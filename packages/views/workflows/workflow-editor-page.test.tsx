@@ -137,6 +137,43 @@ describe("WorkflowEditorPage status creation", () => {
   });
 });
 
+// The catalog refetches whenever anyone adds or archives a status.
+describe("WorkflowEditorPage when the status catalog changes", () => {
+  const status = (key: string, name: string) => ({ key, name, category: "started", description: "", color: "", icon: "", position: 0 });
+  const changeDescription = (value: string) =>
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value } });
+
+  it("keeps an unsaved new workflow", async () => {
+    renderEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Release" } });
+    await addNewStatus("Deploy");
+
+    statusEntries.current = [status("triage", "Triage")];
+    changeDescription("Ships weekly");
+
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Release");
+    expect((screen.getByRole("textbox", { name: "Description" }) as HTMLTextAreaElement).value).toBe("Ships weekly");
+    expect(stepCard("Deploy")).toBeTruthy();
+  });
+
+  it("uses a status an admin adds for a template without dropping the member's edits", async () => {
+    createWorkflow.mockResolvedValue({ id: "wf-1" });
+    renderEditor({ template: "content", canCreateStatus: false });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Blog" } });
+    expect(screen.getByRole("alert")).toBeTruthy();
+
+    statusEntries.current = [status("drafting", "Drafting"), status("editing", "Editing"), status("scheduled", "Scheduled")];
+    changeDescription("Posts");
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Blog");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const steps = createWorkflow.mock.calls[0]![0].steps as { status_key?: string }[];
+    expect(steps.map((s) => s.status_key)).toEqual(expect.arrayContaining(["drafting", "editing", "scheduled"]));
+  });
+});
+
 /** A step in the list (the detail panel's status picker shares its name). */
 function stepCard(name: string) {
   const card = screen

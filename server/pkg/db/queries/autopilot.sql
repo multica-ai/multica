@@ -66,7 +66,7 @@ INSERT INTO autopilot (
 -- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
-    description = COALESCE(sqlc.narg('description'), description),
+    description = sqlc.narg('description'),
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
@@ -845,6 +845,17 @@ WHERE autopilot_id = $1 AND user_type = $2 AND user_id = $3;
 -- Application-layer cleanup run inside the autopilot delete transaction.
 DELETE FROM autopilot_collaborator
 WHERE autopilot_id = $1;
+
+-- name: DeleteAutopilotCollaboratorsByMember :exec
+-- Collaborator grants carry no FK, so member removal must prune them in the
+-- same application transaction: a re-invited user must not regain write access
+-- they were granted before. Scoped to the workspace like the subscriber prune.
+DELETE FROM autopilot_collaborator AS c
+USING autopilot AS a
+WHERE c.autopilot_id = a.id
+  AND a.workspace_id = sqlc.arg(workspace_id)
+  AND c.user_type = 'member'
+  AND c.user_id = sqlc.arg(user_id);
 
 -- name: IsAutopilotCollaborator :one
 SELECT EXISTS (

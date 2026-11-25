@@ -182,6 +182,9 @@ function PaletteFrame({
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
 
+  // The selected row's value. cmdk picks the first row only when it is empty.
+  const [selected, setSelected] = useState("");
+
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -190,6 +193,8 @@ function PaletteFrame({
   if (stack.length !== prevDepthRef.current) {
     navDirectionRef.current = stack.length > prevDepthRef.current ? 1 : -1;
     prevDepthRef.current = stack.length;
+    // It names a row of the page left behind. Cleared before the new rows mount.
+    setSelected("");
   }
   const navDirection = navDirectionRef.current;
   const pageKey = current ? `${stack.length}:${current.page.type}` : "root";
@@ -279,6 +284,8 @@ function PaletteFrame({
         data-mc="command-palette"
         label={t(($) => $.title)}
         shouldFilter={false}
+        value={selected}
+        onValueChange={setSelected}
         onPointerDownCapture={recordIntent}
         onClickCapture={recordIntent}
         onKeyDownCapture={(e) => {

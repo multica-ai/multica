@@ -12,11 +12,9 @@ import {
   ChevronDown,
   CircleUser,
   Copy,
-  Globe,
   Layers,
   Link2,
   ListTodo,
-  Lock,
   Pencil,
   Plus,
   SquarePen,
@@ -35,7 +33,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -98,6 +95,7 @@ import { DeleteViewDialog } from "./delete-view-dialog";
 import { BUILTIN_VIEW_ICON, useBuiltinViewLabel } from "./builtin-views";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
+import { ViewVisibilityMenuItems } from "./view-visibility-menu-items";
 
 /** The page a header sits on; a saved view opened there replaces its title. */
 export type IssueViewHeaderBase =
@@ -440,30 +438,8 @@ export function IssueViewHeader({
                         <Link2 className="size-3.5" />
                         {t(($) => $.views.copy_link)}
                       </DropdownMenuItem>
+                      <ViewVisibilityMenuItems view={activeView} actions={actions} />
                     </DropdownMenuGroup>
-                    {canManage && activeView.scope_type !== "my" && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel>{t(($) => $.views.visible_to)}</DropdownMenuLabel>
-                          <DropdownMenuRadioGroup
-                            value={activeView.visibility === "workspace" ? "workspace" : "private"}
-                            onValueChange={(value) =>
-                              actions.setVisibility(activeView, value as "private" | "workspace")
-                            }
-                          >
-                            <DropdownMenuRadioItem value="private">
-                              <Lock className="size-3.5" />
-                              {t(($) => $.views.only_me)}
-                            </DropdownMenuRadioItem>
-                            <DropdownMenuRadioItem value="workspace">
-                              <Globe className="size-3.5" />
-                              {t(($) => $.views.workspace_members)}
-                            </DropdownMenuRadioItem>
-                          </DropdownMenuRadioGroup>
-                        </DropdownMenuGroup>
-                      </>
-                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>
                       {starId && (

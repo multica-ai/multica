@@ -14,6 +14,7 @@ const actions = vi.hoisted(() => ({
   edit: vi.fn(),
   remove: vi.fn(),
   canManage: vi.fn(() => true),
+  setVisibility: vi.fn(),
 }));
 
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
@@ -82,6 +83,7 @@ const SAVED_VIEW = {
 beforeEach(() => {
   actions.create.mockReset();
   actions.edit.mockReset();
+  actions.setVisibility.mockReset();
   actions.canManage.mockImplementation(() => true);
   actions.sidebar.items = [];
   useSidebarTreeStore.setState({ viewsCollapsed: false });
@@ -135,6 +137,19 @@ describe("ViewsSection", () => {
     fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
     expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Edit view" })).toBeNull();
+  });
+
+  it("shares a saved project view from its right-click menu", async () => {
+    const view = { ...SAVED_VIEW, scope_type: "project", scope_id: "project-1", visibility: "private" };
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(actions.setVisibility).toHaveBeenCalledWith(view, "workspace");
+    expect(useActiveIssueViewStore.getState().active).toEqual({});
   });
 
   // dnd-kit stops the release's click at the document without cancelling

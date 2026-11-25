@@ -1006,6 +1006,8 @@
       "runtime_recovery": "守护进程已重启",
       "runtime_access_revoked": "运行时访问已撤销",
       "timeout": "运行超时",
+      "cleanup_unconfirmed": "未能确认智能体进程已退出",
+      "cleanup_blocked": "上次运行可能未结束，需手动重跑",
       "iteration_limit": "达到迭代次数上限",
       "agent_blocked": "等待人工输入",
       "api_invalid_request": "模型 API 拒绝了请求",

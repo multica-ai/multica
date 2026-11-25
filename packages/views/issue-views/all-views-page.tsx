@@ -52,6 +52,7 @@ import { useT } from "../i18n";
 import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "./builtin-views";
 import { DeleteViewDialog } from "./delete-view-dialog";
 import { useIssueViewActions } from "./use-view-actions";
+import { ViewVisibilityMenuItems } from "./view-visibility-menu-items";
 
 type DirectoryScope = "all" | "builtin" | "mine" | "shared";
 const SCOPES: readonly DirectoryScope[] = ["all", "builtin", "mine", "shared"];
@@ -275,6 +276,7 @@ export function AllViewsPage() {
                 <Link2 className="size-3.5" />
                 {t(($) => $.views.copy_link)}
               </DropdownMenuItem>
+              <ViewVisibilityMenuItems view={view} actions={actions} />
               {actions.canManage(view) && (
                 <>
                   <DropdownMenuSeparator />

@@ -788,6 +788,28 @@ describe("WorkPanel and the open issue's project", () => {
     expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
     await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
   });
+
+  it("scrolls to the issue only once its project has finished opening", async () => {
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    await openInProject(qc);
+    await screen.findByRole("link", { name: ISSUE.title });
+
+    const heights: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      const list = this.closest("[data-sidebar-list]");
+      if (list) heights.push(list.parentElement!.style.height);
+    };
+    try {
+      act(() => {
+        useSidebarTreeStore.getState().requestLocate({ issueId: ISSUE.id, source: PROJECT_SOURCE });
+      });
+      await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
+      expect(heights).toEqual(["auto"]);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
 });
 
 describe("KeptRowsRelease Inbox Zero undo", () => {

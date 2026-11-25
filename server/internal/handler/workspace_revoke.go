@@ -256,11 +256,22 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		return empty, err
 	}
 
+	// autopilot_collaborator holds write grants, FK-free like the templates
+	// above. A grant left behind would hand a re-invited user their old write
+	// access back without anyone granting it.
+	if err := qtx.DeleteAutopilotCollaboratorsByMember(ctx, db.DeleteAutopilotCollaboratorsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// App requests waiting on the member would otherwise let a later OAuth
 	// connect, or a stale tab, resume an agent in a workspace they left.
-	if _, err := qtx.CancelPendingAppActionRequestsForApprover(ctx, db.CancelPendingAppActionRequestsForApproverParams{
+	cancelledAppRequests, err := qtx.CancelPendingAppActionRequestsForApprover(ctx, db.CancelPendingAppActionRequestsForApproverParams{
 		WorkspaceID: workspaceID, ApproverUserID: userID,
-	}); err != nil {
+	})
+	if err != nil {
 		return empty, err
 	}
 
@@ -347,6 +358,11 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err
+	}
+	// After commit, like publishRevocation: admins are told about what is
+	// still waiting only once the cancellations are final.
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelled(ctx, cancelledAppRequests...)
 	}
 
 	return result, nil
