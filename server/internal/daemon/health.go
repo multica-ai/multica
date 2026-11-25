@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/codechange"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -130,6 +131,9 @@ type activeRepoCheckoutTask struct {
 	AgentID     string
 	AgentName   string
 	WorkDir     string
+	// CodeChanges records where a checkout created mid-run started, so the
+	// run's code-change report measures it from there.
+	CodeChanges *codechange.Baselines
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -606,6 +610,8 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		activeTask.CodeChanges.Capture(r.Context(), result.Path, true)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
