@@ -1565,6 +1565,46 @@
     "actions_aria": "Actions pour {{url}}"
   },
   "desktop": {
+    "island": {
+      "title": "Îlot d’activité",
+      "show": "Afficher l’îlot d’activité",
+      "description": "Consultez les exécutions actives en haut de l’écran quand vous utilisez une autre application.",
+      "soundEnabled": "Alertes de fin",
+      "soundHelp": "Émettre un son lorsqu’une exécution visible se termine ou échoue.",
+      "sound": "Son de l’alerte",
+      "previewSound": "Écouter",
+      "display": "Écran d’affichage",
+      "unavailable": "Écran déconnecté",
+      "profile": "Apparence par écran",
+      "preview": "Aperçu de l’apparence",
+      "background": "Arrière-plan",
+      "trailing": "À droite en mode réduit",
+      "center": "Au centre en mode réduit",
+      "indicator": "Indicateur d’état",
+      "group": "Regrouper par",
+      "sort": "Trier par",
+      "sampleReview": "Relire les modifications",
+      "sampleTest": "Lancer les tests",
+      "options": {
+        "auto": "Suivre la fenêtre de l’espace de travail",
+        "notch": "Encoche du MacBook",
+        "floating": "Autres écrans",
+        "black": "Noir pur",
+        "graphite": "Graphite",
+        "count": "Nombre d’exécutions",
+        "agents": "Initiales des agents",
+        "hidden": "Masqué",
+        "none": "Aucun",
+        "agent": "Agent",
+        "task": "Titre de la tâche",
+        "dot": "Point pulsant",
+        "bar": "Barre",
+        "glyph": "Icône",
+        "tint": "Ligne teintée",
+        "status": "État",
+        "recent": "Activité récente"
+      }
+    },
     "tabs": {
       "updates": "Mises à jour"
     },

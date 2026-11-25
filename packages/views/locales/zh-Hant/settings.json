@@ -1553,6 +1553,46 @@
     "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
+    "island": {
+      "title": "執行動態島",
+      "show": "顯示執行動態島",
+      "description": "使用其他 App 時，也能在螢幕上方查看執行中或排隊中的工作。",
+      "soundEnabled": "任務結束提示音",
+      "soundHelp": "島上顯示的任務完成或失敗時播放音效。",
+      "sound": "提示音",
+      "previewSound": "試聽",
+      "display": "顯示位置",
+      "unavailable": "顯示器已中斷連線",
+      "profile": "設定外觀的螢幕",
+      "preview": "外觀預覽",
+      "background": "背景",
+      "trailing": "收合時右側顯示",
+      "center": "收合時中央顯示",
+      "indicator": "任務狀態樣式",
+      "group": "任務分組",
+      "sort": "任務排序",
+      "sampleReview": "檢閱變更",
+      "sampleTest": "執行測試",
+      "options": {
+        "auto": "跟隨工作區視窗",
+        "notch": "MacBook 瀏海螢幕",
+        "floating": "其他顯示器",
+        "black": "純黑",
+        "graphite": "石墨色",
+        "count": "任務數量",
+        "agents": "Agent 名稱首字",
+        "hidden": "隱藏",
+        "none": "無",
+        "agent": "Agent",
+        "task": "任務標題",
+        "dot": "呼吸圓點",
+        "bar": "直條",
+        "glyph": "圖示",
+        "tint": "資料列底色",
+        "status": "狀態",
+        "recent": "最近活動"
+      }
+    },
     "tabs": {
       "updates": "更新"
     },

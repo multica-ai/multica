@@ -64,7 +64,7 @@ import {
  * into tabs. Theme, style and frame colour live on the Appearance page.
  * Changes apply immediately; only failures are announced.
  */
-export function PreferencesTab() {
+export function PreferencesTab({ children }: { children?: React.ReactNode } = {}) {
   const { t } = useT("settings");
   return (
     <SettingsTab title={t(($) => $.page.tabs.preferences)}>
@@ -111,6 +111,7 @@ export function PreferencesTab() {
       >
         <IssueFieldsMatrix />
       </SettingsSection>
+      {children}
     </SettingsTab>
   );
 }

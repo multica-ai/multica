@@ -1,3 +1,4 @@
+import type { RunIslandSnapshot } from "../shared/run-island";
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -160,6 +161,15 @@ const desktopAPI = {
   /** App version + normalized OS. Read once at preload time so the renderer
    *  can use it synchronously when initializing the API client. */
   appInfo,
+  onRunIslandDisplaysChanged: (listener: () => void) => {
+    const handle = () => listener();
+    ipcRenderer.on("run-island:displays-changed", handle);
+    return () => { ipcRenderer.removeListener("run-island:displays-changed", handle); };
+  },
+  runIslandDevices: () => ipcRenderer.invoke("run-island:devices"),
+  previewRunIslandSound: (name: string) => ipcRenderer.send("run-island:preview-sound", name),
+  reportRunIslandFinish: (slug: string, id: string) => ipcRenderer.send("run-island:finish", slug, id),
+  reportRunIsland: (snapshot: RunIslandSnapshot | null) => ipcRenderer.send("run-island:snapshot", snapshot),
   /** OS-preferred locale (BCP 47), passed from main via additionalArguments.
    *  Used by the renderer's LocaleAdapter as the system-preference signal. */
   systemLocale,

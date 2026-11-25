@@ -1553,6 +1553,46 @@
     "actions_aria": "{{url}} の操作"
   },
   "desktop": {
+    "island": {
+      "title": "実行アイランド",
+      "show": "実行アイランドを表示",
+      "description": "他のアプリを使用中も、画面上部で実行中または待機中の処理を確認できます。",
+      "soundEnabled": "実行終了時の通知音",
+      "soundHelp": "表示中の実行が完了または失敗したときに音を鳴らします。",
+      "sound": "通知音",
+      "previewSound": "試聴",
+      "display": "表示先",
+      "unavailable": "未接続のディスプレイ",
+      "profile": "外観を設定する画面",
+      "preview": "外観のプレビュー",
+      "background": "背景",
+      "trailing": "折りたたみ時の右側",
+      "center": "折りたたみ時の中央",
+      "indicator": "状態の表示形式",
+      "group": "グループ化",
+      "sort": "並べ替え",
+      "sampleReview": "変更をレビュー",
+      "sampleTest": "テストを実行",
+      "options": {
+        "auto": "ワークスペースのウィンドウに合わせる",
+        "notch": "MacBook のノッチ",
+        "floating": "その他のディスプレイ",
+        "black": "黒",
+        "graphite": "グラファイト",
+        "count": "実行数",
+        "agents": "エージェントの頭文字",
+        "hidden": "非表示",
+        "none": "なし",
+        "agent": "エージェント",
+        "task": "タスク名",
+        "dot": "点滅するドット",
+        "bar": "縦線",
+        "glyph": "アイコン",
+        "tint": "行の背景色",
+        "status": "状態",
+        "recent": "新しい順"
+      }
+    },
     "tabs": {
       "updates": "アップデート"
     },

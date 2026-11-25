@@ -1565,6 +1565,46 @@
     "actions_aria": "Actions for {{url}}"
   },
   "desktop": {
+    "island": {
+      "title": "Run Island",
+      "show": "Show Run Island",
+      "description": "See active runs at the top of your display while using other apps.",
+      "soundEnabled": "Run alerts",
+      "soundHelp": "Play a sound when a visible run finishes or fails.",
+      "sound": "Alert sound",
+      "previewSound": "Preview",
+      "display": "Show on display",
+      "unavailable": "Disconnected display",
+      "profile": "Appearance for",
+      "preview": "Appearance preview",
+      "background": "Background",
+      "trailing": "Right side when collapsed",
+      "center": "Center label when collapsed",
+      "indicator": "Run indicator",
+      "group": "Group runs by",
+      "sort": "Sort runs by",
+      "sampleReview": "Review changes",
+      "sampleTest": "Run tests",
+      "options": {
+        "auto": "Follow workspace window",
+        "notch": "MacBook notch",
+        "floating": "Other displays",
+        "black": "Pure black",
+        "graphite": "Graphite",
+        "count": "Run count",
+        "agents": "Agent initials",
+        "hidden": "Hidden",
+        "none": "None",
+        "agent": "Agent",
+        "task": "Task title",
+        "dot": "Pulsing dot",
+        "bar": "Bar",
+        "glyph": "Icon",
+        "tint": "Tinted row",
+        "status": "Status",
+        "recent": "Most recent"
+      }
+    },
     "tabs": {
       "updates": "Updates"
     },

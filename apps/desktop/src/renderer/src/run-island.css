@@ -1,0 +1,56 @@
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+}
+* {
+  box-sizing: border-box;
+}
+html.dark,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+main {
+  height: 100vh;
+}
+section {
+  padding: 0 8px 8px;
+  animation: reveal 120ms ease-out;
+}
+header {
+  height: 41px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 9px;
+}
+header strong {
+  flex: none;
+  font-size: var(--text-body-lg);
+  letter-spacing: -0.025em;
+}
+header span {
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #b4b5bd;
+  font-size: var(--text-micro);
+}
+p {
+  margin: 0;
+  padding: 12px 9px;
+  color: #b4b5bd;
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  section {
+    animation: none;
+  }
+}
