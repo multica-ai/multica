@@ -47,7 +47,7 @@ import {
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import { shouldAutoLink } from "@multica/ui/markdown";
+import { shouldAutoLink } from "@multica/ui/markdown/linkify";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
 import {

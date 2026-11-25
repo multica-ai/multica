@@ -11,6 +11,8 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
+  agentDescriptionLength,
+  isAgentDescriptionWithinLimit,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
 import { isImeComposing } from "@multica/core/utils";
@@ -140,7 +142,7 @@ export function AgentDetailInspector({
     enabled:
       canEdit &&
       profileDraft.name.length > 0 &&
-      profileDraft.description.length <= AGENT_DESCRIPTION_MAX_LENGTH,
+      isAgentDescriptionWithinLimit(profileDraft.description),
     isEqual: profileDraftsEqual,
   });
 
@@ -253,12 +255,14 @@ export function AgentDetailInspector({
                     onBlur={profileAutoSave.flush}
                     disabled={!canEdit}
                     rows={5}
-                    maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+                    // No maxLength: it counts UTF-16 units and would disagree
+                    // with the counter on emoji. Past the limit the counter
+                    // turns red and autosave holds off.
                     className="resize-y"
                     placeholder={t(($) => $.inspector.description_placeholder)}
                   />
                   <CharCounter
-                    length={[...description].length}
+                    length={agentDescriptionLength(description)}
                     max={AGENT_DESCRIPTION_MAX_LENGTH}
                   />
                 </div>
