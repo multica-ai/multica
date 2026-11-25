@@ -953,7 +953,7 @@ function OpenPathButton({
           <button
             type="button"
             data-testid="run-file-diff-open"
-            className="cursor-pointer shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="cursor-pointer shrink-0 rounded-xs p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label={label}
             onClick={() => {
               void onOpen(path, opener.id).then((result) => {

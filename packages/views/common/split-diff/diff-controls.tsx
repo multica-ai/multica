@@ -22,7 +22,7 @@ export function CopyPathButton({ path }: { path: string }) {
           <button
             type="button"
             data-testid="run-file-diff-copy"
-            className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="shrink-0 cursor-pointer rounded-xs p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label={
               copied
                 ? t(($) => $.transcript.files_copied)

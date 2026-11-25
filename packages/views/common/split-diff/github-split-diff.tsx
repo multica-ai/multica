@@ -98,7 +98,7 @@ function DiffParts({
           return (
             <del
               key={index}
-              className="rounded-[2px] bg-destructive/30 px-[2px] text-foreground no-underline [box-decoration-break:clone]"
+              className="rounded-xs bg-destructive/30 px-[2px] text-foreground no-underline [box-decoration-break:clone]"
             >
               {body}
             </del>
@@ -107,7 +107,7 @@ function DiffParts({
         return (
           <ins
             key={index}
-            className="rounded-[2px] bg-success/30 px-[2px] text-foreground no-underline [box-decoration-break:clone]"
+            className="rounded-xs bg-success/30 px-[2px] text-foreground no-underline [box-decoration-break:clone]"
           >
             {body}
           </ins>
