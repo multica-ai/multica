@@ -32,9 +32,9 @@ export const PASTE_AS_FILE_THRESHOLD = 4000;
  * inline. What this catches is the machine-sized paste — a log dump, a JSON
  * export, a minified bundle — that no one reads in place and that the comment
  * renderer has to lay out in full for everyone who opens the issue. Nothing
- * else bounds a comment: there is no client or server length limit, so
- * without this a single paste of a megabyte-sized line goes straight into
- * the body.
+ * else bounds a comment a member writes: there is no client length limit and
+ * the server does not cap it, so without this a single paste of a
+ * megabyte-sized line goes straight into the body.
  *
  * The value matches `LARGE_PASTE_TEXT_THRESHOLD` in
  * `extensions/markdown-paste.ts`: that is where the editor already stops

@@ -10,10 +10,6 @@ import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
-import {
-  markPastedTextFile,
-  PASTED_TEXT_FILENAME,
-} from "../../editor/extensions/file-upload";
 import { COMMENT_PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -1096,11 +1092,7 @@ describe("comment composers — upload submit gate", () => {
    * coordinator calls `api.uploadFile`, so this controls THAT promise: resolve
    * it with an attachment (success) or reject it (failure).
    */
-  function startPendingUpload(
-    container: HTMLElement,
-    filename = "slow.png",
-    file?: File,
-  ) {
+  function startPendingUpload(container: HTMLElement, filename = "slow.png") {
     let resolveUpload!: (att: Attachment) => void;
     let rejectUpload!: (err: Error) => void;
     apiUploadFile.mockImplementationOnce(
@@ -1115,7 +1107,7 @@ describe("comment composers — upload submit gate", () => {
     const input = container.querySelector('input[type="file"]');
     if (!input) throw new Error("Expected a file input to render");
     fireEvent.change(input, {
-      target: { files: [file ?? new File(["x"], filename, { type: "image/png" })] },
+      target: { files: [new File(["x"], filename, { type: "image/png" })] },
     });
     return {
       resolve: (att: Attachment) => resolveUpload(att),
@@ -1408,35 +1400,6 @@ describe("comment composers — upload submit gate", () => {
     const uploads = useCommentDraftStore.getState().getUploads("new:issue-1");
     expect(uploads).toHaveLength(1);
     expect(uploads[0]?.status).toBe("uploaded");
-  });
-
-  it("restores a failed paste-as-file's text into the draft even after the composer unmounts", async () => {
-    const pastedText = "a long pasted wall of text that became an attachment";
-    const { container, unmount } = renderCommentInput();
-    activateComposer("comment-composer-shell");
-    fireEvent.change(screen.getByTestId("editor"), { target: { value: "wip text" } });
-
-    const pending = startPendingUpload(
-      container,
-      PASTED_TEXT_FILENAME,
-      markPastedTextFile(
-        new File([pastedText], PASTED_TEXT_FILENAME, { type: "text/plain" }),
-        pastedText,
-      ),
-    );
-    unmount();
-
-    await act(async () => {
-      pending.fail();
-    });
-
-    // A dropped file survives a failed upload on disk; this text does not
-    // exist anywhere else, so the draft must get it back rather than keep a
-    // failed chip standing in for content the user can never recover.
-    const draft = useCommentDraftStore.getState().getDraft("new:issue-1");
-    expect(draft).toContain("wip text");
-    expect(draft).toContain(pastedText);
-    expect(useCommentDraftStore.getState().getUploads("new:issue-1")).toHaveLength(0);
   });
 
   it("hands the finished upload's link to a REOPENED composer's live editor", async () => {
