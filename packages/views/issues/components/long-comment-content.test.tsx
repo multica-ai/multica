@@ -96,6 +96,24 @@ describe("LongCommentContent", () => {
     expect(animate).toHaveBeenCalledTimes(1);
   });
 
+  it("lands a collapse from a body taller than its scroll container without animating", () => {
+    const animate = fakeHeights();
+    const { container } = renderWithI18n(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <LongCommentContent issueId="issue-1" commentId="c1" content={"t".repeat(LONG_COMMENT_CHARS + 1)} />
+      </div>,
+    );
+    const scroller = container.querySelector<HTMLElement>("[data-testid=scroller]")!;
+    Object.defineProperty(scroller, "scrollHeight", { value: 50_000 });
+    Object.defineProperty(scroller, "clientHeight", { value: 800 });
+    fireEvent.click(screen.getByRole("button", { name: /show full comment/i }));
+    animate.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse comment/i }));
+
+    expect(animate).not.toHaveBeenCalled();
+  });
+
   it("lands the new height in the same frame under reduced motion", () => {
     const animate = fakeHeights();
     useAppearanceStore.setState({ reduceMotion: true });
