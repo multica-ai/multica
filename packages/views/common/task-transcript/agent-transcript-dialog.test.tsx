@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import type { RunFileChanges } from "@multica/core/agents/file-changes";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import { useTranscriptViewStore } from "@multica/core/agents/stores";
@@ -19,8 +21,21 @@ vi.mock("./use-trace-issue-labels", () => ({
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 
+const legacyUnavailableFileChanges = vi.hoisted(() => ({
+  collectionId: null,
+  status: "unavailable",
+  reason: "legacy_no_baseline",
+  scope: "registered_workdir_roots",
+  roots: [],
+  files: [],
+  filesTotal: 0,
+  totalsComplete: false,
+  nextCursor: null,
+}));
+
 vi.mock("@multica/core/api", () => ({
   api: {
+    listRunFileChanges: vi.fn().mockResolvedValue(legacyUnavailableFileChanges),
     getAgent: vi.fn().mockResolvedValue(null),
     listRuntimes: vi.fn().mockResolvedValue([]),
   },
@@ -60,14 +75,44 @@ vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
-vi.mock("@multica/ui/components/ui/dialog", () => ({
-  Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
-    open ? <>{children}</> : null,
-  DialogContent: ({ children }: { children: ReactNode }) => (
-    <div role="dialog">{children}</div>
-  ),
-  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
-}));
+vi.mock("@multica/ui/components/ui/dialog", async () => {
+  const React = await import("react");
+  return {
+    Dialog: ({
+      open,
+      onOpenChange,
+      children,
+    }: {
+      open: boolean;
+      onOpenChange?: (open: boolean) => void;
+      children: ReactNode;
+    }) => {
+      React.useEffect(() => {
+        if (!open) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key !== "Escape") return;
+          onOpenChange?.(false);
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+      }, [open, onOpenChange]);
+      if (!open) return null;
+      return (
+        <>
+          <div
+            data-slot="dialog-overlay"
+            onClick={() => onOpenChange?.(false)}
+          />
+          {children}
+        </>
+      );
+    },
+    DialogContent: ({ children }: { children: ReactNode }) => (
+      <div role="dialog">{children}</div>
+    ),
+    DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  };
+});
 
 vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   const React = await import("react");
@@ -228,14 +273,22 @@ function renderDialog(
   } = {},
 ) {
   return renderWithI18n(
-    <AgentTranscriptDialog
-      open
-      onOpenChange={vi.fn()}
-      task={options.task ?? baseTask}
-      items={dialogItems}
-      agentName="Codex"
-      isLive={options.isLive}
-    />,
+    <QueryClientProvider
+      client={new QueryClient({
+        // The dialog's own queries must not leave garbage-collection timers
+        // behind an unmount; the tests below count timers.
+        defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+      })}
+    >
+      <AgentTranscriptDialog
+        open
+        onOpenChange={vi.fn()}
+        task={options.task ?? baseTask}
+        items={dialogItems}
+        agentName="Codex"
+        isLive={options.isLive}
+      />
+    </QueryClientProvider>,
     { locale: options.locale },
   );
 }
@@ -244,6 +297,9 @@ beforeEach(() => {
   cleanup();
   copyTextMock.mockClear();
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
+  vi.mocked(api.listRunFileChanges).mockResolvedValue(
+    legacyUnavailableFileChanges,
+  );
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
     selectedFilterKeys: [],
@@ -438,17 +494,21 @@ describe("AgentTranscriptDialog", () => {
   // and the header already carries it.
   it("states the agent once in the header, not on every prose row", () => {
     renderWithI18n(
-      <AgentTranscriptDialog
-        open
-        onOpenChange={vi.fn()}
-        task={{ ...baseTask, agent_id: "agent-1" }}
-        items={[
-          { seq: 1, type: "text", content: "Cleanup done. Starting tests:" },
-          { seq: 2, type: "text", content: "Now adding the Feishu row:" },
-          { seq: 3, type: "text", content: "Now the version bump:" },
-        ]}
-        agentName="【Chores|Opus5】Multica Helper"
-      />,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })}
+      >
+        <AgentTranscriptDialog
+          open
+          onOpenChange={vi.fn()}
+          task={{ ...baseTask, agent_id: "agent-1" }}
+          items={[
+            { seq: 1, type: "text", content: "Cleanup done. Starting tests:" },
+            { seq: 2, type: "text", content: "Now adding the Feishu row:" },
+            { seq: 3, type: "text", content: "Now the version bump:" },
+          ]}
+          agentName="【Chores|Opus5】Multica Helper"
+        />
+      </QueryClientProvider>,
     );
 
     expect(screen.getAllByTestId("rich-content")).toHaveLength(3);
@@ -755,6 +815,14 @@ describe("AgentTranscriptDialog", () => {
       expect(vi.getTimerCount()).toBeGreaterThan(0);
 
       unmount();
+
+      // TanStack Query can leave one short bookkeeping timer behind when its
+      // snapshot query settles around the unmount. Advancing past it — but
+      // staying short of the 2s copy-feedback window — proves this
+      // component's own timer was the one cleaned up.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+      });
 
       expect(vi.getTimerCount()).toBe(0);
     } finally {
@@ -1158,6 +1226,277 @@ describe("readable issue references", () => {
     expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: issueId } });
     expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+  });
+});
+
+// Body/pagination behavior is covered in run-file-diff-view.test.tsx.
+describe("run file diff takeover", () => {
+  it("opens without provider edits and the back button restores the transcript", async () => {
+    const onOpenChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithI18n(<QueryClientProvider client={client}><AgentTranscriptDialog open onOpenChange={onOpenChange} task={baseTask} items={[]} agentName="Cursor" /></QueryClientProvider>);
+    const chip = await screen.findByRole("button", { name: "No baseline" });
+    fireEvent.click(chip);
+    expect(await screen.findByText("This run has no baseline. Final file changes are unavailable.")).toBeInTheDocument();
+    expect(api.listRunFileChanges).toHaveBeenCalledWith(baseTask.id, "0");
+    fireEvent.click(screen.getByRole("button", { name: "Back to steps" }));
+    expect(screen.queryByTestId("run-file-diff-view")).not.toBeInTheDocument();
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    expect(chip).toHaveFocus();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    client.clear();
+  });
+  it("closes the dialog on the first Escape while the file diff is open", async () => {
+    const onOpenChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithI18n(<QueryClientProvider client={client}><AgentTranscriptDialog open onOpenChange={onOpenChange} task={baseTask} items={[]} agentName="Cursor" /></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "No baseline" }));
+    expect(await screen.findByTestId("run-file-diff-view")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    client.clear();
+  });
+  it("closes the dialog on the first overlay click while the file diff is open", async () => {
+    const onOpenChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithI18n(<QueryClientProvider client={client}><AgentTranscriptDialog open onOpenChange={onOpenChange} task={baseTask} items={[]} agentName="Cursor" /></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "No baseline" }));
+    expect(await screen.findByTestId("run-file-diff-view")).toBeInTheDocument();
+    const overlay = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+    expect(overlay).not.toBeNull();
+    fireEvent.click(overlay!);
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    client.clear();
+  });
+  it("never substitutes historical tool edits for an unavailable baseline", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithI18n(<QueryClientProvider client={client}><AgentTranscriptDialog open onOpenChange={() => {}} task={baseTask} items={[{ seq: 1, type: "tool_use", tool: "Edit", input: { file_path: "old.ts", old_string: "old", new_string: "new" } }]} agentName="Cursor" /></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "No baseline" }));
+    await screen.findByText("This run has no baseline. Final file changes are unavailable.");
+    expect(document.querySelector("[data-github-split-diff]")).toBeNull();
+    client.clear();
+  });
+});
+
+// A snapshot that proves the run changed no files hides the outcome-row entry
+// outright — "no edits" is not a state the reader needs a control for. Loading
+// and every degraded state keep the entry for now; their per-state
+// presentation (unavailable hint, retry control) waits on the state-by-state
+// design.
+describe("run file entry presence", () => {
+  const readyNoFiles: RunFileChanges = {
+    collectionId: "col-empty",
+    status: "ready",
+    reason: "",
+    scope: "registered_workdir_roots",
+    roots: [
+      { id: "r1", label: "repo", kind: "git", coverage: "complete", reason: "" },
+    ],
+    files: [],
+    filesTotal: 0,
+    totalsComplete: true,
+    nextCursor: null,
+  };
+
+  function renderWithClient(items: TimelineItem[] = []) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <AgentTranscriptDialog open onOpenChange={() => {}} task={baseTask} items={items} agentName="Cursor" />
+      </QueryClientProvider>,
+    );
+    return client;
+  }
+
+  it("hides the file entry when the snapshot proves the run changed no files", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue(readyNoFiles);
+    const client = renderWithClient();
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Files this run changed" })).not.toBeInTheDocument(),
+    );
+    expect(api.listRunFileChanges).toHaveBeenCalledWith(baseTask.id, "0");
+    client.clear();
+  });
+
+  // S9: no entry while the first page is in flight — a run with no edits
+  // must not flash a button that then disappears.
+  it("renders no file entry while the snapshot is still loading", () => {
+    vi.mocked(api.listRunFileChanges).mockReturnValue(new Promise<RunFileChanges>(() => {}));
+    renderWithClient();
+
+    expect(screen.queryByRole("button", { name: "Files this run changed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "File changes unavailable" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a solid file entry when the snapshot records changes", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      files: [{
+        id: "f1",
+        rootId: "r1",
+        path: "README.md",
+        change: "modified",
+        beforeBytes: 4,
+        afterBytes: 9,
+        beforeMode: "100644",
+        afterMode: "100644",
+        binary: false,
+        bodyStatus: "available",
+        reason: "",
+      }],
+      filesTotal: 1,
+    });
+    const client = renderWithClient();
+
+    // Without provable line totals the chip reads the count only — no ±
+    // figures, no partial badge.
+    const chip = (await screen.findByText("1 file")).closest("button")!;
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    expect(chip).toHaveTextContent("1 file");
+    expect(screen.queryByText("+9")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("file-entry-partial-badge")).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  // The classic chip: file count plus +X −Y line totals from the collection.
+  it("shows file count and line totals when the snapshot carries them", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      files: [{
+        id: "f1",
+        rootId: "r1",
+        path: "README.md",
+        change: "modified",
+        beforeBytes: 4,
+        afterBytes: 9,
+        beforeMode: "100644",
+        afterMode: "100644",
+        binary: false,
+        bodyStatus: "available",
+        reason: "",
+        insertions: 9,
+        deletions: 4,
+      }],
+      filesTotal: 1,
+      insertionsTotal: 9,
+      deletionsTotal: 4,
+      statsComplete: true,
+    });
+    const client = renderWithClient();
+
+    const count = await screen.findByText("1 file");
+    const chip = count.closest("button")!;
+    expect(chip).toHaveTextContent("+9");
+    expect(chip).toHaveTextContent("−4");
+    expect(screen.queryByText("Files this run changed")).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  // No provable numbers — fields absent or stats_complete=false — means no
+  // ± figures at all, never a 0 or a partial sum; the count still reads.
+  it.each([
+    [{}, "fields absent"],
+    [{ statsComplete: false, insertionsTotal: 5, deletionsTotal: 2 }, "stats incomplete"],
+  ])("hides the line totals when they are not provable (%s)", async (
+    extra: Record<string, unknown>,
+    _label: string,
+  ) => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      ...extra,
+      files: [{
+        id: "f1",
+        rootId: "r1",
+        path: "README.md",
+        change: "modified",
+        beforeBytes: 4,
+        afterBytes: 9,
+        beforeMode: "100644",
+        afterMode: "100644",
+        binary: false,
+        bodyStatus: "available",
+        reason: "",
+      }],
+      filesTotal: 1,
+    });
+    const client = renderWithClient();
+
+    expect(await screen.findByText("1 file")).toBeInTheDocument();
+    expect(screen.queryByText("+9")).not.toBeInTheDocument();
+    expect(screen.queryByText("−4")).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  it("marks a partial snapshot's entry with a warning badge", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      status: "partial",
+      files: [{
+        id: "f1",
+        rootId: "r1",
+        path: "README.md",
+        change: "modified",
+        beforeBytes: 4,
+        afterBytes: 9,
+        beforeMode: "100644",
+        afterMode: "100644",
+        binary: false,
+        bodyStatus: "available",
+        reason: "",
+      }],
+      filesTotal: 3,
+    });
+    const client = renderWithClient();
+
+    await screen.findByRole("button", { name: "Files this run changed" });
+    expect(screen.getByTestId("file-entry-partial-badge")).toBeInTheDocument();
+    client.clear();
+  });
+
+  it("spins the entry while the run is still collecting", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      status: "collecting",
+    });
+    const client = renderWithClient();
+
+    await screen.findByRole("button", { name: "Files this run changed" });
+    expect(screen.getByTestId("file-entry-collecting-spinner")).toBeInTheDocument();
+    client.clear();
+  });
+
+  it.each([
+    ["legacy_no_baseline", "No baseline"],
+    ["interrupted", "Collection interrupted"],
+    ["invalid_response", "File changes unavailable"],
+  ])("weakens the entry for an unavailable snapshot (%s)", async (reason, label) => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      status: "unavailable",
+      reason,
+    });
+    const client = renderWithClient();
+
+    const chip = await screen.findByRole("button", { name: label });
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    client.clear();
+  });
+
+  it("still opens the panel from a weakened entry", async () => {
+    vi.mocked(api.listRunFileChanges).mockResolvedValue({
+      ...readyNoFiles,
+      status: "unavailable",
+      reason: "interrupted",
+    });
+    const client = renderWithClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collection interrupted" }));
+    expect(await screen.findByText("The run was interrupted; final file changes are temporarily unavailable.")).toBeInTheDocument();
+    expect(api.listRunFileChanges).toHaveBeenCalledWith(baseTask.id, "0");
+    client.clear();
   });
 });
 

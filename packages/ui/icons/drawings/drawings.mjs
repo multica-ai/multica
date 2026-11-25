@@ -87,6 +87,8 @@ export const DRAWINGS = {
     <path d="M12 12.75v8.5M8 3h8"/>`,
   Archive: `<path class="b" d="${rect(2.5, 3.5, 19, 5, 2.5)}"/>
     <path d="${shape([[4, 8.5], [4, 20.5, 5], [20, 20.5, 5], [20, 8.5]], false)}"/><path d="M10 12.75h4"/>`,
+  ArchiveX: `<path class="b" d="${rect(2.5, 3.5, 19, 5, 2.5)}"/>
+    <path d="${shape([[4, 8.5], [4, 20.5, 5], [20, 20.5, 5], [20, 8.5]], false)}"/><path d="M10 12.5l4 4.5M14 12.5l-4 4.5"/>`,
   Lock: `<path class="b" d="${rect(4, 10, 16, 11.25, 6)}"/>
     <path d="M7.75 10V7.25a4.25 4.25 0 0 1 8.5 0V10M12 14.5v2.5"/>`,
   Clock: `<circle class="b" cx="12" cy="12" r="9.25"/><path d="M12 7.5V12l3 2"/>`,
@@ -108,6 +110,7 @@ Object.assign(DRAWINGS, {
   ChevronLeft: `<path d="M15 6L9 12 15 18"/>`,
   ChevronUp: `<path d="M6 15L12 9 18 15"/>`,
   ChevronsUpDown: `<path d="M8 9L12 5.5 16 9M8 15L12 18.5 16 15"/>`,
+  ChevronsDownUp: `<path d="M8 7.5L12 11 16 7.5M8 16.5L12 13 16 16.5"/>`,
   Download: `<path d="M12 3.5v11M7.5 10.5L12 15 16.5 10.5"/><path d="${shape([[3.5, 15], [3.5, 20.5, 4], [20.5, 20.5, 4], [20.5, 15]], false)}"/>`,
   Upload: `<path d="M12 15V4M7.5 8L12 3.5 16.5 8"/><path d="${shape([[3.5, 15], [3.5, 20.5, 4], [20.5, 20.5, 4], [20.5, 15]], false)}"/>`,
   RotateCw: cw,
@@ -158,6 +161,7 @@ Object.assign(DRAWINGS, {
   FileAudio: file(`<circle cx="10.25" cy="16.25" r="1.75"/><path d="M12 16.25v-5l3 1.25"/>`),
   FileVideo: file(`<path d="${shape([[9.75, 11.75, 1], [15.25, 14.75, 1], [9.75, 17.75, 1]])}"/>`),
   FileQuestion: file(`<path d="M10 12.25a2.1 2.1 0 1 1 2.9 1.94c-.5.21-.9.7-.9 1.25v.31"/>${dot(12, 18.1, 1)}`),
+  FileX: file(`<path d="M9.75 12l4.5 4.5M14.25 12l-4.5 4.5"/>`),
   FilePlus: file(`<path d="M12 11.5v6M9 14.5h6"/>`),
   Folder: `<path class="b" d="${folderBody}"/>`,
   FolderOpen: `<path d="${shape([[2.75, 19.5], [2.75, 3.75, 3.5], [9.25, 3.75, 1.5], [11.5, 6.25, 1.5], [18.25, 6.25, 3.5], [18.25, 10.75]], false)}"/>
@@ -201,6 +205,7 @@ Object.assign(DRAWINGS, {
   Code2: `<path d="M7.5 7L3 12 7.5 17M16.5 7L21 12 16.5 17M13.75 4.5l-3.5 15"/>`,
   Globe: `${ring}<path d="M2.75 12h18.5"/><path d="M12 2.75c-2.6 2.6-3.9 5.7-3.9 9.25s1.3 6.65 3.9 9.25c2.6-2.6 3.9-5.7 3.9-9.25S14.6 5.35 12 2.75Z"/>`,
   Cloud: `<path class="b" d="M7 19.25h10a4.75 4.75 0 0 0 .85-9.42 6 6 0 0 0-11.7.02A4.7 4.7 0 0 0 7 19.25Z"/>`,
+  CloudOff: `<path class="b" d="M7 19.25h10a4.75 4.75 0 0 0 .85-9.42 6 6 0 0 0-11.7.02A4.7 4.7 0 0 0 7 19.25Z"/><path d="m3 3 18 18"/>`,
   Wifi: wifi(3),
   WifiHigh: wifi(2),
   WifiOff: `${wifi(3)}<path d="m3 3 18 18"/>`,
@@ -335,6 +340,8 @@ Object.assign(DRAWINGS, {
   ListX: `<path d="M3.5 5h17M3.5 12h11M3.5 19h9M16.5 15.5l4 4M20.5 15.5l-4 4"/>`,
   FilterX: `<path d="M3.75 6.5h16.5M7 12h7M10.25 17.5h2M16 14.25l4.5 4.5M20.5 14.25 16 18.75"/>`,
   Columns2: `<path class="b" d="${grid}"/><path class="k" d="M12 3v18"/>`,
+  Rows2: `<path class="b" d="${grid}"/><path class="k" d="M3 12h18"/>`,
+  UnfoldVertical: `<path d="M2.75 12h18.5M7 20l5-5 5 5M17 4l-5 5-5-5"/>`,
   Columns3: `<path class="b" d="${grid}"/><path class="k" d="M9 3v18M15 3v18"/>`,
   Rows3: `<path class="b" d="${grid}"/><path class="k" d="M3 9h18M3 15h18"/>`,
   Table2: `<path class="b" d="${grid}"/><path class="k" d="M3 9h18M9 3v18"/>`,

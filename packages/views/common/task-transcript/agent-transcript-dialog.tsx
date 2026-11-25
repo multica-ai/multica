@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -19,6 +20,7 @@ import {
   Filter,
   FilePen,
   FileText,
+  FileX,
   Search,
   Terminal,
   Wrench,
@@ -28,6 +30,7 @@ import {
   Info,
   Coins,
   GitBranch,
+  AlertTriangle,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -83,6 +86,8 @@ import {
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
+import { RunFileDiffView } from "./run-file-diff-view";
+import { fileChangesOptions, fileChangesStatus } from "@multica/core/agents/file-changes";
 import { ContextReceiptButton } from "./context-receipt";
 import {
   base64ByteLength,
@@ -112,6 +117,7 @@ import { formatBytes } from "../format-bytes";
 import "../../editor/styles/code.css";
 import "./task-transcript.css";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 
 // The run surface, read in four layers: what happened (header), what it
 // produced (outcome), where the time went (timeline), and the evidence (steps).
@@ -344,6 +350,76 @@ export function AgentTranscriptDialog({
   const [copied, showCopied] = useCopyFeedback();
   const [copiedWorkdir, showCopiedWorkdir] = useCopyFeedback();
   const [copiedBranch, showCopiedBranch] = useCopyFeedback();
+  const wsId = useWorkspaceId();
+  const [filesOpen, setFilesOpen] = useState(false);
+  const fileChipRef = useRef<HTMLButtonElement>(null);
+  // Shares the RunFileDiffView cache, so opening the panel costs no extra
+  // request. The outcome entry is state semantics, not a constant button:
+  // it hides while loading (no flash) and for a run that truly changed
+  // nothing, weakens for an unavailable snapshot, and goes solid for
+  // collecting / partial / ready-with-files.
+  const fileChangesQuery = useInfiniteQuery(
+    fileChangesOptions(wsId, task.id, open),
+  );
+  const firstChangesPage = fileChangesQuery.data?.pages[0];
+  let fileEntry: FileEntryState = { variant: "hidden" };
+  if (fileChangesQuery.isPending) {
+    fileEntry = { variant: "hidden" };
+  } else if (fileChangesQuery.isError) {
+    fileEntry = {
+      variant: "muted",
+      label: t(($) => $.transcript.net_chip_unavailable),
+      tooltip: t(($) => $.transcript.net_error),
+    };
+  } else if (firstChangesPage !== undefined) {
+    const status = fileChangesStatus(firstChangesPage);
+    if (status === "unavailable") {
+      fileEntry =
+        firstChangesPage.reason === "legacy_no_baseline"
+          ? {
+              variant: "muted",
+              label: t(($) => $.transcript.net_chip_legacy),
+              tooltip: t(($) => $.transcript.net_legacy),
+            }
+          : firstChangesPage.reason === "interrupted"
+            ? {
+                variant: "muted",
+                label: t(($) => $.transcript.net_chip_interrupted),
+                tooltip: t(($) => $.transcript.net_interrupted),
+              }
+            : {
+                variant: "muted",
+                label: t(($) => $.transcript.net_chip_unavailable),
+                tooltip: t(($) => $.transcript.net_unavailable),
+              };
+    } else if (status === "ready" && firstChangesPage.filesTotal === 0) {
+      fileEntry = { variant: "hidden" };
+    } else {
+      // The classic chip shows "N files +X −Y". The line counts render only
+      // when the backend proved them: absent fields (older snapshots) or
+      // stats_complete=false (totals cover only the countable files) hide
+      // the numbers instead of showing a 0 or a partial sum.
+      const stats =
+        status === "ready" &&
+        firstChangesPage.filesTotal > 0 &&
+        firstChangesPage.statsComplete === true &&
+        firstChangesPage.insertionsTotal !== undefined &&
+        firstChangesPage.deletionsTotal !== undefined
+          ? {
+              files: firstChangesPage.filesTotal,
+              added: firstChangesPage.insertionsTotal,
+              removed: firstChangesPage.deletionsTotal,
+            }
+          : undefined;
+      fileEntry = {
+        variant: "solid",
+        collecting: status === "collecting",
+        partial: status === "partial",
+        filesCount: firstChangesPage.filesTotal,
+        stats,
+      };
+    }
+  }
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const workdirCopyTarget = useMemo(
@@ -566,6 +642,15 @@ export function AgentTranscriptDialog({
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
   const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
+
+  useEffect(() => {
+    if (!open) setFilesOpen(false);
+  }, [open]);
+
+  const handleDialogOpenChange = (next: boolean) => {
+    if (!next) setFilesOpen(false);
+    onOpenChange(next);
+  };
 
   const selectedStep = useMemo(() => {
     if (selectedSeq === null) return null;
@@ -910,7 +995,7 @@ export function AgentTranscriptDialog({
     !!usage;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         className="!max-w-5xl !w-[calc(100%-4rem)] !max-h-[calc(100%-4rem)] !h-[calc(100%-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
@@ -1144,7 +1229,20 @@ export function AgentTranscriptDialog({
         <RunTriggerRow task={task} />
 
         {/* ── What the run produced ──────────────────────────────────── */}
-        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+        <RunOutcomeRow
+          outcome={outcome}
+          branch={task.branch_name}
+          fileEntry={fileEntry}
+          filesOpen={filesOpen}
+          fileChipRef={fileChipRef}
+          onToggleFiles={() => {
+            setFilesOpen((current) => {
+              const next = !current;
+              if (!next) fileChipRef.current?.focus();
+              return next;
+            });
+          }}
+        />
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (
@@ -1164,6 +1262,7 @@ export function AgentTranscriptDialog({
         )}
 
         {/* ── List toolbar: search left, the two menus right ── */}
+        {!filesOpen && (
         <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
           <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
             <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
@@ -1270,8 +1369,20 @@ export function AgentTranscriptDialog({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        )}
 
         {/* ── Steps, and the inspector when one is selected ───────────── */}
+        {filesOpen ? (
+          <RunFileDiffView
+            taskId={task.id}
+            workdir={workdirCopyTarget?.path}
+            runtime={runtimeInfo?.id === task.runtime_id ? runtimeInfo : null}
+            onBack={() => {
+              setFilesOpen(false);
+              fileChipRef.current?.focus();
+            }}
+          />
+        ) : (
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             {contentState ? <div className="flex h-full items-center justify-center p-4">{contentState}</div> : displayRows.length === 0 ? (
@@ -1346,6 +1457,7 @@ export function AgentTranscriptDialog({
             )}
           </AnimatePresence>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -1424,7 +1536,22 @@ function FactDot() {
  *
  * Renders nothing when the run produced nothing nameable; a row of zeroes
  * would read as "it did nothing" rather than "we have nothing to summarize".
+ *
+ * The file entry is state semantics derived from the run snapshot (never tool
+ * logs): a solid chip invites reading the diff, a muted chip reports an
+ * unavailable collection without posing as a primary action, and "the run
+ * changed nothing" renders nothing at all — a normal ending, not a warning.
  */
+type FileEntryState =
+  | { variant: "hidden" }
+  | {
+      variant: "solid";
+      collecting: boolean;
+      partial: boolean;
+      filesCount: number;
+      stats?: { added: number; removed: number };
+    }
+  | { variant: "muted"; label: React.ReactNode; tooltip: React.ReactNode };
 /**
  * What the person asked for, in full. The header names only how the run was
  * triggered ("Comment"), and the lists that open this dialog show the ask on
@@ -1454,12 +1581,19 @@ function RunTriggerRow({ task }: { task: AgentTask }) {
 function RunOutcomeRow({
   outcome,
   branch,
+  fileEntry,
+  filesOpen,
+  fileChipRef,
+  onToggleFiles,
 }: {
   outcome: ReturnType<typeof buildRunOutcome>;
   branch?: string | null;
+  fileEntry: FileEntryState;
+  filesOpen: boolean;
+  fileChipRef: React.RefObject<HTMLButtonElement | null>;
+  onToggleFiles: () => void;
 }) {
   const { t } = useT("agents");
-  if (!outcome) return null;
 
   const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-caption";
   return (
@@ -1467,20 +1601,80 @@ function RunOutcomeRow({
       <span className="shrink-0 text-micro text-faint-foreground">
         {t(($) => $.transcript.outcome_label)}
       </span>
-      {outcome.paths.length > 0 && (
-        <span className={chip} title={outcome.paths.join("\n")}>
-          <FilePen aria-hidden className="h-3 w-3 text-muted-foreground" />
-          <span className="font-medium">
-            {t(($) => $.transcript.outcome_files, { count: outcome.paths.length })}
-          </span>
-          {outcome.addedLines > 0 && (
-            <span className="tabular-nums text-success">+{outcome.addedLines}</span>
-          )}
-          {outcome.removedLines > 0 && (
-            <span className="tabular-nums text-destructive">−{outcome.removedLines}</span>
-          )}
-        </span>
-      )}
+        {fileEntry.variant !== "hidden" && (
+          <Tooltip>
+            <TooltipTrigger render={
+              <button
+                ref={fileChipRef}
+                type="button"
+                className={cn(
+                  chip,
+                  "cursor-pointer",
+                  filesOpen && "border-brand bg-brand/10",
+                  fileEntry.variant === "muted" &&
+                    "border-none bg-transparent font-normal text-muted-foreground hover:bg-muted/60",
+                )}
+                aria-pressed={filesOpen}
+                onClick={onToggleFiles}
+              >
+                {fileEntry.variant === "solid" ? (
+                  fileEntry.collecting ? (
+                    <Loader2
+                      aria-hidden
+                      data-testid="file-entry-collecting-spinner"
+                      className="h-3 w-3 animate-spin text-muted-foreground"
+                    />
+                  ) : (
+                    <FilePen aria-hidden className="h-3 w-3 text-muted-foreground" />
+                  )
+                ) : (
+                  <FileX aria-hidden className="h-3 w-3" />
+                )}
+                {fileEntry.variant === "muted" ? (
+                  <span>{fileEntry.label}</span>
+                ) : fileEntry.collecting || fileEntry.partial ? (
+                  <span className="font-medium">
+                    {t(($) => $.transcript.files_title)}
+                  </span>
+                ) : (
+                  <>
+                    <span className="font-medium">
+                      {t(($) => $.transcript.outcome_files, {
+                        count: fileEntry.filesCount,
+                      })}
+                    </span>
+                    {fileEntry.stats && fileEntry.stats.added > 0 && (
+                      <span className="tabular-nums text-success">
+                        +{fileEntry.stats.added}
+                      </span>
+                    )}
+                    {fileEntry.stats && fileEntry.stats.removed > 0 && (
+                      <span className="tabular-nums text-destructive">
+                        −{fileEntry.stats.removed}
+                      </span>
+                    )}
+                  </>
+                )}
+                {fileEntry.variant === "solid" && fileEntry.partial && (
+                  <AlertTriangle
+                    aria-hidden
+                    data-testid="file-entry-partial-badge"
+                    className="h-3 w-3 text-warning"
+                  />
+                )}
+              </button>
+            } />
+            <TooltipContent>
+              {fileEntry.variant === "muted"
+                ? fileEntry.tooltip
+                : fileEntry.collecting
+                  ? t(($) => $.transcript.net_collecting)
+                  : fileEntry.partial
+                    ? t(($) => $.transcript.net_partial)
+                    : t(($) => $.transcript.files_chip_open)}
+            </TooltipContent>
+          </Tooltip>
+        )}
       {outcome.commandCount > 0 && (
         <span className={chip}>
           <Terminal aria-hidden className="h-3 w-3 text-muted-foreground" />

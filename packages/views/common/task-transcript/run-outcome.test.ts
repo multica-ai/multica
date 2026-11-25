@@ -6,17 +6,6 @@ import { traceEventDetail, traceToolArgSummary } from "./trace-event-presenter";
 import type { TimelineItem } from "./build-timeline";
 
 let seq = 0;
-function edit(path: string, before: string, after: string): TimelineItem {
-  return {
-    seq: ++seq,
-    type: "tool_use",
-    tool: "Edit",
-    input: { file_path: path, old_string: before, new_string: after },
-  };
-}
-function write(path: string, content: string): TimelineItem {
-  return { seq: ++seq, type: "tool_use", tool: "Write", input: { file_path: path, content } };
-}
 function bash(command: string): TimelineItem {
   return { seq: ++seq, type: "tool_use", tool: "Bash", input: { command } };
 }
@@ -25,6 +14,21 @@ function read(path: string): TimelineItem {
 }
 
 describe("buildRunOutcome", () => {
+  // The outcome summarizes commands only — file
+  // changes come from the run snapshot, never derived from tool calls.
+  it("summarizes shell calls without deriving file changes from tools", () => {
+    const steps = buildSteps([
+      { type: "tool_use", seq: 1, tool: "shell", input: { command: "echo ok" } },
+      {
+        type: "tool_use",
+        seq: 2,
+        tool: "edit",
+        input: { file_path: "a", old_string: "old", new_string: "new" },
+      },
+    ]);
+    expect(buildRunOutcome(steps)).toEqual({ commandCount: 1 });
+  });
+
   it("keeps normalized Antigravity commands visible and counts each command", () => {
     const calls: TimelineItem[] = ["pwd", "git status", "go test ./..."].map((command) => ({
       seq: ++seq,
@@ -91,32 +95,8 @@ describe("buildRunOutcome", () => {
 
       expect(traceEventDetail(call)).toMatchObject({ kind, path: "/workspace/a.go" });
       expect(toolKindTotals(steps)).toEqual({ command: 0, write: 1000, read: 0, other: 0 });
-      expect(buildRunOutcome(steps)?.paths).toEqual(["/workspace/a.go"]);
     },
   );
-
-  it("counts changed lines from an edit", () => {
-    const outcome = buildRunOutcome(buildSteps([edit("a.ts", "one\ntwo", "one\ntwo\nthree")]))!;
-
-    expect(outcome.paths).toEqual(["a.ts"]);
-    expect(outcome.addedLines).toBe(1);
-    expect(outcome.removedLines).toBe(0);
-  });
-
-  it("counts a whole-file write as additions", () => {
-    const outcome = buildRunOutcome(buildSteps([write("new.ts", "a\nb\nc")]))!;
-
-    expect(outcome.paths).toEqual(["new.ts"]);
-    expect(outcome.addedLines).toBe(3);
-  });
-
-  it("counts each path once across several edits", () => {
-    const outcome = buildRunOutcome(
-      buildSteps([edit("a.ts", "x", "y"), edit("a.ts", "y", "z"), edit("b.ts", "p", "q")]),
-    )!;
-
-    expect(outcome.paths).toEqual(["a.ts", "b.ts"]);
-  });
 
   it("counts commands by their input shape, not the tool's name", () => {
     const custom: TimelineItem = {
@@ -130,35 +110,9 @@ describe("buildRunOutcome", () => {
     expect(outcome.commandCount).toBe(2);
   });
 
-  it("does not count a read as a change", () => {
+  it("does not count a read as a command", () => {
     const outcome = buildRunOutcome(buildSteps([read("a.ts"), bash("ls")]))!;
 
-    expect(outcome.paths).toEqual([]);
     expect(outcome.commandCount).toBe(1);
-  });
-
-  it("sums every file of a multi-file patch", () => {
-    const patch: TimelineItem = {
-      seq: ++seq,
-      type: "tool_use",
-      tool: "apply_patch",
-      input: {
-        changes: [
-          { path: "src/a.go", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new\n+extra\n" },
-          { path: "src/new.go", kind: "add", content: "package main\n" },
-        ],
-      },
-    };
-
-    const outcome = buildRunOutcome(buildSteps([patch]))!;
-
-    expect(outcome.paths).toEqual(["src/a.go", "src/new.go"]);
-    expect(outcome.addedLines).toBe(4);
-    expect(outcome.removedLines).toBe(1);
-  });
-
-  it("returns null when nothing nameable was produced", () => {
-    expect(buildRunOutcome(buildSteps([read("a.ts")]))).toBeNull();
-    expect(buildRunOutcome([])).toBeNull();
   });
 });
