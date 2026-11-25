@@ -1389,6 +1389,7 @@
       "cancel": "取消",
       "error": "无法创建唤醒，请检查设置后重试。",
       "capacity_error": "此任务或工作区开启的唤醒已达上限。",
+      "agent_error": "你无权运行这个智能体。请联系它的所有者开通权限，或选择其他智能体。",
       "missing_condition": "请选择条件。",
       "missing_agent": "请选择要唤醒的智能体。",
       "missing_events": "请至少选择一个事件。",

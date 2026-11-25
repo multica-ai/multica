@@ -1448,6 +1448,7 @@
       "cancel": "Cancel",
       "error": "Could not create the wakeup. Check the settings and try again.",
       "capacity_error": "This issue or workspace already has the maximum number of enabled wakeups.",
+      "agent_error": "You can't run this agent. Ask its owner for access, or choose another agent.",
       "missing_condition": "Choose a condition.",
       "missing_agent": "Choose an agent to wake.",
       "missing_events": "Choose at least one event.",
