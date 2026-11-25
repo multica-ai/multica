@@ -30,6 +30,7 @@ import {
   type Ref,
 } from "react";
 import { prefersReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   AppWindow,
   ChevronDown,
@@ -660,6 +661,31 @@ function DynamicBlockErrorPanel({
       </div>
     </div>
   );
+}
+
+/**
+ * Fade a preview in when it replaces the loading skeleton, instead of the
+ * finished render cutting in over it. A preview ready on its first render, or
+ * one that re-renders in place (a theme switch), appears as it is.
+ */
+export function useSkeletonHandoffReveal<T extends HTMLElement>(ready: boolean) {
+  const ref = useRef<T>(null);
+  const waitedRef = useRef(!ready);
+  useLayoutEffect(() => {
+    if (!ready) {
+      waitedRef.current = true;
+      return;
+    }
+    if (!waitedRef.current) return;
+    waitedRef.current = false;
+    const element = ref.current;
+    if (!element?.animate || prefersReducedMotion()) return;
+    element.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: UI_MOTION_DURATION.fast * 1000,
+      easing: UI_EASE_OUT_CSS,
+    });
+  }, [ready]);
+  return ref;
 }
 
 /**

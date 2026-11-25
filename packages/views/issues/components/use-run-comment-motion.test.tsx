@@ -3,7 +3,16 @@ import { useAppearanceStore } from "@multica/core/appearance";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
-import { revealElement, useNewRunIds, useRunAnimationVisibility, useRunCommentMotion, useRunDisclosureMotion } from "./use-run-comment-motion";
+import {
+  CommentArrivalsContext,
+  revealElement,
+  useCommentArrivalReveal,
+  useCommentArrivals,
+  useNewRunIds,
+  useRunAnimationVisibility,
+  useRunCommentMotion,
+  useRunDisclosureMotion,
+} from "./use-run-comment-motion";
 
 const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({ cancel: vi.fn() }));
 const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
@@ -216,6 +225,64 @@ describe("run comment motion", () => {
     expect(animate).toHaveBeenLastCalledWith([{ rotate: "42deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 100 }));
     for (const animation of firstAnimations) expect(animation.cancel).toHaveBeenCalled();
     style.mockRestore();
+  });
+
+  describe("comment arrivals", () => {
+    type Entry = { id: string; type: string };
+    function Row({ id }: { id: string }) {
+      const ref = useCommentArrivalReveal<HTMLDivElement>(id);
+      return <div ref={ref}>{id}</div>;
+    }
+    function Timeline({ issueId = "issue", entries, ready = true, mounted }: {
+      issueId?: string; entries: Entry[]; ready?: boolean; mounted?: string[];
+    }) {
+      const arrivals = useCommentArrivals(issueId, entries, ready);
+      return (
+        <CommentArrivalsContext.Provider value={arrivals}>
+          {(mounted ?? entries.map((entry) => entry.id)).map((id) => <Row key={id} id={id} />)}
+        </CommentArrivalsContext.Provider>
+      );
+    }
+    const comment = (id: string): Entry => ({ id, type: "comment" });
+
+    it("fades in a comment added after the first load, once, and never the history", () => {
+      const view = render(<Timeline entries={[comment("a")]} />);
+      expect(animate).not.toHaveBeenCalled();
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} />);
+      expect(animate.mock.instances).toEqual([screen.getByText("b")]);
+      expect(animate).toHaveBeenCalledWith(
+        [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }],
+        expect.objectContaining({ duration: 150 }),
+      );
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} mounted={["a"]} />);
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} />);
+      expect(animate).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves an arrival still when its row mounts after the reveal window", () => {
+      const now = vi.spyOn(performance, "now").mockReturnValue(0);
+      const view = render(<Timeline entries={[comment("a")]} />);
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} mounted={["a"]} />);
+      now.mockReturnValue(5000);
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} />);
+      expect(animate).not.toHaveBeenCalled();
+    });
+
+    it("treats entries that come with a reload or another issue as history", () => {
+      const view = render(<Timeline entries={[comment("a")]} />);
+      view.rerender(<Timeline entries={[comment("a")]} ready={false} />);
+      view.rerender(<Timeline entries={[comment("a"), comment("older")]} />);
+      view.rerender(<Timeline issueId="other" entries={[comment("x")]} />);
+      expect(animate).not.toHaveBeenCalled();
+    });
+
+    it("shows an arrival at once under reduced motion", () => {
+      reduced = true;
+      const view = render(<Timeline entries={[comment("a")]} />);
+      view.rerender(<Timeline entries={[comment("a"), comment("b")]} />);
+      expect(screen.getByText("b")).toBeInTheDocument();
+      expect(animate).not.toHaveBeenCalled();
+    });
   });
 
   it("reveals an element via WAAPI once and skips under reduced motion", () => {

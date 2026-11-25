@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { prefersReducedMotion } from "@multica/core/appearance";
 import type { AgentTask } from "@multica/core/types";
 import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
@@ -36,6 +36,71 @@ export function useNewRunIds(issueId: string, tasks: readonly AgentTask[] | unde
     ]) }));
   }, [issueId, tasks]);
   return arrivals.issueId === issueId ? arrivals.ids : EMPTY_IDS;
+}
+
+/**
+ * How long an arrival may wait for its row to mount. A row the virtual list
+ * mounts later, as the reader scrolls to it, is history by then and stays still.
+ */
+const ARRIVAL_REVEAL_WINDOW_MS = 1000;
+
+export interface CommentArrivals {
+  /** True once per comment that arrived after the first load, if it mounts soon enough. */
+  take(commentId: string): boolean;
+}
+
+export const CommentArrivalsContext = createContext<CommentArrivals | null>(null);
+
+/**
+ * Track comments (roots and replies) added after the timeline's first load:
+ * a live comment from someone else, an agent's reply, or one the reader posted.
+ * Recorded during render, so a row mounting in the same commit can claim it.
+ * Entries that come with a reload (a thread fetched for a jump) are history.
+ */
+export function useCommentArrivals(
+  issueId: string,
+  entries: readonly { id: string; type: string }[],
+  ready: boolean,
+): CommentArrivals {
+  const known = useRef<{ issueId: string; ids: Set<string>; reloading: boolean } | null>(null);
+  const pending = useRef(new Map<string, number>());
+  if (!ready) {
+    if (known.current?.issueId === issueId) known.current.reloading = true;
+  } else if (!known.current || known.current.issueId !== issueId) {
+    known.current = { issueId, ids: new Set(entries.map((entry) => entry.id)), reloading: false };
+    pending.current.clear();
+  } else {
+    const live = !known.current.reloading;
+    known.current.reloading = false;
+    for (const entry of entries) {
+      if (known.current.ids.has(entry.id)) continue;
+      known.current.ids.add(entry.id);
+      if (live && entry.type === "comment") pending.current.set(entry.id, performance.now());
+    }
+  }
+  const [arrivals] = useState<CommentArrivals>(() => ({
+    take(commentId) {
+      const at = pending.current.get(commentId);
+      if (at === undefined) return false;
+      pending.current.delete(commentId);
+      return performance.now() - at < ARRIVAL_REVEAL_WINDOW_MS;
+    },
+  }));
+  return arrivals;
+}
+
+/**
+ * Fade a comment row in when it is a live arrival. Not cancelled on unmount:
+ * a strict-mode effect replay must not stop the one reveal the row gets.
+ */
+export function useCommentArrivalReveal<T extends HTMLElement>(commentId: string) {
+  const arrivals = useContext(CommentArrivalsContext);
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    if (!arrivals?.take(commentId)) return;
+    revealElement(ref.current, UI_MOTION_DURATION.fast * 1000, 4);
+  }, [arrivals, commentId]);
+  return ref;
 }
 
 /** Pause ambient run motion outside the viewport, including Virtuoso overscan. */

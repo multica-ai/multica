@@ -44,7 +44,7 @@ import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";
-import { DYNAMIC_BLOCK_COLLAPSE_AT_PX, DynamicBlockSkeleton } from "./dynamic-block";
+import { DYNAMIC_BLOCK_COLLAPSE_AT_PX, DynamicBlockSkeleton, useSkeletonHandoffReveal } from "./dynamic-block";
 import { useDragToScroll } from "./hooks/use-drag-to-scroll";
 import { useInlineZoom, type InlineZoom } from "./hooks/use-inline-zoom";
 import { useThemeVersion } from "./hooks/use-theme-version";
@@ -407,6 +407,7 @@ export function MermaidDiagram({
     readCachedLayout(chart),
   );
   const [error, setError] = useState<string | null>(null);
+  const revealRef = useSkeletonHandoffReveal<HTMLIFrameElement>(rendered !== null);
   const [ownViewerOpen, setOwnViewerOpen] = useState(false);
   const viewerOpen = frame ? frame.viewerOpen : ownViewerOpen;
   const setViewerOpen = frame ? frame.onViewerOpenChange : setOwnViewerOpen;
@@ -582,6 +583,7 @@ export function MermaidDiagram({
             {...dragToScroll}
           >
             <iframe
+              ref={revealRef}
               className="mermaid-diagram-frame"
               sandbox=""
               srcDoc={rendered.inlineDocument}

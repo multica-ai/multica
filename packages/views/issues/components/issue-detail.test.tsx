@@ -1776,34 +1776,84 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(".sticky.bottom-0")).toBeNull();
   });
 
-  it("realigns after Virtuoso measures the newly posted row", async () => {
-    mockApiObj.createComment.mockResolvedValue({
-      id: "comment-new",
-      issue_id: "issue-1",
-      content: "A new update",
-      author_type: "member",
-      author_id: "user-1",
-      parent_id: null,
-      type: "comment",
-      created_at: "2026-08-13T00:00:00Z",
-      updated_at: "2026-08-13T00:00:00Z",
-    });
-    renderIssueDetail();
+  it("holds the composer back until the comments replace the skeleton", async () => {
+    let resolveTimeline!: (entries: typeof mockTimeline) => void;
+    mockApiObj.listTimeline.mockReturnValue(new Promise((resolve) => { resolveTimeline = resolve; }));
+    const { container } = renderIssueDetail();
 
     await screen.findByText("Implement authentication");
-    fireEvent.click(screen.getByTestId("comment-composer-shell"));
-    const editor = await screen.findByPlaceholderText("Leave a comment...");
-    fireEvent.change(editor, { target: { value: "A new update" } });
-    const composer = editor.closest<HTMLElement>("[aria-busy], .relative.flex.flex-col.rounded-lg")!;
-    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+    const composer = container.querySelector<HTMLElement>(".sticky.bottom-0")!;
+    expect(composer).toHaveAttribute("inert");
+    expect(composer).toHaveClass("opacity-0");
 
-    expect(scrollToIndexSpy).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+    await act(async () => resolveTimeline(mockTimeline));
+    await waitFor(() => expect(composer).not.toHaveAttribute("inert"));
+    expect(composer).not.toHaveClass("opacity-0");
+    expect(composer).toHaveClass("motion-reduce:transition-none");
+  });
+
+  describe("scrolling to a posted comment", () => {
+    async function post(layout?: { scrollHeight: number; clientHeight: number }) {
+      mockApiObj.createComment.mockResolvedValue({
+        id: "comment-new",
+        issue_id: "issue-1",
+        content: "A new update",
+        author_type: "member",
+        author_id: "user-1",
+        parent_id: null,
+        type: "comment",
+        created_at: "2026-08-13T00:00:00Z",
+        updated_at: "2026-08-13T00:00:00Z",
+      });
+      const { container } = renderIssueDetail();
+
+      await screen.findByText("Implement authentication");
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      if (layout) {
+        Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: layout.scrollHeight });
+        Object.defineProperty(scroller, "clientHeight", { configurable: true, value: layout.clientHeight });
+      }
+      fireEvent.click(screen.getByTestId("comment-composer-shell"));
+      const editor = await screen.findByPlaceholderText("Leave a comment...");
+      fireEvent.change(editor, { target: { value: "A new update" } });
+      const composer = editor.closest<HTMLElement>("[aria-busy], .relative.flex.flex-col.rounded-lg")!;
+      fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+      expect(scrollToIndexSpy).not.toHaveBeenCalled();
+      return scroller;
+    }
+    afterEach(() => {
+      useAppearanceStore.getState().reset();
     });
-    expect(scrollToIndexSpy).toHaveBeenNthCalledWith(1, { index: 2, align: "end", offset: 0 });
-    expect(scrollToIndexSpy).toHaveBeenNthCalledWith(2, { index: 2, align: "end", offset: 0 });
-    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+    it("realigns after Virtuoso measures the newly posted row", async () => {
+      await post();
+      await waitFor(() => {
+        expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+      });
+      expect(scrollToIndexSpy).toHaveBeenNthCalledWith(1, { index: 2, align: "end", offset: 0, behavior: "auto" });
+      expect(scrollToIndexSpy).toHaveBeenNthCalledWith(2, { index: 2, align: "end", offset: 0, behavior: "auto" });
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+    });
+
+    it("glides to a nearby posted comment and realigns once the glide ends", async () => {
+      const scroller = await post({ scrollHeight: 1000, clientHeight: 600 });
+      await waitFor(() => {
+        expect(scrollToIndexSpy).toHaveBeenCalledWith({ index: 2, align: "end", offset: 0, behavior: "smooth" });
+      });
+      expect(scrollToIndexSpy).toHaveBeenCalledTimes(1);
+      fireEvent(scroller, new Event("scrollend"));
+      expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+      expect(scrollToIndexSpy).toHaveBeenLastCalledWith({ index: 2, align: "end", offset: 0, behavior: "auto" });
+    });
+
+    it("jumps instead of gliding with the Appearance Reduce motion switch", async () => {
+      useAppearanceStore.getState().set({ reduceMotion: true });
+      await post({ scrollHeight: 1000, clientHeight: 600 });
+      await waitFor(() => {
+        expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+      });
+      for (const [location] of scrollToIndexSpy.mock.calls) expect(location).toMatchObject({ behavior: "auto" });
+    });
   });
 
   it("keeps metadata collapsed by default when the bag has keys", async () => {

@@ -68,7 +68,7 @@ import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
-import { useRunCommentMotion } from "./use-run-comment-motion";
+import { useCommentArrivalReveal, useRunCommentMotion } from "./use-run-comment-motion";
 import { WakeupSourceChip } from "./wakeup-source-chip";
 
 const commentActionClassName =
@@ -1150,6 +1150,21 @@ function AgentRunCommentImpl({ run, standalone = false, commentProps, entering =
   );
 }
 
+function CommentReplyFrame({ commentId, authorType, anchorId, className, children }: {
+  commentId: string;
+  authorType: string;
+  anchorId?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const ref = useCommentArrivalReveal<HTMLDivElement>(commentId);
+  return (
+    <div ref={ref} data-mc="comment-reply" data-author-type={authorType} id={anchorId} className={className}>
+      {children}
+    </div>
+  );
+}
+
 // CommentCard — One Card per thread (parent + all replies flat inside)
 
 // A quick action posts an ordinary comment and is rendered as one (MUL-5465).
@@ -1312,10 +1327,10 @@ function CommentCardImpl({
       {/* A tombstone keeps its place in the thread but contributes no row
           of its own. */}
       {!isDeletedComment(reply) && (
-        <div
-          data-mc="comment-reply"
-          data-author-type={reply.actor_type}
-          id={managedAnchor ? undefined : `comment-${reply.id}`}
+        <CommentReplyFrame
+          commentId={reply.id}
+          authorType={reply.actor_type}
+          anchorId={managedAnchor ? undefined : `comment-${reply.id}`}
           className={cn(
             "border-t border-border/50 transition-colors duration-700",
             highlightedCommentId === reply.id && highlightedCommentBackgroundClass,
@@ -1339,7 +1354,7 @@ function CommentCardImpl({
             onCopyLink={onCopyLink}
             onFocusReply={currentUserId ? focusReply : undefined}
           />
-        </div>
+        </CommentReplyFrame>
       )}
     </Fragment>
   );

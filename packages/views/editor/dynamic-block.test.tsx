@@ -15,7 +15,8 @@ vi.mock("./code-block-static", () => ({
 const { copyTextMock } = vi.hoisted(() => ({ copyTextMock: vi.fn() }));
 vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: copyTextMock }));
 
-import { DynamicBlock } from "./dynamic-block";
+import { useAppearanceStore } from "@multica/core/appearance";
+import { DynamicBlock, useSkeletonHandoffReveal } from "./dynamic-block";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -139,5 +140,46 @@ describe("DynamicBlock", () => {
     // The in-place footprint stays at the clamp, never at the full height.
     expect(screen.getByTestId("content").style.height).toBe("480px");
     expect(screen.getByRole("button", { name: "Show all" })).toBeTruthy();
+  });
+});
+
+describe("useSkeletonHandoffReveal", () => {
+  function Preview({ ready }: { ready: boolean }) {
+    const ref = useSkeletonHandoffReveal<HTMLDivElement>(ready);
+    return <div ref={ref} data-testid="preview">{ready ? "chart" : "loading"}</div>;
+  }
+  function stubAnimate() {
+    const animate = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    return animate;
+  }
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    useAppearanceStore.getState().reset();
+  });
+
+  it("fades a preview in when it replaces the skeleton, once", () => {
+    const animate = stubAnimate();
+    const view = render(<Preview ready={false} />);
+    view.rerender(<Preview ready />);
+    expect(animate.mock.instances).toEqual([screen.getByTestId("preview")]);
+    expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 150 }));
+    view.rerender(<Preview ready />);
+    expect(animate).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a preview ready on its first render as it is", () => {
+    const animate = stubAnimate();
+    render(<Preview ready />);
+    expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("shows the preview at once with the Appearance Reduce motion switch", () => {
+    const animate = stubAnimate();
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    const view = render(<Preview ready={false} />);
+    view.rerender(<Preview ready />);
+    expect(screen.getByText("chart")).toBeInTheDocument();
+    expect(animate).not.toHaveBeenCalled();
   });
 });

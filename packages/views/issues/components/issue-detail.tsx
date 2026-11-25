@@ -111,7 +111,13 @@ import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { IssueProjectPicker } from "../../projects/components/issue-project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
-import { revealElement, useNewRunIds } from "./use-run-comment-motion";
+import {
+  CommentArrivalsContext,
+  revealElement,
+  useCommentArrivalReveal,
+  useCommentArrivals,
+  useNewRunIds,
+} from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
@@ -568,16 +574,36 @@ function ResolvedToggleReveal({
   className?: string;
   children: ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useCommentArrivalReveal<HTMLDivElement>(id);
   useLayoutEffect(() => {
     if (!toggledRef.current.delete(id)) return;
     const anim = revealElement(ref.current, UI_MOTION_DURATION.fast * 1000, -3);
     return () => { anim?.cancel(); };
-  }, [id, toggledRef]);
+  }, [id, toggledRef, ref]);
   return <div ref={ref} id={domId} className={className}>{children}</div>;
 }
 
-function TimelineSkeleton() {
+/**
+ * The timeline's first rows. They fade in only when they replace the loading
+ * skeleton; a timeline already in cache appears as it is.
+ */
+function TimelineRows({ listRef, skeletonShownRef, children }: {
+  listRef: React.RefObject<HTMLDivElement | null>;
+  skeletonShownRef: React.RefObject<boolean>;
+  children: ReactNode;
+}) {
+  useLayoutEffect(() => {
+    if (!skeletonShownRef.current) return;
+    skeletonShownRef.current = false;
+    revealElement(listRef.current, UI_MOTION_DURATION.fast * 1000);
+  }, [listRef, skeletonShownRef]);
+  return <div ref={listRef} className="mt-4">{children}</div>;
+}
+
+function TimelineSkeleton({ shownRef }: { shownRef?: React.RefObject<boolean> }) {
+  useLayoutEffect(() => {
+    if (shownRef) shownRef.current = true;
+  }, [shownRef]);
   return (
     <div className="mt-4 flex flex-col gap-3">
       {[0, 1].map((i) => (
@@ -607,6 +633,14 @@ const LANDING_OVERSCAN_HOLD_MAX_MS = 3000;
 const LANDING_CHROME_HOLD_MAX_MS = 500;
 /** Overscan while a deep link lands, then on each idle step after it, before TIMELINE_OVERSCAN. */
 const LANDING_OVERSCAN_STEPS = [0, 200, 400];
+/** Cap on the rows mounted before the timeline is measured (see initialTimelineItemCount). */
+const INITIAL_TIMELINE_ITEMS_MAX = 12;
+/** Row height assumed when the timeline has no estimates yet. */
+const TIMELINE_ITEM_FALLBACK_HEIGHT = 120;
+/** How far below, in screens, a posted comment may be for the scroll to it to glide. */
+const POSTED_COMMENT_GLIDE_MAX_SCREENS = 2;
+/** Upper bound on waiting for that glide to end before the aligning repeat. */
+const POSTED_COMMENT_GLIDE_MAX_MS = 700;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -1836,6 +1870,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     if (timelineLoading || commentTasksLoading) releaseLandingChrome();
   }, [timelineLoading, commentTasksLoading, releaseLandingChrome]);
   const enteringRunIds = useNewRunIds(id, commentTasks);
+  const commentArrivals = useCommentArrivals(id, timeline, !timelineLoading);
+  const timelineSkeletonShownRef = useRef(false);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
   const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
     const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
@@ -2225,6 +2261,20 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // pixel scroll restoration so its settle-window hold cannot yank the scroll
   // container back to a stale pixel offset while virtualized rows measure.
   const ownsTimelineScroll = isPeek || landingAtMount || pendingHighlight || !!readingAnchor;
+  const timelinePending = (timelineLoading && timelineView.groups.length === 0) || !scrollContainerEl;
+  // The rows from the top that cover a viewport, by estimate, mounted before
+  // Virtuoso has measured anything. Not when the timeline opens elsewhere.
+  const initialTimelineItemCount = useMemo(() => {
+    if (landingAtMount || pendingHighlight || readingAnchor) return undefined;
+    const viewport = scrollContainerEl?.clientHeight ?? 0;
+    let count = 0;
+    let covered = 0;
+    while (count < Math.min(items.length, INITIAL_TIMELINE_ITEMS_MAX) && covered < viewport) {
+      covered += timelineHeightEstimates?.[count] ?? TIMELINE_ITEM_FALLBACK_HEIGHT;
+      count += 1;
+    }
+    return count;
+  }, [landingAtMount, pendingHighlight, readingAnchor, scrollContainerEl, items.length, timelineHeightEstimates]);
   const restoreScrollRef = useRestoredScrollRef(scrollContainerKey, {
     disabled: ownsTimelineScroll,
   });
@@ -2260,8 +2310,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
   // CommentCard, so the containing top-level row is the scroll target.
-  // Virtuoso owns the scroll. The first jump materializes the row at its
+  // Virtuoso owns the scroll. The first scroll materializes the row at its
   // estimated height; once measured, the repeat aligns using the real height.
+  // Within a couple of screens the first scroll glides while the comment fades
+  // in, and the repeat waits for it to end; from farther away, and with
+  // reduced motion, both are instant.
   // The extra `offset` lifts the row's bottom clear of the sticky composer.
   // `scrollContainerEl` stays out of the deps: a container re-measure would
   // cancel the scroll mid-flight.
@@ -2274,7 +2327,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     if (index < 0) return;
     let timer: number | undefined;
     let cancelled = false;
-    const scrollEnd = () => {
+    const scrollEnd = (behavior: "auto" | "smooth") => {
       if (cancelled) return;
       const composer = composerRef.current;
       // The Inbox's group floats above the composer and covers the row too.
@@ -2282,9 +2335,17 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       const offset =
         (composer?.getBoundingClientRect().height ?? 0) +
         (group ? group.getBoundingClientRect().height + COMPOSER_DOCK_GAP : 0);
-      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset });
+      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset, behavior });
     };
     const container = scrollContainerElRef.current;
+    const smooth = !reduceMotion && !!container &&
+      container.scrollHeight - container.scrollTop - container.clientHeight
+        < container.clientHeight * POSTED_COMMENT_GLIDE_MAX_SCREENS;
+    const settle = () => {
+      scrollEnd("auto");
+      cancelled = true;
+      setPendingPostedCommentId(null);
+    };
     const stopOnUserInput = () => {
       cancelled = true;
       cancelAnimationFrame(frame);
@@ -2294,19 +2355,23 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     const userEvents = ["wheel", "touchstart", "pointerdown"] as const;
     for (const type of userEvents) container?.addEventListener(type, stopOnUserInput, { passive: true });
     const frame = requestAnimationFrame(() => {
-      scrollEnd();
-      timer = window.setTimeout(() => {
-        scrollEnd();
-        setPendingPostedCommentId(null);
-      }, 100);
+      if (!smooth || !container) {
+        scrollEnd("auto");
+        timer = window.setTimeout(settle, 100);
+        return;
+      }
+      scrollEnd("smooth");
+      container.addEventListener("scrollend", settle, { once: true });
+      timer = window.setTimeout(settle, POSTED_COMMENT_GLIDE_MAX_MS);
     });
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
+      container?.removeEventListener("scrollend", settle);
       for (const type of userEvents) container?.removeEventListener(type, stopOnUserInput);
     };
-  }, [pendingPostedCommentId, items, replyToRoot]);
+  }, [pendingPostedCommentId, items, replyToRoot, reduceMotion]);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -4526,22 +4591,24 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 first commit. Without this null guard Virtuoso falls back to
                 its own scroller, grabs 0 height inside overflow-y-auto, and
                 miscomputes total-height on first paint. */}
-            {timelineLoading && timelineView.groups.length === 0 ? (
-              <TimelineSkeleton />
+            {/* The skeleton also covers the gap while the scroll container's
+                callback ref populates, so the first Virtuoso mount doesn't
+                flash empty. */}
+            {timelinePending ? (
+              <TimelineSkeleton shownRef={timelineSkeletonShownRef} />
             ) : (
-              !scrollContainerEl ? (
-                // Skeleton while the callback ref populates so the gap
-                // between IssueDetail mount and Virtuoso mount doesn't
-                // flash empty.
-                <TimelineSkeleton />
-              ) : (
-                <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
-                  <div ref={virtualTimelineRef} className="mt-4">
+              <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
+                <CommentArrivalsContext.Provider value={commentArrivals}>
+                  <TimelineRows listRef={virtualTimelineRef} skeletonShownRef={timelineSkeletonShownRef}>
                     <Virtuoso
                       key={`${wsId}:${id}`}
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
+                      // Virtuoso mounts nothing until it has measured the
+                      // viewport, which left the first frame after the
+                      // skeleton empty. A landing mounts only its target.
+                      initialItemCount={initialTimelineItemCount}
                       heightEstimates={timelineHeightEstimates}
                       increaseViewportBy={timelineOverscan}
                       totalListHeightChanged={handleTimelineHeightChange}
@@ -4556,9 +4623,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                       // tick — issue-detail is document-shaped, not chat.
                       itemContent={renderItem}
                     />
-                  </div>
-                </ImageThumbnailsProvider>
-              )
+                  </TimelineRows>
+                </CommentArrivalsContext.Provider>
+              </ImageThumbnailsProvider>
             )}
 
           </div>
@@ -4594,10 +4661,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           <div
             ref={composerRef}
             data-comment-images={commentImageLayout}
+            // Held back while the timeline loads: shown under the skeleton,
+            // it jumped down as soon as the comments came in.
+            inert={timelinePending}
             className={cn(
               !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
                 "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+              "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+              timelinePending && "opacity-0",
             )}
           >
             {/* key={id}: web's /issues/[id] route doesn't remount on

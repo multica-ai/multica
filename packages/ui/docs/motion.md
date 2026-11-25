@@ -66,6 +66,7 @@ Tabs, views, a filter that changes a list, the next or previous item in a detail
 - While the next content loads, the container keeps its height, then eases to the new height (200ms). It never collapses to 0 and grows back.
 - Slide only when the order means something, such as next and previous: at most 12px, 160ms (`.animate-inbox-enter-next` / `-prev`).
 - A loading placeholder uses `.animate-skeleton`, which stays hidden for its first 200ms, so fast data never flashes a skeleton.
+- Content that replaces a skeleton fades in (150ms, `UI_EASE_OUT`); content already in cache appears at once (`useSkeletonHandoffReveal`).
 
 ### Selected-state indicator
 
@@ -135,7 +136,8 @@ These stay instant:
 | Row exit collapse | Inbox row `motion.li` exit | `packages/views/layout/panels/inbox-section.tsx` |
 | Right sidebar open and close | `AnimatedRightSidebar` | `packages/views/layout/animated-right-sidebar.tsx` |
 | Next and previous detail | `.animate-inbox-enter-next`, `-prev`, `-fade` | `packages/ui/styles/base.css` |
-| Live arrivals in virtualized lists | `useNewRunIds`, `useRunCommentMotion`, `useRunDisclosureMotion` | `packages/views/issues/components/use-run-comment-motion.ts` |
+| Live arrivals in virtualized lists | `useNewRunIds`, `useRunCommentMotion`, `useRunDisclosureMotion`; comments and replies: `useCommentArrivals`, `useCommentArrivalReveal` | `packages/views/issues/components/use-run-comment-motion.ts` |
+| Async preview replacing its skeleton (diagrams, HTML blocks) | `useSkeletonHandoffReveal` | `packages/views/editor/dynamic-block.tsx` |
 | Changing numbers | `NumberFlow` | `packages/ui/components/ui/number-flow.tsx` |
 | Copy confirmation | `CopyCheckIcon` | `packages/ui/components/common/copy-check-icon.tsx` |
 | Loading placeholder | `.animate-skeleton` | `packages/ui/styles/base.css` |

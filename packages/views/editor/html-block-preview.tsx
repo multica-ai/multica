@@ -36,6 +36,7 @@ import {
   DYNAMIC_BLOCK_MIN_BODY_PX,
   DynamicBlock,
   DynamicBlockSkeleton,
+  useSkeletonHandoffReveal,
   useValueWhileVisible,
   type DynamicBlockEditing,
   type DynamicBlockError,
@@ -288,6 +289,7 @@ function HtmlBlockBody({
   }, [loaded, height]);
 
   const ready = height != null || timedOut;
+  const revealRef = useSkeletonHandoffReveal<HTMLDivElement>(ready);
   const bodyHeight = bodyHeightPx(
     height ?? (timedOut ? UNMEASURED_HEIGHT_PX : (cachedHeight ?? DYNAMIC_BLOCK_MIN_BODY_PX)),
   );
@@ -320,6 +322,7 @@ function HtmlBlockBody({
       title={title}
     >
       <div
+        ref={revealRef}
         className="relative"
         style={{ height: fullscreen ? "100%" : bodyHeight }}
       >
