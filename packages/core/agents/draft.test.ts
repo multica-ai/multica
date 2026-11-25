@@ -17,6 +17,7 @@ import {
 
 const draft = (): AgentDraft => ({
   qoderAgentId: "",
+  command: "",
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
@@ -410,4 +411,3 @@ it("persists a Command Agent runner config and drops LLM overrides", () => {
   expect(request.service_tier).toBeUndefined();
   expect(applyDraftRuntimeChange(current, "another-runtime").command).toBe("");
 });
-

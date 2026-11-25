@@ -266,12 +266,13 @@ export function buildCreateAgentRequest(options: {
       : runtimeProvider
         ? { ...options.draft, qoderAgentId: "", command: "" }
         : options.draft;
-  const commandConfig = draft.command.trim()
+  const trimmedCommand = (draft.command ?? "").trim();
+  const commandConfig = trimmedCommand
     ? serializeCommandRuntimeConfig({
         ...(duplicateSource && duplicateSource.runtime_id === runtimeId
           ? parseCommandRuntimeConfig(duplicateSource.runtime_config)
           : {}),
-        command: draft.command.trim(),
+        command: trimmedCommand,
       })
     : null;
   const request: CreateAgentRequest = {

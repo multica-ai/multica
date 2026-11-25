@@ -375,6 +375,7 @@ export function AgentDetailInspector({
                   >
                     <CommandTextField
                       id="agent-command-working-dir"
+                      ariaLabel="Working directory"
                       value={commandConfig.workingDir ?? ""}
                       placeholder="${MULTICA_WORK_DIR}"
                       canEdit={canEdit}
@@ -507,7 +508,7 @@ function CommandField({
         }
       }}
       disabled={!canEdit}
-      placeholder="ocr"
+      placeholder="python3"
       aria-label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
       className="font-mono"
     />
@@ -564,12 +565,14 @@ function CommandArgsField({
 
 function CommandTextField({
   id,
+  ariaLabel,
   value,
   placeholder,
   canEdit,
   onSave,
 }: {
   id: string;
+  ariaLabel: string;
   value: string;
   placeholder?: string;
   canEdit: boolean;
@@ -606,6 +609,7 @@ function CommandTextField({
       }}
       disabled={!canEdit}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       className="font-mono"
     />
   );

@@ -305,8 +305,13 @@ describe("runtime facts in docs", () => {
   const probed = extractProbeRuntimes(readRepoFile(sources.probe));
   const steering = extractSteering(readRepoFile(sources.steering));
 
+  // Built-in non-LLM runtimes execute deterministic scripts rather than an
+  // external AI coding CLI, so they are excluded from the AI coding tool count.
+  const nonAICodingRuntimes = new Set(["command"]);
   const runtimeIds = new Set([...supportedTypes, ...registry.map((r) => r.id)]);
-  const documentedIds = [...runtimeIds].filter((id) => !(id in undocumentedRuntimes));
+  const documentedIds = [...runtimeIds].filter(
+    (id) => !(id in undocumentedRuntimes) && !nonAICodingRuntimes.has(id),
+  );
   const toolCount = documentedIds.length;
   const commandById = new Map([...probed, ...registry].map((r) => [r.id, r.command]));
 
