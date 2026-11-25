@@ -80,3 +80,32 @@ describe("IssuePickerModal isSelectable", () => {
     expect(screen.queryByText("Tap targets too small on iPhone")).toBeNull();
   });
 });
+
+// A picker that stays open on select (adding a blocker) must show the click
+// landed while the write is out, instead of looking frozen (MUL-10169).
+describe("IssuePickerModal pending select", () => {
+  it("marks the clicked row busy while the caller's write is in flight", () => {
+    const onSelect = vi.fn();
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      title: "Wait for another task",
+      description: "Pick a blocker",
+      excludeIds: [],
+      closeOnSelect: false,
+      suggestions: [{ key: "recent", heading: "Recently viewed", issues: [ORIGINAL] }],
+      onSelect,
+    };
+    const { rerender } = renderWithI18n(<IssuePickerModal {...props} />);
+    expect(screen.queryByRole("status")).toBeNull();
+
+    fireEvent.click(screen.getByText("Tap targets too small"));
+    expect(onSelect).toHaveBeenCalledWith(ORIGINAL);
+    rerender(<IssuePickerModal {...props} pending />);
+    expect(screen.getByRole("status")).toBeTruthy();
+
+    // A second click while pending is ignored.
+    fireEvent.click(screen.getByText("Tap targets too small"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
