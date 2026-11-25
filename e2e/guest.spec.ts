@@ -351,7 +351,7 @@ test.describe("as a guest", () => {
     const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
     await expect(sheet.getByText("Go to Inbox", { exact: true })).toBeVisible();
     await expect(sheet.getByText("Reply", { exact: true })).toBeVisible();
-    for (const name of ["Go to Chat", "Go to Agents", "Create issue", "Change status"]) {
+    for (const name of ["Go to Chat", "Go to Agents", "Create issue", "Change status", "Toggle chat window"]) {
       await expect(sheet.getByText(name, { exact: true })).toHaveCount(0);
     }
     await page.keyboard.press("Escape");

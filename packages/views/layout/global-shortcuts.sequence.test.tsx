@@ -134,6 +134,29 @@ describe("GlobalShortcuts sequences", () => {
     expect(adapter.push).toHaveBeenCalledWith("/w/settings");
   });
 
+  it("lets a field, a dialog or a modal focused after G keep the second key", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    press("g");
+    expect(press("i", {}, input).defaultPrevented).toBe(false);
+    expect(pageKey).toHaveBeenCalledTimes(1);
+    // The sequence ended there: the next key on the page is not its second.
+    press("p");
+    input.remove();
+
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    press("g");
+    expect(press("m", {}, dialog).defaultPrevented).toBe(false);
+    dialog.remove();
+
+    press("g");
+    act(() => useModalStore.getState().open("create-issue"));
+    expect(press("t").defaultPrevented).toBe(false);
+    expect(adapter.push).not.toHaveBeenCalled();
+  });
+
   it("does not start in a field, a dialog or a modal", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);

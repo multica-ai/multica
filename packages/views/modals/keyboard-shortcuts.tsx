@@ -119,7 +119,6 @@ const GROUPS: readonly { id: GroupId; rows: readonly Row[] }[] = [
   },
 ];
 
-/** The groups about the page underneath, which lead the sheet. */
 /** The groups the current page uses, most specific first. */
 function useCurrentGroups(): ReadonlySet<GroupId> {
   const { pathname } = useNavigation();

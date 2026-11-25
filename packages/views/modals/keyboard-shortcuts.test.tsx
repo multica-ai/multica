@@ -96,6 +96,8 @@ describe("KeyboardShortcutsModal", () => {
     expect(screen.queryByText("Go to Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("Create issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Change status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Toggle chat window")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ask Multica")).not.toBeInTheDocument();
     expect(screen.getByText("Go to Inbox")).toBeInTheDocument();
     expect(screen.getByText("Reply")).toBeInTheDocument();
   });

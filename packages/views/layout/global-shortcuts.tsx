@@ -61,6 +61,8 @@ export function shouldIgnoreGlobalShortcutEvent(event: KeyboardEvent): boolean {
  */
 const GUEST_UNAVAILABLE_ACTIONS = new Set<ShortcutActionId>([
   "createIssue",
+  "toggleChat",
+  "newChat",
   "goChat",
   "goAutopilots",
   "goAgents",
@@ -209,7 +211,14 @@ export function GlobalShortcuts() {
 
     const handleSequenceKey = (event: KeyboardEvent) => {
       if (shouldIgnoreGlobalShortcutEvent(event) || isShortcutModifierKey(event.key)) return;
-      if (isShortcutRecorderTarget(event.target)) {
+      // A field, a menu, a dialog or a shortcut being recorded owns its keys,
+      // even when the pointer took focus there between the two keys.
+      if (
+        isShortcutRecorderTarget(event.target) ||
+        isEditableShortcutTarget(event.target) ||
+        isPortalLayerShortcutTarget(event.target) ||
+        useModalStore.getState().modal
+      ) {
         clearPending();
         return;
       }
@@ -226,8 +235,6 @@ export function GlobalShortcuts() {
         run(match.id);
         return;
       }
-      if (isEditableShortcutTarget(event.target) || isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
       const first = sequences().find((sequence) => shortcutMatchesEvent(sequence.first, event))?.first;
       if (!first) return;
       event.preventDefault();
