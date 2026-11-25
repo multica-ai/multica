@@ -40,6 +40,8 @@ const COLLAPSED_THREAD = 70;
 const THREAD_FRAME = 30;
 const THREAD_ROW = 75;
 const RUN_BLOCK = 70;
+/** An expanded huge comment: its notice, a box capped near 60vh, and the toggle. */
+const PLAIN_TEXT_BODY = 600;
 
 /** Characters per rendered line for a timeline in a scroll container `width` px wide. */
 export function timelineCharsPerLine(width: number): number {
@@ -109,7 +111,8 @@ export function estimateTimelineItemHeights(
         return COLLAPSED_THREAD;
       case "thread":
         return content.bodies.reduce(
-          (sum, body) => sum + THREAD_ROW + estimateMarkdownHeight(body.markdown, options.charsPerLine),
+          (sum, body) => sum + THREAD_ROW
+            + (body.plainText ? PLAIN_TEXT_BODY : estimateMarkdownHeight(body.markdown, options.charsPerLine)),
           THREAD_FRAME,
         );
       case "run":

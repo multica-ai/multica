@@ -33,7 +33,9 @@ export function isLongComment(content: string | null | undefined): boolean {
  * {@link PREVIEW_MAX_CHARS} characters, ending at a line break when one falls
  * in the second half of that window. A single huge line is cut hard.
  */
-export function longCommentPreview(content: string): string {
+export function longCommentPreview(body: string): string {
+  // Leading blank lines render as nothing; start the window at the text.
+  const content = body.slice(Math.max(0, body.search(/\S/)));
   let end = Math.min(content.length, PREVIEW_MAX_CHARS);
   let lines = 0;
   for (let index = content.indexOf("\n"); index !== -1 && index < end; index = content.indexOf("\n", index + 1)) {
@@ -50,6 +52,11 @@ export function longCommentPreview(content: string): string {
   const last = content.charCodeAt(end - 1);
   if (last >= 0xd800 && last <= 0xdbff) end -= 1;
   return content.slice(0, end).trimEnd();
+}
+
+/** Whether an expanded body shows as plain text instead of Markdown. */
+export function isPlainTextComment(content: string): boolean {
+  return content.length > PLAIN_TEXT_COMMENT_CHARS;
 }
 
 /** The Markdown a comment card puts on screen for `content`. */

@@ -64,12 +64,17 @@ describe("estimateTimelineItemHeights", () => {
   });
 
   it("sizes a collapsed long comment by its preview", () => {
-    const huge = comment("huge", `{"rows":[${'{"id":1},'.repeat(20_000)}]}`);
+    const huge = comment("huge", `{"rows":[${'{"id":1},'.repeat(5_000)}]}`);
     const thread: TimelineRowItem[] = [{ kind: "comment", id: huge.id, entry: huge }];
     const [collapsed] = estimateTimelineItemHeights(thread, new Map(), new Map(), OPEN, options);
     const [expanded] = estimateTimelineItemHeights(thread, new Map(), new Map(), { ...OPEN, expandedLong: new Set([huge.id]) }, options);
     expect(collapsed).toBeLessThan(1_000);
     expect(expanded).toBeGreaterThan(10 * collapsed!);
+    // Past the plain-text limit it expands into a capped box.
+    const capped = comment("capped", "x".repeat(200_000));
+    const [box] = estimateTimelineItemHeights([{ kind: "comment", id: capped.id, entry: capped }], new Map(), new Map(),
+      { ...OPEN, expandedLong: new Set([capped.id]) }, options);
+    expect(box).toBeLessThan(1_000);
   });
 
   it("adds a run's output to its block", () => {

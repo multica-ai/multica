@@ -36,7 +36,7 @@ export function buildTimelineFindUnits(
     const content = timelineRowContent(item, threadReplies, commentRuns, folds);
     if (content.shape !== "thread" && content.shape !== "run") continue;
     for (const body of content.bodies) {
-      const text = markdownSearchText(body.markdown).toLowerCase();
+      const text = (body.plainText ? body.markdown : markdownSearchText(body.markdown)).toLowerCase();
       if (text.trim()) units.push({ key: body.key, itemId: item.id, anchorId: body.anchorId, text });
     }
   }

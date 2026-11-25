@@ -8,7 +8,7 @@ import {
   type CommentRun,
 } from "../components/comment-runs";
 import { deriveThreadResolution } from "../components/thread-utils";
-import { visibleCommentMarkdown } from "./long-comment";
+import { isPlainTextComment, visibleCommentMarkdown } from "./long-comment";
 
 /** The fields of a timeline row this needs; issue-detail's rows satisfy it. */
 export type TimelineRowItem =
@@ -34,6 +34,8 @@ export interface TimelineRowBody {
   /** `comment-<anchorId>` brings the body into the DOM, as a deep link does. */
   anchorId: string;
   markdown: string;
+  /** Shown verbatim in a capped box instead of rendered (an expanded huge comment). */
+  plainText?: boolean;
 }
 
 /**
@@ -71,7 +73,11 @@ function threadContent(
   const bodies: TimelineRowBody[] = [];
   // A long comment shows only its opening until the reader expands it.
   const add = (key: string, anchorId: string, markdown: string | null | undefined) => {
-    if (markdown) bodies.push({ key, anchorId, markdown: visibleCommentMarkdown(markdown, folds.expandedLong.has(key)) });
+    if (!markdown) return;
+    const expanded = folds.expandedLong.has(key);
+    bodies.push(expanded && isPlainTextComment(markdown)
+      ? { key, anchorId, markdown, plainText: true }
+      : { key, anchorId, markdown: visibleCommentMarkdown(markdown, expanded) });
   };
   const replies = [...(threadReplies.get(root.id) ?? [])];
   const runs = commentRuns.get(root.id) ?? [];

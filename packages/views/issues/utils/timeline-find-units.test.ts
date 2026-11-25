@@ -79,6 +79,14 @@ describe("buildTimelineFindUnits", () => {
     expect(expanded!.text).toContain("hidden ending");
   });
 
+  it("searches an expanded huge comment as the plain text it shows", () => {
+    const huge = comment("huge", `<row>|${"a|b ".repeat(30_000)}`);
+    const thread: TimelineRowItem[] = [{ kind: "comment", id: huge.id, entry: huge }];
+
+    const [unit] = buildTimelineFindUnits(thread, new Map(), new Map(), { ...OPEN, expandedLong: new Set([huge.id]) });
+    expect(unit!.text).toBe(huge.content!.toLowerCase());
+  });
+
   it("leaves out a failure notice, which renders as its run's block", () => {
     const failed = task("run-1", { status: "failed" });
     const notice = comment("notice", "agent exited with status 1", {

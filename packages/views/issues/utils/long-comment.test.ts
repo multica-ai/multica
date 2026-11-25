@@ -44,6 +44,11 @@ describe("longCommentPreview", () => {
     expect(preview.split("\n")).toHaveLength(30);
   });
 
+  it("starts at the text when the body opens with blank lines", () => {
+    expect(longCommentPreview(`${"\n".repeat(40)}${"a".repeat(20_000)}`)).toBe("a".repeat(2_000));
+    expect(longCommentPreview(`${" ".repeat(2_000)}${"b".repeat(20_000)}`)).toBe("b".repeat(2_000));
+  });
+
   it("never splits a surrogate pair", () => {
     const preview = longCommentPreview(`${"a".repeat(1_999)}${"😀".repeat(10_000)}`);
 
