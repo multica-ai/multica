@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -266,5 +268,42 @@ func TestWorkflowSquadHandoffKeepsAssignmentGates(t *testing.T) {
 				"handler": map[string]any{"type": "squad", "id": tc.squadID},
 			}).Want(tc.status)
 		})
+	}
+}
+
+func TestDeleteSquadHandsItsWorkflowStepsToTheLeader(t *testing.T) {
+	seedTestCatalog(t)
+	leaderID := seededReadyAgentID(t)
+	squadID := dbfx.Squad(t, "Retired reviewers", leaderID)
+	otherSquadID := dbfx.Squad(t, "Kept reviewers", leaderID)
+	wf := createTestWorkflow(t, "Squad archive "+workflowTestSuffix(), "in_progress", "in_review")
+	projectID := createWorkflowTestProject(t, "Squad archive")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	for status, id := range map[string]string{"in_progress": squadID, "in_review": otherSquadID} {
+		setWorkflowHandoff(t, wf.ID, status, map[string]any{
+			"handler": map[string]any{"type": "squad", "id": id}, "instructions": "Work on it",
+		}).Want(http.StatusOK)
+	}
+
+	testutil.Call(t, testHandler.DeleteSquad, squadScopeReq(testUserID, http.MethodDelete, "/api/squads", nil, map[string]string{"id": squadID})).Want(http.StatusNoContent)
+
+	issueID := dbfx.Issue(t, "Enters the retired squad's step", testutil.Cols{"project_id": projectID, "status": "todo"})
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+	if status, assigneeType, assigneeID := issueStatusAndAssignee(t, issueID); status != "in_progress" || assigneeType != "agent" || assigneeID != leaderID {
+		t.Fatalf("issue = %s, %s %s; want in_progress with leader agent %s", status, assigneeType, assigneeID, leaderID)
+	}
+	row, err := testHandler.Queries.GetIssueWorkflow(t.Context(), db.GetIssueWorkflowParams{ID: parseUUID(wf.ID), WorkspaceID: parseUUID(testWorkspaceID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := issueworkflow.Decode(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step, _ := def.Step("in_progress"); step.Handler != (issueworkflow.Handler{Type: issueworkflow.HandlerAgent, ID: leaderID}) || step.Instructions != "Work on it" {
+		t.Fatalf("in_progress step = %+v", step)
+	}
+	if step, _ := def.Step("in_review"); step.Handler != (issueworkflow.Handler{Type: issueworkflow.HandlerSquad, ID: otherSquadID}) {
+		t.Fatalf("in_review step = %+v, want the other squad kept", step)
 	}
 }

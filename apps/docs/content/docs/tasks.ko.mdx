@@ -110,7 +110,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `timeout` | 데몬에 설정된 실행 시간 상한을 초과함 | 태스크 범위를 줄이거나 데몬의 `agent_timeout` 조정 |
 | `iteration_limit` | 실행 반복 횟수 상한에 도달함 | 태스크 범위 축소 |
 | `agent_blocked` | 에이전트가 계속 진행할 수 없다고 직접 보고함 | 댓글의 설명에 따라 정보 보충 |
-| `api_invalid_request` | 플랫폼 API가 잘못된 요청을 거부함 | 재시도하고 반복되면 문제 신고 |
+| `api_invalid_request` | 모델 API가 이 대화를 거부함. 요청이 유효하지 않다고 판단되었거나(예: 읽을 수 없는 이미지) 모델이 응답을 거부함 | 다음 실행은 자동으로 새 세션에서 시작됨. 같은 요청이 계속 거부되면 표현을 바꾸거나 모델을 변경 |
 | `codex_semantic_inactivity` | Codex가 오랫동안 유효한 출력을 내지 않아 멈춘 것으로 판단됨 | 재시도하거나 Codex 정체 timeout 조정 |
 
 </Tab>

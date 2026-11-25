@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"testing"
 	"time"
@@ -227,6 +228,58 @@ func TestDocCommentClaimCarriesDiscussionAndResumesDocSession(t *testing.T) {
 		t.Fatalf("orphaned doc run status = %q, want cancelled", status)
 	}
 	testPool.Exec(context.Background(), "DELETE FROM agent_task_queue WHERE id = $1", tasks[1].ID)
+}
+
+// Deleting a discussion stops its runs: they have nothing left to answer, and
+// the page no longer shows them to stop. A deleted reply stops nothing, and
+// other discussions keep their runs.
+func TestDocCommentDeleteStopsTheDiscussionsRuns(t *testing.T) {
+	doc := createDocForTest(t)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		testPool.Exec(ctx, "DELETE FROM agent_task_queue WHERE doc_id = $1", doc.ID)
+		testPool.Exec(ctx, "DELETE FROM doc_comment WHERE doc_id = $1", doc.ID)
+	})
+	stamp := time.Now().UnixNano()
+	runner := createHandlerTestAgent(t, fmt.Sprintf("Doc Runner %d", stamp), nil)
+	waiter := createHandlerTestAgent(t, fmt.Sprintf("Doc Waiter %d", stamp), nil)
+	post := func(body map[string]any) DocCommentResponse {
+		t.Helper()
+		var c DocCommentResponse
+		testutil.Call(t, testHandler.CreateDocComment, withURLParam(newRequest("POST", "/comments", body), "id", doc.ID)).Want(http.StatusCreated).JSON(&c)
+		return c
+	}
+	remove := func(id string) {
+		t.Helper()
+		testutil.Call(t, testHandler.DeleteDocComment, withURLParams(newRequest("DELETE", "/comments", nil), "id", doc.ID, "docCommentId", id)).Want(http.StatusNoContent)
+	}
+	mention := func(id string) string { return "[@A](mention://agent/" + id + ")" }
+	statuses := func() map[string]string {
+		out := map[string]string{}
+		for _, task := range docTasksFor(t, doc.ID) {
+			out[task.ThreadID+"/"+task.AgentID] = task.Status
+		}
+		return out
+	}
+
+	root := post(map[string]any{"content": "Tighten this. " + mention(runner), "anchor_quote": "Original"})
+	dbfx.Exec(t, "UPDATE agent_task_queue SET status = 'running', started_at = now(), dispatched_at = now() WHERE doc_id = $1 AND agent_id = $2", doc.ID, runner)
+	reply := post(map[string]any{"content": "And check it. " + mention(waiter), "parent_id": root.ID})
+	other := post(map[string]any{"content": "Expand this. " + mention(waiter), "anchor_quote": "First"})
+
+	want := map[string]string{root.ID + "/" + runner: "running", root.ID + "/" + waiter: "queued", other.ID + "/" + waiter: "queued"}
+	if got := statuses(); !maps.Equal(got, want) {
+		t.Fatalf("runs before any delete = %v, want %v", got, want)
+	}
+	remove(reply.ID)
+	if got := statuses(); !maps.Equal(got, want) {
+		t.Fatalf("runs after deleting a reply = %v, want %v", got, want)
+	}
+	remove(root.ID)
+	want[root.ID+"/"+runner], want[root.ID+"/"+waiter] = "cancelled", "cancelled"
+	if got := statuses(); !maps.Equal(got, want) {
+		t.Fatalf("runs after deleting the discussion = %v, want %v", got, want)
+	}
 }
 
 // A run that ends without replying still answers its discussion with its

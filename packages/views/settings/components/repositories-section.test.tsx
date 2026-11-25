@@ -239,6 +239,75 @@ describe("RepositoriesSection", () => {
     });
   });
 
+  describe("when the list changes while a dialog is open", () => {
+    const api = { url: "https://github.com/acme/api", description: "API" };
+    const web = { url: "https://github.com/acme/web", description: "Web" };
+    const docs = { url: "https://github.com/acme/docs", description: "Docs" };
+
+    async function openRowAction(user: ReturnType<typeof userEvent.setup>, url: string, action: string) {
+      await user.click(screen.getByRole("button", { name: `Actions for ${url}` }));
+      await user.click(await screen.findByRole("menuitem", { name: action }));
+    }
+
+    function replaceRepos(rerender: (ui: ReactNode) => void, repos: typeof workspaceRef.current.repos) {
+      workspaceRef.current = { ...workspaceRef.current, repos };
+      rerender(<RepositoriesSection connection={connection} />);
+    }
+
+    async function saveDescription(user: ReturnType<typeof userEvent.setup>, text: string) {
+      const dialog = screen.getByRole("dialog", { name: "Edit repository" });
+      const description = within(dialog).getByRole("textbox", { name: "Description" });
+      await user.clear(description);
+      await user.type(description, text);
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    }
+
+    beforeEach(() => {
+      workspaceRef.current = { ...workspaceRef.current, repos: [api, web, docs] };
+    });
+
+    it("edits the repository the dialog was opened for", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Edit");
+      replaceRepos(rerender, [web, docs]);
+      await saveDescription(user, "Web app");
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+          repos: [{ url: web.url, description: "Web app" }, docs],
+        }),
+      );
+    });
+
+    it("saves an edit to a repository that was removed meanwhile", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Edit");
+      replaceRepos(rerender, [api, docs]);
+      await saveDescription(user, "Web app");
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+          repos: [api, docs, { url: web.url, description: "Web app" }],
+        }),
+      );
+    });
+
+    it("removes the repository the confirmation was opened for", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Delete repository");
+      const dialog = await screen.findByRole("alertdialog");
+      replaceRepos(rerender, [web, docs]);
+      await user.click(within(dialog).getByRole("button", { name: "Delete repository" }));
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", { repos: [docs] }),
+      );
+    });
+  });
+
   it("hides every write affordance from members", () => {
     roleRef.current = "member";
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });

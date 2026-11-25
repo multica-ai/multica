@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -74,6 +75,59 @@ func TestIssueWakeupSquadLeaderAttribution(t *testing.T) {
 			}
 			if task.SquadID != wantSquad {
 				t.Fatalf("squad_id=%s, want %s", util.UUIDToString(task.SquadID), util.UUIDToString(wantSquad))
+			}
+		})
+	}
+}
+
+func TestSystemWakeupInheritsSquadUsageFromIssueOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		member bool
+	}{
+		{name: "squad member", member: true},
+		{name: "outside assignee"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, s, issue, agent := wakeFixture(t)
+			ctx := context.Background()
+			leader := f.privateAgentOwnedBy(t, f.UserID, "squad leader")
+			squad := f.Squad(t, "Usage squad", leader)
+			var wantUsageSquad pgtype.UUID
+			if tc.member {
+				f.SquadMember(t, squad, "agent", agent)
+				wantUsageSquad = parseTestUUID(t, squad)
+			}
+			origin := f.Task(t, leader, testutil.Cols{
+				"status": "completed", "completed_at": testutil.Raw("now()"),
+				"is_leader_task": true, "squad_id": squad,
+				"originator_user_id": f.UserID, "accountable_user_id": f.UserID,
+			})
+			f.Exec(t, `UPDATE issue SET assignee_type='agent', assignee_id=$2, status='todo',
+				origin_type='agent_create', origin_id=$3, creator_type='agent', creator_id=$4 WHERE id=$1`, issue, agent, origin, leader)
+			blocker := f.Issue(t, "squad blocker")
+			if err := AddIssueBlocker(ctx, f.q, parseTestUUID(t, f.WorkspaceID), issue, parseTestUUID(t, blocker), "member", parseTestUUID(t, f.UserID)); err != nil {
+				t.Fatal(err)
+			}
+			f.Cleanup(t, "DELETE FROM issue_blocker WHERE issue_id=$1", issue)
+			w := blockerRule(t, f, issue)
+			f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", blocker)
+			if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+				t.Fatal(err)
+			}
+			got := blockerRule(t, f, issue)
+			if got.ID != w.ID || !got.LastTaskID.Valid {
+				t.Fatalf("blockers-done rule queued no run: %+v", got)
+			}
+			task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if task.DelegatedFromTaskID != parseTestUUID(t, origin) {
+				t.Fatalf("blockers-done run source = %q, want %q", util.UUIDToString(task.DelegatedFromTaskID), origin)
+			}
+			if sid := effectiveTaskSquadID(task); sid != wantUsageSquad {
+				t.Fatalf("blockers-done run squad usage = %q, want %q", util.UUIDToString(sid), util.UUIDToString(wantUsageSquad))
 			}
 		})
 	}

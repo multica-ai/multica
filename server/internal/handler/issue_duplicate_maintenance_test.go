@@ -201,7 +201,7 @@ func concurrentWriteAfterPointerCleared(t *testing.T, deleteOriginal bool) {
 			SELECT 1 FROM pg_stat_activity
 			WHERE datname = current_database()
 			  AND wait_event_type = 'Lock'
-			  AND query LIKE '-- name: UpdateIssue :one%')`).Scan(&blocked); err != nil {
+			  AND query LIKE '-- name: LockIssueForDescriptionUpdate :one%')`).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked {

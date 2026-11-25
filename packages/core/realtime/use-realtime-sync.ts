@@ -63,6 +63,7 @@ import {
   onIssueReactionAdded,
   onIssueReactionRemoved,
   invalidateIssueOwnerProjections,
+  invalidateProjectProgress,
 } from "../issues/ws-updaters";
 import {
   invalidateLastActivitySortedIssueLists,
@@ -990,6 +991,7 @@ export function useRealtimeSync(
         if (wsId) {
           qc.invalidateQueries({ queryKey: ["labels", wsId] });
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          invalidateProjectProgress(qc, wsId);
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
           qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         }

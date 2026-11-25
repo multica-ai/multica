@@ -48,7 +48,7 @@ import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import { issueIdentifierOptions } from "@multica/core/issues/queries";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { isIssueIdentifier } from "@multica/ui/markdown";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import type { Attachment } from "@multica/core/types";
 import {
   parseMarkdownChunked,

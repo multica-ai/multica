@@ -1674,7 +1674,7 @@ function StepRow({
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <span
           className={cn(
-            "shrink-0 text-caption font-medium",
+            "max-w-[60%] shrink-0 truncate text-caption font-medium",
             row.kind === "error" ? "text-destructive" : "text-foreground",
           )}
         >
@@ -1732,7 +1732,7 @@ function GroupRow({
           )}
         />
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className="shrink-0 text-caption font-medium">{row.tool}</span>
+          <span className="max-w-[60%] shrink-0 truncate text-caption font-medium">{row.tool}</span>
           {/* Name the first thing it touched, not just how many: "Read · 4
               calls" hides the one detail that makes a folded group scannable. */}
           <span className="truncate font-mono text-micro text-muted-foreground">
@@ -1854,8 +1854,8 @@ function StepInspector({
     <aside className="flex w-full shrink-0 flex-col border-l-0 bg-muted/25 md:w-[26rem] md:border-l">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-label font-semibold">{title}</span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
+        <span title={title} className="line-clamp-3 min-w-0 wrap-anywhere text-label font-semibold">{title}</span>
+        <span className="flex flex-1 items-center gap-1.5 whitespace-nowrap text-micro text-muted-foreground">
           {offset && <span className="font-mono tabular-nums">{offset}</span>}
           {call?.durationMs !== undefined && (
             <>

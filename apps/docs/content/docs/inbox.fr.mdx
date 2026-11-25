@@ -27,6 +27,7 @@ Les notifications courantes incluent :
 - une tâche ou un commentaire que vous avez créé reçoit une réaction ;
 - une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
 - une tâche est créée dans un projet que vous suivez ;
+- tous les [bloqueurs](/issues#relations) d'une tâche qui vous est assignée se terminent (**Les tâches attendues sont terminées**) ;
 - [la création d'une tâche via un agent](/issues#créer-avec-un-agent) aboutit ou échoue ;
 - une automatisation à laquelle vous êtes abonné crée une nouvelle tâche, ou est mise en pause après des échecs consécutifs.
 
@@ -125,7 +126,7 @@ Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisi
 Tant qu'une tâche est reportée :
 
 - ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
-- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si toutes ses sous-tâches sont terminées ou si tous ses bloqueurs se terminent. Les mentions `@all` ne la réveillent pas ;
 - **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous traitez** compte la fin de la tâche (c'est le cas par défaut) ;
 - ouvrir directement la page de la tâche ne la marque pas comme lue et ne met pas fin au report. Ouverte depuis l'onglet **Reportés**, son groupe indique quand elle revient. Cliquez sur cette heure pour la faire revenir maintenant (`H`) ou en choisir une autre.
 
