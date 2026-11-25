@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useLongCommentExpandStore } from "@multica/core/issues/stores";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { renderWithI18n } from "../../test/i18n";
 
 // Comment card suites mock the editor barrel, so the component imports from it too.
@@ -69,6 +70,40 @@ describe("LongCommentContent", () => {
     const plain = screen.getByTestId("long-comment-plain-text");
     expect(plain.textContent).toBe(huge);
     expect(screen.getByRole("button", { name: /download as \.txt/i })).toBeTruthy();
+  });
+
+  // jsdom has no layout: report the body's height from what it renders.
+  function fakeHeights() {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { height: this.textContent?.length ?? 0 } as DOMRect;
+    });
+    const animate = vi.fn(() => ({ cancel: vi.fn() }));
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      useAppearanceStore.setState({ reduceMotion: false });
+    });
+    return animate;
+  }
+
+  it("animates the height change when the reader toggles", () => {
+    const animate = fakeHeights();
+    renderComment("w".repeat(LONG_COMMENT_CHARS + 1));
+
+    fireEvent.click(screen.getByRole("button", { name: /show full comment/i }));
+
+    expect(animate).toHaveBeenCalledTimes(1);
+  });
+
+  it("lands the new height in the same frame under reduced motion", () => {
+    const animate = fakeHeights();
+    useAppearanceStore.setState({ reduceMotion: true });
+    renderComment("w".repeat(LONG_COMMENT_CHARS + 1));
+
+    fireEvent.click(screen.getByRole("button", { name: /show full comment/i }));
+
+    expect(animate).not.toHaveBeenCalled();
   });
 
   it("downloads the full text", () => {
