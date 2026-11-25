@@ -427,11 +427,14 @@ type claudeTurn struct {
 	closeRequested  bool
 
 	mu sync.Mutex
-	// runningCommand is the command Claude Code last reported as started and
-	// not yet completed. A result emitted while another command runs is not
-	// this turn's answer: resuming a session whose last turn was cut off can
-	// re-run that turn before the queued prompt (GH #11506).
-	runningCommand           string
+	// Resuming a session whose last turn was cut off can make Claude Code
+	// re-run that turn as its own command before the queued prompt
+	// (GH #11506). A result that arrives after another command started but
+	// before this turn's own command started is not this turn's answer.
+	// Once the own command starts, every result counts, whatever other
+	// commands do meanwhile (folded in, cancelled).
+	otherCommandStarted      bool
+	ownCommandStarted        bool
 	lastAssistantText        string
 	finalResultText          string
 	sawResult                bool
@@ -488,28 +491,23 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		t.mu.Unlock()
 		trySend(t.msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sid})
 	case "command_lifecycle":
-		switch msg.State {
-		case "started":
-			t.runningCommand = msg.CommandUUID
+		if msg.State == "started" && !t.ownCommandStarted {
 			if msg.CommandUUID == t.commandUUID {
+				t.ownCommandStarted = true
 				// Text streamed by an earlier command must not become this
 				// turn's fallback output.
 				t.coalescer.flushAll()
 				t.lastAssistantText = ""
-			}
-		case "completed":
-			if t.runningCommand == msg.CommandUUID {
-				t.runningCommand = ""
+			} else {
+				t.otherCommandStarted = true
 			}
 		}
 		t.mu.Unlock()
 	case "result":
 		t.coalescer.flushAll()
-		if t.runningCommand != "" && t.runningCommand != t.commandUUID {
-			running := t.runningCommand
+		if t.otherCommandStarted && !t.ownCommandStarted {
 			t.mu.Unlock()
 			t.backend.cfg.Logger.Info("claude: ignoring result of a command this turn did not send",
-				"command_uuid", running,
 				"turn_command_uuid", t.commandUUID,
 				"result_bytes", len(msg.ResultText),
 				"is_error", msg.IsError,

@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,12 +29,16 @@ func TestClaudeResumeIgnoresResultOfReRunInterruptedTurn(t *testing.T) {
 	}
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	run := func(pool *WarmSessionPool, prompt, resumeID string) Result {
+	runVariant := func(variant string, pool *WarmSessionPool, prompt, resumeID string) Result {
 		t.Helper()
 		cfg := Config{
 			ExecutablePath: self,
 			Logger:         discard,
-			Env:            map[string]string{"CLAUDE_FAKE_MODE": "resume_interrupted_turn", "IS_SANDBOX": "1"},
+			Env: map[string]string{
+				"CLAUDE_FAKE_MODE":           "resume_interrupted_turn",
+				"CLAUDE_FAKE_RESUME_VARIANT": variant,
+				"IS_SANDBOX":                 "1",
+			},
 		}
 		if pool != nil {
 			cfg.WarmPool = pool
@@ -57,6 +62,10 @@ func TestClaudeResumeIgnoresResultOfReRunInterruptedTurn(t *testing.T) {
 		}
 		return <-sess.Result
 	}
+	run := func(pool *WarmSessionPool, prompt, resumeID string) Result {
+		t.Helper()
+		return runVariant("", pool, prompt, resumeID)
+	}
 
 	t.Run("warm pool", func(t *testing.T) {
 		pool := NewWarmSessionPool(WarmSessionPoolConfig{IdleTTL: 30 * time.Second, MaxIdle: 4, Logger: discard})
@@ -79,6 +88,29 @@ func TestClaudeResumeIgnoresResultOfReRunInterruptedTurn(t *testing.T) {
 		r := run(nil, "first message", "claude-resumed")
 		if r.Status != "completed" || r.Output != "reply to first message" {
 			t.Fatalf("resumed turn result = %+v, want the reply to its own prompt", r)
+		}
+	})
+
+	// A prompt that arrives while the re-run is still going can be folded
+	// into it: the prompt's command starts and completes inside the re-run,
+	// and one result answers both.
+	t.Run("prompt folded into the re-run", func(t *testing.T) {
+		r := runVariant("folded", nil, "first message", "claude-resumed")
+		if r.Status != "completed" || r.Output != "reply to first message" {
+			t.Fatalf("resumed turn result = %+v, want the folded result", r)
+		}
+	})
+
+	// Once the turn's own command started, its result counts even when a
+	// command folded into it ends some other way first.
+	t.Run("own command fails after a folded command is cancelled", func(t *testing.T) {
+		start := time.Now()
+		r := runVariant("cancelled_fold", nil, "first message", "")
+		if r.Status != "failed" || !strings.Contains(r.Error, "API Error") {
+			t.Fatalf("turn result = %+v, want the own command's error", r)
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("turn took %s; the error result was ignored until timeout", elapsed)
 		}
 	})
 }
@@ -134,8 +166,31 @@ func runFakeClaudeResumeInterruptedTurn() {
 			return f["type"] == "control_response" && resp["request_id"] == requestID
 		}, 3*time.Second) != nil
 	}
+	variant := os.Getenv("CLAUDE_FAKE_RESUME_VARIANT")
+	lifecycle := func(id, state string) {
+		emit(map[string]any{"type": "command_lifecycle", "command_uuid": id, "state": state})
+	}
+	promptOf := func(frame map[string]any) (string, string) {
+		id, _ := frame["uuid"].(string)
+		message, _ := frame["message"].(map[string]any)
+		content, _ := message["content"].([]any)
+		block, _ := content[0].(map[string]any)
+		text, _ := block["text"].(string)
+		return id, text
+	}
 	command := func(id, prompt string, n int) {
-		emit(map[string]any{"type": "command_lifecycle", "command_uuid": id, "state": "started"})
+		if variant == "cancelled_fold" {
+			lifecycle(id, "started")
+			if !hook(fmt.Sprintf("ups-%d", n), "UserPromptSubmit") {
+				os.Exit(31)
+			}
+			lifecycle("folded-cron", "started")
+			lifecycle("folded-cron", "cancelled")
+			emit(map[string]any{"type": "result", "subtype": "error_during_execution", "result": "API Error: 500", "is_error": true})
+			lifecycle(id, "completed")
+			return
+		}
+		lifecycle(id, "started")
 		var reply string
 		if hook(fmt.Sprintf("ups-%d", n), "UserPromptSubmit") {
 			emit(map[string]any{"type": "system", "subtype": "init"})
@@ -163,7 +218,24 @@ func runFakeClaudeResumeInterruptedTurn() {
 	} else {
 		queued = append(queued, first)
 	}
-	if slices.Contains(os.Args, "--resume") {
+	if slices.Contains(os.Args, "--resume") && variant == "folded" {
+		lifecycle("re-run-of-cut-off-turn", "started")
+		if !hook("ups-0", "UserPromptSubmit") {
+			os.Exit(32)
+		}
+		var prompt map[string]any
+		if len(queued) > 0 {
+			prompt, queued = queued[0], queued[1:]
+		} else {
+			prompt = next(func(f map[string]any) bool { return f["type"] == "user" }, 5*time.Second)
+		}
+		id, text := promptOf(prompt)
+		lifecycle(id, "queued")
+		lifecycle(id, "started")
+		lifecycle(id, "completed")
+		emit(map[string]any{"type": "result", "subtype": "success", "result": "reply to " + text, "is_error": false})
+		lifecycle("re-run-of-cut-off-turn", "completed")
+	} else if slices.Contains(os.Args, "--resume") {
 		command("re-run-of-cut-off-turn", "Continue from where you left off.", 0)
 	}
 	for n := 1; ; n++ {
@@ -173,13 +245,9 @@ func runFakeClaudeResumeInterruptedTurn() {
 		} else {
 			prompt = next(func(f map[string]any) bool { return f["type"] == "user" }, time.Hour)
 		}
-		id, _ := prompt["uuid"].(string)
-		message, _ := prompt["message"].(map[string]any)
-		content, _ := message["content"].([]any)
-		block, _ := content[0].(map[string]any)
-		text, _ := block["text"].(string)
+		id, text := promptOf(prompt)
 		if id != "" {
-			emit(map[string]any{"type": "command_lifecycle", "command_uuid": id, "state": "queued"})
+			lifecycle(id, "queued")
 		}
 		command(id, text, n)
 	}
