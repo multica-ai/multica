@@ -25,7 +25,7 @@ import type { Project } from "@multica/core/types";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { renderWithI18n } from "../../test/i18n";
 import { registerProjectFoldersExtension, type ProjectFolders } from "../../extensions";
-import { ProjectsSection } from "./work-tree";
+import { ProjectsSection, type ProjectsSearch } from "./work-tree";
 
 const apiMock = vi.hoisted(() => ({ putIssueViewPreference: vi.fn() }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
@@ -134,6 +134,7 @@ function renderSection(
   projects = PROJECTS,
   projectSettings: Partial<SidebarProjectSettings> = {},
   order: string[] = ["p9"],
+  search?: ProjectsSearch,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
   qc.setQueryData(issueTableFacetsOptions("ws-1", noProjectCountRequest([])).queryKey, {
@@ -161,6 +162,7 @@ function renderSection(
         activeIssueId={null}
         litSource={null}
         locatedSource={null}
+        search={search}
       />
     </QueryClientProvider>,
   );
@@ -314,6 +316,38 @@ describe("ProjectsSection", () => {
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "New issue in Mobile" }));
     expect(openCreateIssue).toHaveBeenCalledWith({ project_id: "p2" });
+  });
+
+  it("collapses every expanded project at once, leaving other rows and the section open", () => {
+    useSidebarTreeStore.setState({ expanded: ["project:p1", "builtin:my_issues", "project:none", "project:p3"] });
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all projects" }));
+
+    expect(useSidebarTreeStore.getState().expanded).toEqual(["builtin:my_issues"]);
+    expect(useSidebarTreeStore.getState().projectsCollapsed).toBe(false);
+    expect(screen.getByRole("link", { name: "Desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse all projects" })).toBeNull();
+  });
+
+  it("offers Collapse all only while a project is expanded", () => {
+    renderSection();
+    expect(screen.queryByRole("button", { name: "Collapse all projects" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Issues in Web" }));
+    expect(screen.getByRole("button", { name: "Collapse all projects" })).toBeInTheDocument();
+  });
+
+  it("keeps the manual order while a search narrows the list", async () => {
+    renderSection(PROJECTS, {}, ["p9"], { query: "o", onQueryChange: vi.fn(), hiddenMatches: 0, searchAll: false, onSearchAllChange: vi.fn() });
+    act(() => dnd.onDragEnd?.({ active: { id: "p2" }, over: { id: "p1" } } as DragEndEvent));
+    // The save is asynchronous (see "saves a manual order"): give it the same
+    // chance to run before asserting it did not.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(apiMock.putIssueViewPreference).not.toHaveBeenCalled();
+  });
+
+  it("lists projects only while a search narrows the list", () => {
+    renderSection(PROJECTS, { showNoProject: true }, ["p9"], { query: "o", onQueryChange: vi.fn(), hiddenMatches: 0, searchAll: false, onSearchAllChange: vi.fn() });
+    expect(screen.queryByText("No project")).toBeNull();
   });
 
   it("opens the project's menu on right-click, led by a new issue in it", async () => {

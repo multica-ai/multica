@@ -10,7 +10,7 @@ import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { NO_PROJECT_SIDEBAR_SOURCE, projectSidebarSource, sidebarProjects } from "@multica/core/issues/sidebar-list";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
-import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useSidebarTreeStore, type SidebarProjectSettings } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
@@ -31,6 +31,17 @@ const EMPTY_PROJECTS: Project[] = [];
 const PROJECTS_LIST = "projects";
 /** Pinned rows' place in the clicked-issue record, apart from every sidebar source. */
 const PINS_LIST = "pins";
+
+/** The section's own order, over every project the filter would leave out. */
+const SEARCH_ALL_SETTINGS = (settings: SidebarProjectSettings): SidebarProjectSettings => ({
+  ...settings,
+  statuses: ["planned", "in_progress", "paused", "completed", "cancelled"],
+  onlyMine: false,
+});
+
+function matchesQuery(title: string, query: string) {
+  return title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
 
 interface ClickedIssue {
   segment: string;
@@ -167,13 +178,35 @@ export function WorkPanel() {
   };
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
+  const [projectQuery, setProjectQuery] = useState("");
+  const [searchAllProjects, setSearchAllProjects] = useState(false);
+  const searching = projectQuery.trim() !== "";
   const filteredProjects = useMemo(
-    () => sidebarProjects(projects, projectSettings, projectOrder, userId),
-    [projects, projectSettings, projectOrder, userId],
+    () =>
+      sidebarProjects(
+        projects,
+        searching && searchAllProjects ? SEARCH_ALL_SETTINGS(projectSettings) : projectSettings,
+        projectOrder,
+        userId,
+      ),
+    [projects, projectSettings, projectOrder, userId, searching, searchAllProjects],
   );
   const activeProjectCount = useMemo(() => projects.filter((project) => !project.archived_at).length, [projects]);
   const openProject = projects.find((project) => isPathWithin(pathname, p.projectDetail(project.id)));
-  const shownProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
+  const keptProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
+  const shownProjects = useMemo(
+    () => (searching ? keptProjects.filter((project) => matchesQuery(project.title, projectQuery)) : keptProjects),
+    [keptProjects, searching, projectQuery],
+  );
+  // Matches the projects filter leaves out, offered while searching. Archived
+  // projects never list in the sidebar, so they are not offered either.
+  const hiddenMatches = useMemo(() => {
+    if (!searching || searchAllProjects) return 0;
+    const shown = new Set(shownProjects.map((project) => project.id));
+    return projects.filter(
+      (project) => !project.archived_at && !shown.has(project.id) && matchesQuery(project.title, projectQuery),
+    ).length;
+  }, [projects, shownProjects, searching, searchAllProjects, projectQuery]);
   const plainRowsLit = !pins.isActivePinnedRoute;
 
   // Opening an issue never opens its project: the tree changes only when the
@@ -268,6 +301,16 @@ export function WorkPanel() {
               activeIssueId={currentIssueId}
               litSource={litSource}
               locatedSource={locatedSource}
+              search={{
+                query: projectQuery,
+                onQueryChange: (query) => {
+                  setProjectQuery(query);
+                  if (!query.trim()) setSearchAllProjects(false);
+                },
+                hiddenMatches,
+                searchAll: searchAllProjects,
+                onSearchAllChange: setSearchAllProjects,
+              }}
             />
           )}
         </PanelBody>

@@ -23,6 +23,15 @@ describe("useSidebarTreeStore", () => {
     expect(useSidebarTreeStore.getState().expanded).toEqual([]);
   });
 
+  it("collapses only the rows under a prefix, keeping the state when none match", () => {
+    useSidebarTreeStore.setState({ expanded: ["project:p1", "builtin:my_issues", "project:none"] });
+    useSidebarTreeStore.getState().collapseAll("project:");
+    const after = useSidebarTreeStore.getState();
+    expect(after.expanded).toEqual(["builtin:my_issues"]);
+    after.collapseAll("project:");
+    expect(useSidebarTreeStore.getState()).toBe(after);
+  });
+
   it("collapses each section on its own", () => {
     useSidebarTreeStore.setState({ viewsCollapsed: false, pinnedCollapsed: false, projectsCollapsed: false });
     useSidebarTreeStore.getState().setPinnedCollapsed(true);

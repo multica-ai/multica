@@ -812,6 +812,57 @@ describe("WorkPanel and the open issue's project", () => {
   });
 });
 
+describe("WorkPanel project search", () => {
+  const DONE = { ...PROJECT, id: "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a", title: "Launch v1", status: "completed" } as Project;
+  const OTHER_PROJECT = { ...PROJECT, id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", title: "Billing" } as Project;
+
+  function search(query: string) {
+    fireEvent.click(screen.getByRole("button", { name: "Search projects" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search projects" }), { target: { value: query } });
+  }
+
+  it("filters the listed projects by name within the display filter", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT, DONE]);
+    search("LAUNCH");
+
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: OTHER_PROJECT.title })).toBeNull();
+    expect(screen.queryByRole("link", { name: DONE.title })).toBeNull();
+  });
+
+  it("offers the matches the display filter hides, then only the shown ones again", () => {
+    // A closed project never lists in the sidebar, so it is not offered either.
+    const CLOSED = { ...DONE, id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", title: "Launch beta", archived_at: "2026-01-02T00:00:00Z" } as Project;
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT, DONE, CLOSED]);
+    search("launch");
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 more outside your display filter" }));
+    expect(screen.getByRole("link", { name: DONE.title })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: CLOSED.title })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Only search projects your display filter shows" }));
+    expect(screen.queryByRole("link", { name: DONE.title })).toBeNull();
+  });
+
+  it("says when nothing matches and restores every project once cleared", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT]);
+    search("nothing");
+    expect(screen.getByText("No matching projects")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: OTHER_PROJECT.title })).toBeInTheDocument();
+  });
+
+  it("closes on Escape, clearing the query", () => {
+    renderPanel("/acme/my-issues", [], [PROJECT, OTHER_PROJECT]);
+    search("bill");
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search projects" }), { key: "Escape" });
+
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("link", { name: PROJECT.title })).toBeInTheDocument();
+  });
+});
+
 describe("KeptRowsRelease Inbox Zero undo", () => {
   const cleared = () => useInboxSelectionStore.getState().lastClearedByWorkspace["ws-1"];
   const recordCleared = () =>
