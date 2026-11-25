@@ -1792,6 +1792,47 @@ describe("IssueDetail (shared)", () => {
     expect(composer).toHaveClass("motion-reduce:transition-none");
   });
 
+  describe("timeline reveal", () => {
+    const animate = vi.fn();
+    beforeEach(() => {
+      animate.mockClear();
+      Object.defineProperty(Element.prototype, "animate", { configurable: true, value: animate });
+    });
+    afterEach(() => {
+      Reflect.deleteProperty(Element.prototype, "animate");
+    });
+    const timelineRevealed = () => animate.mock.instances.includes(screen.getByTestId("virtuoso-mock").parentElement);
+
+    it("fades the comments in when they replace the loading skeleton", async () => {
+      let resolveTimeline!: (entries: typeof mockTimeline) => void;
+      mockApiObj.listTimeline.mockReturnValue(new Promise((resolve) => { resolveTimeline = resolve; }));
+      renderIssueDetail();
+      await screen.findByText("Implement authentication");
+
+      await act(async () => resolveTimeline(mockTimeline));
+      await screen.findByTestId("virtuoso-mock");
+      expect(timelineRevealed()).toBe(true);
+    });
+
+    it("shows a cached timeline at once, past the frame the scroll container attaches", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      const { container } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      await screen.findByTestId("virtuoso-mock");
+      expect(timelineRevealed()).toBe(false);
+      expect(container.querySelector(".sticky.bottom-0")).not.toHaveAttribute("inert");
+    });
+  });
+
   describe("scrolling to a posted comment", () => {
     async function post(layout?: { scrollHeight: number; clientHeight: number }) {
       mockApiObj.createComment.mockResolvedValue({

@@ -66,6 +66,7 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 - 新内容加载期间，容器保持原高度，加载完成后过渡到新高度（200ms）。不要先塌成 0 再撑开。
 - 只有顺序有含义时才滑动，比如上一项和下一项：最多 12px，160ms（`.animate-inbox-enter-next` / `-prev`）。
 - 加载占位使用 `.animate-skeleton`，前 200ms 不显示，数据很快到达时不会闪出骨架屏。
+- 替换骨架屏的内容淡入（150ms，`UI_EASE_OUT`）；已在缓存中的内容直接出现（`useSkeletonHandoffReveal`）。
 
 ### 选中态指示器
 
@@ -135,7 +136,8 @@ Dialog、AlertDialog、Sheet、Popover、DropdownMenu、ContextMenu、Select、H
 | 行退场收起 | Inbox 行的 `motion.li` 退场 | `packages/views/layout/panels/inbox-section.tsx` |
 | 右侧栏展开收起 | `AnimatedRightSidebar` | `packages/views/layout/animated-right-sidebar.tsx` |
 | 详情的上一项和下一项 | `.animate-inbox-enter-next`、`-prev`、`-fade` | `packages/ui/styles/base.css` |
-| 虚拟列表中的实时到达 | `useNewRunIds`、`useRunCommentMotion`、`useRunDisclosureMotion` | `packages/views/issues/components/use-run-comment-motion.ts` |
+| 虚拟列表中的实时到达 | `useNewRunIds`、`useRunCommentMotion`、`useRunDisclosureMotion`；评论与回复：`useCommentArrivals`、`useCommentArrivalReveal` | `packages/views/issues/components/use-run-comment-motion.ts` |
+| 异步预览替换骨架屏（图表、HTML 块） | `useSkeletonHandoffReveal` | `packages/views/editor/dynamic-block.tsx` |
 | 变化的数字 | `NumberFlow` | `packages/ui/components/ui/number-flow.tsx` |
 | 复制确认 | `CopyCheckIcon` | `packages/ui/components/common/copy-check-icon.tsx` |
 | 加载占位 | `.animate-skeleton` | `packages/ui/styles/base.css` |

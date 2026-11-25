@@ -584,26 +584,32 @@ function ResolvedToggleReveal({
 }
 
 /**
- * The timeline's first rows. They fade in only when they replace the loading
- * skeleton; a timeline already in cache appears as it is.
+ * The timeline's first rows. They fade in only when they replace the skeleton
+ * of this issue's timeline load; a timeline already in cache appears as it is,
+ * even past the frame the skeleton holds while the scroll container attaches.
  */
-function TimelineRows({ listRef, skeletonShownRef, children }: {
+function TimelineRows({ issueId, listRef, loadingSkeletonRef, children }: {
+  issueId: string;
   listRef: React.RefObject<HTMLDivElement | null>;
-  skeletonShownRef: React.RefObject<boolean>;
+  loadingSkeletonRef: React.RefObject<string | null>;
   children: ReactNode;
 }) {
   useLayoutEffect(() => {
-    if (!skeletonShownRef.current) return;
-    skeletonShownRef.current = false;
+    if (loadingSkeletonRef.current !== issueId) return;
+    loadingSkeletonRef.current = null;
     revealElement(listRef.current, UI_MOTION_DURATION.fast * 1000);
-  }, [listRef, skeletonShownRef]);
+  }, [issueId, listRef, loadingSkeletonRef]);
   return <div ref={listRef} className="mt-4">{children}</div>;
 }
 
-function TimelineSkeleton({ shownRef }: { shownRef?: React.RefObject<boolean> }) {
+/** `loadingIssueId`: the issue whose timeline is loading, recorded for TimelineRows. */
+function TimelineSkeleton({ loadingIssueId, loadingSkeletonRef }: {
+  loadingIssueId?: string | null;
+  loadingSkeletonRef?: React.RefObject<string | null>;
+}) {
   useLayoutEffect(() => {
-    if (shownRef) shownRef.current = true;
-  }, [shownRef]);
+    if (loadingSkeletonRef && loadingIssueId) loadingSkeletonRef.current = loadingIssueId;
+  }, [loadingIssueId, loadingSkeletonRef]);
   return (
     <div className="mt-4 flex flex-col gap-3">
       {[0, 1].map((i) => (
@@ -1871,7 +1877,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   }, [timelineLoading, commentTasksLoading, releaseLandingChrome]);
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const commentArrivals = useCommentArrivals(id, timeline, !timelineLoading);
-  const timelineSkeletonShownRef = useRef(false);
+  const timelineLoadingSkeletonRef = useRef<string | null>(null);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
   const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
     const next = buildCommentRunView(commentTasks ?? [], timeline, previousCommentRuns.current);
@@ -2261,7 +2267,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // pixel scroll restoration so its settle-window hold cannot yank the scroll
   // container back to a stale pixel offset while virtualized rows measure.
   const ownsTimelineScroll = isPeek || landingAtMount || pendingHighlight || !!readingAnchor;
-  const timelinePending = (timelineLoading && timelineView.groups.length === 0) || !scrollContainerEl;
+  const timelineLoadingEmpty = timelineLoading && timelineView.groups.length === 0;
   // The rows from the top that cover a viewport, by estimate, mounted before
   // Virtuoso has measured anything. Not when the timeline opens elsewhere.
   const initialTimelineItemCount = useMemo(() => {
@@ -4594,12 +4600,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             {/* The skeleton also covers the gap while the scroll container's
                 callback ref populates, so the first Virtuoso mount doesn't
                 flash empty. */}
-            {timelinePending ? (
-              <TimelineSkeleton shownRef={timelineSkeletonShownRef} />
+            {timelineLoadingEmpty || !scrollContainerEl ? (
+              <TimelineSkeleton
+                loadingIssueId={timelineLoadingEmpty ? id : null}
+                loadingSkeletonRef={timelineLoadingSkeletonRef}
+              />
             ) : (
               <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
                 <CommentArrivalsContext.Provider value={commentArrivals}>
-                  <TimelineRows listRef={virtualTimelineRef} skeletonShownRef={timelineSkeletonShownRef}>
+                  <TimelineRows issueId={id} listRef={virtualTimelineRef} loadingSkeletonRef={timelineLoadingSkeletonRef}>
                     <Virtuoso
                       key={`${wsId}:${id}`}
                       ref={virtuosoRef}
@@ -4663,13 +4672,13 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             data-comment-images={commentImageLayout}
             // Held back while the timeline loads: shown under the skeleton,
             // it jumped down as soon as the comments came in.
-            inert={timelinePending}
+            inert={timelineLoadingEmpty}
             className={cn(
               !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
                 "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
               "transition-opacity duration-150 ease-out motion-reduce:transition-none",
-              timelinePending && "opacity-0",
+              timelineLoadingEmpty && "opacity-0",
             )}
           >
             {/* key={id}: web's /issues/[id] route doesn't remount on
