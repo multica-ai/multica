@@ -26,6 +26,7 @@
     "message": "Message de l'agent",
     "error": "Erreur",
     "waiting_result": "En attente du résultat de l'outil...",
+    "reply_pending_call": "Toujours en cours : en attente de la fin de {{step}}",
     "supplement_failure_turn_ended": "l'exécution s'est terminée avant la livraison",
     "supplement_failure_turn_not_started": "l’agent n’était pas prêt",
     "supplement_failure_provider_rejected": "l’agent a refusé le message",

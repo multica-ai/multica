@@ -26,6 +26,7 @@
     "message": "Agent message",
     "error": "Error",
     "waiting_result": "Waiting for the tool result...",
+    "reply_pending_call": "Still running: waiting for {{step}} to finish",
     "supplement_failure_turn_ended": "the run ended before delivery",
     "supplement_failure_turn_not_started": "the agent was not ready",
     "supplement_failure_provider_rejected": "the agent rejected the message",

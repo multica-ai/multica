@@ -60,8 +60,64 @@ export type InlineCommentRunState = ReturnType<typeof useInlineCommentRunState>;
 
 export function PlacedInlineCommentRun({ presentation = "inline", ...props }: Parameters<typeof InlineCommentRun>[0]) {
   // A live reply compacts its run into the comment header.
-  if ((presentation === "header") !== showCommentRunInHeader(props.run)) return null;
+  const inHeader = showCommentRunInHeader(props.run);
+  if (presentation === "inline" && inHeader && props.run.task.status === "running") {
+    return <ReplyRunPendingCall task={props.run.task} />;
+  }
+  if ((presentation === "header") !== inHeader) return null;
   return <InlineCommentRun {...props} presentation={presentation} />;
+}
+
+/**
+ * How long a published reply's run must sit on one unfinished tool call before
+ * the reply says so. Runs normally exit seconds after posting their reply, so
+ * this keeps the usual tail settled and only explains a wait that lasts.
+ */
+export const REPLY_PENDING_CALL_NOTICE_MS = 60_000;
+
+/**
+ * A reply can be published while its run is still waiting on a tool call, for
+ * example a command stuck behind a local permission prompt. The
+ * header shows only the log button, so without this line the answer looks
+ * finished while the run stays Running with no visible reason.
+ */
+function ReplyRunPendingCall({ task }: { task: AgentTask }) {
+  const { t } = useT("issues");
+  const [now, setNow] = useState(Date.now);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const cancel = useCancelIssueRun(task.issue_id);
+  const { data } = useTaskMessages(task.id, true);
+  const items = useMemo(() => buildTimeline(data ?? []), [data]);
+  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, true);
+  const pending = useMemo(() => {
+    const steps = buildSteps(items);
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i]!;
+      if (isCallStep(step) && !step.result) return step;
+    }
+    return undefined;
+  }, [items]);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const startedAt = pending?.startedAt ? Date.parse(pending.startedAt) : Number.NaN;
+  if (!pending || !Number.isFinite(startedAt) || now - startedAt < REPLY_PENDING_CALL_NOTICE_MS) return null;
+  const step = redactSecrets(traceToolArgSummary(pending.call?.input, { formatText }) || pending.tool);
+  const text = t(($) => $.inline_run.reply_pending_call, { step });
+  const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
+  return <div className="flex min-h-7 min-w-0 items-center gap-2 py-1 text-label text-muted-foreground" data-reply-pending-call={task.id}>
+    <Loader2 aria-hidden className="size-3.5 shrink-0 text-info motion-safe:animate-spin motion-safe:[animation-duration:900ms]" />
+    <span role="status" className="min-w-0 flex-1 truncate" title={text}>{text}</span>
+    <span className="shrink-0 whitespace-nowrap tabular-nums">{formatDuration(pending.startedAt!, now)}</span>
+    <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
+      label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
+      onClick={() => setConfirmStop(true)}>
+      {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
+    </IconButton>
+    <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop} showRunningNote
+      onConfirm={() => void cancel.mutateAsync(task.id).catch(() => toast.error(t(($) => $.execution_log.cancel_failed)))} />
+  </div>;
 }
 
 export function InlineCommentRun({ run, className, viewState, showIdentity = false, presentation = "inline", replyTo, replacesFailureNotice = false }: {

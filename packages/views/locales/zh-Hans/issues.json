@@ -25,6 +25,7 @@
     "message": "智能体消息",
     "error": "错误",
     "waiting_result": "等待工具返回结果...",
+    "reply_pending_call": "仍在运行：等待 {{step}} 结束",
     "supplement_failure_turn_ended": "送达前运行已结束",
     "supplement_failure_turn_not_started": "智能体尚未就绪",
     "supplement_failure_provider_rejected": "智能体拒绝了该消息",
