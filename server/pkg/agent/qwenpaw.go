@@ -60,6 +60,13 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("qwenpaw executable not found at %q: %w", execPath, err)
 	}
 
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (qwenpaw_warm.go); without the pool, every turn spawns and reaps
+	// its own process below.
+	if b.cfg.WarmPool != nil {
+		return b.executeWarmQwenpaw(ctx, execPath, prompt, opts)
+	}
+
 	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("qwenpaw: invalid mcp_config: %w", err)

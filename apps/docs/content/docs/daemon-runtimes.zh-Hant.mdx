@@ -282,7 +282,7 @@ Codex 原生子 AI 代理同樣預設關閉：父執行緒結束時，Multica �
 使用 `MULTICA_TOKEN` 發起請求時，作者身份由服務端決定；任務評論等寫入操作會歸屬到被指派的 AI 代理和當前 task。令牌的完整繫結關係、權限、歸屬方式、最長 24 小時的有效期和清理規則見[AI 代理執行的臨時令牌](/auth-tokens#ai-代理執行的臨時令牌)。
 
 <Callout type="info">
-內建的 **Codex** 與 **Claude Code** 執行時預設啟用工作階段程序池以複用後續輪次程序。在程序池模式下，每輪都會變動的任務變數（`MULTICA_TOKEN`、`MULTICA_TASK_ID`、`MULTICA_TASK_CONFIG_ROOT`、`MULTICA_TASK_SLOT`）改由守護程序透過私有的單輪覆蓋檔案提供給 `multica` CLI，不再寫入常駐程序的靜態環境變數，因此不保證出現在 provider 程序環境或任意子指令碼中。自定義執行時配置命令不啟用程序池，仍直接在程序環境中接收全部變數。如果內建 Codex 或 Claude Code 的工作流需要舊的直接環境變數行為，可在守護程序環境中設定 `MULTICA_WARM_POOL=0`。
+內建的 **Codex**、**Claude Code**、**Qoder**、**QwenPaw** 與 **MiniMax Code** 執行時預設啟用工作階段程序池以複用後續輪次程序。在程序池模式下，每輪都會變動的任務變數（`MULTICA_TOKEN`、`MULTICA_TASK_ID`、`MULTICA_TASK_CONFIG_ROOT`、`MULTICA_TASK_SLOT`）改由守護程序透過私有的單輪覆蓋檔案提供給 `multica` CLI，不再寫入常駐程序的靜態環境變數，因此不保證出現在 provider 程序環境或任意子指令碼中。自定義執行時配置命令不啟用程序池，仍直接在程序環境中接收全部變數。如果內建 Codex、Claude Code、Qoder、QwenPaw 或 MiniMax Code 的工作流需要舊的直接環境變數行為，可在守護程序環境中設定 `MULTICA_WARM_POOL=0`。
 </Callout>
 
 <Callout type="warning">

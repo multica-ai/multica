@@ -83,6 +83,13 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("%s executable not found at %q: %w", b.defaultExecutable, execPath, err)
 	}
 
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (qoder_warm.go); without the pool, every turn spawns and reaps
+	// its own process below.
+	if b.cfg.WarmPool != nil {
+		return b.executeWarmQoder(ctx, execPath, prompt, opts)
+	}
+
 	// Translate the agent's mcp_config (Claude-style object of objects) into
 	// the array shape ACP session/new and session/resume expect. Reuse the
 	// shared converter so remote MCP `headers` (e.g. Authorization) survive as
