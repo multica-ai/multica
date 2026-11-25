@@ -66,6 +66,13 @@ func (b *devinBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("devin working directory: %w", err)
 	}
 
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (devin_warm.go); without the pool, every turn spawns and reaps
+	// its own process below.
+	if b.cfg.WarmPool != nil {
+		return b.executeWarmDevin(ctx, execPath, prompt, opts)
+	}
+
 	// Translate the agent's mcp_config (Claude-style object of objects) into
 	// the array shape ACP session/new and session/load expect. Fail closed on
 	// malformed JSON so the launch surfaces the real error instead of silently
