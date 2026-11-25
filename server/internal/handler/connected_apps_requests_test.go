@@ -367,6 +367,56 @@ func TestConnectedApps_TeamConnectRequestEndsWhileAnotherWaits(t *testing.T) {
 	}
 }
 
+func TestConnectedApps_TeamConnectNoticeHandOffOnIssueDelete(t *testing.T) {
+	f := newAppsFixture(t)
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	requestConnection := func(f *appsFixture) string {
+		t.Helper()
+		code, text, isErr := f.gateway(t, f.token(t), "apps_request_connection", map[string]any{"app": "gmail"})
+		if code != http.StatusOK || isErr {
+			t.Fatalf("request connection: %d %s", code, text)
+		}
+		requests := f.listRequests(t, testUserID)
+		if len(requests) != 1 {
+			t.Fatalf("requests for issue %s = %+v, want one", f.issueID, requests)
+		}
+		return requests[0].ID
+	}
+	firstRequest := requestConnection(f)
+	next := *f
+	next.issueID = dbfx.Issue(t, "second team Gmail request")
+	next.taskID = createHandlerTestTaskForAgentOnIssue(t, next.agentID, next.issueID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=$1, accountable_user_id=$1, originator_source='direct_human' WHERE id=$2`, testUserID, next.taskID)
+	nextRequest := requestConnection(&next)
+
+	openNotices := func(issueID, requestID string) int {
+		t.Helper()
+		return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id=$1 AND recipient_id=$2 AND type=$3
+			AND issue_id=$4 AND details->>'request_id'=$5 AND NOT archived`,
+			testWorkspaceID, testUserID, connectedapps.NotifConnectRequested, issueID, requestID)
+	}
+	if n := openNotices(f.issueID, firstRequest); n != 1 {
+		t.Fatalf("open notifications for the first issue = %d, want 1", n)
+	}
+	if n := openNotices(next.issueID, nextRequest); n != 0 {
+		t.Fatalf("open notifications for the second issue before delete = %d, want 0", n)
+	}
+
+	req := withURLParam(newRequest(http.MethodDelete, "/api/issues/"+f.issueID, nil), "id", f.issueID)
+	testutil.Call(t, f.h.DeleteIssue, req).Want(http.StatusNoContent)
+	if got := f.requestStatus(t, firstRequest); got != "cancelled" {
+		t.Fatalf("first request status = %s, want cancelled", got)
+	}
+	if got := f.requestStatus(t, nextRequest); got != "pending" {
+		t.Fatalf("second request status = %s, want pending", got)
+	}
+	if n := openNotices(next.issueID, nextRequest); n != 1 {
+		t.Fatalf("open notifications for the second issue after delete = %d, want 1", n)
+	}
+}
+
 // The notification passes only to admins who held one for the ended request
 // and whom a waiting request concerns, once per app however many end.
 func TestConnectedApps_TeamConnectNoticeHandOff(t *testing.T) {

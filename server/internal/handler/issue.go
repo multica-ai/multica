@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -4838,6 +4839,7 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
 	var cancelledAppRequests []db.AppActionRequest
+	var teamNoticeHolders connectedapps.TeamNoticeHolders
 	if len(issues) > 0 {
 		if err = qtx.LockIssueBlockerGraph(ctx, issues[0].WorkspaceID); err != nil {
 			return issueDeleteResult{}, err
@@ -4876,6 +4878,12 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 			return issueDeleteResult{}, fmt.Errorf("cancel issue app requests: %w", err)
 		}
 		cancelledAppRequests = append(cancelledAppRequests, withdrawn...)
+		if h.ConnectedApps != nil {
+			// Issue deletion also removes the inbox rows used to identify recipients.
+			if err := teamNoticeHolders.Capture(ctx, qtx, withdrawn); err != nil {
+				return issueDeleteResult{}, fmt.Errorf("capture team request notification holders: %w", err)
+			}
+		}
 		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
 		if err != nil {
 			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
@@ -4926,7 +4934,7 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		return issueDeleteResult{}, fmt.Errorf("commit issue delete: %w", err)
 	}
 	if h.ConnectedApps != nil {
-		h.ConnectedApps.RequestsCancelled(ctx, cancelledAppRequests...)
+		h.ConnectedApps.RequestsCancelledWithTeamNoticeHolders(ctx, &teamNoticeHolders, cancelledAppRequests...)
 	}
 	return result, nil
 }
