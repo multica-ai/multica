@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
+import { fileChangesKeys } from "../agents/file-changes";
 import { chatKeys, taskMessagesOptions } from "../chat/queries";
 import type { TaskMessagePayload } from "../types/events";
 import type { WSClient } from "../api/ws-client";
@@ -36,7 +37,10 @@ function createMockWs(handlers: Handlers): WSClient {
       handlers.set(event, handler);
       return () => handlers.delete(event);
     }),
-    onAny: vi.fn(() => () => {}),
+    onAny: vi.fn((handler: (payload: unknown) => void) => {
+      handlers.set("any", handler);
+      return () => handlers.delete("any");
+    }),
     onReconnect: vi.fn(() => () => {}),
   } as unknown as WSClient;
 }
@@ -226,5 +230,28 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     await vi.waitFor(() => expect(listTaskMessages).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]));
     reopen();
+  });
+});
+
+describe("run file changes lifecycle refresh", () => {
+  it.each(["task:completed", "task:failed", "task:cancelled"])("refreshes active file queries on %s without crossing workspaces", async (type) => {
+    vi.useFakeTimers();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const handlers: Handlers = new Map();
+    const queryFn = vi.fn(async () => "final snapshot");
+    const key = fileChangesKeys.list("ws-1", HELD_TASK);
+    const otherKey = fileChangesKeys.list("ws-other", HELD_TASK);
+    qc.setQueryData(key, "collecting snapshot");
+    qc.setQueryData(otherKey, "other workspace snapshot");
+    const observer = new QueryObserver(qc, { queryKey: key, queryFn, staleTime: Infinity });
+    const unsubscribe = observer.subscribe(() => {});
+    const { unmount } = renderHook(() => useRealtimeSync(createMockWs(handlers), createStores()), { wrapper: createWrapper(qc) });
+    try {
+      handlers.get("any")?.({ type, payload: { task_id: HELD_TASK } });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(qc.getQueryData(key)).toBe("final snapshot");
+      expect(qc.getQueryState(otherKey)?.isInvalidated).toBe(false);
+    } finally { unmount(); unsubscribe(); qc.clear(); vi.useRealTimers(); }
   });
 });

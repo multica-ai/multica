@@ -3666,3 +3666,20 @@ describe("workspace guest lists", () => {
     expect(init.headers["X-Client-Capabilities"]).toBe(WORKSPACE_GUESTS_CAPABILITY);
   });
 });
+
+describe("run file changes compatibility", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("maps old-server 404 to unavailable, without requesting tool messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await new ApiClient("https://api.example.test").listRunFileChanges("task", "0");
+    expect(result).toMatchObject({ status: "unavailable", reason: "legacy_no_baseline", totalsComplete: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/tasks/task/file-changes?cursor=0&limit=100");
+  });
+  it("keeps authorization failures as errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 403 })));
+    await expect(new ApiClient("https://api.example.test").listRunFileChanges("task", "0")).rejects.toMatchObject({ status: 403 });
+  });
+});
