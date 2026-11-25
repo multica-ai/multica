@@ -129,6 +129,25 @@
     "deleted_squads": "Squads supprimés",
     "toggle_squad_members": "Afficher ou masquer les membres de {{name}}"
   },
+  "machines": {
+    "tab": "Par machine",
+    "title": "Consommation par machine",
+    "description": "Consommation des exécutions lancées sur chaque machine. Les machines sont regroupées et nommées comme sur la page Runtimes.",
+    "caption_one": "{{count}} machine",
+    "caption_other": "{{count}} machines",
+    "header_machine": "Machine",
+    "header_tokens": "Tokens",
+    "header_cost": "Coût",
+    "header_tasks": "Exécutions avec consommation",
+    "show_runtimes": "Afficher les runtimes de {{name}}",
+    "hide_runtimes": "Masquer les runtimes de {{name}}",
+    "runtimes_title": "Runtimes de {{name}}",
+    "other_machines": "Autres machines",
+    "other_machines_hint": "Machines dont vous ne pouvez pas voir la consommation, ou qui ont été supprimées",
+    "deleted_machines": "Machines supprimées",
+    "no_data": "Aucune consommation de machine sur cette fenêtre.",
+    "load_error": "Impossible de charger la consommation par machine."
+  },
   "empty": {
     "title": "Aucune consommation pour l'instant",
     "body": "Dès que les agents tournent, leur consommation de tokens, leur coût et leur taux d'échec s'affichent ici."

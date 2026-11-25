@@ -2390,6 +2390,7 @@ describe("dashboard history limit (MUL-9490)", () => {
     const calls = [
       client.getDashboardUsageDaily.bind(client),
       client.getDashboardUsageByAgent.bind(client),
+      client.getDashboardUsageByRuntime.bind(client),
       client.getDashboardAgentRunTime.bind(client),
       client.getDashboardRunTimeDaily.bind(client),
       client.getDashboardFailuresDaily.bind(client),

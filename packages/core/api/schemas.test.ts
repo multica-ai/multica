@@ -27,6 +27,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByRuntimeListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
@@ -1276,6 +1277,21 @@ describe("dashboard + runtime usage schema drift", () => {
     ]);
     expect(parsed).toHaveLength(1);
     expect(parsed[0]?.date).toBe("");
+  });
+
+  it("fills missing fields on by-runtime rows and keeps a row whose usage is malformed", () => {
+    const [row, broken] = DashboardUsageByRuntimeListSchema.parse([
+      { usage: [{ model: "m" }] },
+      { runtime_id: "r2", task_count: 3, usage: "nope" },
+    ]);
+    expect(row?.runtime_id).toBe("");
+    expect(row?.task_count).toBe(0);
+    expect(row?.usage[0]?.input_tokens).toBe(0);
+    // Uncosted split stays undefined (not 0) so an old row still gets priced.
+    expect(row?.usage[0]?.uncosted_input_tokens).toBeUndefined();
+    expect(broken?.runtime_id).toBe("r2");
+    expect(broken?.task_count).toBe(3);
+    expect(broken?.usage).toEqual([]);
   });
 
   it("coerces a missing agent_id key to \"\" for the agent-runtime panel", () => {

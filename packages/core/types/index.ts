@@ -95,6 +95,8 @@ export type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardUsageBySquad,
+  DashboardRuntimeUsage,
+  DashboardUsageByRuntime,
   DashboardAgentRunTime,
   DashboardSquadRunTime,
   DashboardRunTimeDaily,

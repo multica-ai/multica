@@ -129,6 +129,25 @@
     "deleted_squads": "Squads eliminados",
     "toggle_squad_members": "Alternar miembros de {{name}}"
   },
+  "machines": {
+    "tab": "Por máquina",
+    "title": "Uso por máquina",
+    "description": "Uso de las ejecuciones que hizo cada máquina. Las máquinas se agrupan y nombran como en la página de runtimes.",
+    "caption_one": "{{count}} máquina",
+    "caption_other": "{{count}} máquinas",
+    "header_machine": "Máquina",
+    "header_tokens": "Tokens",
+    "header_cost": "Coste",
+    "header_tasks": "Ejecuciones con uso",
+    "show_runtimes": "Mostrar los runtimes de {{name}}",
+    "hide_runtimes": "Ocultar los runtimes de {{name}}",
+    "runtimes_title": "Runtimes de {{name}}",
+    "other_machines": "Otras máquinas",
+    "other_machines_hint": "Máquinas cuyo uso no puedes ver o que se eliminaron",
+    "deleted_machines": "Máquinas eliminadas",
+    "no_data": "Sin uso de máquinas en este periodo.",
+    "load_error": "No se pudo cargar el uso por máquina."
+  },
   "empty": {
     "title": "Aún no hay uso",
     "body": "Cuando los agentes empiecen a ejecutarse, aquí aparecerán el uso de tokens, el coste y la tasa de fallos."

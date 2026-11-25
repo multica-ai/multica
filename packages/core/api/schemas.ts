@@ -2285,6 +2285,26 @@ const DashboardUsageBySquadSchema = DashboardUsageByAgentSchema.extend({
 
 export const DashboardUsageBySquadListSchema = z.array(DashboardUsageBySquadSchema);
 
+// Per-runtime usage (`/api/dashboard/usage/by-runtime`). A malformed `usage`
+// array costs that row its usage rather than dropping the whole response.
+const DashboardRuntimeUsageSchema = z.object({
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
+}).loose();
+
+const DashboardUsageByRuntimeSchema = z.object({
+  runtime_id: z.string().default(""),
+  task_count: z.number().default(0),
+  usage: z.array(DashboardRuntimeUsageSchema).catch([]),
+}).loose();
+
+export const DashboardUsageByRuntimeListSchema = z.array(DashboardUsageByRuntimeSchema);
+
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
 // cancelled segment, which is exactly what that backend measured.
