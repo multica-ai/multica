@@ -9,7 +9,7 @@ import (
 const deterministicTitleLimit = 30
 
 var (
-	markdownFence = regexp.MustCompile("```.*?```")
+	markdownFence = regexp.MustCompile("(?s)```.*?```")
 	markdownMarks = regexp.MustCompile("[#*`>~_]")
 	markdownLink  = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
 	titleSpace    = regexp.MustCompile(`[[:space:]]+`)
@@ -24,6 +24,9 @@ var (
 // when every line is), Markdown stripped, whitespace collapsed, capped at 30
 // code points with a single ellipsis.
 func Derive(body string) string {
+	// Fences span lines, so strip them before choosing the first line: the
+	// language tag and the code inside are not what the chat is about.
+	body = markdownFence.ReplaceAllString(body, " ")
 	line := ""
 	for _, candidate := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(candidate)
@@ -38,7 +41,6 @@ func Derive(body string) string {
 			break
 		}
 	}
-	line = markdownFence.ReplaceAllString(line, " ")
 	line = markdownMarks.ReplaceAllString(line, "")
 	line = markdownLink.ReplaceAllString(line, "$1")
 	line = strings.TrimSpace(titleSpace.ReplaceAllString(line, " "))

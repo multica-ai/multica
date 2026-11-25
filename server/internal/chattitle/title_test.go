@@ -21,3 +21,20 @@ func TestDeriveSkipsALineOfMentions(t *testing.T) {
 		}
 	}
 }
+
+// A fenced code block can precede the sentence that names the chat. Its
+// language tag is not a title, and neither is any code inside the fence.
+func TestDeriveSkipsFencedCodeBlocks(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{"```go\nfmt.Println(\"hi\")\n```\nWhat should I fix?", "What should I fix?"},
+		{"```\nplain code\n```\nSecond line", "Second line"},
+		{"```go\nfmt.Println(\"hi\")\n```", ""},
+		{"Before the fence\n```go\ncode\n```", "Before the fence"},
+		{"Use ```code``` here", "Use here"},
+	}
+	for _, tc := range tests {
+		if got := Derive(tc.input); got != tc.want {
+			t.Errorf("Derive(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
