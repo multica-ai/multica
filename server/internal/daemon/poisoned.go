@@ -74,14 +74,6 @@ var poisonedMarkers = []struct {
 }{
 	{"i reached the iteration limit", FailureReasonIterationLimit},
 	{"put your final update inside the content string", FailureReasonAgentFallbackMsg},
-	// The client's model-mismatch banner, reported verbatim as the run's
-	// successful answer: "The selected model cannot continue this
-	// conversation. Please select a different model, or start a new
-	// conversation, or rewind the current conversation to an earlier point…".
-	// The conversation was created under a model this turn may not use, so
-	// every resume replays the same refusal — the output-side flavor of
-	// poisoning, and the reason resumeUnsafeFailureReason's set covers.
-	{"cannot continue this conversation", FailureReasonAgentFallbackMsg},
 }
 
 // classifyPoisonedOutput reports whether output matches a known agent
