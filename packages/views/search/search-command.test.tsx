@@ -1088,6 +1088,13 @@ describe("SearchCommand", () => {
       expect(input().value).toBe("");
     });
 
+    it("keeps the page's issue ahead of a list cursor registered after it", () => {
+      registerContext({ kind: "issue", issue: makeIssue({ id: "issue-2", identifier: "MUL-7" }), cursor: true });
+      renderSearch();
+
+      expect(renderedHeadings()[0]).toContain("MUL-42");
+    });
+
     it("opens a submenu from its row, with the issue in the breadcrumb", async () => {
       const user = userEvent.setup();
       renderSearch();

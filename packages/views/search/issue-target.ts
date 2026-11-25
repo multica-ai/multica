@@ -19,9 +19,22 @@ export function targetIssues(target: IssueTarget): Issue[] {
   return target.kind === "single" ? [target.issue] : target.issues;
 }
 
-/** What issue commands act on: the newest issue or selection a page registered. */
+/** `contexts` (newest first) with a list cursor's issue moved behind the rest. */
+export function withCursorLast(contexts: readonly CommandBarContext[]): readonly CommandBarContext[] {
+  if (!contexts.some(isCursorContext)) return contexts;
+  return [...contexts.filter((context) => !isCursorContext(context)), ...contexts.filter(isCursorContext)];
+}
+
+function isCursorContext(context: CommandBarContext): boolean {
+  return context.kind === "issue" && context.cursor === true;
+}
+
+/**
+ * What issue commands act on: the newest issue or selection a page
+ * registered, and a list cursor's issue only when there is neither.
+ */
 export function issueTargetFromContexts(contexts: readonly CommandBarContext[]): IssueTarget | null {
-  for (const context of contexts) {
+  for (const context of withCursorLast(contexts)) {
     if (context.kind === "issue") return { kind: "single", issue: context.issue };
     if (context.kind === "issues") {
       return { kind: "batch", issues: context.issues, clearSelection: context.clearSelection };
