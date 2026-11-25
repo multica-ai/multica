@@ -68,7 +68,6 @@ import {
   ArchiveRestore,
   BookCheck,
   ListChecks,
-  ArrowLeft,
   AlarmClock,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
@@ -88,8 +87,7 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { cn } from "@multica/ui/lib/utils";
-import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { InboxArchiveAllDialog } from "./inbox-archive-all-dialog";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
@@ -388,6 +386,18 @@ export function InboxPage() {
     replace(inboxTabHref(wsPaths, tab, key));
   }, [replace, wsPaths, tab]);
 
+  // A phone opens a row in place of its list, and the detail's header holds
+  // the nav trigger rather than a way back, so the opening is a history entry:
+  // the system back gesture is what returns to the list.
+  const openFromList = useCallback((key: string) => {
+    if (!isCompact) {
+      setSelectedKey(key);
+      return;
+    }
+    setSelectedKeyState(key);
+    push(inboxTabHref(wsPaths, tab, key));
+  }, [isCompact, setSelectedKey, push, wsPaths, tab]);
+
   // Switching tabs always clears the selection: the lists are mutually
   // exclusive, so a key carried across would never resolve, and the fallback
   // effect below would bounce the user to the issue page.
@@ -592,7 +602,7 @@ export function InboxPage() {
       writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
       if (nextKey === selectedKey) setHighlightRequestToken((t) => t + 1);
     }
-    setSelectedKey(nextKey);
+    openFromList(nextKey);
   };
 
   // The comment a notification opens at is chosen once per opening or
@@ -954,7 +964,7 @@ export function InboxPage() {
         />
       </div>
     ) : (
-      <SnoozedInboxList wsId={wsId} rows={snoozed.rows} selectedKey={selectedKey} onSelect={setSelectedKey} />
+      <SnoozedInboxList wsId={wsId} rows={snoozed.rows} selectedKey={selectedKey} onSelect={openFromList} />
     )
   ) : isArchivedView && archivedError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -1052,31 +1062,17 @@ export function InboxPage() {
     </>
   );
 
-  // Compact widths only: the detail fills the screen there, so the trip back to
-  // the list has to live inside it. On desktop the list is still on screen in
-  // the left panel and needs no back control at all.
-  //
-  // The detail owns the whole compact screen in four states — loaded, loading,
-  // not-found and crashed — so this control is threaded into all four below.
-  // Miss one and that state strands the reader with no way out.
-  const compactBackAction = isCompact ? (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => setSelectedKey("")}
-      className="-ml-2 shrink-0 gap-1.5 text-muted-foreground"
-    >
-      <ArrowLeft className="h-4 w-4" />
-      {/* Back goes to the list the user came FROM, so the label has to
-          name it — "Inbox" here would be a lie about the destination. */}
-      {tab === "inbox" ? t(($) => $.page.back) : tabLabel}
-    </Button>
-  ) : undefined;
-
-  const compactBackBar = compactBackAction ? (
-    <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
-      {compactBackAction}
-    </div>
+  // Compact widths only: the detail fills the screen there, and its leading
+  // slot is the nav trigger, as on every other page. The nav sheet holds the
+  // Work panel's Inbox section with the open row lit, so that is the way to
+  // the next notification; a "back to the list" control in its place left the
+  // sheet unreachable from the detail (MUL-10233). `IssueDetail` brings its
+  // own header; the states drawn here (a notification with no issue, and a
+  // crashed detail) need this one or they strand the reader with no nav.
+  const compactHeader = isCompact ? (
+    <PageHeader>
+      <h1 className="truncate text-body font-semibold">{tabLabel}</h1>
+    </PageHeader>
   ) : null;
 
   // A notification without an issue that left the Inbox on its own: say so
@@ -1121,11 +1117,11 @@ export function InboxPage() {
     <ErrorBoundary
       resetKeys={[detailIssueId]}
       // The default fallback is a bare message card. On a phone it would be the
-      // only thing on screen, so it has to carry the way back too — the bar is
+      // only thing on screen, so it has to carry the nav too — the header is
       // the point here, the message is whatever the boundary caught.
-      fallback={compactBackAction ? ({ error }) => (
+      fallback={compactHeader ? ({ error }) => (
         <div className="flex flex-1 min-h-0 flex-col">
-          {compactBackBar}
+          {compactHeader}
           <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
             {error.message}
           </div>
@@ -1155,7 +1151,9 @@ export function InboxPage() {
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          leadingAction={compactBackAction}
+          // The loaded header falls back to the trigger by itself; the loading
+          // and not-found states draw only what they are handed.
+          leadingAction={isCompact ? <CollapsedNavTrigger /> : undefined}
           inbox={inboxHost(detailIssueId)}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
@@ -1382,8 +1380,8 @@ export function InboxPage() {
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
     // notification (a failed quick-create, say), not an issue.
     if (detailIssueId) {
-      // No scroll container and no back bar of our own: `IssueDetail` owns
-      // both, and takes the way back through `leadingAction`. Wrapping it in
+      // No scroll container and no header of our own: `IssueDetail` owns
+      // both, and its header keeps the nav trigger. Wrapping it in
       // an `overflow-y-auto` used to collapse its inner scroller to content
       // height, which took its header (and the done/pin/more/sidebar actions
       // in it) out of the pinned position, made `position: sticky` inside it a
@@ -1394,11 +1392,11 @@ export function InboxPage() {
     }
 
     if (detailItem) {
-      // A notification body is a plain block with no header to host a leading
-      // slot and no scroller of its own, so this branch keeps supplying both.
+      // A notification body is a plain block with no header of its own and no
+      // scroller of its own, so this branch keeps supplying both.
       return (
         <div className="relative flex flex-1 flex-col min-h-0">
-          {compactBackBar}
+          {compactHeader}
           <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
