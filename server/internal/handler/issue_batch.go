@@ -244,6 +244,7 @@ func (h *Handler) resolveBatchPropertyPlan(w http.ResponseWriter, r *http.Reques
 
 type batchIssueWrite struct {
 	issue             db.Issue
+	prev              db.Issue
 	labelsChanged     bool
 	propertiesChanged bool
 }
@@ -251,8 +252,8 @@ type batchIssueWrite struct {
 // writeBatchIssue applies one issue's field update, label operations and
 // property operations in a single transaction, so an issue is either written
 // in full or skipped in full. params is nil when the batch changes no field.
-func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, prev db.Issue, params *db.UpdateIssueParams, statusKey string, labels *batchLabelPlan, properties *batchPropertyPlan) (batchIssueWrite, error) {
-	out := batchIssueWrite{issue: prev}
+func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, prev db.Issue, params *db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool, statusKey string, labels *batchLabelPlan, properties *batchPropertyPlan) (batchIssueWrite, error) {
+	out := batchIssueWrite{issue: prev, prev: prev}
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
 		return out, err
@@ -276,6 +277,10 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 	conditional := params != nil && params.ExpectedRevision.Valid
 	var cancelled []db.AgentTaskQueue
 	if params != nil {
+		out.prev, err = lockIssueForFieldUpdate(ctx, q, workspaceID, params, rawFields, workflowAssignee)
+		if err != nil {
+			return out, err
+		}
 		out.issue, cancelled, err = updateIssueStoppingWakeups(ctx, q, *params)
 		if err != nil {
 			return out, err

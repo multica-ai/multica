@@ -135,19 +135,9 @@ func systemWakeupFacts(w db.IssueWakeup, receipts []db.IssueWakeupReceipt) map[s
 	if w.SystemRule.String != SystemRuleBlockersDone {
 		return childDoneFacts(receipts)
 	}
-	facts := map[string]any{"rule": SystemRuleBlockersDone}
-	for i := len(receipts) - 1; i >= 0; i-- {
-		if receipts[i].EventType != wakeupConditionEventType {
-			continue
-		}
-		var payload struct {
-			Observed map[string]any `json:"observed"`
-		}
-		_ = json.Unmarshal(receipts[i].Payload, &payload)
-		facts["blockers"] = payload.Observed["blockers"]
-		break
-	}
-	return facts
+	// The run's evidence names the blockers. These facts go to the timeline and
+	// the inbox, whose readers may not see every blocker's project.
+	return map[string]any{"rule": SystemRuleBlockersDone}
 }
 
 var ErrIssueBlockerNotFound = errors.New("blocker issue not found in this workspace")

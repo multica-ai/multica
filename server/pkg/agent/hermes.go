@@ -1388,7 +1388,10 @@ func (c *hermesClient) handleLine(line string) {
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return
 	}
+	c.handleEnvelope(raw)
+}
 
+func (c *hermesClient) handleEnvelope(raw map[string]json.RawMessage) {
 	// Agent → client request: has id + method (no result / error yet).
 	// Kimi and Hermes both use session/request_permission; if we don't
 	// answer, the agent blocks for its internal timeout and the task

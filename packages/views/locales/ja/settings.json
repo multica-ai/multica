@@ -910,7 +910,7 @@
       },
       "squad_handoffs": {
         "label": "スクワッド内の引き継ぎを含める",
-        "description": "スクワッドのリーダーとエージェントが作業を受け渡すコメントです。@メンション、エージェントの実行失敗、確認が必要なステータスは引き続き通知されます。"
+        "description": "スクワッドのリーダーとエージェントが作業を受け渡すコメントです。@メンション、エージェントの実行失敗、スクワッドが作業を終えたときの最終報告は引き続き通知されます。"
       },
       "mentions": {
         "label": "メンション",
@@ -2044,10 +2044,10 @@
       "no_matches": "検索に一致するアプリはありません。",
       "unavailable": "このサーバーではアプリを利用できません。",
       "retry": "再試行",
-      "category_all": "すべて",
+      "catalog": "カタログ",
+      "catalog_failed": "アプリカタログを読み込めませんでした。",
       "category_curated": "おすすめ",
       "categories_label": "カテゴリ",
-      "categories_nav": "アプリのカテゴリ",
       "connect_oauth": "OAuth でログイン",
       "connect_key": "API キーを入力",
       "show_more": "さらに表示",

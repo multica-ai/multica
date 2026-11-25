@@ -1096,6 +1096,20 @@ describe("SearchCommand", () => {
       expect(renderedValues().every((v) => v.startsWith("status:"))).toBe(true);
     });
 
+    it("selects the first row of a submenu opened with an empty query, and the root's on the way back", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await rowText("Change status...");
+      await user.keyboard("{Enter}");
+
+      expect(screen.getByRole("navigation", { name: "Current menu" })).toHaveTextContent("MUL-42Change status");
+      expect(selectedValue()).toBe(renderedValues()[0]);
+
+      await user.keyboard("{ArrowDown}{Backspace}");
+      expect(await screen.findByPlaceholderText(PLACEHOLDER)).toBeInTheDocument();
+      expect(selectedValue()).toBe(renderedValues()[0]);
+    });
+
     it("ranks the issue's command first when its name is typed", async () => {
       const user = userEvent.setup();
       renderSearch();

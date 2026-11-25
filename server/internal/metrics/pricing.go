@@ -54,7 +54,9 @@ var modelPrices = map[string]ModelPrice{
 	// Haiku 5.5 uses the <=100K prompt tier, matching the frontend estimate.
 	// Above 100K (including cache reads/writes), all four rates are 5x higher.
 	// Usage aggregates lack per-request prompt sizes, so long requests are underestimated.
-	"anthropic:claude-haiku-5-5":  {Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
+	"anthropic:claude-haiku-5-5": {Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
+	// Fable 5.2 (anthropic.com/pricing): $8 / $40, cache read $0.20, cache write $10.
+	"anthropic:claude-fable-5-2":  {Provider: "anthropic", Model: "claude-fable-5-2", InputPerM: 8.00, CacheReadPerM: 0.20, CacheWritePerM: 10.00, OutputPerM: 40.00},
 	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-opus-5-5":   {Provider: "anthropic", Model: "claude-opus-5-5", InputPerM: 4.00, CacheReadPerM: 0.20, CacheWritePerM: 5.00, OutputPerM: 20.00},
@@ -233,6 +235,7 @@ var modelAliasRules = []struct {
 	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
 	// needs its own row, and both rules end at their own version
 	// (claudeVersionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]2` + claudeVersionEnd), "anthropic:claude-fable-5-2"},
 	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
 	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
 	// Opus 5.5 is cheaper than Opus 5 ($4 / $20) and prices cache reads at

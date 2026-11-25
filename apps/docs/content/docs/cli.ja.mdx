@@ -484,10 +484,10 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 
 | コマンド | サブコマンド | 用途 | 主なフラグ |
 | --- | --- | --- | --- |
-| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
+| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--blocked`（未完了のブロック元または前ステージを待っているタスクのみ）、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
-| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
-| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--description-base-revision`（`issue get` の値；説明が更新済みなら上書きを拒否）、`--position`、`--no-start`、`--duplicate-of` |
+| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--blocked-by`（繰り返し可；開始前に待つタスクの番号または UUID）、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--remove-blocked-by`（繰り返し可；手動のブロック元を解除）、`--description-base-revision`（`issue get` の値；説明が更新済みなら上書きを拒否）、`--position`、`--no-start`、`--duplicate-of` |
 | | `edit-description <id>` | 全文を書き換えずにタスク説明の該当テキストを正確に置換 | `--old` / `--old-file`（必須）、`--new` / `--new-file`（必須）、`--replace-all` |
 | | `batch update <id>...` | 複数のタスクに同じ変更を適用 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |

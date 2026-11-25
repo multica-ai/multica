@@ -4145,6 +4145,63 @@ func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
 	}
 }
 
+// Someone edits the description while the file uploads: the update must add the
+// file to their text, not write the text read before the upload over it.
+func TestRunIssueUpdateAttachmentKeepsDescriptionEditedDuringUpload(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const uploadedID = "33333333-3333-4333-8333-333333333333"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	description, revision := "Existing body", int64(4)
+	uploads := 0
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/upload-file":
+			uploads++
+			description, revision = "Existing body, edited", 5
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": uploadedID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + uploadedID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				_ = json.NewEncoder(w).Encode(map[string]any{"description": description, "description_revision": revision})
+				return
+			}
+			body = nil
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			if base, ok := body["description_base_revision"]; ok && base != float64(revision) {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": "revision_conflict", "resource_type": "issue_description"})
+				return
+			}
+			description = body["description"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if want := "Existing body, edited\n\n![revised.png](https://api.example/api/attachments/" + uploadedID + "/download)"; description != want {
+		t.Fatalf("description = %q, want %q", description, want)
+	}
+	if ids, ok := body["attachment_ids"].([]any); !ok || !reflect.DeepEqual(ids, []any{uploadedID}) {
+		t.Fatalf("attachment_ids = %#v", body["attachment_ids"])
+	}
+	if uploads != 1 {
+		t.Fatalf("uploads = %d, want 1", uploads)
+	}
+}
+
 func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testing.T) {
 	t.Chdir(t.TempDir())
 	const issueID = "11111111-1111-4111-8111-111111111111"
@@ -6651,6 +6708,42 @@ func TestRunIssueUpdateSurfacesRevisionConflict(t *testing.T) {
 	}
 	if code := cli.ExitCodeFor(err); code == 0 {
 		t.Fatalf("conflict exit code = %d, want non-zero", code)
+	}
+}
+
+func TestRunIssueUpdateKeepsBothRevisionsOnConditionalDescriptionConflict(t *testing.T) {
+	var writes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writes.Add(1)
+		if r.Method != http.MethodPut || r.URL.Path != "/api/issues/"+testIssueUUID+"/conditional" ||
+			r.URL.Query().Get("expected_revision") != "4" {
+			t.Errorf("expected a conditional write at issue revision 4, got %s %s", r.Method, r.URL)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode update: %v", err)
+		}
+		if body["expected_revision"] != float64(4) || body["description_base_revision"] != float64(7) {
+			t.Errorf("expected independent issue and description revisions, got %v", body)
+		}
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": "revision_conflict", "resource_type": "issue_description",
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description", "My edit")
+	_ = cmd.Flags().Set("description-base-revision", "7")
+	_ = cmd.Flags().Set("expected-revision", "4")
+
+	err := runIssueUpdate(cmd, []string{testIssueUUID})
+	if err == nil || !strings.Contains(err.Error(), "description changed") {
+		t.Fatalf("expected description conflict, got %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Fatalf("requests = %d, want one conditional write", writes.Load())
 	}
 }
 

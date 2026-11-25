@@ -498,17 +498,17 @@ func (l *LocalPathLocker) Holder(realPath string) string {
 // Returns a release func that the caller must invoke (typically deferred)
 // to free the lock. The release is idempotent.
 //
-// Acquire is cancellable via ctx. When ctx is cancelled while the goroutine
-// is blocked on the lock, Acquire returns ctx.Err() and the lock is NOT
-// taken. This is the same contract as sync.Mutex.Lock paired with
-// context-aware cancellation — a daemon shutdown won't wedge inside the
-// per-path wait queue.
+// Acquire returns ctx.Err() without transferring ownership if cancellation
+// is observed before granting the lock, including on the uncontended path.
 func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, onWait func(holder string)) (func(), error) {
 	if realPath == "" {
 		return nil, errors.New("local_directory: realpath required for lock")
 	}
 	if taskID == "" {
 		return nil, errors.New("local_directory: taskID required for lock")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	l.mu.Lock()
@@ -519,12 +519,20 @@ func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, 
 	}
 	l.mu.Unlock()
 
-	// Try the fast path first — no allocation, no waiter goroutine.
-	if entry.mu.TryLock() {
+	adopt := func() (func(), error) {
+		// Both the lock and cancellation can become ready during a handoff.
+		if err := ctx.Err(); err != nil {
+			entry.mu.Unlock()
+			return nil, err
+		}
 		entry.mu2.Lock()
 		entry.holderID = taskID
 		entry.mu2.Unlock()
 		return l.releaser(realPath, entry), nil
+	}
+	// Try the fast path first — no allocation, no waiter goroutine.
+	if entry.mu.TryLock() {
+		return adopt()
 	}
 
 	// Slow path: somebody else holds the lock. Fire onWait once with the
@@ -545,10 +553,7 @@ func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, 
 
 	select {
 	case <-acquired:
-		entry.mu2.Lock()
-		entry.holderID = taskID
-		entry.mu2.Unlock()
-		return l.releaser(realPath, entry), nil
+		return adopt()
 	case <-ctx.Done():
 		// We lost the wait — the goroutine above will still complete and
 		// take the lock. Spin off a clean-up goroutine that releases it

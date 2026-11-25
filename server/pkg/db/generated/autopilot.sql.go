@@ -528,6 +528,28 @@ func (q *Queries) DeleteAutopilotCollaborator(ctx context.Context, arg DeleteAut
 	return err
 }
 
+const deleteAutopilotCollaboratorsByMember = `-- name: DeleteAutopilotCollaboratorsByMember :exec
+DELETE FROM autopilot_collaborator AS c
+USING autopilot AS a
+WHERE c.autopilot_id = a.id
+  AND a.workspace_id = $1
+  AND c.user_type = 'member'
+  AND c.user_id = $2
+`
+
+type DeleteAutopilotCollaboratorsByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Collaborator grants carry no FK, so member removal must prune them in the
+// same application transaction: a re-invited user must not regain write access
+// they were granted before. Scoped to the workspace like the subscriber prune.
+func (q *Queries) DeleteAutopilotCollaboratorsByMember(ctx context.Context, arg DeleteAutopilotCollaboratorsByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotCollaboratorsByMember, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const deleteAutopilotCollaboratorsForAutopilot = `-- name: DeleteAutopilotCollaboratorsForAutopilot :exec
 DELETE FROM autopilot_collaborator
 WHERE autopilot_id = $1
@@ -2377,7 +2399,7 @@ func (q *Queries) TouchAutopilotTriggerFiredAt(ctx context.Context, id pgtype.UU
 const updateAutopilot = `-- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE($2, title),
-    description = COALESCE($3, description),
+    description = $3,
     assignee_type = COALESCE($4, assignee_type),
     assignee_id = COALESCE($5::uuid, assignee_id),
     status = COALESCE($6, status),

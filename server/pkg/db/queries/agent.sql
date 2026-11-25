@@ -2163,6 +2163,7 @@ LEFT JOIN squad direct_squad
  AND direct_squad.archived_at IS NULL
  AND direct_squad.handoff_mode = 'direct'
  AND direct_squad.leader_id <> source.agent_id
+ AND direct_squad.leader_id <> failed.agent_id
  AND EXISTS (
      SELECT 1
      FROM squad_member direct_member
@@ -2861,3 +2862,20 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: TaskPassedWorkOn :one
+-- Whether a run posted a comment on its issue, started another agent run
+-- there, or left an enabled wakeup waiting on it: a squad leader run that did
+-- none of these ended its squad's chain of handoffs.
+SELECT (
+    EXISTS (
+        SELECT 1 FROM comment c
+        WHERE c.issue_id = @issue_id::uuid AND c.source_task_id = @task_id::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM agent_task_queue t
+        WHERE t.issue_id = @issue_id::uuid AND t.delegated_from_task_id = @task_id::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM issue_wakeup w
+        WHERE w.issue_id = @issue_id::uuid AND w.source_task_id = @task_id::uuid AND w.enabled
+    )
+)::boolean AS passed_on;

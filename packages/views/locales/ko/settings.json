@@ -910,7 +910,7 @@
       },
       "squad_handoffs": {
         "label": "스쿼드 내부 인계 포함",
-        "description": "스쿼드 리더와 에이전트가 서로 작업을 넘기는 댓글입니다. @멘션, 에이전트 실행 실패, 확인이 필요한 상태는 계속 알림이 옵니다."
+        "description": "스쿼드 리더와 에이전트가 서로 작업을 넘기는 댓글입니다. @멘션, 에이전트 실행 실패, 스쿼드가 작업을 마칠 때의 최종 보고는 계속 알림이 옵니다."
       },
       "mentions": {
         "label": "멘션",
@@ -2044,10 +2044,10 @@
       "no_matches": "검색과 일치하는 앱이 없습니다.",
       "unavailable": "이 서버에서는 앱을 사용할 수 없습니다.",
       "retry": "다시 시도",
-      "category_all": "전체",
+      "catalog": "카탈로그",
+      "catalog_failed": "앱 카탈로그를 불러오지 못했습니다.",
       "category_curated": "추천",
       "categories_label": "카테고리",
-      "categories_nav": "앱 카테고리",
       "connect_oauth": "OAuth로 로그인",
       "connect_key": "API 키 입력",
       "show_more": "더 보기",

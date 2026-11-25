@@ -910,7 +910,7 @@
       },
       "squad_handoffs": {
         "label": "包含小队内部交接",
-        "description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和需要人工关注的状态照常通知。"
+        "description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和小队收尾时的最终回报照常通知。"
       },
       "mentions": {
         "label": "提及",
@@ -2044,10 +2044,10 @@
       "no_matches": "没有匹配的应用。",
       "unavailable": "此服务器未提供应用功能。",
       "retry": "重试",
-      "category_all": "全部",
+      "catalog": "目录",
+      "catalog_failed": "无法加载应用目录。",
       "category_curated": "精选",
       "categories_label": "分类",
-      "categories_nav": "应用分类",
       "connect_oauth": "OAuth 登录",
       "connect_key": "填写 API key",
       "show_more": "显示更多",

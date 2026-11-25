@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useId, useRef, type RefObject } from "react";
+import { createContext, useContext, useId, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown } from "@multica/ui/icons";
@@ -105,13 +105,25 @@ export function PanelBody({
   );
 }
 
+const PanelDisclosureSettledContext = createContext(true);
+
+/**
+ * False while an enclosing `PanelDisclosure` is still opening, when the rows
+ * inside are not at their final position and scrolling to one would miss it.
+ */
+export function usePanelDisclosureSettled() {
+  return useContext(PanelDisclosureSettledContext);
+}
+
 function PanelDisclosureInner({
   id,
   className,
+  onOpened,
   children,
 }: {
   id?: string;
   className?: string;
+  onOpened: () => void;
   children: React.ReactNode;
 }) {
   const isPresent = useIsPresent();
@@ -133,6 +145,9 @@ function PanelDisclosureInner({
         opacity: 0,
         overflow: "hidden",
         transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      onAnimationComplete={() => {
+        if (isPresent) onOpened();
       }}
       className={cn(!isPresent && "pointer-events-none", className)}
     >
@@ -158,6 +173,9 @@ export function PanelDisclosure({
   children: React.ReactNode;
 }) {
   const reduceMotion = useReducedMotion();
+  const parentSettled = usePanelDisclosureSettled();
+  const [settled, setSettled] = useState(open);
+  if (settled !== open && (!open || reduceMotion)) setSettled(open);
   if (reduceMotion) {
     return open ? (
       <div id={id} className={className}>
@@ -166,13 +184,15 @@ export function PanelDisclosure({
     ) : null;
   }
   return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <PanelDisclosureInner key="disclosure" id={id} className={className}>
-          {children}
-        </PanelDisclosureInner>
-      )}
-    </AnimatePresence>
+    <PanelDisclosureSettledContext.Provider value={parentSettled && settled}>
+      <AnimatePresence initial={false}>
+        {open && (
+          <PanelDisclosureInner key="disclosure" id={id} className={className} onOpened={() => setSettled(true)}>
+            {children}
+          </PanelDisclosureInner>
+        )}
+      </AnimatePresence>
+    </PanelDisclosureSettledContext.Provider>
   );
 }
 

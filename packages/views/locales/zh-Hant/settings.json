@@ -910,7 +910,7 @@
       },
       "squad_handoffs": {
         "label": "包含小隊內部交接",
-        "description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和需要關注的狀態照常通知。"
+        "description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和小隊收尾時的最終回報照常通知。"
       },
       "mentions": {
         "label": "提及",
@@ -2044,10 +2044,10 @@
       "no_matches": "沒有符合的應用。",
       "unavailable": "此伺服器未提供應用功能。",
       "retry": "重試",
-      "category_all": "全部",
+      "catalog": "目錄",
+      "catalog_failed": "無法載入應用目錄。",
       "category_curated": "精選",
       "categories_label": "分類",
-      "categories_nav": "應用程式分類",
       "connect_oauth": "OAuth 登入",
       "connect_key": "填寫 API key",
       "show_more": "顯示更多",

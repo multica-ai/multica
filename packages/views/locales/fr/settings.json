@@ -920,7 +920,7 @@
       },
       "squad_handoffs": {
         "label": "Inclure les passations de squad",
-        "description": "Commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions, les exécutions d'agent échouées et les statuts qui nécessitent votre attention vous parviennent toujours."
+        "description": "Commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions, les exécutions d'agent échouées et le compte rendu final du squad vous parviennent toujours."
       },
       "mentions": {
         "label": "Mentions",
@@ -2066,10 +2066,10 @@
       "no_matches": "Aucune app ne correspond à votre recherche.",
       "unavailable": "Les apps ne sont pas disponibles sur ce serveur.",
       "retry": "Réessayer",
-      "category_all": "Toutes",
+      "catalog": "Catalogue",
+      "catalog_failed": "Impossible de charger le catalogue d'apps.",
       "category_curated": "À la une",
       "categories_label": "Catégories",
-      "categories_nav": "Catégories d'apps",
       "connect_oauth": "Connexion OAuth",
       "connect_key": "Utilise une clé API",
       "show_more": "Afficher plus",

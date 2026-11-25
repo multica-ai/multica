@@ -208,6 +208,7 @@ function SortableTabItem({
   }, [titleResolved, title, tab.id, tab.title, updateTab]);
 
   const isPresent = useIsPresent();
+  // The sortable node is the tab frame so its drag boundary is the entire strip.
   const {
     attributes,
     listeners,
@@ -369,6 +370,8 @@ function SortableTabItem({
 
   return (
     <motion.div
+      ref={setNodeRef}
+      style={style}
       inert={!isPresent}
       initial={false}
       exit={
@@ -393,124 +396,122 @@ function SortableTabItem({
         !isPresent && "pointer-events-none overflow-hidden",
       )}
     >
-      <div ref={setNodeRef} style={style} className="size-full">
-        <motion.div
-          className="group/tab relative size-full"
-          initial={isEntering ? { opacity: 0, x: 8 } : false}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: isEntering ? 0.18 : 0, ease: TAB_ENTRY_EASE }}
-          onAnimationComplete={() => setIsEntering(false)}
-        >
-          {/* Every tab is a pill on the title bar; the active one is made of
-              the content card's own material so it reads as the card's tab
-              without having to join it. */}
-          <span
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg transition-[background-color,box-shadow,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
-              isActive
-                ? "bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border"
-                : "bg-page-canvas/50 group-hover/tab:bg-page-canvas/80",
-              isDragging && "opacity-60",
+      <motion.div
+        className="group/tab relative size-full"
+        initial={isEntering ? { opacity: 0, x: 8 } : false}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: isEntering ? 0.18 : 0, ease: TAB_ENTRY_EASE }}
+        onAnimationComplete={() => setIsEntering(false)}
+      >
+        {/* Every tab is a pill on the title bar; the active one is made of
+            the content card's own material so it reads as the card's tab
+            without having to join it. */}
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg transition-[background-color,box-shadow,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            isActive
+              ? "bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border"
+              : "bg-page-canvas/50 group-hover/tab:bg-page-canvas/80",
+            isDragging && "opacity-60",
+          )}
+        />
+        <ContextMenu>
+          <TooltipHint label={tab.pinned ? tabName : undefined} side="bottom">
+            <ContextMenuTrigger render={tabButton} />
+          </TooltipHint>
+          <ContextMenuContent>
+            {issueWindowPath && (
+              <>
+                <ContextMenuItem onClick={handleOpenAsWindow}>
+                  <AppWindow />
+                  {openWindowLabel}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
             )}
-          />
-          <ContextMenu>
-            <TooltipHint label={tab.pinned ? tabName : undefined} side="bottom">
-              <ContextMenuTrigger render={tabButton} />
-            </TooltipHint>
-            <ContextMenuContent>
-              {issueWindowPath && (
+            <ContextMenuItem onClick={() => togglePin(tab.id)}>
+              {tab.pinned ? (
                 <>
-                  <ContextMenuItem onClick={handleOpenAsWindow}>
-                    <AppWindow />
-                    {openWindowLabel}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
+                  <PinOff />
+                  {pinLabel}
+                </>
+              ) : (
+                <>
+                  <Pin />
+                  {pinLabel}
                 </>
               )}
-              <ContextMenuItem onClick={() => togglePin(tab.id)}>
-                {tab.pinned ? (
-                  <>
-                    <PinOff />
-                    {pinLabel}
-                  </>
-                ) : (
-                  <>
-                    <Pin />
-                    {pinLabel}
-                  </>
-                )}
-              </ContextMenuItem>
-              <ContextMenuItem onClick={handleCopyLink}>
-                <Link2 />
-                {t(($) => $.desktop.tab_bar.copy_link)}
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem
-                variant="destructive"
-                disabled={tab.pinned || isOnly}
-                onClick={() => closeTab(tab.id)}
-              >
-                <X />
-                {closeLabel}
-              </ContextMenuItem>
-              <ContextMenuItem
-                variant="destructive"
-                disabled={!canCloseOthers}
-                onClick={() => closeOtherTabs(tab.id)}
-              >
-                <ListX />
-                {closeOthersLabel}
-              </ContextMenuItem>
-              <ContextMenuItem
-                variant="destructive"
-                disabled={!canCloseRight}
-                onClick={() => closeTabsToRight(tab.id)}
-              >
-                <ListEnd />
-                {t(($) => $.desktop.tab_bar.close_right)}
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-          {showAddedHighlight &&
-            (shouldReduceMotion ? (
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 opacity-40 ring-1 ring-inset ring-primary/20"
-              />
-            ) : (
-              <motion.span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
-                initial={{ opacity: 0.65 }}
-                animate={{ opacity: 0 }}
-                transition={{ duration: 0.42 }}
-                onAnimationComplete={() => setShowAddedHighlight(false)}
-              />
-            ))}
-          {attentionSequence > 0 &&
-            // Keyed so each background open of this tab replays the flash.
-            (shouldReduceMotion ? (
-              <span
-                key={attentionSequence}
-                aria-hidden
-                data-tab-attention
-                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 opacity-60 ring-2 ring-inset ring-brand/70"
-              />
-            ) : (
-              <motion.span
-                key={attentionSequence}
-                aria-hidden
-                data-tab-attention
-                className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: [0, 1, 0, 1, 0] }}
-                transition={{ duration: 0.9, ease: "easeOut" }}
-                onAnimationComplete={() => clearTabAttention(attentionSequence)}
-              />
-            ))}
-        </motion.div>
-      </div>
+            </ContextMenuItem>
+            <ContextMenuItem onClick={handleCopyLink}>
+              <Link2 />
+              {t(($) => $.desktop.tab_bar.copy_link)}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant="destructive"
+              disabled={tab.pinned || isOnly}
+              onClick={() => closeTab(tab.id)}
+            >
+              <X />
+              {closeLabel}
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={!canCloseOthers}
+              onClick={() => closeOtherTabs(tab.id)}
+            >
+              <ListX />
+              {closeOthersLabel}
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={!canCloseRight}
+              onClick={() => closeTabsToRight(tab.id)}
+            >
+              <ListEnd />
+              {t(($) => $.desktop.tab_bar.close_right)}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+        {showAddedHighlight &&
+          (shouldReduceMotion ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 opacity-40 ring-1 ring-inset ring-primary/20"
+            />
+          ) : (
+            <motion.span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+              initial={{ opacity: 0.65 }}
+              animate={{ opacity: 0 }}
+              transition={{ duration: 0.42 }}
+              onAnimationComplete={() => setShowAddedHighlight(false)}
+            />
+          ))}
+        {attentionSequence > 0 &&
+          // Keyed so each background open of this tab replays the flash.
+          (shouldReduceMotion ? (
+            <span
+              key={attentionSequence}
+              aria-hidden
+              data-tab-attention
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 opacity-60 ring-2 ring-inset ring-brand/70"
+            />
+          ) : (
+            <motion.span
+              key={attentionSequence}
+              aria-hidden
+              data-tab-attention
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 1, 0, 1, 0] }}
+              transition={{ duration: 0.9, ease: "easeOut" }}
+              onAnimationComplete={() => clearTabAttention(attentionSequence)}
+            />
+          ))}
+      </motion.div>
     </motion.div>
   );
 }
