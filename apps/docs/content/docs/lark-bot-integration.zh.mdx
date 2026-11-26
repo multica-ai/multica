@@ -1,12 +1,12 @@
 ---
-title: 飞书 Bot
-description: 把智能体接入飞书，在私聊或群聊中直接交代工作。
+title: 飞书 Bot：在飞书里 @ 智能体接任务
+description: Multica 内置的飞书集成：在飞书群里 @ 智能体或私聊它，就能直接交代工作，也可以用 /issue 创建任务。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-把一个 Multica 智能体连接成飞书 Bot 后，团队成员可以在飞书里私聊它、在群里 @ 它，也可以用 `/issue` 创建任务。对话和执行记录都保存在 Multica 工作区。
+飞书集成是 Multica 内置的功能，扫码就能连接，不需要自己写机器人代码。把一个 Multica 智能体连接成飞书 Bot 后，团队成员可以在飞书里私聊它、在群里 @ 它，也可以用 `/issue` 创建任务。对话和执行记录都保存在 Multica 工作区。
 
 每个 Bot 只对应一个智能体。需要在飞书中使用多个智能体时，分别为它们连接 Bot。
 
@@ -59,9 +59,9 @@ Multica 靠这次绑定确认消息来自哪位工作区成员。非成员无法
 
 直接给 Bot 发消息即可。连续消息保留在同一段 Multica 对话中，智能体的回复也发回当前对话。
 
-### 群聊
+### 在飞书群里 @ 智能体接任务
 
-先把 Bot 加入群聊，再 `@Bot` 并写下要求。Bot 只响应明确 @ 它的消息，执行时会带上群里最近的几条消息作为上下文。
+先把 Bot 加入群聊，再 `@Bot` 并写下要求。Bot 只响应明确 @ 它的消息，执行时会带上群里最近的几条消息作为上下文。智能体在它的[运行时](/daemon-runtimes)上执行，结果回复到原来的群聊或话题里；需要放到看板上跟踪的工作，用下面的 `/issue` 创建任务。
 
 无论私聊还是群聊，每次执行的提示词还会列出所回复消息的飞书 ID：`chat_id`、`chat_type`、`message_id`、消息在话题中时的话题 `thread_id`，以及 `sender_open_id`（发送者的 `open_id`）。这些是飞书的 ID，不是 Multica 的 ID；智能体如果有自己的飞书访问权限，可以用它们查到原消息或会话。`open_id` 只在当前连接的 Bot 所属应用内有效。Multica 没有记录到的 ID 不会出现。
 
