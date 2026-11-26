@@ -472,17 +472,26 @@ func TestFailTaskFinalDelegatedFailureWakesCoordinatorOnce(t *testing.T) {
 	if parentID != f.sourceTrigger {
 		t.Fatalf("recovery comment parent_id = %q, want source trigger %s", parentID, f.sourceTrigger)
 	}
-	if strings.Contains(content, secret) || !strings.Contains(content, "[REDACTED API KEY]") {
-		t.Fatalf("recovery comment did not redact error: %q", content)
+	// The recovery comment is the coordinator run's trigger, so it carries
+	// neither the error nor a redacted copy of it.
+	if strings.Contains(content, "upstream capacity exhausted") || strings.Contains(content, secret) || strings.Contains(content, "REDACTED") {
+		t.Fatalf("recovery comment carries the run error: %q", content)
+	}
+	if !strings.Contains(content, util.UUIDToString(failedID)) || !strings.Contains(content, "agent_error.process_failure") {
+		t.Fatalf("recovery comment = %q, want the failed task and its failure reason", content)
 	}
 	var failedIssueComments int
+	var failedIssueContent string
 	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM comment
-		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failedID).Scan(&failedIssueComments); err != nil {
+		SELECT count(*), COALESCE(max(content), '') FROM comment
+		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failedID).Scan(&failedIssueComments, &failedIssueContent); err != nil {
 		t.Fatalf("count failed-issue comments: %v", err)
 	}
 	if failedIssueComments != 1 {
 		t.Fatalf("failed-issue comments = %d, want legacy failure comment preserved", failedIssueComments)
+	}
+	if want := RunFailureNotice(failedID, "agent_error.process_failure"); failedIssueContent != want {
+		t.Fatalf("failed-issue comment = %q, want %q", failedIssueContent, want)
 	}
 
 	// Replaying the sweeper/direct-failure side effect for the same terminal row
@@ -1100,8 +1109,8 @@ func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
 		Scan(&comments, &content); err != nil {
 		t.Fatalf("read failure comment: %v", err)
 	}
-	if comments != 1 || content != "daemon restarted while task was in flight" {
-		t.Fatalf("terminal failure comments = %d content %q, want one system comment with the task error", comments, content)
+	if want := RunFailureNotice(failed.ID, "runtime_recovery"); comments != 1 || content != want {
+		t.Fatalf("terminal failure comments = %d content %q, want one system comment %q", comments, content, want)
 	}
 }
 
