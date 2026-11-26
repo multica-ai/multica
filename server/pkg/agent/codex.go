@@ -1204,9 +1204,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Result.Output is "final user-facing output selected by the backend"
 	// (agent.go), so it holds the deliverable only. output tracks the text the
 	// app-server labelled `phase: "final_answer"` and, for the legacy
-	// `agent_message` protocol which carries no phase, the last agent message.
-	// Every agent message still flows to msgCh, so the transcript is unchanged —
-	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
+	// `agent_message` protocol which carries no phase, the last agent message —
+	// which a tool call afterwards clears, because unlabelled text followed by
+	// tool use is narration (GH #6006). Every agent message still flows to
+	// msgCh, so the transcript is unchanged — only what the daemon forwards to a
+	// chat/channel reply narrows.
 	var output codexOutputSelection
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
@@ -1252,6 +1254,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		onMessage: func(msg Message) {
 			observeMessage(msg)
 			trySend(msgCh, msg)
+		},
+		onToolActivity: func(callID string, started bool) {
+			outputMu.Lock()
+			output.observeToolActivity(callID, started)
+			outputMu.Unlock()
 		},
 		onAgentMessageChunk: func(text string) bool {
 			msg := Message{Type: MessageText, Content: text}
@@ -2244,13 +2251,49 @@ type codexOutputSelection struct {
 	finalAnswerObserved bool
 	lastAgentMessage    string
 	// lastAgentMessagePhase is the phase label of lastAgentMessage; empty for
-	// the legacy protocol and for app-servers that do not label phases.
+	// app-servers and gateways that do not label phases.
 	lastAgentMessagePhase string
+	// startedToolCalls holds the call IDs whose start this turn observed, so
+	// their end can be told apart from an end that arrives without one.
+	startedToolCalls map[string]struct{}
 }
 
 func (s *codexOutputSelection) observeAgentMessage(text, phase string) {
 	s.lastAgentMessage = text
 	s.lastAgentMessagePhase = phase
+}
+
+// observeToolActivity records a tool call starting (started=true) or ending.
+// Unlabelled text followed by a tool call is narration — "Let me check the
+// logs." — so it must not outlive the call as the phase-less fallback: a turn
+// that ends right after a tool call (or whose final `task_complete` carries no
+// message at all) would otherwise hand that sentence to the server as the run's
+// result, and the server synthesizes a comment from it. Same rule as
+// assistantTurn.resolveFallback for the stream-json backends, which drops its
+// candidate when a turn uses a tool.
+//
+// The start of a call is what marks the text before it as narration. The end
+// of a call whose start was seen is not a new action and keeps the candidate:
+// Codex reports a background command's end when the process exits, which can
+// be after the answer the model wrote meanwhile. An end without an observed
+// start still clears, because then it is the only sign that a tool ran after
+// the text.
+//
+// The transcript is untouched: the text already reached the message channel,
+// and the clearing only affects what Result.Output may still adopt.
+func (s *codexOutputSelection) observeToolActivity(callID string, started bool) {
+	if started {
+		if callID != "" {
+			if s.startedToolCalls == nil {
+				s.startedToolCalls = make(map[string]struct{})
+			}
+			s.startedToolCalls[callID] = struct{}{}
+		}
+	} else if _, ok := s.startedToolCalls[callID]; ok && callID != "" {
+		return
+	}
+	s.lastAgentMessage = ""
+	s.lastAgentMessagePhase = ""
 }
 
 func (s *codexOutputSelection) observeFinalAnswer(text string) {
@@ -2269,6 +2312,10 @@ func (s *codexOutputSelection) observeFinalAnswer(text string) {
 // example `commentary`) is narration too, so an empty or missing final answer
 // after it yields empty output instead of promoting the narration to the
 // deliverable.
+//
+// A phase-less message stops being the candidate once the turn calls a tool
+// after it (observeToolActivity): "Let me verify the facts." followed by the
+// tool call is narration, and a run that ends there has no deliverable at all.
 func codexDeliverableOutput(s codexOutputSelection) string {
 	if s.finalAnswer != "" {
 		return s.finalAnswer
@@ -2366,6 +2413,17 @@ type codexClient struct {
 	// Both still reach onMessage: the transcript keeps the whole timeline, only
 	// Result.Output is narrowed to the deliverable (GH #6006).
 	onFinalAnswer func(text string)
+	// onToolActivity fires when a tool call starts (started=true) or ends, for
+	// every kind of tool the protocol reports — including the ones that never
+	// reach the transcript, such as web search. callID pairs the two ends; it
+	// may be "" when the protocol omits it. Result.Output uses it to tell
+	// narration before a tool call from a deliverable (codexOutputSelection).
+	onToolActivity func(callID string, started bool)
+	// legacyTurnID is the turn_id of this turn's legacy task_started event; ""
+	// until it arrives or when the stream omits it. Legacy tool events carry
+	// their own turn_id, and one from an earlier turn (a background command
+	// that exits now) must not count as tool activity in this one.
+	legacyTurnID string
 	// acceptNotification isolates the active turn from same-thread history
 	// replay emitted while thread/resume is restoring prior conversation.
 	// Unit-level protocol tests leave it nil and exercise dispatch directly.
@@ -2901,6 +2959,7 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	c.reportServerRequestToolActivity(method, raw["params"])
 
 	// Auto-approve all exec/patch requests in daemon mode
 	switch method {
@@ -3366,6 +3425,10 @@ func pluralizeFiles(n int) string {
 
 func (c *codexClient) handleEvent(msg map[string]any) {
 	msgType, _ := msg["type"].(string)
+	if msgType == "task_started" {
+		c.legacyTurnID, _ = msg["turn_id"].(string)
+	}
+	c.reportLegacyToolActivity(msgType, msg)
 
 	switch msgType {
 	case "task_started":
@@ -3374,11 +3437,17 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 		}
 	case "agent_message":
 		text, _ := msg["message"].(string)
+		// Codex copies the item's phase onto the legacy event; gateways that
+		// strip it leave it absent, which keeps the phase-less fallback.
+		phase, _ := msg["phase"].(string)
 		if text != "" && c.onMessage != nil {
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text, "")
+			c.onAgentMessage(text, phase)
+		}
+		if phase == "final_answer" && c.onFinalAnswer != nil {
+			c.onFinalAnswer(text)
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -3465,6 +3534,15 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	}
 
 	switch method {
+	case "turn/plan/updated":
+		// The update_plan tool reports only through this notification, never
+		// as a thread item.
+		turnID, _ := params["turnId"].(string)
+		if active := c.activeTurnID(); c.onToolActivity != nil &&
+			(turnID == "" || active == "" || turnID == active) {
+			c.onToolActivity("", true)
+		}
+
 	case "thread/tokenUsage/updated":
 		c.updateThreadTokenUsage(params)
 
@@ -3719,6 +3797,15 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	if item == nil && method != "item/agentMessage/delta" {
 		return
 	}
+	if _, ok := codexToolItemTypes[itemType]; ok && c.onToolActivity != nil &&
+		!codexIsUserShellCommand(item["source"]) {
+		switch method {
+		case "item/started":
+			c.onToolActivity(itemID, true)
+		case "item/completed":
+			c.onToolActivity(itemID, false)
+		}
+	}
 
 	switch {
 	case method == "item/agentMessage/delta" && itemType == "agentMessage":
@@ -3868,6 +3955,110 @@ func codexRawTokenUsageFromV2(usage map[string]any) codexRawTokenUsage {
 		CacheWriteInputTokens: codexInt64(usage, "cacheWriteInputTokens"),
 		ReasoningOutputTokens: codexInt64(usage, "reasoningOutputTokens"),
 	}
+}
+
+// codexToolItemTypes are the v2 thread item types that are tool calls, as
+// opposed to messages, reasoning, plans and review/compaction markers. Several
+// (webSearch, dynamicToolCall, imageGeneration, ...) never reach the
+// transcript, but they still mark the text before them as narration.
+var codexToolItemTypes = map[string]struct{}{
+	"commandExecution":    {},
+	"fileChange":          {},
+	"mcpToolCall":         {},
+	"dynamicToolCall":     {},
+	"collabAgentToolCall": {},
+	"webSearch":           {},
+	"imageView":           {},
+	"imageGeneration":     {},
+	"sleep":               {},
+}
+
+// reportLegacyToolActivity forwards a legacy codex/event tool event to
+// onToolActivity, skipping a command the user ran (source user_shell) and an
+// event whose turn_id names a turn other than this one.
+func (c *codexClient) reportLegacyToolActivity(msgType string, msg map[string]any) {
+	started, ok := codexLegacyToolEvents[msgType]
+	if !ok || c.onToolActivity == nil || codexIsUserShellCommand(msg["source"]) {
+		return
+	}
+	if turnID, _ := msg["turn_id"].(string); turnID != "" && c.legacyTurnID != "" && turnID != c.legacyTurnID {
+		return
+	}
+	callID, _ := msg["call_id"].(string)
+	if callID == "" {
+		callID, _ = msg["callId"].(string)
+	}
+	c.onToolActivity(callID, started)
+}
+
+// reportServerRequestToolActivity counts an approval request as the start of
+// the tool call it gates. request_permissions is a tool of its own, and an
+// approval may be all a denied or pending call ever reports.
+func (c *codexClient) reportServerRequestToolActivity(method string, rawParams json.RawMessage) {
+	if _, ok := codexToolServerRequests[method]; !ok || c.onToolActivity == nil {
+		return
+	}
+	var params map[string]any
+	_ = json.Unmarshal(rawParams, &params)
+	if c.isNotificationFromOtherThread(params) {
+		return
+	}
+	callID, _ := params["itemId"].(string)
+	if callID == "" {
+		callID, _ = params["callId"].(string)
+	}
+	c.onToolActivity(callID, true)
+}
+
+// codexIsUserShellCommand reports whether a command's source says the user ran
+// it rather than the model: v2 "userShell", legacy "user_shell".
+func codexIsUserShellCommand(source any) bool {
+	s, _ := source.(string)
+	return s == "userShell" || s == "user_shell"
+}
+
+// codexToolServerRequests are the app-server requests that gate a tool call.
+var codexToolServerRequests = map[string]struct{}{
+	"item/commandExecution/requestApproval": {},
+	"item/fileChange/requestApproval":       {},
+	"item/permissions/requestApproval":      {},
+	"execCommandApproval":                   {},
+	"applyPatchApproval":                    {},
+}
+
+// codexLegacyToolEvents maps each legacy codex/event tool event to whether it
+// starts (true) or ends (false) a call. Single-event tools (view_image,
+// update_plan, request_user_input, request_permissions) and approval requests
+// count as a start.
+var codexLegacyToolEvents = map[string]bool{
+	"exec_command_begin":             true,
+	"exec_command_end":               false,
+	"patch_apply_begin":              true,
+	"patch_apply_end":                false,
+	"mcp_tool_call_begin":            true,
+	"mcp_tool_call_end":              false,
+	"web_search_begin":               true,
+	"web_search_end":                 false,
+	"image_generation_begin":         true,
+	"image_generation_end":           false,
+	"view_image_tool_call":           true,
+	"plan_update":                    true,
+	"request_user_input":             true,
+	"request_permissions":            true,
+	"exec_approval_request":          true,
+	"apply_patch_approval_request":   true,
+	"dynamic_tool_call_request":      true,
+	"dynamic_tool_call_response":     false,
+	"collab_agent_spawn_begin":       true,
+	"collab_agent_spawn_end":         false,
+	"collab_agent_interaction_begin": true,
+	"collab_agent_interaction_end":   false,
+	"collab_waiting_begin":           true,
+	"collab_waiting_end":             false,
+	"collab_close_begin":             true,
+	"collab_close_end":               false,
+	"collab_resume_begin":            true,
+	"collab_resume_end":              false,
 }
 
 // isCodexItemProgressActivity reports whether an item notification shows the
