@@ -1186,6 +1186,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().StringSlice("attachment-id", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
+	cmd.Flags().StringArray("label", nil, "")
 	return cmd
 }
 

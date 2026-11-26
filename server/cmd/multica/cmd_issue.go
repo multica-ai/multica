@@ -291,7 +291,9 @@ var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
 	Long: `Create a new issue. Use --property "Name=Value" to set a custom property
-atomically with creation (repeatable, one distinct property per flag).
+atomically with creation (repeatable, one distinct property per flag), and
+--label to attach labels in the same write (repeatable):
+  multica issue create --title "Crash on launch" --label bug --label "User feedback"
 For multi_text / multi_url, use a JSON array of strings when entries contain
 commas or the value starts with "["; simple entries can use comma-separated values:
   multica issue create --title "Review specs" --property 'Aliases=["Smith, John","[draft] spec"]'
@@ -724,6 +726,7 @@ func init() {
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page. To place it inline instead, reference the same path in the description (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
+	issueCreateCmd.Flags().StringArray("label", nil, issueLabelFlagHelp+", attached atomically with creation")
 	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values; multi_text/multi_url also accept JSON arrays (required for commas in entries or values starting with "["). Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
@@ -1805,6 +1808,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["properties"] = createProperties
 	}
+	labelFlags, _ := cmd.Flags().GetStringArray("label")
+	var createLabelIDs []string
+	if len(labelFlags) > 0 {
+		createLabelIDs, err = resolveIssueLabelFlags(ctx, client, labelFlags)
+		if err != nil {
+			return err
+		}
+		body["label_ids"] = createLabelIDs
+	}
 	desc, hasDesc, err := resolveTextFlag(cmd, "description")
 	if err != nil {
 		return err
@@ -1940,6 +1952,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
 		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
 	}
+	if err := verifyIssueCreateLabels(createLabelIDs, result); err != nil {
+		return fmt.Errorf("issue %s was created, but the server did not confirm its labels; review it before retrying: %w", issueDisplayKey(result), err)
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -1955,6 +1970,30 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// verifyIssueCreateLabels checks the label snapshot the create response
+// echoes. A server that predates label_ids omits it and drops the labels.
+func verifyIssueCreateLabels(expected []string, issue map[string]any) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	labels, ok := issue["labels"].([]any)
+	if !ok {
+		return errors.New("response omitted the labels snapshot; update the server, then add them with `multica issue label add`")
+	}
+	attached := make(map[string]bool, len(labels))
+	for _, raw := range labels {
+		if l, ok := raw.(map[string]any); ok {
+			attached[strings.ToLower(strVal(l, "id"))] = true
+		}
+	}
+	for _, id := range expected {
+		if !attached[strings.ToLower(id)] {
+			return fmt.Errorf("response omitted label %s", id)
+		}
+	}
+	return nil
 }
 
 func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {

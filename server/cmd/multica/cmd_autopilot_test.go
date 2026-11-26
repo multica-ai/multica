@@ -25,6 +25,7 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
+	cmd.Flags().StringArray("label", nil, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -42,6 +43,8 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
 	cmd.Flags().Bool("clear-subscribers", false, "")
+	cmd.Flags().StringArray("label", nil, "")
+	cmd.Flags().Bool("clear-labels", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
