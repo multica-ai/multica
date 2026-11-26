@@ -12,10 +12,10 @@ import (
 )
 
 const addDelegatedSubscriber = `-- name: AddDelegatedSubscriber :execrows
-WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
-    SELECT root.id, root.parent_issue_id, 0 FROM issue root WHERE root.id = $1
-    UNION ALL
-    SELECT i.id, i.parent_issue_id, a.depth + 1
+WITH RECURSIVE ancestors(node_id, parent_id, is_root) AS (
+    SELECT root.id, root.parent_issue_id, true FROM issue root WHERE root.id = $1
+    UNION
+    SELECT i.id, i.parent_issue_id, false
     FROM issue i JOIN ancestors a ON i.id = a.parent_id
 ),
 active_member AS (
@@ -32,7 +32,7 @@ WHERE NOT EXISTS (
     JOIN ancestors a ON a.node_id = s.issue_id
     WHERE s.user_type = 'member' AND s.user_id = $2
       AND s.unsubscribed_at IS NOT NULL
-      AND (a.depth = 0 OR s.opt_out_scope = 'subtree')
+      AND (a.is_root OR s.opt_out_scope = 'subtree')
 )
 ON CONFLICT (issue_id, user_type, user_id) DO UPDATE
 SET reason = EXCLUDED.reason
@@ -70,6 +70,8 @@ type AddDelegatedSubscriberParams struct {
 // ON CONFLICT keeps AddIssueSubscriber's two rules: never resurrect a
 // tombstone, and upgrade an active 'delegated' row when the user becomes
 // directly involved.
+// UNION drops repeated rows, so a parent loop an older server stored still
+// ends the walk.
 func (q *Queries) AddDelegatedSubscriber(ctx context.Context, arg AddDelegatedSubscriberParams) (int64, error) {
 	result, err := q.db.Exec(ctx, addDelegatedSubscriber,
 		arg.IssueID,
@@ -244,10 +246,10 @@ func (q *Queries) GetDelegatedSubscriptionFacts(ctx context.Context, arg GetDele
 }
 
 const hasAncestorOptOut = `-- name: HasAncestorOptOut :one
-WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
-    SELECT root.id, root.parent_issue_id, 0 FROM issue root WHERE root.id = $1
-    UNION ALL
-    SELECT i.id, i.parent_issue_id, a.depth + 1 FROM issue i JOIN ancestors a ON i.id = a.parent_id
+WITH RECURSIVE ancestors(node_id, parent_id, is_root) AS (
+    SELECT root.id, root.parent_issue_id, true FROM issue root WHERE root.id = $1
+    UNION
+    SELECT i.id, i.parent_issue_id, false FROM issue i JOIN ancestors a ON i.id = a.parent_id
 )
 SELECT EXISTS(
     SELECT 1
@@ -255,7 +257,7 @@ SELECT EXISTS(
     JOIN ancestors a ON a.node_id = s.issue_id
     WHERE s.user_type = $2 AND s.user_id = $3
       AND s.unsubscribed_at IS NOT NULL
-      AND (a.depth = 0 OR s.opt_out_scope = 'subtree')
+      AND (a.is_root OR s.opt_out_scope = 'subtree')
 ) AS opted_out
 `
 
@@ -276,6 +278,8 @@ type HasAncestorOptOutParams struct {
 //
 // An 'issue'-scoped tombstone on an ancestor deliberately does NOT match: the
 // user declined that one issue, not everything the agent files beneath it.
+// UNION drops repeated rows, so a parent loop an older server stored still
+// ends the walk.
 func (q *Queries) HasAncestorOptOut(ctx context.Context, arg HasAncestorOptOutParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasAncestorOptOut, arg.ID, arg.UserType, arg.UserID)
 	var opted_out bool
@@ -346,17 +350,20 @@ WHERE i.workspace_id = $1
   AND s.user_type = 'member'
   AND s.user_id = $2
   AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($3::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])))
 `
 
 type ListSubscribedIssueIDsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	UserID           pgtype.UUID   `json:"user_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 // Every issue in the workspace the member actively subscribes to; opt-out
 // tombstones do not count.
 func (q *Queries) ListSubscribedIssueIDs(ctx context.Context, arg ListSubscribedIssueIDsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID)
+	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}
@@ -520,10 +527,72 @@ func (q *Queries) SubscribeToIssueExplicitly(ctx context.Context, arg SubscribeT
 	return err
 }
 
+const undoIssueUnsubscribe = `-- name: UndoIssueUnsubscribe :one
+WITH target AS (
+    SELECT s.issue_id, s.user_type, s.user_id, s.created_at = s.unsubscribed_at AS synthetic
+    FROM issue_subscriber s
+    WHERE s.issue_id = $1
+      AND s.user_type = $2
+      AND s.user_id = $3
+      AND s.unsubscribed_at IS NOT NULL
+      AND s.opt_out_scope = 'issue'
+),
+dropped AS (
+    DELETE FROM issue_subscriber s
+    USING target t
+    WHERE t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.issue_id
+),
+revived AS (
+    UPDATE issue_subscriber s
+    SET unsubscribed_at = NULL, opt_out_scope = NULL
+    FROM target t
+    WHERE NOT t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.reason
+)
+SELECT
+    COALESCE((SELECT reason FROM revived), '')::text AS revived_reason,
+    EXISTS (SELECT 1 FROM dropped) AS dropped_opt_out
+`
+
+type UndoIssueUnsubscribeParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	UserType string      `json:"user_type"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type UndoIssueUnsubscribeRow struct {
+	RevivedReason string `json:"revived_reason"`
+	DroppedOptOut bool   `json:"dropped_opt_out"`
+}
+
+// Reverse an issue-scope opt-out, putting the subscription back exactly as it
+// was instead of subscribing again (which would rewrite the reason to manual
+// and lift the member out of the delegated and bystander tiers):
+//
+//   - a retired row keeps its reason (creator, commenter, delegated, ...), so
+//     it is reactivated as it stands;
+//   - a tombstone the opt-out itself inserted for a project watcher has no
+//     subscription behind it, so it is deleted and the project covers the
+//     issue again. RemoveIssueSubscriber writes such a row in one statement,
+//     which is why its created_at equals its unsubscribed_at; a retired row
+//     was created before it was retired.
+//
+// Subtree opt-outs are not undone here: they cover descendants and future
+// children, which one issue's row cannot restore.
+func (q *Queries) UndoIssueUnsubscribe(ctx context.Context, arg UndoIssueUnsubscribeParams) (UndoIssueUnsubscribeRow, error) {
+	row := q.db.QueryRow(ctx, undoIssueUnsubscribe, arg.IssueID, arg.UserType, arg.UserID)
+	var i UndoIssueUnsubscribeRow
+	err := row.Scan(&i.RevivedReason, &i.DroppedOptOut)
+	return i, err
+}
+
 const unsubscribeFromIssueSubtree = `-- name: UnsubscribeFromIssueSubtree :many
 WITH RECURSIVE subtree(node_id) AS (
     SELECT root.id FROM issue root WHERE root.id = $1
-    UNION ALL
+    UNION
     SELECT i.id FROM issue i JOIN subtree s ON i.parent_issue_id = s.node_id
 ),
 retire_descendants AS (
@@ -566,6 +635,8 @@ type UnsubscribeFromIssueSubtreeParams struct {
 // Returns every issue id it actually tombstoned so the caller can broadcast one
 // subscriber:removed per issue; publishing only the root left other open tabs
 // showing a stale subscription on the children.
+// UNION drops repeated rows, so a parent loop an older server stored still
+// ends the walk.
 func (q *Queries) UnsubscribeFromIssueSubtree(ctx context.Context, arg UnsubscribeFromIssueSubtreeParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, unsubscribeFromIssueSubtree, arg.ID, arg.UserType, arg.UserID)
 	if err != nil {

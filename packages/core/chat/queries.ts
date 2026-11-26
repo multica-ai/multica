@@ -1,8 +1,15 @@
-import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useQuery,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
+  ChatMessagesPage,
   ChatQuickActionsFailureState,
   ChatQuickActionsPendingState,
   ChatSession,
@@ -50,6 +57,11 @@ export const chatKeys = {
   draftRestoresAll: () => ["chat", "draft-restores"] as const,
   /** Durable deferred-cancellation draft restores for a session (#5219). */
   draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
+  wakeupsAll: () => ["chat", "wakeups"] as const,
+  /** A conversation's wakeups: active ones plus those that ended recently. */
+  wakeups: (sessionId: string) => [...chatKeys.wakeupsAll(), sessionId] as const,
+  /** The caller's wakeups across their conversations in this workspace. */
+  myWakeups: (wsId: string) => [...chatKeys.all(wsId), "my-wakeups"] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
@@ -190,6 +202,69 @@ export function chatDraftRestoresOptions(sessionId: string) {
     queryFn: () => api.listChatDraftRestores(sessionId),
     enabled: !!sessionId,
     staleTime: 0,
+  });
+}
+
+/** Kept fresh by chat:wakeup_changed; the countdowns tick client-side. */
+export function chatWakeupsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.wakeups(sessionId),
+    queryFn: () => api.listChatSessionWakeups(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * How many trailing assistant turns' task timelines to warm after prefetching
+ * a session's newest message page. Keeps the visible tail from expanding
+ * asynchronously when `AssistantMessage` upgrades from plain text to its
+ * collapsible `TimelineView`, while capping cache entries for MUL-6396.
+ */
+const PREFETCH_TAIL_TASK_LIMIT = 2;
+
+/**
+ * Warms a chat session's conversation queries in parallel so archiving and
+ * advancing to the next thread — or clicking an adjacent row — renders from
+ * cache without flashing the skeleton or asynchronously popping in bottom
+ * strips (wakeups). All warmed queries use `staleTime: Infinity`, so an
+ * already-warm session costs nothing.
+ */
+export async function prefetchChatSession(
+  qc: QueryClient,
+  sessionId: string,
+): Promise<void> {
+  if (!sessionId) return;
+  await Promise.all([
+    qc.prefetchInfiniteQuery(chatMessagesPageOptions(sessionId)),
+    qc.prefetchQuery(pendingChatTaskOptions(sessionId)),
+    qc.prefetchQuery(chatWakeupsOptions(sessionId)),
+  ]);
+
+  const newestMessages =
+    qc.getQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId))
+      ?.pages?.[0]?.messages ?? [];
+  const tailTaskIds: string[] = [];
+  const seen = new Set<string>();
+  for (let i = newestMessages.length - 1; i >= 0 && tailTaskIds.length < PREFETCH_TAIL_TASK_LIMIT; i--) {
+    const m = newestMessages[i];
+    if (!m || m.role !== "assistant" || !isTaskMessageTaskId(m.task_id) || seen.has(m.task_id)) {
+      continue;
+    }
+    seen.add(m.task_id);
+    tailTaskIds.push(m.task_id);
+  }
+  if (tailTaskIds.length > 0) {
+    await Promise.all(tailTaskIds.map((taskId) => qc.prefetchQuery(taskMessagesOptions(taskId))));
+  }
+}
+
+export function myChatWakeupsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.myWakeups(wsId),
+    queryFn: () => api.listMyChatWakeups(),
+    enabled: !!wsId,
+    staleTime: Infinity,
   });
 }
 

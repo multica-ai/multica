@@ -9,6 +9,7 @@ name: Mobile Verify
 # - packages/core/**              — mobile imports types AND pure functions
 #                                   (agents, markdown, permissions, api/schemas, …),
 #                                   not only @multica/core/types
+# - shared failure reason fixture — mobile tests check label coverage
 # - package.json / pnpm-lock.yaml — install graph
 # - pnpm-workspace.yaml           — catalog versions
 # - turbo.json                    — turbo task pipeline
@@ -25,6 +26,7 @@ on:
     paths:
       - "apps/mobile/**"
       - "packages/core/**"
+      - "packages/views/agents/components/tabs/test-fixtures/server-failure-reasons.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -35,15 +37,18 @@ on:
     paths:
       - "apps/mobile/**"
       - "packages/core/**"
+      - "packages/views/agents/components/tabs/test-fixtures/server-failure-reasons.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
       - ".github/workflows/mobile-verify.yml"
 
+# Same rule as ci.yml: the push path filter only sees the commits in that
+# push, so a cancelled main run would never be re-checked.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   mobile:

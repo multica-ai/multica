@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -637,43 +636,122 @@ func TestDeliveryCallBudgetFitsTheLease(t *testing.T) {
 	}
 }
 
-// A call that hangs must be cut off by its own budget rather than by the
-// client's, so the turn is released close to the lease instead of minutes past
-// it. Exercised with a short lease and a bot that never answers.
-func TestReview8545PostgresSlowCallIsCutOffInsideTheLease(t *testing.T) {
-	block := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-block:
-		case <-r.Context().Done():
-		}
-	}))
-	// Release the handler before closing the server: Close waits for handlers
-	// to return, and deferred calls run in reverse.
-	defer srv.Close()
-	defer close(block)
+type review8545SlowRouting struct {
+	*review8545Queries
+	delay time.Duration
+}
 
-	bot := &auditBot{}
-	o, _, _, e := review8545Setup(t, bot)
-	o.apiBase = srv.URL
-	o.client = srv.Client()
-	o.leaseTTL = 600 * time.Millisecond
-
-	done := make(chan time.Duration, 1)
-	go func() {
-		started := time.Now()
-		o.handleTaskMessage(telegramPartialEvent(e.TaskID, "a send that never comes back"))
-		done <- time.Since(started)
-	}()
-
+func (q *review8545SlowRouting) GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	timer := time.NewTimer(q.delay)
+	defer timer.Stop()
 	select {
-	case took := <-done:
-		// The call budget is a third of the lease, so the frame has to give up
-		// well before the lease lapses — never at the client's 65s.
-		if took >= o.leaseTTL {
-			t.Fatalf("send held the turn for %s, past its %s lease", took, o.leaseTTL)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("send was still running long after its lease; the call budget is not bounding it")
+	case <-timer.C:
+		return q.review8545Queries.GetChannelTaskDelivery(ctx, taskID)
+	case <-ctx.Done():
+		return db.ChannelTaskDelivery{}, ctx.Err()
+	}
+}
+
+// Observe the HTTP context and the real SQL outcome separately: routing and
+// database scheduling are not part of the provider call's timeout budget.
+func TestReview8545PostgresSlowCallIsCutOffInsideTheLease(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		routeDelay time.Duration
+	}{
+		{name: "normal"},
+		{name: "slow_routing_before_lease", routeDelay: 450 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bot := &auditBot{}
+			o, q, c, e := review8545Setup(t, bot)
+			o.leaseTTL = 600 * time.Millisecond
+			if tc.routeDelay > 0 {
+				o.q = &review8545SlowRouting{review8545Queries: q, delay: tc.routeDelay}
+			}
+
+			type observedCall struct {
+				hasDeadline bool
+				budget      time.Duration
+				err         error
+			}
+			// Only the initial worker accesses calls until done closes. After that,
+			// assertions and the second instance's sends run on the test goroutine.
+			var calls []observedCall
+			stop := make(chan struct{})
+			// The transport never answers. Keeping it in memory exercises Bot API
+			// context propagation without a socket racing a short deadline; connection
+			// teardown by net/http's standard transport is outside this test's scope.
+			o.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				deadline, ok := r.Context().Deadline()
+				call := observedCall{hasDeadline: ok, budget: time.Until(deadline)}
+				select {
+				case <-r.Context().Done():
+					call.err = r.Context().Err()
+				case <-stop:
+					call.err = errors.New("test stopped the unbounded request")
+				}
+				calls = append(calls, call)
+				return nil, call.err
+			})}
+
+			done := make(chan struct{})
+			t.Cleanup(func() {
+				close(stop)
+				<-done
+			})
+			started := time.Now()
+			go func() {
+				defer close(done)
+				o.handleTaskMessage(telegramPartialEvent(e.TaskID, "a send that never comes back"))
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider call did not stop within the test's hang guard")
+			}
+			t.Logf("routing delay=%s; message processing=%s", tc.routeDelay, time.Since(started))
+
+			if len(calls) != 1 {
+				t.Fatalf("provider calls = %d, want 1", len(calls))
+			}
+			call := calls[0]
+			// Exact budget boundaries are checked with virtual time in
+			// TestDeliveryCallContextBudget. Scheduling may consume any part
+			// of that budget before the transport starts.
+			if !call.hasDeadline || call.budget > 200*time.Millisecond {
+				t.Fatalf("request deadline present=%v, remaining budget=%s, want at most 200ms", call.hasDeadline, call.budget)
+			}
+			if call.err != context.DeadlineExceeded {
+				t.Fatalf("provider context error = %v, want DeadlineExceeded", call.err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			taskID, err := util.ParseUUID(e.TaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err := q.GetChannelReplyDelivery(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.SendState != deliverySendUnknown {
+				t.Fatalf("send state after timeout = %q, want unknown", row.SendState)
+			}
+			if row.OwnerToken.Valid {
+				t.Fatal("timed-out send did not release the delivery lease")
+			}
+
+			other := review8545Second(o)
+			other.q = q
+			other.leaseTTL = o.leaseTTL
+			other.handleTaskMessage(telegramPartialEvent(e.TaskID, "late frame after the timeout"))
+			other.enqueueTerminalReply(e)
+			auditDrain(t, other, c, e.ChatSessionID)
+			if len(calls) != 1 {
+				t.Fatalf("unknown send was replayed: provider calls = %d, want 1", len(calls))
+			}
+		})
 	}
 }

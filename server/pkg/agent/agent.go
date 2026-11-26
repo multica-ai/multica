@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -24,6 +25,8 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
+	// SkillInvocation is set only for validated member-authored skill selections.
+	SkillInvocation *SkillInvocation
 	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool
@@ -46,8 +49,8 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
-	// no-progress ceiling — the window a turn may stay completely silent after
-	// the app-server reports turn/started before the watchdog fails it. Zero
+	// no-progress ceiling — the window a turn may go without model progress
+	// after the app-server accepts turn/start before the watchdog fails it. Zero
 	// keeps the provider default and the existing behaviour where
 	// SemanticInactivityTimeout can only shrink that ceiling; a positive value
 	// sets it explicitly, upward included. This answers a different question than
@@ -156,11 +159,12 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
-	// CursorHookCommand is the argv of the multica hook relay (the daemon's own
-	// binary followed by CursorHookHelperArg). The cursor backend needs it, with
-	// EnableTaskSupplement, to accept additional messages; other providers
-	// ignore it.
-	CursorHookCommand []string
+	// SupplementHookCommand is the argv of the provider's multica hook relay
+	// (the daemon's own binary followed by CursorHookHelperArg or
+	// AntigravityHookHelperArg). The cursor and antigravity backends need it,
+	// with EnableTaskSupplement, to accept additional messages; other
+	// providers ignore it.
+	SupplementHookCommand []string
 	// OnUsage optionally receives the backend's cumulative usage snapshot while
 	// the run is still live, keyed exactly like Result.Usage so a mid-run flush
 	// and the terminal report upsert the same (task, provider, model) rows
@@ -172,6 +176,21 @@ type ExecOptions struct {
 	// can trip its idle watchdog. Take the snapshot and report on your own
 	// goroutine.
 	OnUsage func(map[string]TokenUsage)
+	// OnRateLimits optionally receives the account's subscription rate-limit
+	// snapshot each time the agent CLI reports a change (Claude Code's
+	// rate_limit_event, Codex's account/rateLimits/updated). Every call carries
+	// the full merged view, so the latest call supersedes earlier ones.
+	// Backends whose CLI reports no rate limits never call it.
+	//
+	// Like OnUsage it runs on the backend's protocol reader goroutine and MUST
+	// NOT block.
+	OnRateLimits func(RateLimitSnapshot)
+	// WarmPoolBriefHash optionally fingerprints the workdir runtime brief
+	// (AGENTS.md / CLAUDE.md) for warm session pool invalidation. When the brief
+	// changes between turns (e.g. edited persona, skills, or workspace context),
+	// the pool evicts the stale warm process and spawns fresh so the provider
+	// loads the updated instructions.
+	WarmPoolBriefHash string
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
@@ -189,6 +208,11 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 	}
 	return context.WithCancel(ctx)
 }
+
+// ErrSupplementTurnEnded is returned (wrapped) by a Session.Supplement whose
+// target turn finished before the provider accepted the message. The daemon
+// reports it as turn_ended rather than as a provider rejection.
+var ErrSupplementTurnEnded = errors.New("turn ended before the message was accepted")
 
 // Session represents a running agent execution.
 type Session struct {
@@ -305,6 +329,9 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// NoToolCallsStarted is set only for a failed prompt whose complete native
+	// turn history was observed without a tool call. Missing evidence is false.
+	NoToolCallsStarted bool
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was permanently refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history
@@ -387,6 +414,10 @@ type Config struct {
 	// Command boundary applies it to every process the package spawns, task
 	// launches and CLI probes alike. Backends never read it directly.
 	LaunchPrefix []string
+	// WarmPool optionally enables warm provider process reuse across turns of
+	// the same conversation for supported backends (Codex, Claude Code). Nil
+	// disables pooling and preserves one-process-per-turn behavior.
+	WarmPool *WarmSessionPool
 }
 
 // New creates a Backend for the given agent type.
@@ -432,6 +463,8 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"droid",
+	"amp",
 	"mcode",
 	"muse",
 	"dim",
@@ -471,6 +504,8 @@ var resumeRejectionUndetectable = map[string]bool{
 	"deveco":      true,
 	"opencode":    true,
 	"codearts":    true,
+	"droid":       true,
+	"amp":         true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -540,6 +575,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "droid":
+		return &droidBackend{cfg: cfg}, nil
+	case "amp":
+		return &ampBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
 	case "devin":
@@ -596,6 +635,8 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"droid":       "droid exec (stream-json)",
+	"amp":         "amp --execute (stream-json)",
 	"dim":         "dim acp",
 	"devin":       "devin acp",
 	"mcode":       "mcode acp",

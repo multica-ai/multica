@@ -10,11 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func TestFindLocalDirectoryAssignment(t *testing.T) {
@@ -180,7 +183,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 	if leaderAssignment != nil {
 		t.Fatalf("leader assignment = %+v, want nil", leaderAssignment)
 	}
-	leaderRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	leaderRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default(), newTestTaskSlot(0))
 	if abort {
 		t.Fatal("leader lock acquisition aborted")
 	}
@@ -191,7 +194,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		t.Fatalf("holder after leader skip = %q, want empty", got)
 	}
 
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default(), newTestTaskSlot(0))
 	if abort {
 		t.Fatal("worker lock acquisition aborted")
 	}
@@ -203,7 +206,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		t.Fatalf("holder = %q, want %q", got, worker.ID)
 	}
 
-	leaderRelease, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	leaderRelease, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default(), newTestTaskSlot(0))
 	if abort {
 		t.Fatal("leader lock acquisition aborted")
 	}
@@ -488,6 +491,30 @@ func TestLocalPathLockerCtxCancel(t *testing.T) {
 	}
 }
 
+func TestLocalPathLockerRejectsCancelledAcquireOnFreePath(t *testing.T) {
+	locker := NewLocalPathLocker()
+	path := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	release, err := locker.Acquire(ctx, path, "cancelled-task", nil)
+	if release != nil {
+		defer release()
+		t.Fatal("cancelled task acquired the lock")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire error = %v, want context.Canceled", err)
+	}
+
+	nextCtx, cancelNext := context.WithTimeout(t.Context(), time.Second)
+	defer cancelNext()
+	release, err = locker.Acquire(nextCtx, path, "next-task", nil)
+	if err != nil {
+		t.Fatalf("acquire for next task: %v", err)
+	}
+	defer release()
+}
+
 func TestLocalPathLockerDistinctPathsParallel(t *testing.T) {
 	locker := NewLocalPathLocker()
 
@@ -614,7 +641,7 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default())
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default(), newTestTaskSlot(0))
 		done <- result{release: rel, abort: abort}
 	}()
 
@@ -701,7 +728,7 @@ func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testi
 	}
 	done := make(chan result, 1)
 	go func() {
-		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), newTestTaskSlot(0))
 		done <- result{release: rel, abort: abort}
 	}()
 
@@ -781,7 +808,7 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), newTestTaskSlot(0))
 			if !abort {
 				t.Fatal("expected local_directory failure to abort task")
 			}
@@ -792,6 +819,194 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 	}
 	if got := failCalls.Load(); got != int32(len(tests)) {
 		t.Fatalf("fail callback calls = %d, want %d", got, len(tests))
+	}
+}
+
+// MUL-9665: a project's linked folder deleted after it was linked must fail the
+// run as local_directory_missing — the generic local_directory_error gave the
+// user no hint that the folder itself was gone. Every other validation failure
+// keeps the generic reason.
+func TestAcquireLocalDirectoryLock_ReportsDirectoryMovedDuringWait(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "project")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locker := NewLocalPathLocker()
+	releaseHolder, err := locker.Acquire(ctx, realDir, "holder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var finishHolder sync.Once
+	defer finishHolder.Do(releaseHolder)
+
+	failures := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			if err := os.Rename(dir, filepath.Join(parent, "moved")); err != nil {
+				t.Errorf("move linked directory while task waits: %v", err)
+			}
+			finishHolder.Do(releaseHolder)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			var report struct {
+				FailureReason string `json:"failure_reason"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&report); err != nil {
+				t.Errorf("decode terminal report: %v", err)
+			}
+			failures <- report.FailureReason
+		default:
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: locker,
+		cfg:            Config{DaemonID: daemonID},
+	}
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := Task{
+		ID: "waiter",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), newTestTaskSlot(0))
+	if release != nil {
+		release()
+		t.Error("waiter returned a usable lock for the moved directory")
+	}
+	if !abort {
+		t.Fatal("waiter continued after its linked directory moved")
+	}
+	select {
+	case reason := <-failures:
+		if reason != "local_directory_missing" {
+			t.Errorf("failure_reason = %q, want local_directory_missing", reason)
+		}
+	default:
+		t.Error("missing terminal failure report")
+	}
+	if released, err := locker.Acquire(ctx, realDir, "next", nil); err != nil {
+		t.Errorf("waiter did not release path lock: %v", err)
+	} else {
+		released()
+	}
+}
+
+func TestAcquireLocalDirectoryLock_ReportsDeletedDirectoryAsMissing(t *testing.T) {
+	t.Parallel()
+
+	type failReport struct {
+		Error         string `json:"error"`
+		FailureReason string `json:"failure_reason"`
+	}
+	reports := make(chan failReport, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		var body failReport
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode fail body: %v", err)
+		}
+		reports <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: NewLocalPathLocker(),
+		cfg:            Config{DaemonID: daemonID},
+	}
+
+	notADirectory := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(notADirectory, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	tests := []struct {
+		name       string
+		path       func(t *testing.T) string
+		wantReason string
+	}{
+		{
+			name: "linked folder deleted",
+			path: func(t *testing.T) string {
+				dir := filepath.Join(t.TempDir(), "project")
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatalf("remove linked folder: %v", err)
+				}
+				return dir
+			},
+			wantReason: taskfailure.ReasonLocalDirectoryMissing.String(),
+		},
+		{
+			name:       "path is a file",
+			path:       func(*testing.T) string { return notADirectory },
+			wantReason: "local_directory_error",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := tc.path(t)
+			ref, err := json.Marshal(localDirectoryRef{LocalPath: path, DaemonID: daemonID})
+			if err != nil {
+				t.Fatalf("marshal ref: %v", err)
+			}
+			task := Task{
+				ID: "task-" + strings.ReplaceAll(tc.name, " ", "-"),
+				ProjectResources: []ProjectResourceData{
+					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+				},
+			}
+
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default(), newTestTaskSlot(0))
+			if !abort || release != nil {
+				t.Fatalf("acquire = (release != nil: %v, abort: %v), want the task aborted without a lock", release != nil, abort)
+			}
+			got := <-reports
+			if got.FailureReason != tc.wantReason {
+				t.Errorf("failure_reason = %q, want %q (error %q)", got.FailureReason, tc.wantReason, got.Error)
+			}
+			// validateLocalPath formats the path with %q, which escapes Windows
+			// backslashes.
+			if quoted := strconv.Quote(path); !strings.Contains(got.Error, quoted) {
+				t.Errorf("error %q does not name the linked path %s", got.Error, quoted)
+			}
+			// The server upgrades older daemons' reports by this text, so the
+			// two must agree on the reason.
+			if normalized := taskfailure.NormalizeDaemonReason("local_directory_error", got.Error).String(); normalized != tc.wantReason {
+				t.Errorf("server normalization of an older daemon's report = %q, want %q", normalized, tc.wantReason)
+			}
+		})
 	}
 }
 
@@ -836,6 +1051,7 @@ func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
 			context.Background(),
 			Task{ID: taskID, ProjectResources: resources},
 			slog.Default(),
+			newTestTaskSlot(0),
 		)
 		if abort {
 			t.Fatalf("%s: acquisition aborted", taskID)
@@ -937,6 +1153,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 		context.Background(),
 		Task{ID: "t1", ProjectResources: resources},
 		slog.Default(),
+		newTestTaskSlot(0),
 	)
 	if !abort {
 		t.Error("abort = false; the task was allowed to run with an unsupported mode")
@@ -1053,7 +1270,7 @@ func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
 
 	// The coding task takes the lock and keeps it for the rest of the test —
 	// this is the 20-minute build the chat turn used to queue behind.
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default(), newTestTaskSlot(0))
 	if abort {
 		t.Fatal("worker lock acquisition aborted")
 	}
@@ -1074,7 +1291,7 @@ func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
 	}
 	done := make(chan acquireResult, 1)
 	go func() {
-		chatRelease, chatAbort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+		chatRelease, chatAbort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default(), newTestTaskSlot(0))
 		done <- acquireResult{release: chatRelease, abort: chatAbort}
 	}()
 
@@ -1135,7 +1352,7 @@ func TestChatTaskOnWorktreeResourceKeepsAssignment(t *testing.T) {
 		localPathLocks: NewLocalPathLocker(),
 		logger:         slog.Default(),
 	}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default(), newTestTaskSlot(0))
 	if abort {
 		t.Fatal("chat lock acquisition aborted")
 	}
@@ -1184,7 +1401,7 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 		logger:             slog.Default(),
 		cancelPollInterval: time.Hour, // never poll; the test drives cancellation itself
 	}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default(), newTestTaskSlot(0))
 	if abort || release == nil {
 		t.Fatalf("first issue task failed to take the lock (abort=%v)", abort)
 	}
@@ -1195,7 +1412,7 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		defer close(blocked)
-		secondRelease, _ := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default())
+		secondRelease, _ := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default(), newTestTaskSlot(0))
 		if secondRelease != nil {
 			secondRelease()
 		}

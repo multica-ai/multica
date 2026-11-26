@@ -35,8 +35,8 @@ type claudePluginManifest struct {
 // that Claude Code itself has enabled. Reading the install registry is
 // deliberate: recursively scanning ~/.claude/plugins would surface both the
 // marketplace checkout and every cached version of the same plugin.
-func listEnabledClaudePlugins(home string) []claudePluginInstall {
-	settingsRaw, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+func listEnabledClaudePlugins(configDir string) []claudePluginInstall {
+	settingsRaw, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
 	if err != nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func listEnabledClaudePlugins(home string) []claudePluginInstall {
 		return nil
 	}
 
-	installedRaw, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
+	installedRaw, err := os.ReadFile(filepath.Join(configDir, "plugins", "installed_plugins.json"))
 	if err != nil {
 		return nil
 	}

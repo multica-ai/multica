@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // EventRequestChanged tells clients to refetch the requests of an issue or
@@ -76,19 +77,111 @@ func (s *Service) createRequest(ctx context.Context, rn *run, kind string, app d
 	if err != nil {
 		return db.AppActionRequest{}, err
 	}
-	notif := NotifActionRequested
-	if kind == KindConnect {
-		notif = NotifConnectRequested
+	switch {
+	case isTeamConnect(req):
+		s.notifyAdmins(ctx, req)
+	case kind == KindConnect:
+		s.notify(ctx, req, NotifConnectRequested)
+	default:
+		s.notify(ctx, req, NotifActionRequested)
 	}
-	s.notify(ctx, req, notif)
 	s.publishChange(req)
 	return req, nil
+}
+
+// isTeamConnect reports a request for the workspace's team account. Any
+// admin may answer it, not only its approver, who is the person waiting.
+func isTeamConnect(req db.AppActionRequest) bool {
+	return req.Kind == KindConnect && req.AccountScope == ScopeTeam
+}
+
+// AskTeamAccount records a member asking the admins for a team account for
+// slug, outside any run. Asking again while the ask is open changes nothing.
+func (s *Service) AskTeamAccount(ctx context.Context, workspaceID, memberID pgtype.UUID, slug string, agentID pgtype.UUID) (db.AppActionRequest, error) {
+	slug = NormalizeSlug(slug)
+	if existing, err := s.q.FindPendingTeamAsk(ctx, db.FindPendingTeamAskParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug, ApproverUserID: memberID,
+	}); err == nil {
+		return existing, nil
+	} else if !isNoRows(err) {
+		return db.AppActionRequest{}, err
+	}
+	req, err := s.q.CreateAppActionRequest(ctx, db.CreateAppActionRequestParams{
+		WorkspaceID:    workspaceID,
+		Kind:           KindConnect,
+		AgentID:        agentID,
+		ApproverUserID: memberID,
+		AccountScope:   ScopeTeam,
+		ToolkitSlug:    slug,
+		ActionClass:    ClassSend,
+		Arguments:      []byte("{}"),
+		ExpiresAt:      pgtype.Timestamptz{Time: s.now().Add(TeamAskTTL), Valid: true},
+	})
+	if err != nil {
+		return db.AppActionRequest{}, err
+	}
+	s.notifyAdmins(ctx, req)
+	s.publishChange(req)
+	return req, nil
+}
+
+// WithdrawTeamAsk cancels the member's own open ask for slug's team account.
+func (s *Service) WithdrawTeamAsk(ctx context.Context, workspaceID, memberID pgtype.UUID, slug string) error {
+	req, err := s.q.FindPendingTeamAsk(ctx, db.FindPendingTeamAskParams{
+		WorkspaceID: workspaceID, ToolkitSlug: NormalizeSlug(slug), ApproverUserID: memberID,
+	})
+	if isNoRows(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.withdraw(ctx, req)
+	return nil
+}
+
+// archiveAdminNotifications archives the admins' open notifications for a
+// team account request nobody needs to answer any more, except keep's: the
+// admin who decided it keeps theirs where they acted on it.
+func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActionRequest, keep pgtype.UUID, reason string) {
+	rows, err := s.q.ArchiveAppRequestInbox(ctx, db.ArchiveAppRequestInboxParams{
+		WorkspaceID: req.WorkspaceID, RequestID: util.UUIDToString(req.ID), KeepRecipientID: keep,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: archive team request notifications failed", "request_id", util.UUIDToString(req.ID), "error", err)
+		return
+	}
+	if s.bus == nil {
+		return
+	}
+	for _, row := range rows {
+		if row.RecipientType != "member" {
+			continue
+		}
+		s.bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: util.UUIDToString(req.WorkspaceID),
+			Payload: map[string]any{
+				"recipient_id": util.UUIDToString(row.RecipientID),
+				"count":        int64(1),
+				"reason":       reason,
+			},
+		})
+	}
 }
 
 // Approve executes an approved request with args (nil keeps the agent's) and
 // resumes the agent with the outcome. Only the approver may approve.
 func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, args map[string]any) (db.AppActionRequest, error) {
-	req, err := s.pendingForApprover(ctx, workspaceID, actorID, requestID)
+	decided, err := s.approve(ctx, workspaceID, actorID, requestID, args)
+	if err == nil {
+		s.endTeamRequests(ctx, actorID, "app_request_decided", decided)
+	}
+	return decided, err
+}
+
+func (s *Service) approve(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, args map[string]any) (db.AppActionRequest, error) {
+	req, asAdmin, err := s.pendingForDecider(ctx, workspaceID, actorID, requestID)
 	if err != nil {
 		return db.AppActionRequest{}, err
 	}
@@ -96,8 +189,17 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		s.withdraw(ctx, req)
 		return db.AppActionRequest{}, ErrNoLongerAllowed
 	}
+	addsApp := false
 	if req.Kind == KindConnect {
-		if _, err := s.resolveAccount(ctx, workspaceID, actorID, req.ToolkitSlug, req.AccountScope); err != nil {
+		if _, has := s.agentApp(ctx, req.AgentID, req.ToolkitSlug); req.TaskID.Valid && !has {
+			if req.AccountScope != ScopePersonal || !s.mayManage(ctx, req.WorkspaceID, req.AgentID, actorID) ||
+				!s.Catalog(ctx, workspaceID).Allows(req.ToolkitSlug) {
+				s.withdraw(ctx, req)
+				return db.AppActionRequest{}, ErrCannotAddApp
+			}
+			addsApp = true
+		}
+		if _, err := s.resolveAccount(ctx, workspaceID, req.ApproverUserID, req.ToolkitSlug, req.AccountScope); err != nil {
 			return db.AppActionRequest{}, ErrAccountMissing
 		}
 	} else if acct, err := s.resolveAccount(ctx, workspaceID, actorID, req.ToolkitSlug, req.AccountScope); err == nil &&
@@ -113,7 +215,7 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 	}
 	decided, err := s.q.DecideAppActionRequest(ctx, db.DecideAppActionRequestParams{
 		ID: requestID, WorkspaceID: workspaceID, Status: "approved", DecidedBy: actorID,
-		ApprovedArguments: approvedArgs,
+		ApprovedArguments: approvedArgs, AsAdmin: asAdmin,
 	})
 	if isNoRows(err) {
 		return db.AppActionRequest{}, ErrNotPending
@@ -122,10 +224,37 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		return db.AppActionRequest{}, err
 	}
 	if decided.Kind == KindConnect {
+		if !decided.TaskID.Valid {
+			s.publishChange(decided)
+			s.notify(ctx, decided, NotifActionResult)
+			return decided, nil
+		}
+		note := fmt.Sprintf("The %s account you asked for (request %s) is now connected. Continue the task and use the app.",
+			appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+		if isTeamConnect(decided) {
+			note = fmt.Sprintf("A workspace admin connected the team %s account you asked for (request %s). Continue the task and use the app.",
+				appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+		}
+		if addsApp {
+			if err := s.addPersonalApp(ctx, decided, actorID); err != nil {
+				slog.Warn("connectedapps: add app on approval failed", "request_id", util.UUIDToString(decided.ID), "error", err)
+				if row, serr := s.q.SetAppActionRequestOutcome(ctx, db.SetAppActionRequestOutcomeParams{
+					ID: decided.ID, WorkspaceID: decided.WorkspaceID, Status: "failed",
+					Error: pgtype.Text{String: "the app could not be added to the agent", Valid: true},
+				}); serr == nil {
+					decided = row
+				}
+				s.publishChange(decided)
+				s.resume(ctx, decided, actorID, fmt.Sprintf(
+					"The person approved adding %s to you (request %s), but adding it failed. Continue without it and explain in your reply.",
+					appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID)))
+				return decided, nil
+			}
+			note = fmt.Sprintf("The person added %s to your apps and connected their account (request %s). Continue the task and use the app.",
+				appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+		}
 		s.publishChange(decided)
-		s.resume(ctx, decided, actorID, fmt.Sprintf(
-			"The %s account you asked for (request %s) is now connected. Continue the task and use the app.",
-			appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID)))
+		s.resume(ctx, decided, actorID, note)
 		return decided, nil
 	}
 
@@ -138,9 +267,9 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 // ResolveConnectRequests completes the connection requests a member was
 // asked to answer for slug, once they connected it, and resumes each agent.
 // It runs from the OAuth callback, so nobody has to come back and confirm.
-func (s *Service) ResolveConnectRequests(ctx context.Context, userID pgtype.UUID, slug string) {
+func (s *Service) ResolveConnectRequests(ctx context.Context, workspaceID, userID pgtype.UUID, slug string) {
 	rows, err := s.q.ListPendingConnectRequestsForUser(ctx, db.ListPendingConnectRequestsForUserParams{
-		ApproverUserID: userID, ToolkitSlug: NormalizeSlug(slug),
+		WorkspaceID: workspaceID, ApproverUserID: userID, ToolkitSlug: NormalizeSlug(slug),
 	})
 	if err != nil {
 		slog.Warn("connectedapps: list connect requests failed", "toolkit", slug, "error", err)
@@ -148,21 +277,76 @@ func (s *Service) ResolveConnectRequests(ctx context.Context, userID pgtype.UUID
 	}
 	for _, r := range rows {
 		if _, err := s.Approve(ctx, r.WorkspaceID, userID, r.ID, nil); err != nil &&
-			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) {
+			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) && !errors.Is(err, ErrCannotAddApp) {
 			slog.Warn("connectedapps: resolve connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
 		}
 	}
 }
 
+// ResolveTeamConnectRequests answers everything waiting for the workspace's
+// team account for slug once an admin connected it: agents resume, members
+// who asked are told.
+func (s *Service) ResolveTeamConnectRequests(ctx context.Context, workspaceID, adminID pgtype.UUID, slug string) {
+	rows, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: NormalizeSlug(slug),
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list team connect requests failed", "toolkit", slug, "error", err)
+		return
+	}
+	var decided []db.AppActionRequest
+	for _, r := range rows {
+		row, err := s.approve(ctx, workspaceID, adminID, r.ID, nil)
+		if err == nil {
+			decided = append(decided, row)
+		} else if !errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) && !errors.Is(err, ErrCannotAddApp) {
+			slog.Warn("connectedapps: resolve team connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
+		}
+	}
+	s.endTeamRequests(ctx, adminID, "app_request_decided", decided...)
+}
+
+// DeclineTeamConnectRequests is an admin declining everything waiting for
+// the team account for slug.
+func (s *Service) DeclineTeamConnectRequests(ctx context.Context, workspaceID, adminID pgtype.UUID, slug string) error {
+	rows, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: NormalizeSlug(slug),
+	})
+	if err != nil {
+		return err
+	}
+	var decided []db.AppActionRequest
+	defer func() { s.endTeamRequests(ctx, adminID, "app_request_decided", decided...) }()
+	for _, r := range rows {
+		row, err := s.reject(ctx, workspaceID, adminID, r.ID, "")
+		if err != nil && !errors.Is(err, ErrNotPending) {
+			return err
+		}
+		if err == nil {
+			decided = append(decided, row)
+		}
+	}
+	return nil
+}
+
 // Reject declines a request and resumes the agent so it can adapt.
 func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
-	if _, err := s.pendingForApprover(ctx, workspaceID, actorID, requestID); err != nil {
+	decided, err := s.reject(ctx, workspaceID, actorID, requestID, reason)
+	if err == nil {
+		s.endTeamRequests(ctx, actorID, "app_request_decided", decided)
+	}
+	return decided, err
+}
+
+func (s *Service) reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
+	_, asAdmin, err := s.pendingForDecider(ctx, workspaceID, actorID, requestID)
+	if err != nil {
 		return db.AppActionRequest{}, err
 	}
 	reason = truncate(strings.TrimSpace(reason), 1000)
 	decided, err := s.q.DecideAppActionRequest(ctx, db.DecideAppActionRequestParams{
 		ID: requestID, WorkspaceID: workspaceID, Status: "rejected", DecidedBy: actorID,
-		Reason: pgtype.Text{String: reason, Valid: reason != ""},
+		Reason: pgtype.Text{String: reason, Valid: reason != ""}, AsAdmin: asAdmin,
 	})
 	if isNoRows(err) {
 		return db.AppActionRequest{}, ErrNotPending
@@ -180,8 +364,17 @@ func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pg
 		})
 	}
 	s.publishChange(decided)
+	if !decided.TaskID.Valid {
+		if decided.DecidedBy != decided.ApproverUserID {
+			s.notify(ctx, decided, NotifActionResult)
+		}
+		return decided, nil
+	}
 	note := fmt.Sprintf("The person declined your %s request %s (%s).", appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID), decided.ToolSlug)
-	if decided.Kind == KindConnect {
+	switch {
+	case isTeamConnect(decided) && decided.DecidedBy != decided.ApproverUserID:
+		note = fmt.Sprintf("A workspace admin declined to connect a team %s account (request %s).", appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+	case decided.Kind == KindConnect:
 		note = fmt.Sprintf("The person declined to connect %s (request %s).", appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
 	}
 	if reason != "" {
@@ -192,18 +385,30 @@ func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pg
 	return decided, nil
 }
 
-func (s *Service) pendingForApprover(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID) (db.AppActionRequest, error) {
-	req, err := s.q.GetAppActionRequest(ctx, db.GetAppActionRequestParams{ID: requestID, WorkspaceID: workspaceID})
+// pendingForDecider loads a pending request actorID may decide: its
+// approver's, or, for a team account request, any admin's. asAdmin is set
+// when the actor decides as an admin rather than as the approver.
+func (s *Service) pendingForDecider(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID) (req db.AppActionRequest, asAdmin bool, err error) {
+	req, err = s.q.GetAppActionRequest(ctx, db.GetAppActionRequestParams{ID: requestID, WorkspaceID: workspaceID})
 	if err != nil {
-		return db.AppActionRequest{}, ErrRequestNotFound
+		return db.AppActionRequest{}, false, ErrRequestNotFound
 	}
 	if req.ApproverUserID != actorID {
-		return db.AppActionRequest{}, ErrNotApprover
+		if !isTeamConnect(req) || !s.IsAdmin(ctx, workspaceID, actorID) {
+			return db.AppActionRequest{}, false, ErrNotApprover
+		}
+		asAdmin = true
 	}
 	if req.Status != "pending" {
-		return db.AppActionRequest{}, ErrNotPending
+		return db.AppActionRequest{}, false, ErrNotPending
 	}
-	return req, nil
+	return req, asAdmin, nil
+}
+
+// IsAdmin reports whether userID owns or administers the workspace.
+func (s *Service) IsAdmin(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	member, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: userID, WorkspaceID: workspaceID})
+	return err == nil && (member.Role == "owner" || member.Role == "admin")
 }
 
 func personalOwner(req db.AppActionRequest) pgtype.UUID {
@@ -224,8 +429,8 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 		acct:    account{scope: req.AccountScope, owner: personalOwner(req)},
 		toolkit: req.ToolkitSlug, tool: req.ToolSlug, class: req.ActionClass, requestID: req.ID,
 	}
-	fail := func(msg string) (db.AppActionRequest, string) {
-		call.outcome, call.err = "error", truncate(msg, 500)
+	failAs := func(outcome, msg string) (db.AppActionRequest, string) {
+		call.outcome, call.err = outcome, truncate(msg, 500)
 		s.recordCall(ctx, call)
 		row, err := s.q.SetAppActionRequestOutcome(ctx, db.SetAppActionRequestOutcomeParams{
 			ID: req.ID, WorkspaceID: req.WorkspaceID, Status: "failed",
@@ -236,6 +441,7 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 		}
 		return row, fmt.Sprintf("Your %s was approved, but running it failed: %s. Decide how to continue; do not resubmit the same call unless the failure was transient.", label, msg)
 	}
+	fail := func(msg string) (db.AppActionRequest, string) { return failAs("error", msg) }
 
 	app, ok := s.agentApp(ctx, req.AgentID, req.ToolkitSlug)
 	if !ok {
@@ -264,6 +470,14 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	}
 	if Decide(req.ToolkitSlug, app.Level, class, rule) == PolicyBlock {
 		return fail("a rule now blocks this call")
+	}
+	// Last: it counts the call, which runs right after.
+	if s.quota != nil {
+		countedIn, exceeded := s.quota.Admit(ctx, req.WorkspaceID)
+		if exceeded != nil {
+			return failAs("quota_exceeded", exceeded.Message())
+		}
+		call.meteredPeriod = countedIn
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, req.WorkspaceID, acct)
@@ -307,9 +521,62 @@ func (s *Service) agentApp(ctx context.Context, agentID pgtype.UUID, slug string
 	return db.AgentApp{}, false
 }
 
+// addPersonalApp attaches the requested app to the agent through the personal
+// account of whoever triggers it, keeping the legacy allowlist in step. An
+// app attached meanwhile keeps its account and level.
+func (s *Service) addPersonalApp(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID) error {
+	if s.tx == nil {
+		return errors.New("connectedapps: no transaction starter configured")
+	}
+	agent, err := s.q.GetAgent(ctx, req.AgentID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+	apps, err := qtx.ListAgentApps(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	slug := NormalizeSlug(req.ToolkitSlug)
+	slugs := make([]string, 0, len(apps)+1)
+	has := false
+	for _, app := range apps {
+		slugs = append(slugs, app.ToolkitSlug)
+		has = has || NormalizeSlug(app.ToolkitSlug) == slug
+	}
+	if !has {
+		if _, err := qtx.UpsertAgentApp(ctx, db.UpsertAgentAppParams{
+			WorkspaceID: agent.WorkspaceID, AgentID: agent.ID, ToolkitSlug: slug,
+			AccountScope: ScopePersonal, Level: DefaultLevel(agent.PermissionMode), CreatedBy: actorID,
+		}); err != nil {
+			return err
+		}
+		slugs = append(slugs, slug)
+	}
+	if err := qtx.SetAgentComposioToolkitAllowlist(ctx, db.SetAgentComposioToolkitAllowlistParams{ID: agent.ID, Slugs: slugs}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) mayManage(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
+	return s.resumer != nil && s.resumer.CanManageAgent(ctx, workspaceID, agentID, userID)
+}
+
 // mayAct reports whether the approver is still a member who may run the
 // agent. Membership and agent access can change while a request waits.
 func (s *Service) mayAct(ctx context.Context, req db.AppActionRequest) bool {
+	if !req.TaskID.Valid {
+		_, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID: req.ApproverUserID, WorkspaceID: req.WorkspaceID,
+		})
+		return err == nil
+	}
 	return s.mayUseAgent(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
 }
 
@@ -327,7 +594,16 @@ func (s *Service) withdraw(ctx context.Context, req db.AppActionRequest) {
 	if err != nil {
 		return
 	}
-	s.publishChange(row)
+	s.RequestsCancelled(ctx, row)
+}
+
+// RequestsCancelled follows up requests that were cancelled while pending,
+// here or by a member leaving the workspace.
+func (s *Service) RequestsCancelled(ctx context.Context, cancelled ...db.AppActionRequest) {
+	for _, r := range cancelled {
+		s.publishChange(r)
+	}
+	s.endTeamRequests(ctx, pgtype.UUID{}, "app_request_withdrawn", cancelled...)
 }
 
 func (s *Service) resume(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) {
@@ -338,7 +614,8 @@ func (s *Service) resume(ctx context.Context, req db.AppActionRequest, actorID p
 		slog.Info("connectedapps: approver can no longer run the agent; not resuming", "request_id", util.UUIDToString(req.ID))
 		return
 	}
-	if err := s.resumer.ResumeAfterDecision(ctx, req, actorID, note); err != nil {
+	// The run continues as the person who started it, whoever decided.
+	if err := s.resumer.ResumeAfterDecision(ctx, req, req.ApproverUserID, note); err != nil {
 		slog.Warn("connectedapps: resume agent failed", "request_id", util.UUIDToString(req.ID), "error", err)
 	}
 }
@@ -368,6 +645,7 @@ func (s *Service) Sweep(ctx context.Context) {
 		s.publishChange(r)
 		s.notify(ctx, r, NotifActionResult)
 	}
+	s.endTeamRequests(ctx, pgtype.UUID{}, "", expired...)
 	due, err := s.q.ClaimAppActionRequestReminders(ctx)
 	if err != nil {
 		slog.Warn("connectedapps: claim reminders failed", "error", err)
@@ -399,6 +677,9 @@ func (s *Service) publishChange(req db.AppActionRequest) {
 }
 
 func appLabel(slug string) string {
+	if app, ok := Curated(slug); ok {
+		return app.Name
+	}
 	if name := runtimeapps.DisplayNameForToolkitSlug(slug); name != "" {
 		return name
 	}
@@ -407,15 +688,171 @@ func appLabel(slug string) string {
 
 // notify writes the approver's inbox item. Confirmation and connection
 // requests are always delivered: the agent is stopped until the person
-// answers. Results follow the recipient's agent-activity preference.
+// answers. Results follow the recipient's agent-activity preference; the
+// inbox type registry owns both rules.
 func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType string) {
-	if notifType == NotifActionResult && s.mutedAgentActivity(ctx, req) {
+	s.deliver(ctx, req, notifType, req.ApproverUserID)
+}
+
+// notifyAdmins tells the admins a team account is wanted, but only the ones
+// it concerns: the person who started the run when they are an admin, else
+// the agent's owner when they are an admin, else every admin. An admin who
+// already holds an open notification for this app is not told again: they
+// answer every request for it at once.
+func (s *Service) notifyAdmins(ctx context.Context, req db.AppActionRequest) {
+	recipients := s.teamConnectRecipients(ctx, req)
+	if len(recipients) == 0 {
 		return
 	}
+	notified, err := s.q.ListTeamConnectNotifiedRecipients(ctx, db.ListTeamConnectNotifiedRecipientsParams{
+		WorkspaceID: req.WorkspaceID, ToolkitSlug: req.ToolkitSlug, RecipientIds: recipients,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list notified admins for team request failed", "toolkit", req.ToolkitSlug, "error", err)
+	}
+	told := make(map[pgtype.UUID]bool, len(notified))
+	for _, id := range notified {
+		told[id] = true
+	}
+	for _, admin := range recipients {
+		if !told[admin] {
+			s.deliver(ctx, req, NotifConnectRequested, admin)
+		}
+	}
+}
+
+// endTeamRequests runs once team account requests stopped pending. An
+// admin's one open notification for an app stands for every request waiting
+// for it (notifyAdmins), so whoever held one for an ended request is told
+// about the oldest request still waiting that concerns them. Admins who
+// archived theirs, or never held one, are not told. archiveReason, when set,
+// archives the ended requests' notifications, except keep's: the admin who
+// decided them keeps theirs where they acted on it. Expired ones stay.
+func (s *Service) endTeamRequests(ctx context.Context, keep pgtype.UUID, archiveReason string, ended ...db.AppActionRequest) {
+	type app struct {
+		workspaceID pgtype.UUID
+		slug        string
+	}
+	var apps []app
+	byApp := map[app][]db.AppActionRequest{}
+	for _, r := range ended {
+		if !isTeamConnect(r) {
+			continue
+		}
+		k := app{r.WorkspaceID, r.ToolkitSlug}
+		if _, seen := byApp[k]; !seen {
+			apps = append(apps, k)
+		}
+		byApp[k] = append(byApp[k], r)
+	}
+	for _, k := range apps {
+		reqs := byApp[k]
+		ids := make([]string, len(reqs))
+		for i, r := range reqs {
+			ids[i] = util.UUIDToString(r.ID)
+		}
+		holders, err := s.q.ListAppRequestInboxHolders(ctx, db.ListAppRequestInboxHoldersParams{
+			WorkspaceID: k.workspaceID, RequestIds: ids,
+		})
+		if err != nil {
+			slog.Warn("connectedapps: list team request notification holders failed", "toolkit", k.slug, "error", err)
+		}
+		if archiveReason != "" {
+			for _, r := range reqs {
+				s.archiveAdminNotifications(ctx, r, keep, archiveReason)
+			}
+		}
+		s.handOffTeamNotices(ctx, k.workspaceID, k.slug, holders)
+	}
+}
+
+// handOffTeamNotices tells each of holders about the oldest request still
+// waiting for slug's team account that they are a recipient of, unless they
+// already hold an open notification for one.
+func (s *Service) handOffTeamNotices(ctx context.Context, workspaceID pgtype.UUID, slug string, holders []pgtype.UUID) {
+	if len(holders) == 0 {
+		return
+	}
+	waiting, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list team connect requests failed", "toolkit", slug, "error", err)
+		return
+	}
+	if len(waiting) == 0 {
+		return
+	}
+	notified, err := s.q.ListTeamConnectNotifiedRecipients(ctx, db.ListTeamConnectNotifiedRecipientsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug, RecipientIds: holders,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list notified admins for team request failed", "toolkit", slug, "error", err)
+		return
+	}
+	left := make(map[pgtype.UUID]bool, len(holders))
+	for _, id := range holders {
+		left[id] = true
+	}
+	for _, id := range notified {
+		delete(left, id)
+	}
+	for _, r := range waiting {
+		if len(left) == 0 {
+			return
+		}
+		for _, admin := range s.teamConnectRecipients(ctx, r) {
+			if left[admin] {
+				s.deliver(ctx, r, NotifConnectRequested, admin)
+				delete(left, admin)
+			}
+		}
+	}
+}
+
+// teamConnectRecipients picks who is asked to connect a team account. A
+// member asking outside any run is never asked themselves.
+func (s *Service) teamConnectRecipients(ctx context.Context, req db.AppActionRequest) []pgtype.UUID {
+	eligible := func(id pgtype.UUID) bool {
+		if !id.Valid || (id == req.ApproverUserID && !req.TaskID.Valid) {
+			return false
+		}
+		return s.IsAdmin(ctx, req.WorkspaceID, id)
+	}
+	if req.TaskID.Valid && eligible(req.ApproverUserID) {
+		return []pgtype.UUID{req.ApproverUserID}
+	}
+	if req.AgentID.Valid {
+		if agent, err := s.q.GetAgent(ctx, req.AgentID); err == nil && eligible(agent.OwnerID) {
+			return []pgtype.UUID{agent.OwnerID}
+		}
+	}
+	admins, err := s.q.ListWorkspaceManagerUserIDs(ctx, req.WorkspaceID)
+	if err != nil {
+		slog.Warn("connectedapps: list admins for team request failed", "toolkit", req.ToolkitSlug, "error", err)
+		return nil
+	}
+	out := make([]pgtype.UUID, 0, len(admins))
+	for _, admin := range admins {
+		if admin != req.ApproverUserID || req.TaskID.Valid {
+			out = append(out, admin)
+		}
+	}
+	return out
+}
+
+func (s *Service) deliver(ctx context.Context, req db.AppActionRequest, notifType string, recipient pgtype.UUID) {
 	actorType := pgtype.Text{String: "agent", Valid: true}
+	actorID := req.AgentID
 	agentName := "Agent"
 	if agent, err := s.q.GetAgent(ctx, req.AgentID); err == nil {
 		agentName = agent.Name
+	}
+	if !req.TaskID.Valid {
+		actorType, actorID, agentName = pgtype.Text{String: "member", Valid: true}, req.ApproverUserID, "A member"
+		if user, err := s.q.GetUser(ctx, req.ApproverUserID); err == nil && user.Name != "" {
+			agentName = user.Name
+		}
 	}
 	title, issueStatus := agentName, ""
 	if req.IssueID.Valid {
@@ -426,6 +863,8 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		if chat, err := s.q.GetChatSession(ctx, req.ChatSessionID); err == nil && chat.Title != "" {
 			title = chat.Title
 		}
+	} else if !req.TaskID.Valid {
+		title = appLabel(req.ToolkitSlug)
 	}
 	var body string
 	severity := "action_required"
@@ -433,6 +872,12 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 	case NotifActionResult:
 		severity = "info"
 		switch {
+		case !req.TaskID.Valid && req.Status == "approved":
+			body = fmt.Sprintf("An admin connected the team %s account you asked for", appLabel(req.ToolkitSlug))
+		case !req.TaskID.Valid && req.Status == "rejected":
+			body = fmt.Sprintf("An admin declined your request for a team %s account", appLabel(req.ToolkitSlug))
+		case !req.TaskID.Valid:
+			body = fmt.Sprintf("Your request for a team %s account expired without an answer", appLabel(req.ToolkitSlug))
 		case req.Status == "blocked":
 			body = fmt.Sprintf("A rule blocked %s from running %s · %s", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
 		case req.Kind == KindConnect:
@@ -442,6 +887,11 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		}
 	case NotifConnectRequested:
 		body = fmt.Sprintf("%s asks you to connect %s", agentName, appLabel(req.ToolkitSlug))
+		if isTeamConnect(req) {
+			body = fmt.Sprintf("%s asks for a team %s account", agentName, appLabel(req.ToolkitSlug))
+		} else if _, has := s.agentApp(ctx, req.AgentID, req.ToolkitSlug); !has {
+			body = fmt.Sprintf("%s asks you to add %s and connect your account", agentName, appLabel(req.ToolkitSlug))
+		}
 	case NotifActionReminder:
 		body = fmt.Sprintf("%s is still waiting for your confirmation on %s · %s; it expires in 2 hours", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
 	default:
@@ -455,57 +905,32 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		"toolkit_slug":    req.ToolkitSlug,
 		"tool_slug":       req.ToolSlug,
 		"action_class":    req.ActionClass,
-		"agent_id":        util.UUIDToString(req.AgentID),
+		"agent_id":        util.UUIDToPtr(req.AgentID),
+		"account_scope":   req.AccountScope,
 		"chat_session_id": util.UUIDToPtr(req.ChatSessionID),
 		"summary":         req.Summary,
 		"expires_at":      util.TimestampToString(req.ExpiresAt),
 	})
-	item, inserted, err := inbox.CreateIfEligible(ctx, s.q, db.CreateInboxItemParams{
-		ID:            dbid.NewV7(),
-		WorkspaceID:   req.WorkspaceID,
-		RecipientType: "member",
-		RecipientID:   req.ApproverUserID,
-		Type:          notifType,
-		Severity:      severity,
-		IssueID:       req.IssueID,
-		Title:         title,
-		Body:          pgtype.Text{String: body, Valid: true},
-		ActorType:     actorType,
-		ActorID:       req.AgentID,
-		Details:       details,
+	_, _, err := inbox.Deliver(ctx, s.q, s.bus, inbox.Notification{
+		Params: db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
+			WorkspaceID:   req.WorkspaceID,
+			RecipientType: "member",
+			RecipientID:   recipient,
+			Type:          notifType,
+			Severity:      severity,
+			IssueID:       req.IssueID,
+			Title:         title,
+			Body:          pgtype.Text{String: body, Valid: true},
+			ActorType:     actorType,
+			ActorID:       actorID,
+			Details:       details,
+		},
+		IssueStatus: &issueStatus,
 	})
 	if err != nil {
 		slog.Warn("connectedapps: create inbox item failed", "request_id", util.UUIDToString(req.ID), "error", err)
-		return
 	}
-	if !inserted || s.bus == nil {
-		return
-	}
-	s.bus.Publish(events.Event{
-		Type: "inbox:new", WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "agent", ActorID: util.UUIDToString(req.AgentID),
-		Payload: map[string]any{"item": map[string]any{
-			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
-			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
-			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
-			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,
-		}},
-	})
-}
-
-// mutedAgentActivity reports whether the recipient muted the agent-activity
-// group, which app results belong to.
-func (s *Service) mutedAgentActivity(ctx context.Context, req db.AppActionRequest) bool {
-	pref, err := s.q.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
-		WorkspaceID: req.WorkspaceID, UserID: req.ApproverUserID,
-	})
-	if err != nil {
-		return false
-	}
-	prefs := map[string]string{}
-	_ = json.Unmarshal(pref.Preferences, &prefs)
-	return prefs["agent_activity"] == "muted"
 }
 
 // RunSweeper runs Sweep every minute until ctx ends. Safe on every replica:

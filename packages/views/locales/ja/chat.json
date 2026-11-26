@@ -27,7 +27,7 @@
     "page_context_add": "このページをコンテキストに追加",
     "page_context_remove": "ページのコンテキストを削除",
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
-    "placeholder_archived": "このセッションはアーカイブされています",
+    "placeholder_archived": "このチャットはアーカイブされています",
     "placeholder_archived_agent": "このエージェントはアーカイブされています",
     "placeholder_runtime_required": "ランタイムを設定して続ける",
     "placeholder_access_revoked": "このエージェントを実行する権限がありません",
@@ -39,10 +39,10 @@
     "send_failed_toast": "メッセージを送信できませんでした",
     "send_blocked_toast": "メッセージは送信されませんでした — このエージェントを使用する権限がありません",
     "runtime_required_toast": "メッセージは送信されませんでした — 先にこのエージェントのランタイムを設定してください",
-    "runtime_access_denied_toast": "メッセージは送信されませんでした — このエージェントはプライベートランタイムで実行できません。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください",
+    "runtime_access_denied_toast": "このエージェントのプライベートランタイムにアクセスできません。ランタイムを公開するか、アクセス可能なランタイムをエージェントにバインドしてください。",
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
-    "upload_file": "画像・ファイル",
+    "upload_file": "画像またはファイル",
     "project_context": "プロジェクトコンテキスト",
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
     "clear": "すべて削除",
-    "steer": "指示",
-    "steer_unavailable": "現在の返信が開始されると指示できます",
+    "steer": "今すぐ送信（現在の返信を停止）",
+    "steer_unavailable": "現在の返信が開始すると利用できます",
     "steer_no_permission": "このエージェントを実行する権限がありません",
-    "steer_unavailable_toast": "現在は指示できません。キューを更新しています。",
+    "steer_unavailable_toast": "今すぐ送信できません。キューを更新しています。",
     "edit": "キュー内のメッセージを編集",
     "remove": "キューから削除",
     "more": "その他のキュー操作",
@@ -75,18 +75,19 @@
       "timeout": "処理に時間がかかりすぎたため、完了前に停止しました。もう一度お試しいただくか、リクエストを分けてみてください。",
       "codex_semantic_inactivity": "エージェントが応答しなくなり、完了前に停止しました。もう一度お試しください。",
       "runtime_offline": "エージェントは現在オフラインのため、返信できませんでした。オンラインに戻ってから再度お試しください。",
-      "runtime_access_denied": "このエージェントはプライベートランタイムで実行できないため、返信できませんでした。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください。",
+      "runtime_access_denied": "このエージェントのプライベートランタイムにアクセスできません。ランタイムを公開するか、アクセス可能なランタイムをエージェントにバインドしてください。",
       "runtime_recovery": "完了する前にエージェントが再起動しました。もう一度お試しください。",
       "runtime_access_revoked": "ランタイムへのアクセスが取り消されました。新しい実行を開始する前に、エージェントを利用可能なランタイムに接続してください。",
       "manual": "この返信はキャンセルされました。",
       "skill_bundle_unavailable": "エージェントの skill をダウンロードできず、返信を開始できませんでした。多くの場合はネットワークの問題です。もう一度お試しください。",
-      "runtime_cli_timeout": "ローカルの OpenClaw CLI が時間内に応答せず、この実行は開始されませんでした。ネットワークではなくローカルの起動タイムアウトです。CLI が速くなるか、タイムアウト（MULTICA_OPENCLAW_CLI_TIMEOUT）を延ばすまで再試行しても成功しません。",
+      "runtime_cli_timeout": "ローカルの OpenClaw CLI が応答する前にタイムアウトしました。ローカルの OpenClaw CLI 設定を確認するか、MULTICA_OPENCLAW_CLI_TIMEOUT を引き上げてから再試行してください。",
       "environment_prepare_failed": "エージェントを実行しているマシンでこの実行を準備できず、開始されませんでした。何が失敗したかは下のエラーに出ています——ディスクの空き容量、権限、使用中のフォルダー、読み取れないローカル設定などが多いです。エージェントやモデルプロバイダーの問題ではありません。",
+      "local_directory_missing": "このプロジェクトに関連付けたローカルフォルダが、エージェントを実行しているマシン上にもう存在しないため、実行は開始されませんでした。フォルダを元に戻してから、もう一度お試しください。別のフォルダを使う場合は、そのマシンのデスクトップアプリでプロジェクトを開き、「リソース」で古いフォルダを削除してから「追加 → ローカルフォルダ...」で関連付け直してください。ブラウザではフォルダを選択できません。",
       "provider_network": "モデルサービスとの接続が切断され、返信を完了できませんでした。ネットワークを確認してから再度お試しください。",
-      "provider_auth_or_access": "エージェントのモデルアカウントのログインが無効になりました。再度ログインしてからお試しください。",
+      "provider_auth_or_access": "プロバイダーがこのエージェントの認証情報またはアクセスを拒否しました。API キーやアカウントの有効期限・権限を確認してください。",
       "provider_quota_limit": "エージェントのモデルアカウントの残高が不足しています。チャージするかアカウントを切り替えてからお試しください。",
       "provider_capacity_or_rate_limit": "モデルサービスが混雑しているか、レート制限がかかっています。しばらくしてからお試しください。",
-      "context_overflow": "この会話がモデルのコンテキスト長を超えました。新しいセッションを開始するか、リクエストを分けてみてください。",
+      "context_overflow": "このチャットはモデルのコンテキスト上限を超えました。新しいチャットを開始して続けてください。",
       "runtime_missing_executable": "このデバイスでエージェントの CLI を実行できませんでした。正しくインストールされ、PATH に含まれているか確認してから、もう一度お試しください。",
       "runtime_version_unsupported": "エージェントの CLI のバージョンが古すぎます。アップグレードしてからお試しください。",
       "fallback": "問題が発生し、エージェントは返信を完了できませんでした。もう一度お試しください。"
@@ -115,9 +116,9 @@
     "row_delete_aria": "チャットセッションを削除",
     "row_rename_aria": "チャットセッションの名前を変更",
     "delete_dialog": {
-      "title": "チャットセッションを削除",
+      "title": "チャットを削除",
       "description_with_title": "\"{{title}}\" とそのメッセージが完全に削除されます。この操作は取り消せません。",
-      "description_default": "このチャットセッションとそのメッセージが完全に削除されます。この操作は取り消せません。",
+      "description_default": "このチャットセッションとメッセージは完全に削除されます。この操作は元に戻せません。",
       "cancel": "キャンセル",
       "confirm": "削除",
       "confirming": "削除中..."
@@ -203,12 +204,12 @@
     "digest": {
       "title": "日報が自動で届く",
       "desc": "毎日ワークスペースの進捗をまとめて、インボックスに届けます。",
-      "prompt": "毎朝ワークスペースの進捗をまとめる日報の自動化を作って"
+      "prompt": "毎朝、前日のワークスペースのアクティビティを要約する日次オートパイロットを設定してください。"
     },
     "digest_badge": "毎日 9:00"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
-  "archived_agent_banner": "{{name}} はアーカイブされました。この会話は読み取り専用です。",
+  "archived_agent_banner": "{{name}} はアーカイブされているため、このチャットは読み取り専用です。",
   "agent_access_revoked_banner": "{{name}} を実行する権限がありません。この会話は読み取り専用です。",
   "runtime_required_banner": {
     "fallback_name": "このエージェント",
@@ -256,7 +257,9 @@
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
     "archived_title": "アーカイブ済み",
-    "row_actions_aria": "チャットの操作"
+    "row_actions_aria": "チャットの操作",
+    "wakeup_preview": "報告に戻りました",
+    "wakeup_active": "報告待ち"
   },
   "header": {
     "agent_settings": "エージェント設定",
@@ -264,5 +267,59 @@
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
     "unarchive": "アーカイブを解除"
+  },
+  "wakeup": {
+    "panel_title": "ウェイクアップ",
+    "panel_empty": "この会話にウェイクアップはありません",
+    "panel_ended": "最近終了",
+    "strip_waiting": "待機中：{{title}}",
+    "card": "あとで報告：{{title}}",
+    "ends": "{{relative}}に期限",
+    "reminder_at": "{{relative}}にリマインド",
+    "next_check": "次の確認は{{relative}}",
+    "last_check": "前回の確認：{{note}}",
+    "cancel": "ウェイクアップをキャンセル",
+    "cancel_failed": "ウェイクアップをキャンセルできませんでした",
+    "retry": "再試行",
+    "retry_failed": "ウェイクアップを再試行できませんでした",
+    "change_timing": "時間を変更",
+    "timing_interval": "間隔",
+    "timing_deadline": "期限",
+    "timing_reminder": "通知",
+    "timing_keep": "変更しない",
+    "timing_custom": "カスタム",
+    "timing_check_limit": "チェックは最大 {{max}} 回",
+    "timing_failed": "時間を変更できませんでした",
+    "status": {
+      "active": "待機中",
+      "fired": "報告済み",
+      "expired": "期限切れ",
+      "cancelled": "キャンセル済み",
+      "failed": "実行できませんでした"
+    },
+    "report": {
+      "waiting": "報告待ち",
+      "running": "報告中…",
+      "failed": "報告できませんでした"
+    },
+    "failure": {
+      "permission_revoked": "依頼者はこのエージェントを実行できなくなりました",
+      "access_lost": "監視対象が非公開プロジェクトに移動しました",
+      "dispatch_failed": "エージェントを実行できませんでした"
+    },
+    "kind": {
+      "condition": "条件が満たされたら",
+      "at": "リマインダー",
+      "check": "定期確認"
+    },
+    "divider": {
+      "condition": "報告に戻りました · 条件達成",
+      "at": "報告に戻りました · 指定時刻",
+      "check": "報告に戻りました · 確認",
+      "expired": "報告に戻りました · 期限到来",
+      "generic": "報告に戻りました"
+    },
+    "queue_label": "ウェイクアップ：{{title}}",
+    "queue_fallback": "ウェイクアップ"
   }
 }

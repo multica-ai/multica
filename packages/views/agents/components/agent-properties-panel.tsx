@@ -15,12 +15,15 @@ import {
   summarizeActivityWindow,
   useWorkspaceActivityMap,
 } from "@multica/core/agents";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { providerDisplayName } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ObjectPanelSection, ObjectProperty } from "../../layout/object-page";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useLocale, useT } from "../../i18n";
+import { AgentAppsProperty } from "./agent-apps-property";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { CHIP_CLASS } from "./inspector/chip";
 import { ModelPicker } from "./inspector/model-picker";
@@ -82,6 +85,7 @@ export function AgentPropertiesPanel({
     changeRuntime,
   } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
 
+  const appsEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false) && !qoderRuntime;
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const week = summarizeActivityWindow(activityMap.get(agent.id), 7);
 
@@ -188,6 +192,8 @@ export function AgentPropertiesPanel({
             <span className="truncate">{accessLabel}</span>
           </button>
         </ObjectProperty>
+
+        {appsEnabled && <AgentAppsProperty agent={agent} />}
 
         <ObjectProperty label={t(($) => $.panel.runs_7d)}>
           <Value>

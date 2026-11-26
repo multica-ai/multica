@@ -290,6 +290,7 @@
         "usage",
         "runtimes",
         "skills",
+        "apps",
         "settings",
         "workspaces",
         "teams"
@@ -333,6 +334,7 @@
         "readyz",
         "healthz",
         "ws",
+        "collab",
         "metrics",
         "ping"
       ]

@@ -281,6 +281,9 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 		"event_id", msg.EventID,
 		"outcome", string(res.Outcome),
 		"drop_reason", string(res.DropReason),
+		"installation_id", util.UUIDToString(res.InstallationID),
+		"chat_session_id", util.UUIDToString(res.ChatSessionID),
+		"route_revision", res.ChannelRouteRevision,
 	)
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
@@ -401,6 +404,17 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{
 			Outcome:        OutcomeInvokeDenied,
 			DropReason:     DropReasonInvokeDenied,
+			InstallationID: inst.ID,
+			Sender:         msg.Source.SenderID,
+		}, finalizeMark, nil
+	}
+
+	// Help is answered before resolving a Chat so it cannot alter its route,
+	// history, or pending context boundary. A consumed /new or /clear body is
+	// literal agent input, even when it starts with /help.
+	if !startChat && !msg.ForceFresh && IsHelpCommand(msg.CommandText) {
+		return Result{
+			Outcome:        OutcomeHelp,
 			InstallationID: inst.ID,
 			Sender:         msg.Source.SenderID,
 		}, finalizeMark, nil
@@ -1154,6 +1168,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 }
 
 func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
+	cmd.Title = strings.TrimSpace(util.SanitizeTextForPostgres(cmd.Title))
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}

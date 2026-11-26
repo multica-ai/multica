@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,11 @@ import (
 // interpretation lives in the client definition_version contract.
 
 const issueViewNameMaxLen = 80
+
+// issueViewDefinitionVersionMax is the newest definition_version any client
+// writes. A client that introduces a new version bumps this first, so a write
+// in a format no other client can read is refused rather than stored.
+const issueViewDefinitionVersionMax = 1
 
 // issueViewBodyMaxBytes bounds every saved-view write. The query/display
 // blobs are filter documents — real ones are a few KB; the cap is the
@@ -186,6 +192,10 @@ func (h *Handler) CreateIssueView(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DefinitionVersion <= 0 {
 		req.DefinitionVersion = 1
+	}
+	if req.DefinitionVersion > issueViewDefinitionVersionMax {
+		writeError(w, http.StatusBadRequest, "unsupported definition_version")
+		return
 	}
 	if len(req.Query) == 0 || !isJSONObject(req.Query) {
 		writeError(w, http.StatusBadRequest, "query must be a JSON object")
@@ -381,6 +391,11 @@ type UpdateIssueViewRequest struct {
 	Query            json.RawMessage `json:"query"`
 	Display          json.RawMessage `json:"display"`
 	ExpectedRevision int32           `json:"expected_revision"`
+	// DefinitionVersion, when sent, is the format the query/display were
+	// written in. It must match the stored view's, so a client that only
+	// knows an older format cannot overwrite a newer definition with it.
+	// Optional because clients built before it was added never send it.
+	DefinitionVersion *int32 `json:"definition_version"`
 }
 
 func (h *Handler) UpdateIssueView(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +420,12 @@ func (h *Handler) UpdateIssueView(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExpectedRevision <= 0 {
 		writeError(w, http.StatusBadRequest, "expected_revision is required")
+		return
+	}
+	if req.DefinitionVersion != nil && *req.DefinitionVersion != view.DefinitionVersion {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"view is stored as definition_version %d; this client writes definition_version %d",
+			view.DefinitionVersion, *req.DefinitionVersion))
 		return
 	}
 

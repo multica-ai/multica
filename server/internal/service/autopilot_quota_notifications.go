@@ -12,12 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
-	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const autopilotQuotaFirstRejectionNoticeKey = "rejection_first"
@@ -40,23 +38,44 @@ func (s *AutopilotService) deliverAutopilotQuotaRejectionNotice(
 	source string,
 	params db.CreateAutopilotRunParams,
 ) {
-	if policy.action != entitlement.ActionEnforce || policy.notifications == nil ||
-		policy.notifications.OnRejection != entitlement.NotificationFirstRejectionPerPeriod {
+	if policy.action != entitlement.ActionEnforce || policy.notifications == nil {
 		return
 	}
-	items, err := s.createAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params)
-	if err != nil {
+	switch policy.notifications.OnRejection {
+	case entitlement.NotificationFirstRejectionPerPeriod, entitlement.NotificationFirstRejectionPerLimit:
+	default:
+		return
+	}
+	if _, err := s.createAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params); err != nil {
 		slog.Warn("autopilot quota rejection notice delivery failed; quota rejection remains committed",
 			"workspace_id", util.UUIDToString(workspaceID),
 			"autopilot_id", util.UUIDToString(params.AutopilotID),
 			"source", source,
 			"error", err,
 		)
-		return
 	}
-	s.publishAutopilotQuotaInboxItems(items)
 }
 
+// autopilotQuotaRejectionAlreadyNotified reports whether the period's marker
+// already covers a rejection at limit. Per period, any notice covers the rest
+// of the period. Per limit, a notice covers only the limit it was sent at, so
+// a limit raised by an add-on re-arms it. A notice from before the limit was
+// recorded counts as covering the period: it cannot be told apart, and a
+// duplicate notice is worse than a missed re-arm in that one period.
+func autopilotQuotaRejectionAlreadyNotified(period db.AutopilotQuotaPeriod, mode string, limit int64) bool {
+	if !period.RejectionNotifiedAt.Valid {
+		return false
+	}
+	if mode != entitlement.NotificationFirstRejectionPerLimit || !period.RejectionNotifiedLimit.Valid {
+		return true
+	}
+	return period.RejectionNotifiedLimit.Int64 == limit
+}
+
+// createAutopilotQuotaRejectionNotice writes the first rejection notice of the
+// period (or of the limit, per the notification policy) and, once that
+// commits, announces each row. The period row lock serialises concurrent
+// rejections, so one limit is notified once.
 func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	ctx context.Context,
 	policy autopilotQuotaPolicy,
@@ -78,14 +97,19 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	if err != nil {
 		return nil, fmt.Errorf("lock quota period for rejection notice: %w", err)
 	}
-	if period.RejectionNotifiedAt.Valid {
+	mode := entitlement.NotificationFirstRejectionPerPeriod
+	if policy.notifications != nil {
+		mode = policy.notifications.OnRejection
+	}
+	if autopilotQuotaRejectionAlreadyNotified(period, mode, policy.limit) {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit already-delivered quota rejection notice: %w", err)
 		}
 		return nil, nil
 	}
 
-	items, err := s.createAutopilotQuotaInboxItems(ctx, q, autopilotQuotaNoticeFacts{
+	var pending inbox.Deferred
+	items, err := s.createAutopilotQuotaInboxItems(ctx, q, &pending, autopilotQuotaNoticeFacts{
 		WorkspaceID: period.WorkspaceID,
 		AutopilotID: params.AutopilotID,
 		Source:      source,
@@ -107,26 +131,30 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 		return nil, nil
 	}
 	if _, err := q.MarkAutopilotQuotaRejectionNotified(ctx, db.MarkAutopilotQuotaRejectionNotifiedParams{
-		WorkspaceID: period.WorkspaceID,
-		PeriodStart: period.PeriodStart,
-		PeriodEnd:   period.PeriodEnd,
+		WorkspaceID:   period.WorkspaceID,
+		PeriodStart:   period.PeriodStart,
+		PeriodEnd:     period.PeriodEnd,
+		NotifiedLimit: pgtype.Int8{Int64: policy.limit, Valid: true},
 	}); err != nil {
 		return nil, fmt.Errorf("mark autopilot quota rejection notified: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit quota rejection notice: %w", err)
 	}
+	pending.Flush(s.Bus)
 	return items, nil
 }
 
 func (s *AutopilotService) createAutopilotQuotaInboxItems(
 	ctx context.Context,
 	q *db.Queries,
+	pending *inbox.Deferred,
 	facts autopilotQuotaNoticeFacts,
 ) ([]db.InboxItem, error) {
 	autopilotTitle := ""
 	autopilot, err := q.GetAutopilot(ctx, facts.AutopilotID)
-	if err == nil {
+	autopilotFound := err == nil
+	if autopilotFound {
 		autopilotTitle = autopilot.Title
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("load autopilot for quota notice: %w", err)
@@ -135,10 +163,23 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 	if err != nil {
 		return nil, fmt.Errorf("list workspace billing notification recipients: %w", err)
 	}
+	// The person responsible for the rejected autopilot hears about it too,
+	// even without billing access: its member creator, or the owner of the
+	// agent that created it. A creator who left the workspace is skipped, and
+	// one who already manages billing is not notified twice.
+	if autopilotFound {
+		creator, ok, err := ResolveAutopilotNotificationRecipient(ctx, q, autopilot)
+		if err != nil {
+			return nil, fmt.Errorf("resolve autopilot creator for quota notice: %w", err)
+		}
+		if ok && !containsAutopilotNotificationRecipient(recipients, creator) {
+			recipients = append(recipients, creator)
+		}
+	}
 	resetAt := facts.ResetAt.UTC().Format("January 2, 2006 at 15:04 UTC")
 
 	body := fmt.Sprintf(
-		"This workspace has reached its limit of %d autopilot runs for the current period. Further autopilot runs will not start until the allowance resets at %s.",
+		"This workspace has reached its limit of %d autopilot runs for the current period. Further autopilot runs will not start until the allowance resets at %s, or until the workspace upgrades its plan or buys more runs.",
 		facts.Limit, resetAt,
 	)
 	details, err := json.Marshal(map[string]string{
@@ -159,14 +200,14 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 
 	items := make([]db.InboxItem, 0, len(recipients))
 	for _, recipient := range recipients {
-		item, inserted, err := inbox.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
+		item, inserted, err := inbox.Deliver(ctx, q, pending, inbox.Notification{Params: db.CreateInboxItemParams{
 			ID: dbid.NewV7(), WorkspaceID: facts.WorkspaceID,
 			RecipientType: recipient.Type, RecipientID: recipient.ID,
 			Type: "autopilot_quota_exceeded", Severity: "attention", IssueID: pgtype.UUID{},
 			Title: "Autopilot run limit reached", Body: pgtype.Text{String: body, Valid: true},
 			ActorType: pgtype.Text{String: "system", Valid: true}, ActorID: pgtype.UUID{},
 			Details: details,
-		})
+		}})
 		if err != nil {
 			return nil, fmt.Errorf("create autopilot quota inbox item: %w", err)
 		}
@@ -178,24 +219,11 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 	return items, nil
 }
 
-func (s *AutopilotService) publishAutopilotQuotaInboxItems(items []db.InboxItem) {
-	if s.Bus == nil {
-		return
+func containsAutopilotNotificationRecipient(recipients []AutopilotNotificationRecipient, candidate AutopilotNotificationRecipient) bool {
+	for _, recipient := range recipients {
+		if recipient.Type == candidate.Type && recipient.ID == candidate.ID {
+			return true
+		}
 	}
-	for _, item := range items {
-		s.Bus.Publish(events.Event{
-			Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID),
-			ActorType: "system",
-			Payload: map[string]any{"item": map[string]any{
-				"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-				"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-				"type": item.Type, "severity": item.Severity, "issue_id": nil,
-				"issue_status": nil, "issue_priority": nil,
-				"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read,
-				"archived": item.Archived, "created_at": util.TimestampToString(item.CreatedAt),
-				"actor_type": util.TextToPtr(item.ActorType), "actor_id": nil,
-				"details": json.RawMessage(item.Details),
-			}},
-		})
-	}
+	return false
 }

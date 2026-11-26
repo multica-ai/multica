@@ -98,6 +98,13 @@ export type ProjectContextChange =
   | { kind: "startFreshChat"; agentId: string; projectId: string }
   | { kind: "setDraftProject"; projectId: string | null };
 
+export type ChatArchiveAdvanceDirection = "next" | "prev";
+
+export type ChatArchiveAdvanceResult =
+  | { moved: false }
+  | { moved: true; targetSessionId: string; direction: ChatArchiveAdvanceDirection }
+  | { moved: true; targetSessionId: null; direction: null };
+
 export function planProjectContextChange(input: {
   targetProjectId: string | null;
   activeSessionId: string | null;
@@ -471,6 +478,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       attachmentIds?: string[],
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
+      options?: { queue?: boolean },
     ): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
@@ -551,7 +559,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // the draft for retry (ChatInput never cleared it).
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = options?.queue
+          ? await api.sendChatMessage(sessionId, finalContent, attachmentIds, options)
+          : await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         // Invoke permission can be revoked mid-session; the send is refused with
@@ -588,8 +598,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
         chat_session_id: sessionId,
         role: "user",
         content: finalContent,
-        task_id: result.task_id,
-        created_at: result.created_at,
+        task_id: result.message_task_id ?? result.task_id,
+        created_at: result.message_created_at ?? result.created_at,
         attachments: draftAttachments,
       };
       // Single door into the message caches (MUL-5711): idempotent by id, so
@@ -597,14 +607,16 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // arrival order, and this richer row (it carries the draft attachments)
       // is never downgraded by the echo, which has no attachments field.
       upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
-      seedAcceptedPendingTask(qc, sessionId, {
-        task_id: result.task_id,
-        created_at: result.created_at,
-        message_id: result.message_id,
-        content: finalContent,
-        supports_queue: result.supports_queue,
-        queued: result.queued,
-      });
+      if (result.steered !== true) {
+        seedAcceptedPendingTask(qc, sessionId, {
+          task_id: result.task_id,
+          created_at: result.created_at,
+          message_id: result.message_id,
+          content: finalContent,
+          supports_queue: result.supports_queue,
+          queued: result.queued,
+        });
+      }
       // This send just committed the new session's server-derived title.
       if (sessionId !== activeSessionId) {
         void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
@@ -824,15 +836,24 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // right agent even when the next chat belongs to a different agent. A no-op
   // when the archived session isn't the open one — that selection stays put.
   const advanceSelectionAfterArchive = useCallback(
-    (session: { id: string; agent_id: string }) => {
-      if (activeSessionId !== session.id) return;
+    (session: { id: string; agent_id: string }): ChatArchiveAdvanceResult => {
+      if (activeSessionId !== session.id) return { moved: false };
       const history = sortChatSessions(
         sessions.filter((s) => s.status !== "archived"),
       );
       const idx = history.findIndex((s) => s.id === session.id);
-      const next = history[idx + 1] ?? history[idx - 1] ?? null;
-      if (next) handleSelectSession(next);
-      else setActiveSession(null);
+      const next = history[idx + 1] ?? null;
+      if (next) {
+        handleSelectSession(next);
+        return { moved: true, targetSessionId: next.id, direction: "next" };
+      }
+      const prev = history[idx - 1] ?? null;
+      if (prev) {
+        handleSelectSession(prev);
+        return { moved: true, targetSessionId: prev.id, direction: "prev" };
+      }
+      setActiveSession(null);
+      return { moved: true, targetSessionId: null, direction: null };
     },
     [activeSessionId, sessions, handleSelectSession, setActiveSession],
   );

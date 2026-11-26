@@ -14,7 +14,7 @@
     "name": "姓名",
     "email": "信箱",
     "save": "儲存個人資料",
-    "saving": "儲存中..."
+    "saving": "儲存中…"
   },
   "appearance": {
     "title": "外觀",
@@ -27,7 +27,7 @@
     "title": "語言",
     "system": "跟隨系統",
     "english": "English",
-    "chinese_simplified": "簡體中文",
+    "chinese_simplified": "简体中文",
     "chinese_traditional": "繁體中文"
   },
   "notifications": {
@@ -71,19 +71,21 @@
     "status_changes": "狀態變更",
     "comments": "評論",
     "comments_description": "你訂閱的任務有新評論時。",
+    "squad_handoffs": "包含小隊內部交接",
+    "squad_handoffs_description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和小隊收尾時的最終回報照常通知。",
     "mentions": "提及",
     "mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。",
-    "updates": "任務更新",
-    "updates_description": "標題、描述、標籤、優先順序或截止日期變更時。",
+    "reactions": "表情回應",
+    "reactions_description": "有人對你建立的任務或你寫的評論加上表情時。",
+    "updates": "優先級與截止日期",
+    "updates_description": "你訂閱的任務優先級或截止日期變更時。",
     "new_issues": "新任務",
     "new_issues_description": "你訂閱的專案中有新任務建立時。",
     "agent_activity": "AI 代理動態",
-    "agent_activity_description": "AI 代理執行失敗時。",
+    "agent_activity_description": "AI 代理執行失敗，或 AI 代理請求的應用操作被攔截、過期時。",
     "inbox_notifications": "收件箱通知",
     "system": "系統",
     "system_notifications": "系統通知",
-    "system_description": "帳號變更、安全提醒和產品更新。"
-  },
-  "groups.assignments_description": "任務分配給我或取消分配給我時。",
-  "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"
+    "chat_replies": "包含聊天回覆"
+  }
 }

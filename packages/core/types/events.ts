@@ -10,6 +10,13 @@ import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
+  | "doc:created"
+  | "doc:updated"
+  | "doc:deleted"
+  | "doc_folder:created"
+  | "doc_folder:updated"
+  | "doc_folder:deleted"
+  | "doc_comment:changed"
   | "issue:created"
   | "issue:updated"
   | "issue_attachments:changed"
@@ -39,6 +46,7 @@ export type WSEventType =
   | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
+  | "inbox:deleted"
   | "inbox:batch-read"
   | "inbox:batch-archived"
   | "workspace:updated"
@@ -60,8 +68,10 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:reply_notification"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
+  | "chat:wakeup_changed"
   | "chat:session_created"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -126,8 +136,12 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  stage_changed?: boolean;
   title_changed?: boolean;
   parent_changed?: boolean;
+  // A blocker edge was added or removed; the issue at its other end lists
+  // this one under `blocking`, so the change reaches past this issue.
+  blockers_changed?: boolean;
   prev_parent_issue_id?: string | null;
   // Both ends of a duplicate-mark change (MUL-7349). The mark is not on Issue,
   // so these tell the realtime layer whose duplicate relations to refresh.
@@ -263,6 +277,22 @@ export interface InboxBatchReadPayload {
 export interface InboxBatchArchivedPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications. */
+  issue_id?: string;
+  /**
+   * Why the server archived them on its own: "issue_status_terminal" when the
+   * recipient completed the issue, or "actor_acted" when they triggered an
+   * agent, commented on it, changed its status, or reassigned it. Older clients
+   * (v0.12.0 and earlier) only recognize these two values, so agent-triggered
+   * auto-archives keep `reason: "actor_acted"` and pass `trigger: "agent_triggered"`.
+   * Other values may appear; absent for user-requested batches.
+   */
+  reason?: string;
+  /**
+   * Optional finer-grained trigger for newer clients when `reason` remains
+   * `"actor_acted"` for backward compatibility (e.g. `"agent_triggered"`).
+   */
+  trigger?: string;
 }
 
 export interface CommentCreatedPayload {
@@ -478,9 +508,20 @@ export interface ChatMessageEventPayload {
   created_at: string;
 }
 
+/** Owner-only system alert, also received while connected to another workspace. */
+export interface ChatReplyNotificationPayload {
+  workspace_id: string;
+  chat_session_id: string;
+  message_id: string;
+  title: string;
+  body: string;
+}
+
 export interface ChatDonePayload {
   chat_session_id: string;
   task_id: string;
+  /** Optional OS-alert context for completed direct-chat replies. */
+  notification?: { workspace_id: string; title: string };
   /**
    * Server populates these from the freshly-persisted assistant ChatMessage
    * row so the WS handler can write it into the messages cache inline. Older
@@ -540,6 +581,17 @@ export interface ChatQuickActionsPayload {
  * draft-restores endpoint. All fields beyond the discriminator are optional —
  * treat defensively and fall back to a refetch.
  */
+/**
+ * A chat wakeup was created, changed, ended, or started a turn (`task_id`).
+ * Delivered only to the conversation's owner.
+ */
+export interface ChatWakeupChangedPayload {
+  chat_session_id: string;
+  wakeup_id: string;
+  status: string;
+  task_id?: string;
+}
+
 export interface ChatCancelFinalizedPayload {
   outcome: "stopped" | "restored";
   chat_session_id: string;
@@ -669,6 +721,7 @@ export interface WSEventPayloadMap {
   "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
+  "inbox:deleted": { item_id: string; recipient_id: string; count: number };
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;
   "workspace:updated": WorkspaceUpdatedPayload;
@@ -681,8 +734,10 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:reply_notification": ChatReplyNotificationPayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "chat:wakeup_changed": ChatWakeupChangedPayload;
   "chat:session_created": ChatSessionCreatedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;

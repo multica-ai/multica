@@ -17,12 +17,15 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  canStartShortcutSequence,
   findShortcutConflict,
   createShortcutChord,
   isReservedShortcut,
   isShortcutAllowedForAction,
+  isShortcutModifierKey,
   isPlainShortcut,
   resolveShortcut,
+  shortcutFirstStep,
   shortcutFromEvent,
   SHORTCUT_ACTIONS,
   useShortcutStore,
@@ -46,12 +49,15 @@ type CaptureError =
   | { kind: "reserved" }
   | { kind: "send" }
   | { kind: "unsafe" }
+  | { kind: "unrecognized" }
   | null;
 
 export function KeyboardShortcutsTab() {
   const { t } = useT("settings");
   const [query, setQuery] = useState("");
   const [recording, setRecording] = useState<ShortcutActionId | null>(null);
+  // The first key of a sequence being recorded, waiting for the second.
+  const [pendingFirst, setPendingFirst] = useState<ShortcutChord | null>(null);
   const [captureError, setCaptureError] = useState<CaptureError>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const overrides = useShortcutStore((state) => state.overrides);
@@ -73,27 +79,66 @@ export function KeyboardShortcutsTab() {
     });
   }, [query, t]);
 
-  const groups: readonly ShortcutCategory[] = ["general", "navigation"];
+  const groups: readonly ShortcutCategory[] = ["general", "issue", "navigation"];
+
+  const stopRecording = () => {
+    setRecording(null);
+    setPendingFirst(null);
+    setCaptureError(null);
+  };
 
   const capture = (actionId: ShortcutActionId, event: React.KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat || isImeComposing(event)) return;
     if (event.key === "Escape") {
-      setRecording(null);
-      setCaptureError(null);
+      stopRecording();
       return;
     }
+
+    if (pendingFirst) {
+      // Backspace takes the first key back; Enter keeps it as a single key.
+      if (event.key === "Backspace" || event.key === "Delete") {
+        setPendingFirst(null);
+        setCaptureError(null);
+        return;
+      }
+      if (event.key === "Enter") {
+        commit(actionId, pendingFirst);
+        return;
+      }
+      const then = shortcutFromEvent(event.nativeEvent);
+      if (!then) {
+        if (!isShortcutModifierKey(event.key)) setCaptureError({ kind: "unrecognized" });
+        return;
+      }
+      commit(actionId, { ...pendingFirst, then });
+      return;
+    }
+
     if (event.key === "Backspace" || event.key === "Delete") {
       setShortcut(actionId, null);
-      setRecording(null);
-      setCaptureError(null);
+      stopRecording();
       return;
     }
 
     const shortcut = shortcutFromEvent(event.nativeEvent);
-    if (!shortcut) return;
-    if (isReservedShortcut(shortcut)) {
+    if (!shortcut) {
+      if (!isShortcutModifierKey(event.key)) {
+        setCaptureError({ kind: "unrecognized" });
+      }
+      return;
+    }
+    if (canStartShortcutSequence(actionId, shortcut)) {
+      setPendingFirst(shortcut);
+      setCaptureError(null);
+      return;
+    }
+    commit(actionId, shortcut, event.nativeEvent);
+  };
+
+  const commit = (actionId: ShortcutActionId, shortcut: ShortcutChord, event?: KeyboardEvent) => {
+    if (isReservedShortcut(shortcutFirstStep(shortcut))) {
       setCaptureError({ kind: "reserved" });
       return;
     }
@@ -101,15 +146,14 @@ export function KeyboardShortcutsTab() {
       setCaptureError({ kind: actionId === "send" ? "send" : "unsafe" });
       return;
     }
-    const conflict = findShortcutConflict(actionId, shortcut);
+    const conflict = findShortcutConflict(actionId, shortcut, event);
     if (conflict) {
       setCaptureError({ kind: "conflict", actionId: conflict });
       return;
     }
 
     setShortcut(actionId, shortcut);
-    setRecording(null);
-    setCaptureError(null);
+    stopRecording();
   };
 
   return (
@@ -149,6 +193,7 @@ export function KeyboardShortcutsTab() {
           <SettingsSection
             key={category}
             title={t(($) => $.shortcuts.categories[category])}
+            description={category === "issue" ? t(($) => $.shortcuts.issue_scope) : undefined}
           >
             <SettingsCard>
               {actions.map((action) => (
@@ -161,15 +206,14 @@ export function KeyboardShortcutsTab() {
                     action.id,
                   )}
                   recording={recording === action.id}
+                  pendingFirst={recording === action.id ? pendingFirst : null}
                   error={recording === action.id ? captureError : null}
                   onStartRecording={() => {
                     setRecording(action.id);
+                    setPendingFirst(null);
                     setCaptureError(null);
                   }}
-                  onCancelRecording={() => {
-                    setRecording(null);
-                    setCaptureError(null);
-                  }}
+                  onCancelRecording={stopRecording}
                   onCapture={(event) => capture(action.id, event)}
                   onDisable={() => {
                     setShortcut(action.id, null);
@@ -226,8 +270,7 @@ export function KeyboardShortcutsTab() {
               variant="destructive"
               onClick={() => {
                 resetAll();
-                setCaptureError(null);
-                setRecording(null);
+                stopRecording();
                 setResetConfirmOpen(false);
               }}
             >
@@ -245,6 +288,7 @@ function ShortcutRow({
   shortcut,
   customized,
   recording,
+  pendingFirst,
   error,
   onStartRecording,
   onCancelRecording,
@@ -256,6 +300,7 @@ function ShortcutRow({
   shortcut: ShortcutChord | null;
   customized: boolean;
   recording: boolean;
+  pendingFirst: ShortcutChord | null;
   error: CaptureError;
   onStartRecording: () => void;
   onCancelRecording: () => void;
@@ -266,7 +311,20 @@ function ShortcutRow({
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
   // Keep descriptions in the search index, but only show non-obvious behavior.
-  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+  const description = [
+    "openSearch",
+    "toggleRightSidebar",
+    "archiveInboxItem",
+    "unsubscribeArchiveInboxItem",
+    "snoozeInboxItem",
+    "markInboxUnread",
+    "nextInboxItem",
+    "prevInboxItem",
+    "undoInboxAction",
+    "runIssueQuickAction",
+    "replyToIssue",
+    "send",
+  ].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)
     : undefined;
   const errorText = error?.kind === "reserved"
@@ -275,6 +333,8 @@ function ShortcutRow({
       ? t(($) => $.shortcuts.send_error)
     : error?.kind === "unsafe"
       ? t(($) => $.shortcuts.unsafe_error)
+    : error?.kind === "unrecognized"
+      ? t(($) => $.shortcuts.unrecognized_error)
     : error?.kind === "conflict"
       ? t(($) => $.shortcuts.conflict_error, {
           action: t(($) => $.shortcuts.actions[error.actionId].label),
@@ -311,14 +371,20 @@ function ShortcutRow({
             )}
             aria-label={t(($) => $.shortcuts.record_aria, { action: label })}
             aria-pressed={recording}
+            data-shortcut-recorder={recording ? "" : undefined}
           >
-            {recording ? (
+            {pendingFirst ? (
+              <span className="inline-flex items-center gap-1.5 font-sans">
+                <ShortcutKeycaps shortcut={pendingFirst} layout="split" decorative />
+                {t(($) => $.shortcuts.then)}…
+              </span>
+            ) : recording ? (
               <span className="inline-flex items-center gap-1.5 font-sans">
                 <Keyboard className="size-3.5" />
                 {t(($) => $.shortcuts.recording)}
               </span>
             ) : shortcut ? (
-              <ShortcutKeycaps shortcut={shortcut} decorative />
+              <ShortcutKeycaps shortcut={shortcut} layout="split" decorative thenLabel={t(($) => $.shortcuts.then)} />
             ) : (
               <span className="font-sans font-normal text-muted-foreground">
                 {t(($) => $.shortcuts.unassigned)}
@@ -350,9 +416,15 @@ function ShortcutRow({
           <span role="alert" className="max-w-72 text-right text-caption text-destructive">
             {errorText}
           </span>
+        ) : pendingFirst ? (
+          <span className="max-w-72 text-right text-micro text-muted-foreground">
+            {t(($) => $.shortcuts.record_then_hint)}
+          </span>
         ) : recording ? (
-          <span className="text-right text-micro text-muted-foreground">
-            {t(($) => $.shortcuts.record_hint)}
+          <span className="max-w-72 text-right text-micro text-muted-foreground">
+            {action.category === "navigation"
+              ? t(($) => $.shortcuts.record_sequence_hint)
+              : t(($) => $.shortcuts.record_hint)}
           </span>
         ) : null}
       </div>
@@ -363,7 +435,7 @@ function ShortcutRow({
 function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" className="justify-end" />
     </SettingsRow>
   );
 }

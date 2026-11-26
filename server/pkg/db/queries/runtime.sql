@@ -59,6 +59,18 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockAgentRuntimeForClaimDelivery :one
+-- The claim delivery gate's lock on the runtime it re-reads owner_id and
+-- visibility from. FOR NO KEY UPDATE still blocks every UPDATE and DELETE of
+-- the row, so a re-registration or visibility flip waits for the gate to
+-- commit. Unlike FOR UPDATE it does not block FOR KEY SHARE, which every task
+-- insert takes on its runtime (lock_task_owner_rows and the foreign key) while
+-- already holding the agent row. The gate takes the agent row after this one,
+-- so FOR UPDATE here deadlocked a chat send racing a delivery (MUL-9501).
+SELECT * FROM agent_runtime
+WHERE id = $1
+FOR NO KEY UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -374,6 +386,22 @@ WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: CancelAgentTasksStartedByMember :many
+-- Cancels every active task in the workspace that a departing member started,
+-- directly (initiator) or at the top of an agent chain (originator), on any
+-- runtime. CancelAgentTasksByRuntimeOrAgent only reaches the member's own
+-- runtimes and agents; a run they triggered on a colleague's agent would
+-- otherwise keep working for someone who is no longer in the workspace.
+-- initiator_user_id has no index, so the workspace's agents bound the scan
+-- through idx_agent_task_queue_agent (agent_id, status).
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(),
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = @workspace_id)
+  AND (initiator_user_id = @user_id OR originator_user_id = @user_id)
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
 -- name: ListNonOwnerActiveTasksByRuntime :many
 -- Lists live tasks whose agent owner will lose runtime access, including
 -- hidden Builder execution carriers. shared_with is the desired recipient list.
@@ -495,6 +523,10 @@ WHERE runtime_id = @runtime_id
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
+-- runtime_rate_limit has no FK; its row goes with the runtime.
+WITH deleted_rate_limit AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_id = $1
+)
 DELETE FROM agent_runtime WHERE id = $1;
 
 -- name: DeleteSystemAgentsByRuntime :exec
@@ -620,6 +652,12 @@ SELECT id FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND NOT EXISTS (
+    SELECT 1 FROM runtime_profile p
+    WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+      AND p.daemon_id IS NULL
+      AND p.created_by = agent_runtime.owner_id
+  )
+  AND NOT EXISTS (
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
@@ -645,6 +683,12 @@ SELECT EXISTS (
   WHERE agent_runtime.id = @id
     AND status = 'offline'
     AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1 FROM runtime_profile p
+      WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+        AND p.daemon_id IS NULL
+        AND p.created_by = agent_runtime.owner_id
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM agent

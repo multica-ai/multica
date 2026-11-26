@@ -239,6 +239,75 @@ describe("RepositoriesSection", () => {
     });
   });
 
+  describe("when the list changes while a dialog is open", () => {
+    const api = { url: "https://github.com/acme/api", description: "API" };
+    const web = { url: "https://github.com/acme/web", description: "Web" };
+    const docs = { url: "https://github.com/acme/docs", description: "Docs" };
+
+    async function openRowAction(user: ReturnType<typeof userEvent.setup>, url: string, action: string) {
+      await user.click(screen.getByRole("button", { name: `Actions for ${url}` }));
+      await user.click(await screen.findByRole("menuitem", { name: action }));
+    }
+
+    function replaceRepos(rerender: (ui: ReactNode) => void, repos: typeof workspaceRef.current.repos) {
+      workspaceRef.current = { ...workspaceRef.current, repos };
+      rerender(<RepositoriesSection connection={connection} />);
+    }
+
+    async function saveDescription(user: ReturnType<typeof userEvent.setup>, text: string) {
+      const dialog = screen.getByRole("dialog", { name: "Edit repository" });
+      const description = within(dialog).getByRole("textbox", { name: "Description" });
+      await user.clear(description);
+      await user.type(description, text);
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    }
+
+    beforeEach(() => {
+      workspaceRef.current = { ...workspaceRef.current, repos: [api, web, docs] };
+    });
+
+    it("edits the repository the dialog was opened for", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Edit");
+      replaceRepos(rerender, [web, docs]);
+      await saveDescription(user, "Web app");
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+          repos: [{ url: web.url, description: "Web app" }, docs],
+        }),
+      );
+    });
+
+    it("saves an edit to a repository that was removed meanwhile", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Edit");
+      replaceRepos(rerender, [api, docs]);
+      await saveDescription(user, "Web app");
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+          repos: [api, docs, { url: web.url, description: "Web app" }],
+        }),
+      );
+    });
+
+    it("removes the repository the confirmation was opened for", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+      await openRowAction(user, web.url, "Delete repository");
+      const dialog = await screen.findByRole("alertdialog");
+      replaceRepos(rerender, [web, docs]);
+      await user.click(within(dialog).getByRole("button", { name: "Delete repository" }));
+
+      await waitFor(() =>
+        expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", { repos: [docs] }),
+      );
+    });
+  });
+
   it("hides every write affordance from members", () => {
     roleRef.current = "member";
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
@@ -255,15 +324,59 @@ describe("RepositoriesSection", () => {
     expect(mockConnectGitHub).toHaveBeenCalledOnce();
   });
 
+  it("keeps both browsing and adding an account available after connecting", async () => {
+    githubRef.current.installations = [{ id: "existing", account_login: "alice" }];
+    const user = userEvent.setup();
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+    await openAddMenu(user);
+    expect(await screen.findByRole("menuitem", { name: "Choose from GitHub" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Add account or organization" }));
+    expect(mockConnectGitHub).toHaveBeenCalledOnce();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("honors can_manage for GitHub even when workspace editing is available", async () => {
+    githubRef.current.can_manage = false;
+    githubRef.current.installations = [{ id: "existing", account_login: "alice" }];
+    const user = userEvent.setup();
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+    await openAddMenu(user);
+    expect(await screen.findByRole("menuitem", { name: "Enter a URL..." })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /GitHub|Add account/ })).toBeNull();
+  });
+
+  it.each([
+    ["missing_authorization", /GitHub did not return user authorization/],
+    ["installation_not_authorized", /admin access to every authorized repository/],
+    ["invalid_state", /expired or is invalid/],
+    ["missing_params", /incomplete/],
+    ["bad_installation_id", /incomplete/],
+    ["bad_workspace", /workspace/],
+    ["verification_failed", /verify/],
+    ["persist_failed", /save/],
+    ["untrusted-value", /Could not connect GitHub/],
+  ])("explains a %s callback without altering existing connections", async (code, message) => {
+    githubRef.current.installations = [{ id: "existing", account_login: "alice" }];
+    searchParamsRef.current = new URLSearchParams(`tab=code&section=github&github_error=${code}`);
+    render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(message)));
+    expect(mockNavReplace).toHaveBeenCalledWith("/acme/settings?tab=code&section=github");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mockConnectGitHub).not.toHaveBeenCalled();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
   it("explains why GitHub import is unavailable when browsing is not configured", async () => {
     githubRef.current = { ...githubRef.current, repository_browse_configured: false };
+    githubRef.current.installations = [{ id: "existing", account_login: "alice" }];
     const user = userEvent.setup();
     render(<RepositoriesSection connection={connection} />, { wrapper: Wrapper });
 
     await openAddMenu(user);
-    const item = await screen.findByRole("menuitem", { name: /Connect GitHub/ });
+    const item = await screen.findByRole("menuitem", { name: /Choose from GitHub/ });
     expect(item).toHaveAttribute("aria-disabled", "true");
     expect(item).toHaveTextContent("GITHUB_APP_ID");
+    expect(screen.getByRole("menuitem", { name: "Add account or organization" })).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("imports selected GitHub repositories and deduplicates HTTPS against SSH", async () => {

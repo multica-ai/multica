@@ -35,15 +35,41 @@ export interface SidebarProjectSettings {
   statuses: ProjectStatus[];
   onlyMine: boolean;
   showCount: boolean;
+  /** The row after the projects that lists issues outside every project. */
+  showNoProject: boolean;
+  /** Every project row shows the default folder icon instead of the project's own. */
+  minimalIcons: boolean;
 }
 
 export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   ordering: "manual",
   statuses: ["planned", "in_progress", "paused"],
   onlyMine: false,
-  showCount: true,
+  showCount: false,
+  showNoProject: true,
+  minimalIcons: false,
 };
 
+/** How many rows a capped sidebar section shows before "Show more". */
+export type SidebarSectionLimit = 5 | 10 | 20;
+
+/** The Work panel's Inbox section. Which notifications exist is the account's notification preferences. */
+export interface SidebarInboxSettings {
+  limit: SidebarSectionLimit;
+  /** The unread count beside the section label. */
+  showCount: boolean;
+  /** The unread count on the Work rail item. */
+  railBadge: boolean;
+  /** One line per notification, without the actor and what happened. */
+  compact: boolean;
+}
+
+export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
+  limit: 5,
+  showCount: true,
+  railBadge: true,
+  compact: true,
+};
 
 export interface SidebarLocateRequest {
   issueId: string;
@@ -66,6 +92,11 @@ interface SidebarTreeState {
   issueSettings: SidebarIssueSettings;
   projectSettings: SidebarProjectSettings;
   projectOrder: string[];
+  inboxSettings: SidebarInboxSettings;
+  pinnedLimit: SidebarSectionLimit;
+  /** Counts on the Views section's rows (Unread, All views). */
+  viewsShowCount: boolean;
+  inboxCollapsed: boolean;
   projectsCollapsed: boolean;
   viewsCollapsed: boolean;
   pinnedCollapsed: boolean;
@@ -78,6 +109,10 @@ interface SidebarTreeState {
   locate: SidebarLocateRequest | null;
   setExpanded: (key: string, expanded: boolean) => void;
   requestLocate: (request: SidebarLocateRequest | null) => void;
+  setInboxSettings: (patch: Partial<SidebarInboxSettings>) => void;
+  setPinnedLimit: (limit: SidebarSectionLimit) => void;
+  setViewsShowCount: (show: boolean) => void;
+  setInboxCollapsed: (collapsed: boolean) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
@@ -91,6 +126,10 @@ type PersistedSidebarTree = Pick<
   | "issueSettings"
   | "projectSettings"
   | "projectOrder"
+  | "inboxSettings"
+  | "pinnedLimit"
+  | "viewsShowCount"
+  | "inboxCollapsed"
   | "projectsCollapsed"
   | "viewsCollapsed"
   | "pinnedCollapsed"
@@ -103,6 +142,10 @@ const INITIAL: PersistedSidebarTree = {
   issueSettings: DEFAULT_SIDEBAR_ISSUE_SETTINGS,
   projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS,
   projectOrder: [],
+  inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS,
+  pinnedLimit: 5,
+  viewsShowCount: false,
+  inboxCollapsed: false,
   projectsCollapsed: false,
   viewsCollapsed: false,
   pinnedCollapsed: false,
@@ -121,6 +164,10 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
           if (s.expanded.includes(key) === expanded) return s;
           return { expanded: expanded ? [...s.expanded, key] : s.expanded.filter((k) => k !== key) };
         }),
+      setInboxSettings: (patch) => set((s) => ({ inboxSettings: { ...s.inboxSettings, ...patch } })),
+      setPinnedLimit: (pinnedLimit) => set({ pinnedLimit }),
+      setViewsShowCount: (viewsShowCount) => set({ viewsShowCount }),
+      setInboxCollapsed: (collapsed) => set({ inboxCollapsed: collapsed }),
       setProjectsCollapsed: (collapsed) => set({ projectsCollapsed: collapsed }),
       setViewsCollapsed: (collapsed) => set({ viewsCollapsed: collapsed }),
       setPinnedCollapsed: (collapsed) => set({ pinnedCollapsed: collapsed }),
@@ -130,11 +177,29 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
     {
       name: "multica_sidebar_tree",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // 1: the Inbox section briefly became compact by default, and turned
+      // compact on once for every stored copy.
+      // 2: compact is off by default again. A version-1 copy holds that forced
+      // value rather than a choice, so it goes back to off once; an older copy
+      // never ran version 1 and keeps what the user picked.
+      // 3: compact is on by default, for devices with nothing stored yet. A
+      // stored copy belongs to someone who already used the Inbox section, so
+      // it keeps its value, and one without a value keeps the two-line rows.
+      version: 3,
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<PersistedSidebarTree>;
+        const compact = version === 1 ? false : (p.inboxSettings?.compact ?? false);
+        return { ...p, inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, ...p.inboxSettings, compact } };
+      },
       partialize: (state): PersistedSidebarTree => ({
         expanded: state.expanded,
         issueSettings: state.issueSettings,
         projectSettings: state.projectSettings,
         projectOrder: state.projectOrder,
+        inboxSettings: state.inboxSettings,
+        pinnedLimit: state.pinnedLimit,
+        viewsShowCount: state.viewsShowCount,
+        inboxCollapsed: state.inboxCollapsed,
         projectsCollapsed: state.projectsCollapsed,
         viewsCollapsed: state.viewsCollapsed,
         pinnedCollapsed: state.pinnedCollapsed,
@@ -151,6 +216,7 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
           ...p,
           issueSettings: { ...DEFAULT_SIDEBAR_ISSUE_SETTINGS, ...p.issueSettings },
           projectSettings: { ...DEFAULT_SIDEBAR_PROJECT_SETTINGS, ...p.projectSettings },
+          inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, ...p.inboxSettings },
         };
       },
     },

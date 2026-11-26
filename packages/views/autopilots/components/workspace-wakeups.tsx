@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { AlarmClock, Bell, Clock3, AlertCircle, ListChecks, TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import {
   workspaceWakeupsInfiniteOptions,
   useDisableWorkspaceWakeups,
@@ -517,11 +517,13 @@ export function WorkspaceWakeups() {
   } else {
     body = (
       <CollectionList
+        // Shares the autopilots route with that page's own list.
+        scrollKey="wakeups"
         label={t(($) => $.wakeups.scopes[filters.scope])}
         columns={columns}
         rows={rows}
         getRowId={rowId}
-        getRowHref={(row) => paths.issueDetail(row.issue_id)}
+        getRowHref={(row) => paths.issueDetail(issueRouteRef({ id: row.issue_id, identifier: row.issue_identifier }))}
         getRowTitle={(row) => `${row.issue_identifier} ${row.issue_title}`}
         selection={{
           selectedIds: selected,
@@ -594,12 +596,18 @@ export function WorkspaceWakeups() {
         >
           <TriangleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            {t(($) => $.wakeups.banner, {
-              count: pausedCount,
-              issue: latestPaused.issue_identifier,
-              condition: text.trigger(latestPaused),
-              reason: text.pausedReason(latestPaused) ?? "",
-            })}
+            {pausedCount === 1
+              ? t(($) => $.wakeups.banner_single, {
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })
+              : t(($) => $.wakeups.banner, {
+                  count: pausedCount,
+                  issue: latestPaused.issue_identifier,
+                  condition: text.trigger(latestPaused),
+                  reason: text.pausedReason(latestPaused) ?? "",
+                })}
           </span>
           <Button size="sm" variant="outline" onClick={() => change({ scope: "paused" })}>
             {t(($) => $.wakeups.banner_view)}

@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { isMemberLimitReachedError } from "@multica/core/billing";
 import {
   myInvitationListOptions,
   workspaceListOptions,
@@ -93,7 +94,16 @@ export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) 
   const handleAccept = (invitation: Invitation) => {
     setError(null);
     accept.mutate(invitation, {
-      onError: (e) => setError(e instanceof Error ? e.message : t(($) => $.errors.accept_failed)),
+      onError: (e) =>
+        setError(
+          isMemberLimitReachedError(e)
+            ? t(($) => $.errors.member_limit_reached, {
+                workspace: invitation.workspace_name || t(($) => $.list.workspace_fallback),
+              })
+            : e instanceof Error
+              ? e.message
+              : t(($) => $.errors.accept_failed),
+        ),
     });
   };
   const handleDecline = (invitation: Invitation) => {
@@ -233,7 +243,7 @@ function InvitationRow({
         highlighted ? "border-brand/50 bg-brand/5" : "border-border bg-card",
       )}
     >
-      <WorkspaceAvatar name={name} size="lg" className="rounded-md" />
+      <WorkspaceAvatar name={name} size="lg" radius="md" />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="truncate font-medium">{name}</div>
         <div className="truncate text-caption text-muted-foreground">

@@ -109,9 +109,9 @@ describe("PinnedSection", () => {
       data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
       error: null,
     };
-    // The issue route rewrites the pin's UUID URL to the identifier form.
     renderWithI18n(<Harness pathname="/acme/issues/MUL-123" currentIssueId="issue-1" />);
     const row = (await screen.findByText("Keep this pin")).closest("a");
+    expect(row).toHaveAttribute("href", "/acme/issues/MUL-123");
     expect(row).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("MUL-123 Keep this pin")).toBeNull();
     expect(activePinnedRoute).toBe(true);
@@ -141,12 +141,12 @@ describe("PinnedSection", () => {
       error: null,
     };
     renderWithI18n(<Harness pathname="/acme/issues/MUL-6" currentIssueId="issue-6" />);
-    const lastPin = () => document.querySelector('a[href="/acme/issues/issue-6"]');
+    const lastPin = () => document.querySelectorAll("a")[5] ?? null;
 
     expect(lastPin()).toBeNull();
     expect(activePinnedRoute).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 more…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 more..." }));
     expect(lastPin()).toHaveAttribute("aria-current", "page");
     expect(activePinnedRoute).toBe(true);
 
@@ -167,9 +167,9 @@ describe("PinnedSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
     expect(useSidebarTreeStore.getState().pinnedCollapsed).toBe(true);
-    expect(screen.queryByText("Keep this pin")).toBeNull();
     expect(screen.getByRole("button", { name: "Pinned" })).toHaveAttribute("aria-expanded", "false");
     expect(activePinnedRoute).toBe(false);
+    await waitFor(() => expect(screen.queryByText("Keep this pin")).toBeNull());
   });
 
   it("shows a pinned project's chosen icon, keeping the folder when it has none", async () => {
@@ -185,6 +185,20 @@ describe("PinnedSection", () => {
     renderWithI18n(<Harness pathname="/acme/issues" />);
     expect(await iconSlot()).not.toHaveTextContent("🚀");
     expect((await iconSlot())?.matches("svg")).toBe(true);
+  });
+
+  it("marks a pinned private project with a lock", async () => {
+    state.pins = [{ ...pin(1), item_type: "project", item_id: "project-1" }];
+    state.detail = { isPending: false, isError: false, data: { title: "Fundraise", icon: null, visibility: "private" }, error: null };
+    const { unmount } = renderWithI18n(<Harness pathname="/acme/issues" />);
+    const lock = await screen.findByRole("img", { name: "Visible to project members only" });
+    expect(lock.closest("a")).toHaveTextContent("Fundraise");
+    unmount();
+
+    state.detail = { isPending: false, isError: false, data: { title: "Fundraise", icon: null, visibility: "workspace" }, error: null };
+    renderWithI18n(<Harness pathname="/acme/issues" />);
+    await screen.findByText("Fundraise");
+    expect(screen.queryByRole("img", { name: "Visible to project members only" })).toBeNull();
   });
 
   // dnd-kit stops the release's click at the document without cancelling

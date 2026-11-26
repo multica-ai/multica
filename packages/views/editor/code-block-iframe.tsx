@@ -5,7 +5,8 @@
  *
  * Used by:
  *   - HtmlPreviewBody (the attachment viewer's html kind)
- *   - CodeBlockView for fenced ```html blocks (editable Tiptap NodeView)
+ *   - CodeBlockView for fenced ```html blocks (editable Tiptap NodeView),
+ *     fed the same themed document as HtmlBlockPreview
  *   - HtmlBlockPreview for fenced ```html blocks (RichContent), which also
  *     listens to the size/error bridge in utils/html-block-document.ts
  *

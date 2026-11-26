@@ -9,13 +9,20 @@
     "view_comfortable": "넓게",
     "no_search_results": "검색 결과가 없습니다",
     "view_table": "테이블",
-    "view_cards": "카드",
+    "view_board": "보드",
     "row_menu": "프로젝트 작업",
     "rename": "이름 변경",
     "pin": "사이드바에 고정",
     "unpin": "고정 해제",
     "delete": "삭제",
-    "no_matches": "일치하는 프로젝트가 없습니다"
+    "no_matches": "일치하는 프로젝트가 없습니다",
+    "scope_archived": "보관된 프로젝트",
+    "archive": "보관",
+    "restore": "복원",
+    "no_archived": "보관된 프로젝트가 없습니다",
+    "search": "프로젝트 검색",
+    "group_none": "그룹 없음",
+    "board_column_empty": "프로젝트 없음"
   },
   "table": {
     "name": "이름",
@@ -23,8 +30,12 @@
     "status": "상태",
     "progress": "진행률",
     "lead": "리드",
+    "start_date": "시작일",
+    "due_date": "마감일",
+    "last_activity": "최근 활동",
     "created": "생성일",
-    "issues": "태스크 수"
+    "issues": "태스크 수",
+    "archived": "보관일"
   },
   "status": {
     "planned": "계획됨",
@@ -68,8 +79,12 @@
     "toast_subscription_failed": "구독을 업데이트하지 못했습니다",
     "sidebar_tooltip": "오른쪽 사이드바 열기/닫기",
     "rename_action": "프로젝트 이름 변경",
+    "guest_readonly_note": "게스트는 이 프로젝트를 볼 수 있지만 속성은 바꿀 수 없습니다.",
     "copy_link": "링크 복사",
+    "copy_title_as_link": "제목이 포함된 링크 복사",
     "delete_action": "프로젝트 삭제",
+    "tab_overview": "개요",
+    "tab_issues": "태스크",
     "section_properties": "속성",
     "section_progress": "진행률",
     "section_description": "설명",
@@ -85,14 +100,65 @@
     "empty_issues_add_existing": "기존 태스크 추가",
     "no_issues_yet": "아직 태스크가 없습니다",
     "toast_link_copied": "링크를 복사했습니다",
+    "toast_title_link_copied": "제목이 포함된 링크를 복사했습니다",
+    "toast_title_link_copy_failed": "링크를 복사하지 못했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
-    "toast_move_issue_failed": "태스크를 이동하지 못했습니다"
+    "toast_move_issue_failed": "태스크를 이동하지 못했습니다",
+    "archive_action": "프로젝트 보관",
+    "restore_action": "프로젝트 복원",
+    "progress_panel": {
+      "summary_other": "태스크 {{count}}개 중 {{completed}}개 완료",
+      "legend_completed": "완료",
+      "legend_started": "진행 중",
+      "legend_unstarted": "시작 전",
+      "cancelled_note_other": "취소된 {{count}}개는 진행률에 포함하지 않습니다",
+      "empty_hint": "태스크를 추가하면 진행률과 추이 계산이 시작됩니다.",
+      "chart_label": "주간 진행률",
+      "chart_today": "오늘",
+      "forecast_no_due": "최근 속도라면 {{date}}에 완료 예상",
+      "forecast_ahead_other": "최근 속도라면 {{date}}에 완료 예상, 마감일보다 {{count}}일 빠름",
+      "forecast_behind_other": "최근 속도라면 {{date}}에 완료 예상, 마감일보다 {{count}}일 늦음",
+      "forecast_on_due": "최근 속도라면 {{date}}에 완료 예상, 마감일과 같은 날",
+      "forecast_none": "최근 완료된 태스크가 적어 완료일을 예측할 수 없습니다.",
+      "by_assignee": "담당자별",
+      "agent_tag": "에이전트",
+      "unassigned": "미배정",
+      "axis_assignee": "담당자",
+      "axis_label": "라벨",
+      "by_label": "라벨별",
+      "no_labels": "아직 이슈가 없습니다.",
+      "unlabeled": "라벨 없음"
+    },
+    "tab_activity": "활동",
+    "agent_context_badge": "에이전트 컨텍스트",
+    "section_breakdown": "분포",
+    "section_activity": "최근 활동",
+    "activity": {
+      "empty": "이 프로젝트의 이슈에 아직 활동이 없습니다.",
+      "load_more": "더 불러오기",
+      "view_all": "모두 보기",
+      "hint": "이 프로젝트 이슈의 상태, 담당자, 우선순위, 날짜 변경 내역입니다."
+    }
   },
   "resources": {
     "section_header": "리소스",
-    "repos_group": "저장소",
-    "repos_add": "저장소 추가",
-    "repos_empty": "아직 저장소가 없습니다.",
+    "add": "추가",
+    "add_repo": "GitHub 저장소",
+    "add_repo_hint": "어느 컴퓨터에서 실행해도 체크아웃됩니다",
+    "add_local": "로컬 폴더...",
+    "add_local_hint": "이 컴퓨터에서 실행할 때만 사용됩니다",
+    "add_local_desktop_only": "데스크톱 앱에서만 사용할 수 있습니다",
+    "add_local_exists": "이 컴퓨터에는 이미 설정되어 있습니다",
+    "empty": "에이전트가 작업할 저장소나 로컬 폴더를 추가하세요.",
+    "empty_read_only": "아직 저장소나 로컬 폴더가 없습니다.",
+    "row_menu": "{{name}} 작업",
+    "copy_url": "URL 복사",
+    "copy_path": "경로 복사",
+    "toast_copied": "복사했습니다",
+    "local_dialog_title": "로컬 폴더 추가",
+    "local_dialog_description": "이 컴퓨터에서 실행하면 새로 체크아웃하지 않고 이 폴더를 사용합니다.",
+    "local_dialog_change": "변경...",
+    "local_dialog_mode_label": "실행 방식",
     "repos_input_placeholder": "검색하거나 GitHub URL 붙여넣기...",
     "repos_add_url": "{{repo}} 추가",
     "repos_search_empty": "일치하는 저장소가 없습니다.",
@@ -102,13 +168,9 @@
     "toast_attach_failed": "추가하지 못했습니다",
     "toast_removed": "제거했습니다",
     "toast_remove_failed": "제거하지 못했습니다",
-    "local_group": "로컬 폴더",
-    "local_group_hint": "컴퓨터당 하나이며, 그 컴퓨터에서만 사용됩니다.",
     "local_this_computer": "이 컴퓨터",
     "local_unknown_computer": "다른 컴퓨터",
     "local_offline": "오프라인",
-    "local_slot_description": "이 컴퓨터에서 실행하면 새로 체크아웃하지 않고 내 폴더를 사용합니다.",
-    "local_pick": "폴더 선택...",
     "local_daemon_offline_hint": "폴더를 선택하려면 로컬 데몬을 시작하세요.",
     "chat_hint_prefix": "에이전트가 다음 위치에서 직접 작업합니다:",
     "chat_hint_worktree_prefix": "에이전트가 다음 저장소의 격리된 worktree에서 작업합니다:",
@@ -136,7 +198,7 @@
     "mode_badge_in_place": "직접",
     "ref_label": "시작 브랜치",
     "ref_placeholder": "main",
-    "ref_hint": "작업은 이 브랜치에서 시작하고 풀 리퀘스트도 이 브랜치로 엽니다. 비워 두면 기본 브랜치를 사용합니다.",
+    "ref_hint": "에이전트 실행은 이 브랜치에서 분기하여 이 브랜치를 대상으로 풀 리퀘스트를 엽니다. 비워 두면 기본 브랜치를 사용합니다.",
     "ref_error_too_long": "255자 이내로 입력하세요.",
     "ref_error_characters": "브랜치 이름에는 공백이나 ~ ^ : ? * [ \\ 를 사용할 수 없습니다",
     "ref_error_format": "유효한 브랜치 이름이 아닙니다.",
@@ -148,14 +210,16 @@
     "toast_ref_update_failed": "브랜치를 업데이트하지 못했습니다",
     "ref_error_commit": "이것은 브랜치가 아니라 커밋입니다. 특정 리비전이 필요하면 multica repo checkout --ref를 사용하세요.",
     "ref_default_label": "기본 브랜치",
-    "ref_running_note": "이미 진행 중인 작업에는 영향이 없습니다."
+    "ref_running_note": "이미 진행 중인 실행에는 영향을 주지 않습니다."
   },
   "delete_dialog": {
     "offline_error": "오프라인 상태입니다. 다시 연결한 후 삭제를 재시도하세요.",
     "title": "프로젝트 삭제",
     "description": "프로젝트가 삭제됩니다. 태스크는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",
     "confirm": "삭제",
-    "cancel": "취소"
+    "cancel": "취소",
+    "archive_instead": "대신 보관",
+    "archive_hint": "보관하면 모든 태스크, 기록, 설정이 그대로 유지됩니다."
   },
   "picker": {
     "no_project": "프로젝트 없음",
@@ -178,7 +242,7 @@
     "slides": {
       "progress": {
         "title": "진행 상황을 한눈에",
-        "description": "상태, 리드, 목표일, 완료율이 카드 한 장에 모여 있어 태스크를 하나씩 열어 볼 필요가 없습니다."
+        "description": "상태, 리드, 마감일, 완료율이 카드 한 장에 모여 있어 모든 태스크를 일일이 열어 볼 필요가 없습니다."
       },
       "context": {
         "title": "실행마다 컨텍스트가 따라갑니다",
@@ -204,6 +268,7 @@
     }
   },
   "access": {
+    "agent_notice": "에이전트의 접근 권한은 소유자를 따릅니다.",
     "label": "접근 권한",
     "title": "{{title}} 접근 권한",
     "description": "프로젝트와 해당 태스크, 댓글, 첨부 파일을 볼 수 있는 사람을 설정합니다.",
@@ -214,7 +279,8 @@
     "search": "이름 또는 이메일로 검색...",
     "no_members": "일치하는 멤버가 없습니다",
     "no_selected": "프로젝트 멤버가 없습니다",
-    "admin_notice": "워크스페이스 owner와 admin은 항상 접근할 수 있습니다.",
+    "members_only_notice": "이 목록에 있는 멤버만 접근할 수 있습니다. 워크스페이스 owner와 admin도 추가해야 합니다.",
+    "manager": "액세스 관리",
     "you": "나",
     "remove": "{{name}} 제거",
     "failed": "접근 권한을 저장할 수 없습니다.",
@@ -223,5 +289,24 @@
     "publish_description": "모든 워크스페이스 멤버가 프로젝트와 해당 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
     "done": "완료",
     "retry": "다시 시도"
+  },
+  "archive": {
+    "badge": "보관됨",
+    "dialog_title": "“{{name}}” 프로젝트를 보관할까요?",
+    "dialog_title_count_other": "프로젝트 {{count}}개를 보관할까요?",
+    "dialog_description": "보관된 프로젝트는 프로젝트 목록과 선택 메뉴에서 숨겨지고 새 태스크를 받지 않습니다. 삭제되는 것은 없습니다.",
+    "dialog_open_issues_other": "완료되지 않은 태스크 {{count}}개는 그대로 남으며 계속 보고 편집할 수 있습니다.",
+    "dialog_autopilots_other": "이 프로젝트에 태스크를 만드는 활성 자동화 {{count}}개가 일시 중지됩니다.",
+    "dialog_restore_hint": "‘보관된 프로젝트’에서 언제든 복원할 수 있습니다.",
+    "cancel": "취소",
+    "confirm": "보관",
+    "toast_archived": "“{{name}}” 프로젝트를 보관했습니다",
+    "toast_archived_count_other": "프로젝트 {{count}}개를 보관했습니다",
+    "toast_paused_other": "이 프로젝트에 태스크를 만드는 자동화 {{count}}개를 일시 중지했습니다",
+    "undo": "실행 취소",
+    "toast_restored": "“{{name}}” 프로젝트를 복원했습니다",
+    "toast_completed": "“{{name}}” 프로젝트를 완료했습니다",
+    "notice": "보관된 프로젝트입니다. 프로젝트 목록과 선택 메뉴에 표시되지 않고 새 태스크를 받지 않습니다. 기존 태스크는 계속 보고 편집할 수 있습니다.",
+    "prop_label": "보관"
   }
 }

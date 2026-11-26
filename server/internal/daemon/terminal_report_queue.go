@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -54,6 +55,7 @@ type persistedTerminalTaskReport struct {
 	WorkDir               string    `json:"work_dir,omitempty"`
 	DurableWorkDir        string    `json:"durable_work_dir,omitempty"`
 	FailureReason         string    `json:"failure_reason,omitempty"`
+	NoToolCallsStarted    bool      `json:"no_tool_calls_started,omitempty"`
 	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
 	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
 
@@ -89,6 +91,7 @@ type terminalReportStore struct {
 	namespace string
 	dir       string
 	mu        sync.Mutex
+	lastStats atomic.Pointer[terminalReportStoreStats]
 }
 
 func newTerminalReportStore(cfg Config) *terminalReportStore {
@@ -144,6 +147,7 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 		WorkDir:               report.workDir,
 		DurableWorkDir:        report.durableWorkDir,
 		FailureReason:         report.failureReason,
+		NoToolCallsStarted:    report.noToolCallsStarted,
 		SessionRolloutMissing: report.sessionRolloutMissing,
 		RetiredSessionID:      report.retiredSessionID,
 	}, nil
@@ -175,6 +179,7 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		workDir:               record.WorkDir,
 		durableWorkDir:        record.DurableWorkDir,
 		failureReason:         record.FailureReason,
+		noToolCallsStarted:    record.NoToolCallsStarted,
 		sessionRolloutMissing: record.SessionRolloutMissing,
 		retiredSessionID:      record.RetiredSessionID,
 	}, nil
@@ -567,7 +572,14 @@ func (s *terminalReportStore) stats() (terminalReportStoreStats, error) {
 	if s == nil {
 		return terminalReportStoreStats{}, nil
 	}
-	s.mu.Lock()
+	// A queue write can hold the lock while it flushes to disk. Health probes
+	// can use the last successful sample while that work is in progress.
+	if !s.mu.TryLock() {
+		if previous := s.lastStats.Load(); previous != nil {
+			return *previous, nil
+		}
+		return terminalReportStoreStats{}, nil
+	}
 	defer s.mu.Unlock()
 	var stats terminalReportStoreStats
 	var errs []error
@@ -581,7 +593,11 @@ func (s *terminalReportStore) stats() (terminalReportStoreStats, error) {
 	} else {
 		stats.FailedCount, stats.FailedBytes = count, bytes
 	}
-	return stats, errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return stats, err
+	}
+	s.lastStats.Store(&stats)
+	return stats, nil
 }
 
 // otherNamespaceStats surfaces records owned by a different server/profile/

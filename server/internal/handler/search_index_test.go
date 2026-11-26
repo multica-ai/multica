@@ -345,6 +345,9 @@ func TestDeleteWorkspace_ClearsSearchIndexChanges(t *testing.T) {
 	if n := dbfx.Count(t, `SELECT count(*) FROM search_index_change WHERE workspace_id = $1`, wsID); n == 0 {
 		t.Fatal("writes should have logged search index changes")
 	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member_search_access (workspace_id, user_id, changed_xid) VALUES ($1, $2, pg_current_xact_id())`, wsID, testUserID); err != nil {
+		t.Fatalf("record search access marker: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	testHandler.DeleteWorkspace(w, withURLParam(newRequest(http.MethodDelete, "/api/workspaces/"+wsID, nil), "id", wsID))
@@ -353,6 +356,9 @@ func TestDeleteWorkspace_ClearsSearchIndexChanges(t *testing.T) {
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM search_index_change WHERE workspace_id = $1`, wsID); n != 0 {
 		t.Fatalf("workspace teardown left %d search index change rows", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM member_search_access WHERE workspace_id = $1`, wsID); n != 0 {
+		t.Fatalf("workspace teardown left %d search access markers", n)
 	}
 }
 

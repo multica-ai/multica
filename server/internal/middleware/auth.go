@@ -230,7 +230,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					if patAuth.IsService {
 						r.Header.Set("X-Actor-Source", ActorSourceServiceAccount)
 					}
-					next.ServeHTTP(w, r)
+					next.ServeHTTP(w, r.WithContext(withPersonalAccessToken(r.Context())))
 					return
 				}
 
@@ -272,7 +272,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// within the TTL window skip this write entirely.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(withPersonalAccessToken(r.Context())))
 				return
 			}
 

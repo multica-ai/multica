@@ -15,7 +15,7 @@ The rule is stored on the issue, so nothing runs while it waits. Members create 
 <Steps>
 <Step>
 
-Open the issue and click **+** next to **Wakeups** in the issue sidebar.
+Open the issue and click **+** next to **Wakeups** in the issue sidebar. While the issue has no wakeups, the section is hidden: use the **Add …** row at the bottom of the sidebar instead, such as **Add wakeup** or **Add wakeup or pull request**.
 
 </Step>
 <Step>
@@ -25,7 +25,7 @@ After **When**, choose a condition and fill in what it needs, such as a time, th
 </Step>
 <Step>
 
-After **Wake**, choose the agent. If the issue's assignee is an agent, it is already selected. You can only choose agents that are bound to a runtime and that you are allowed to run; see [Permissions and Access](/agents#permissions-and-access).
+After **Wake**, choose the agent. If the issue's assignee is an agent you can run, it is already selected. You can only choose agents that are bound to a runtime and that you are allowed to run; see [Permissions and Access](/agents#permissions-and-access).
 
 </Step>
 <Step>
@@ -42,7 +42,7 @@ Click **Create**.
 
 Runs a wakeup starts act on behalf of the person who created it, and Multica checks again before the run starts that this person may still run the agent.
 
-In the issue below, Ops helper has asked suppliers for quotes and is waiting for their replies. Add a wakeup, then skip ahead to the wakeup time. Choose "Check regularly" to also see how the agent ends a check without commenting when nothing has arrived yet.
+The clip below adds a one-hour wakeup for Engineer from the issue sidebar, specifying what to check when the wakeup fires and saving the scheduled rule onto the issue.
 
 <WakeupDemo />
 
@@ -76,7 +76,6 @@ When the issue's assignee is an agent, members' comments already trigger it. A "
 - When a regular check finds nothing that needs a reply, the agent can end with a **silent check**: no comment, only a note in the issue timeline and in the rule's trigger history. Consecutive silent checks collapse into one timeline entry.
 - An agent's own comments and its own changes to the issue never wake it.
 - If the same agent already has a run waiting to start on the issue, the wakeup joins that run instead of starting another one.
-- While a wakeup is waiting, the issue header shows what the issue is waiting for, such as "Ops helper: Waiting for a reply". Click it to jump to the Wakeups section.
 
 ## Workflow steps on continued work [#workflow-steps]
 
@@ -100,7 +99,7 @@ The Wakeups section of the issue sidebar lists the issue's rules: the condition,
 
 | Action | Result |
 |---|---|
-| Turn the switch off | Stops later wakeups and withdraws runs that have not started. A run that already started keeps going; stop it from the execution log if needed. |
+| Turn the switch in its details off | Stops later wakeups and withdraws runs that have not started. A run that already started keeps going; stop it from the execution log if needed. |
 | **Wake now** | Wakes the agent once right away, without waiting for the condition. |
 | Edit the instruction | Affects later wakeups only; a run in progress is unchanged. |
 | **Delete** | The rule no longer wakes anyone. Runs that have not started are withdrawn; started ones continue. |
@@ -108,7 +107,7 @@ The Wakeups section of the issue sidebar lists the issue's rules: the condition,
 
 Rules that have ended move to **Wakeup history**. Only the rule's creator and workspace owners and admins can manage it. A wakeup an agent creates during a run belongs to the member who started that run, and shows as "Ops helper, on behalf of Lei Li".
 
-To see every wakeup in the workspace, open **Autopilot** and switch to the **Issue wakeups** tab. You can filter by state (Waiting or executing, Paused, Turned off, Ended), trigger type, source, and agent, turn several off at once, or create a wakeup after picking its issue.
+To see every wakeup in the workspace, open **Auto** in the app rail and switch to the **Issue wakeups** tab. You can filter by state (Waiting or executing, Paused, Turned off, Ended), trigger type, source, and agent, turn several off at once, or create a wakeup after picking its issue.
 
 ## Automatic endings and pauses [#limits]
 
@@ -119,14 +118,15 @@ To see every wakeup in the workspace, open **Autopilot** and switch to the **Iss
 
 ## Wake the parent when sub-issues finish [#child-done]
 
-When an issue has sub-issues, its Wakeups section shows a rule marked **System**. Nobody needs to create it:
+When an issue has sub-issues, a chip next to its **Sub-issues** heading shows a rule marked **System**, such as "Wakes Lambda when all finish". Click it for the rule's progress, its instruction, and the switch that turns it off for this issue. Nobody needs to create it:
 
-- When every sub-issue in a stage is closed and a later stage is still waiting, it wakes the parent's assignee, and it wakes them once more when every sub-issue is closed. Sub-issues without stages wake the parent once, when the last one closes.
+- When every sub-issue in a stage is closed while the next stage has sub-issues parked in `backlog` to promote, it wakes the parent's assignee, and it wakes them once more when every sub-issue is closed. Next-stage sub-issues already in `todo` start automatically once earlier stages finish without waking the parent in between. Sub-issues without stages wake the parent once, when the last one closes.
+- Adding or reopening a sub-issue does not wake anyone, including a stage added after every sub-issue closed: move it out of `backlog` to start it, or mention the assignee to organize it.
 - An agent assignee is woken; for a squad, its leader is woken; a member assignee gets an inbox notification instead. Without an assignee, nobody is woken.
 - While the parent is in `backlog`, nothing is woken; it catches up once the parent leaves `backlog`.
 - The default instruction tells the agent which stage closed and which comes next: check its dependencies, then move the next stage's sub-issues out of `backlog`. When every sub-issue is closed, it brings their results together on the parent.
 
-The parent's assignee is already woken by this rule, so do not add a "Sub-issues finish" wakeup for the same thing. To set up stages, see [Issues](/issues#projects-and-sub-issues).
+The parent's assignee is already woken by this rule, so do not add a "Sub-issues finish" wakeup for the same thing. To set up stages, see [Issues](/issues#projects-and-sub-issues). Issues waiting on manual or stage [blockers](/issues#relations) also have a system dependency wakeup that automatically starts their assignee (or notifies a member) once every blocker ends, unless the issue is in `backlog`.
 
 On a single issue, any workspace member can turn this rule off or rewrite its instruction (up to 4,000 bytes); agents cannot change it. Once changed, that issue no longer follows the workspace default.
 

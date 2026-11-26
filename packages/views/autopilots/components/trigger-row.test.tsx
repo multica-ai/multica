@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AutopilotTrigger } from "@multica/core/types";
@@ -70,11 +70,16 @@ function trigger(overrides: Partial<AutopilotTrigger> = {}): AutopilotTrigger {
   };
 }
 
-function renderRow(trig: AutopilotTrigger, canWrite = true) {
+function renderRow(trig: AutopilotTrigger, canWrite = true, autopilotActive = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
     <QueryClientProvider client={qc}>
-      <TriggerRow trigger={trig} autopilotId={AUTOPILOT_ID} canWrite={canWrite} />
+      <TriggerRow
+        trigger={trig}
+        autopilotId={AUTOPILOT_ID}
+        canWrite={canWrite}
+        autopilotActive={autopilotActive}
+      />
     </QueryClientProvider>,
   );
 }
@@ -102,6 +107,14 @@ describe("TriggerRow", () => {
     expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
   });
 
+  it("stops promising a next run while the autopilot is paused", () => {
+    // Pausing the autopilot leaves its triggers enabled and their next_run_at
+    // in place, but the scheduler skips every trigger of a paused autopilot.
+    renderRow(trigger(), true, false);
+
+    expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
+  });
+
   it("opens the editor on the schedule this row runs", async () => {
     const user = userEvent.setup();
     renderRow(trigger());
@@ -124,5 +137,72 @@ describe("TriggerRow", () => {
     renderRow(trigger(), false);
 
     expect(screen.queryByRole("button", { name: "Edit schedule" })).not.toBeInTheDocument();
+  });
+});
+
+// A webhook's filters used to be reachable only through the autopilot dialog,
+// which renders them for the first trigger alone: a webhook added beside a
+// schedule, or a second webhook, could not be edited anywhere.
+describe("TriggerRow on a webhook", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function webhook(overrides: Partial<AutopilotTrigger> = {}): AutopilotTrigger {
+    return trigger({
+      id: "trg-hook",
+      kind: "webhook",
+      cron_expression: null,
+      timezone: null,
+      next_run_at: null,
+      webhook_token: "tok-1",
+      ...overrides,
+    });
+  }
+
+  it("opens the editor on the webhook this row fires", async () => {
+    const user = userEvent.setup();
+    renderRow(webhook({ event_filters: [{ event: "pull_request", actions: ["opened"] }] }));
+
+    await user.click(screen.getByRole("button", { name: "Edit webhook" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Edit webhook", { selector: "h2" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: "Event" })).toHaveValue("pull_request");
+  });
+
+  it("says a webhook without filters accepts every event", () => {
+    renderRow(webhook());
+
+    expect(screen.getByText("Accepts all events")).toBeInTheDocument();
+  });
+
+  it("reads out each filter rule with its payload condition count", () => {
+    renderRow(
+      webhook({
+        event_filters: [
+          {
+            event: "pull_request",
+            actions: ["opened", "synchronize"],
+            conditions: [
+              { path: "pull_request.base.ref", op: "equals", value: "main" },
+              { path: "sender.type", op: "not_equals", value: "Bot" },
+            ],
+          },
+          { event: "issues" },
+        ],
+      }),
+    );
+
+    expect(screen.getByTitle("pull_request · opened, synchronize · 2 conditions")).toBeInTheDocument();
+    expect(screen.getByTitle("issues")).toBeInTheDocument();
+    expect(screen.queryByText("Accepts all events")).not.toBeInTheDocument();
+  });
+
+  it("shows a reader who cannot write the filters but no edit entry", () => {
+    renderRow(webhook(), false);
+
+    expect(screen.getByText("Accepts all events")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit webhook" })).not.toBeInTheDocument();
   });
 });

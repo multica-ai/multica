@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Webhook, ChevronDown, ChevronRight, Copy, Check } from "@multica/ui/icons";
+import { Webhook, ChevronDown, ChevronRight } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -116,11 +117,7 @@ export function WebhookPayloadPreview({
                 "flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors",
               )}
             >
-              {copied ? (
-                <Check className="h-3 w-3 text-emerald-500" />
-              ) : (
-                <Copy className="h-3 w-3" />
-              )}
+              <CopyCheckIcon copied={copied} className="size-3" />
               {copied
                 ? t(($) => $.webhook_payload.copied_short)
                 : t(($) => $.webhook_payload.copy)}

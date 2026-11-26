@@ -29,22 +29,22 @@
     "page_context_add": "Add this page as context",
     "page_context_remove": "Remove page context",
     "placeholder_no_agent": "Create an agent to start chatting",
-    "placeholder_archived": "This session is archived",
+    "placeholder_archived": "This chat is archived",
     "placeholder_archived_agent": "This agent has been archived",
     "placeholder_runtime_required": "Bind a runtime to continue",
     "placeholder_access_revoked": "You no longer have permission to run this agent",
-    "placeholder_named": "Message {{name}}…",
-    "placeholder_default": "Start a message…",
+    "placeholder_named": "Message {{name}}...",
+    "placeholder_default": "Start a message...",
     "send_tooltip": "Send",
     "queue_send_tooltip": "Queue message",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
     "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
     "runtime_required_toast": "Message not sent — bind a runtime to this agent first",
-    "runtime_access_denied_toast": "Message not sent — this agent can't run on its private runtime. Make the runtime public, or rebind/copy the agent to a runtime its owner can use",
+    "runtime_access_denied_toast": "This agent's private runtime isn't accessible. Make the runtime public, or bind the agent to an accessible runtime.",
     "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
     "add_tooltip": "Add",
-    "upload_file": "Image or files",
+    "upload_file": "Images or files",
     "project_context": "Project context",
     "change_project_context": "Change project context",
     "remove_project_context": "Remove project context",
@@ -55,10 +55,10 @@
     "title_one": "{{count}} queued message",
     "title_other": "{{count}} queued messages",
     "clear": "Clear all",
-    "steer": "Steer",
-    "steer_unavailable": "Steer is available after the current reply starts",
+    "steer": "Send now (stops current reply)",
+    "steer_unavailable": "Available after the current reply starts",
     "steer_no_permission": "You no longer have permission to run this agent",
-    "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
+    "steer_unavailable_toast": "Send now is unavailable. Refreshing the queue.",
     "edit": "Edit queued message",
     "remove": "Remove queued message",
     "more": "More queue actions",
@@ -78,18 +78,19 @@
       "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
       "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
       "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
-      "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
+      "runtime_access_denied": "This agent's private runtime isn't accessible. Make the runtime public, or bind the agent to an accessible runtime.",
       "runtime_recovery": "The agent restarted before it could finish. Please try again.",
       "runtime_access_revoked": "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
       "manual": "This reply was cancelled.",
       "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
-      "runtime_cli_timeout": "The local OpenClaw CLI didn't answer in time, so this run never started. It's a local startup timeout, not a network problem — retrying won't help until the CLI gets faster or the timeout is raised (MULTICA_OPENCLAW_CLI_TIMEOUT).",
+      "runtime_cli_timeout": "The local OpenClaw CLI timed out before answering. Check your local OpenClaw CLI setup or raise MULTICA_OPENCLAW_CLI_TIMEOUT before retrying.",
       "environment_prepare_failed": "The machine running the agent couldn't set this run up, so it never started. The error below says what failed there — often disk space, a permission, a folder still in use, or a local config that couldn't be read. It isn't the agent or the model provider.",
+      "local_directory_missing": "The local folder linked to this project no longer exists on the machine running the agent, so the run never started. Restore the folder, then try again. To use a different folder, open the project in the desktop app on that machine, remove the old folder from Resources, and add the new one with Add → Local folder... — a browser can't choose folders.",
       "provider_network": "The connection to the model provider dropped before the reply finished. Check your network and try again.",
-      "provider_auth_or_access": "The agent's model account isn't signed in any more. Sign in again, then retry.",
+      "provider_auth_or_access": "The provider rejected this agent's credentials or access. Check the API key or account — it may have expired or no longer have access.",
       "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
       "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
-      "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
+      "context_overflow": "This chat got too long for the model. Start a new chat to continue.",
       "runtime_missing_executable": "The agent's CLI couldn't be run on this machine. Check that it's installed correctly and on PATH, then retry.",
       "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",
       "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
@@ -103,7 +104,7 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
-    "loading_older": "Loading older messages…",
+    "loading_older": "Loading older messages...",
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
@@ -135,9 +136,9 @@
       "confirming": "Stopping..."
     },
     "delete_dialog": {
-      "title": "Delete chat session",
+      "title": "Delete chat",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
-      "description_default": "This chat session and its messages will be permanently removed. This action cannot be undone.",
+      "description_default": "This chat session and its messages will be permanently deleted. This can't be undone.",
       "cancel": "Cancel",
       "confirm": "Delete",
       "confirming": "Deleting..."
@@ -208,12 +209,12 @@
     "digest": {
       "title": "Let the daily digest write itself",
       "desc": "A morning summary of workspace progress, straight to your inbox.",
-      "prompt": "Set up a daily automation that posts a morning summary of workspace progress"
+      "prompt": "Set up a daily autopilot that summarizes yesterday's workspace activity each morning."
     },
     "digest_badge": "Daily 9:00"
   },
   "no_agent_banner": "You need an agent to start chatting.",
-  "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
+  "archived_agent_banner": "{{name}} is archived, so this chat is read-only.",
   "agent_access_revoked_banner": "You no longer have permission to run {{name}} — this conversation is read-only.",
   "runtime_required_banner": {
     "fallback_name": "The agent",
@@ -221,7 +222,7 @@
     "action": "Bind runtime"
   },
   "offline_banner": {
-    "fallback_name": "the agent",
+    "fallback_name": "The agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
     "offline": "{{name}} is offline — your message will be delivered when they're back."
   },
@@ -247,7 +248,7 @@
     }
   },
   "list": {
-    "typing": "Typing…",
+    "typing": "Typing...",
     "failed": "Failed to send",
     "you_prefix": "You: ",
     "no_messages": "No messages yet",
@@ -261,7 +262,9 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "archived_title": "Archived",
-    "row_actions_aria": "Chat actions"
+    "row_actions_aria": "Chat actions",
+    "wakeup_preview": "Came back to report",
+    "wakeup_active": "Waiting to report back"
   },
   "header": {
     "agent_settings": "Agent settings",
@@ -269,5 +272,59 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "wakeup": {
+    "panel_title": "Wakeups",
+    "panel_empty": "No wakeups in this conversation",
+    "panel_ended": "Ended recently",
+    "strip_waiting": "Waiting: {{title}}",
+    "card": "Will report back: {{title}}",
+    "ends": "ends {{relative}}",
+    "reminder_at": "reminder {{relative}}",
+    "next_check": "next check {{relative}}",
+    "last_check": "Last check: {{note}}",
+    "cancel": "Cancel wakeup",
+    "cancel_failed": "Couldn't cancel the wakeup",
+    "retry": "Retry",
+    "retry_failed": "Couldn't retry the wakeup",
+    "change_timing": "Change timing",
+    "timing_interval": "Every",
+    "timing_deadline": "Until",
+    "timing_reminder": "Remind",
+    "timing_keep": "No change",
+    "timing_custom": "Custom",
+    "timing_check_limit": "At most {{max}} checks",
+    "timing_failed": "Couldn't change the timing",
+    "status": {
+      "active": "Waiting",
+      "fired": "Reported back",
+      "expired": "Deadline reached",
+      "cancelled": "Cancelled",
+      "failed": "Couldn't run"
+    },
+    "report": {
+      "waiting": "Waiting to report",
+      "running": "Reporting...",
+      "failed": "Couldn't report"
+    },
+    "failure": {
+      "permission_revoked": "The person who asked can no longer run this agent",
+      "access_lost": "What it watched moved to a private project",
+      "dispatch_failed": "The agent couldn't run"
+    },
+    "kind": {
+      "condition": "When it happens",
+      "at": "Reminder",
+      "check": "Periodic check"
+    },
+    "divider": {
+      "condition": "Back to report · it happened",
+      "at": "Back to report · reminder",
+      "check": "Back to report · check",
+      "expired": "Back to report · deadline reached",
+      "generic": "Back to report"
+    },
+    "queue_label": "Wakeup: {{title}}",
+    "queue_fallback": "Wakeup"
   }
 }

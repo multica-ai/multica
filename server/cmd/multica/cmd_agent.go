@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,7 +98,7 @@ var agentEnvCmd = &cobra.Command{
 
 var agentEnvGetCmd = &cobra.Command{
 	Use:   "get <agent-id>",
-	Short: "Print an agent's custom_env as a JSON map (agent owner or workspace owner/admin; every call is recorded)",
+	Short: "Print an agent's custom_env as a JSON map, values masked as **** unless --show-values (agent owner or workspace owner/admin; every call is recorded)",
 	Args:  exactArgs(1),
 	RunE:  runAgentEnvGet,
 }
@@ -239,6 +240,7 @@ func init() {
 
 	// agent env get
 	agentEnvGetCmd.Flags().String("output", "json", "Output format: json or table")
+	agentEnvGetCmd.Flags().Bool("show-values", false, "Print custom_env values in cleartext (default: mask them)")
 
 	// agent env set. Same three secret-safe input channels as `agent
 	// create` so scripts can keep secrets out of shell history. Mutual
@@ -247,6 +249,7 @@ func init() {
 	agentEnvSetCmd.Flags().Bool("custom-env-stdin", false, "Read the replacement custom_env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentEnvSetCmd.Flags().String("custom-env-file", "", "Read the replacement custom_env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
+	agentEnvSetCmd.Flags().Bool("show-values", false, "Print custom_env values in cleartext (default: mask them)")
 }
 
 // resolveProfile returns the --profile flag value (empty string means default profile).
@@ -259,6 +262,9 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
+		if hint := replacedTaskTokenHint(token); hint != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
+		}
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
 		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), name the exact file and say
 		// whether it can be a leftover, instead of an opaque "requires mat_
@@ -398,6 +404,19 @@ func daemonPortOnlyContextHint() string {
 		return ""
 	}
 	return "; MULTICA_DAEMON_PORT is set without task identity — if this is a host or container startup shell, remove that variable and retry"
+}
+
+// replacedTaskTokenHint explains a task that holds a personal access token.
+// The daemon always injects a mat_ token next to MULTICA_TASK_ID, and an
+// agent's custom env cannot override MULTICA_*, so a mul_ token here was put
+// back after launch — typically by a secrets manager wrapping the runtime
+// command (`doppler run`) or a shell profile exporting MULTICA_TOKEN (#7666).
+// The hint names the prefix only, never the token.
+func replacedTaskTokenHint(token string) string {
+	if !strings.HasPrefix(token, "mul_") || strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) == "" {
+		return ""
+	}
+	return "; MULTICA_TOKEN holds a personal access token (mul_) although MULTICA_TASK_ID is set, so something between the daemon and this command replaced the task token — usually a secrets manager in the runtime's launch command or a shell profile exporting MULTICA_TOKEN. Let the daemon's MULTICA_* values win (Doppler: doppler run --preserve-env=MULTICA_TOKEN -- <agent command>); see https://multica.ai/docs/daemon-runtimes#secrets-managers"
 }
 
 // requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost
@@ -1143,9 +1162,10 @@ func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result j
 // Agent env subcommands
 
 // runAgentEnvGet fetches the plaintext custom_env for a single agent
-// via the audited `/env` endpoint. The CLI prints raw JSON in JSON
-// mode and a key/value table otherwise; we never truncate or mask
-// values here — the security gate is on the server, not the printer.
+// via the audited `/env` endpoint. Values are masked in both output modes
+// unless --show-values is given: the secret-safe input channels keep secrets
+// off the command line, and printing them would put them straight back on
+// stdout.
 func runAgentEnvGet(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1161,18 +1181,43 @@ func runAgentEnvGet(cmd *cobra.Command, args []string) error {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
+	reveal, _ := cmd.Flags().GetBool("show-values")
+	result := agentEnvForOutput(resp, reveal)
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, resp)
+		return cli.PrintJSON(os.Stdout, result)
 	}
 
 	headers := []string{"KEY", "VALUE"}
-	env, _ := resp["custom_env"].(map[string]any)
+	env, _ := result["custom_env"].(map[string]any)
 	rows := make([][]string, 0, len(env))
 	for k, v := range env {
 		rows = append(rows, []string{k, fmt.Sprintf("%v", v)})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+const agentEnvMaskedValue = "****"
+
+// agentEnvForOutput copies an /env response with every custom_env value
+// replaced by a fixed placeholder. The copy keeps the caller's response
+// intact, since runAgentEnvSet still reads it after printing.
+func agentEnvForOutput(resp map[string]any, reveal bool) map[string]any {
+	if reveal || resp == nil {
+		return resp
+	}
+	result := make(map[string]any, len(resp))
+	for key, value := range resp {
+		result[key] = value
+	}
+	if env, ok := result["custom_env"].(map[string]any); ok {
+		masked := make(map[string]any, len(env))
+		for key := range env {
+			masked[key] = agentEnvMaskedValue
+		}
+		result["custom_env"] = masked
+	}
+	return result
 }
 
 // runAgentEnvSet replaces an agent's custom_env wholesale via the
@@ -1194,6 +1239,7 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("specify the new env via --custom-env, --custom-env-stdin, or --custom-env-file (pass '{}' to clear)")
 	}
+	warnAgentEnvMaskedInput(os.Stderr, args[0], ce)
 
 	body := map[string]any{"custom_env": ce}
 
@@ -1206,13 +1252,34 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
+	reveal, _ := cmd.Flags().GetBool("show-values")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
+		return cli.PrintJSON(os.Stdout, agentEnvForOutput(result, reveal))
 	}
 
 	env, _ := result["custom_env"].(map[string]any)
 	fmt.Printf("Env updated for agent %s (%d keys)\n", args[0], len(env))
 	return nil
+}
+
+// warnAgentEnvMaskedInput flags **** values in an `env set` payload. The
+// server keeps the target agent's existing value for such a key and drops
+// the key when the agent has none, so piping masked `env get` output from
+// one agent into another succeeds while copying nothing. Only key names are
+// printed, never values.
+func warnAgentEnvMaskedInput(w io.Writer, agentID string, ce map[string]string) {
+	var keys []string
+	for k, v := range ce {
+		if v == agentEnvMaskedValue {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sort.Strings(keys)
+	fmt.Fprintf(w, "Note: %s set to %s keep agent %s's existing value; keys that agent does not already have are dropped.\n", strings.Join(keys, ", "), agentEnvMaskedValue, agentID)
+	fmt.Fprintln(w, "To copy env from another agent, read it with 'multica agent env get <source-agent-id> --show-values'.")
 }
 
 // Helpers

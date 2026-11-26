@@ -9,6 +9,8 @@ import {
   isShortcutAllowedForAction,
   parseLegacyShortcut,
   shortcutChordEquals,
+  shortcutFirstStep,
+  shortcutMatchesEvent,
   type ShortcutActionId,
   type ShortcutChord,
 } from "./definitions";
@@ -23,7 +25,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function sanitizeShortcutChord(value: unknown): ShortcutChord | null | undefined {
+function sanitizeShortcutChord(value: unknown, depth = 0): ShortcutChord | null | undefined {
   if (value === null) return null;
   if (!isRecord(value) || typeof value.key !== "string" || value.key.length === 0) {
     return undefined;
@@ -40,7 +42,7 @@ function sanitizeShortcutChord(value: unknown): ShortcutChord | null | undefined
   ) {
     return undefined;
   }
-  return {
+  const chord: ShortcutChord = {
     key: value.key,
     modifiers: {
       primary,
@@ -50,6 +52,13 @@ function sanitizeShortcutChord(value: unknown): ShortcutChord | null | undefined
       shift,
     },
   };
+  // A sequence has two steps, never more.
+  if (value.then !== undefined) {
+    const then = depth === 0 ? sanitizeShortcutChord(value.then, 1) : undefined;
+    if (!then) return undefined;
+    chord.then = then;
+  }
+  return chord;
 }
 
 /** Drop unknown actions and malformed chords instead of letting storage crash matching/UI. */
@@ -166,14 +175,26 @@ export function getShortcut(actionId: ShortcutActionId): ShortcutChord | null {
   return resolveShortcut(useShortcutStore.getState().overrides, actionId);
 }
 
+/**
+ * Pass the recorded `event` so bindings stored in an older form that the same
+ * keypress would also trigger (an Option chord saved as "©") count as taken.
+ * A key that starts another action's sequence is taken too, and so is a
+ * sequence whose first key is another action's: either would never fire.
+ */
 export function findShortcutConflict(
   actionId: ShortcutActionId,
   shortcut: ShortcutChord,
+  event?: KeyboardEvent,
 ): ShortcutActionId | null {
   for (const action of SHORTCUT_ACTIONS) {
+    if (action.id === actionId) continue;
+    const existing = getShortcut(action.id);
+    if (!existing) continue;
     if (
-      action.id !== actionId &&
-      shortcutChordEquals(getShortcut(action.id), shortcut)
+      shortcutChordEquals(existing, shortcut) ||
+      (event !== undefined && !shortcut.then && shortcutMatchesEvent(existing, event)) ||
+      (!!existing.then !== !!shortcut.then &&
+        shortcutChordEquals(shortcutFirstStep(existing), shortcutFirstStep(shortcut)))
     ) {
       return action.id;
     }

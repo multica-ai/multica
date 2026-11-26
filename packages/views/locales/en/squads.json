@@ -23,14 +23,14 @@
     "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
-    "archiving": "Archiving…",
+    "archiving": "Archiving...",
     "success": "Squad archived"
   },
   "name_editor": {
     "placeholder": "Squad name"
   },
   "add_member_dialog": {
-    "title": "Add Member",
+    "title": "Add member",
     "description": "Choose workspace members or agents.",
     "label_member": "Member",
     "label_role": "Role",
@@ -44,7 +44,7 @@
     "add": "Add"
   },
   "role_editor": {
-    "empty": "Add role…",
+    "empty": "Add role...",
     "placeholder": "Role (e.g. Reviewer)"
   },
   "description_editor": {
@@ -56,7 +56,7 @@
     "add_member_button": "Add member",
     "empty_title": "No members yet",
     "empty_description": "Add agents or members, and issues assigned to this squad go to them.",
-    "create_agent_button": "Create Agent",
+    "create_agent_button": "Create agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
     "make_leader_tooltip": "Make squad leader",
@@ -93,6 +93,21 @@
     "visibility": "Visibility",
     "visibility_workspace": "Workspace"
   },
+  "handoff": {
+    "section_title": "Collaboration",
+    "mode_leader_title": "Leader assigns",
+    "mode_leader_description": "Every step returns to the leader, {{leader}}, who picks the next one. The default for existing squads.",
+    "mode_direct_title": "Members hand off directly",
+    "mode_direct_description": "The leader assigns the first step and handles exceptions. Members pick the next step themselves; handing off for review or asking a person no longer wakes the leader.",
+    "guard_rounds": "Back-and-forth: up to {{limit}} rounds",
+    "guard_daily": "Up to {{limit}} handoffs per issue per day",
+    "guard_failed": "Run failed → back to leader",
+    "guard_no_next": "No next step → back to leader",
+    "saved": "Collaboration mode updated",
+    "brief_title": "What members receive",
+    "brief_hint": "Added to every run on an issue assigned to this squad",
+    "brief_empty": "No agent members yet"
+  },
   "toasts": {
     "member_added": "Member added",
     "member_add_failed": "Failed to add member",
@@ -108,7 +123,7 @@
   },
   "profile_card": {
     "unavailable": "Squad unavailable",
-    "detail_link": "Detail →",
+    "detail_link": "View details →",
     "archived": "Archived",
     "member_count_one": "{{count}} member",
     "member_count_other": "{{count}} members",
@@ -117,7 +132,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "The leader reads these instructions whenever it works on an issue assigned to this squad.",
+    "description": "The leader and every agent member read these instructions whenever they work on an issue assigned to this squad.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save",
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."
@@ -126,7 +141,6 @@
     "mine": "My squads",
     "all": "All squads"
   },
-  "toolbar": {},
   "intro": {
     "title": "Put agents in a squad and they work like a team",
     "description": "Assign an issue to the squad. Its leader agent reads it, hands each step to the member whose role fits, and follows up until the goal is met. You only deal with one assignee.",

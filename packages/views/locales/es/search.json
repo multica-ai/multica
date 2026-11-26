@@ -4,6 +4,7 @@
   "placeholder": "Busca o escribe lo que necesitas hacer...",
   "groups": {
     "pages": "Páginas",
+    "views": "Vistas",
     "commands": "Comandos",
     "members": "Miembros",
     "projects": "Proyectos",
@@ -16,6 +17,7 @@
     "autopilots": "Automatizaciones",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Documentos",
     "new": "Nuevo",
     "best_match": "Mejor coincidencia",
     "actions": "Acciones"
@@ -43,7 +45,6 @@
     "unsubscribed": "Suscripción cancelada",
     "label_added": "Etiqueta {{name}} añadida",
     "label_removed": "Etiqueta {{name}} quitada",
-    "label_failed": "No se ha podido añadir la etiqueta {{name}} a todas las tareas",
     "update_failed": "La actualización falló",
     "assigned": "{{identifier}} asignada a {{name}}"
   },
@@ -140,7 +141,7 @@
   },
   "delegate": {
     "row": "Encargar a un agente: «{{prompt}}»",
-    "hint": "Creación rápida"
+    "hint": "Crear con agente"
   },
   "best": {
     "assign": "Asignar {{subject}} a {{name}}",
@@ -163,5 +164,6 @@
     "prefix_commands": "Comandos",
     "prefix_issues": "Tareas",
     "prefix_people": "Personas y agentes"
-  }
+  },
+  "untitled_doc": "Sin título"
 }

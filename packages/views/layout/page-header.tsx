@@ -21,7 +21,7 @@ import { useAppShell } from "./app-shell-context";
  * anywhere that edge matters instead of writing the class again; a page that
  * spells its own gutter is the bug coming back.
  */
-export const PAGE_GUTTER = "px-4";
+export const PAGE_GUTTER = "px-[var(--page-padding-x,var(--space-md,1rem))]";
 
 /**
  * The centred column a detail page reads inside: `runtimes`, and the agent and
@@ -127,13 +127,13 @@ export function usePageHeaderTitleBar(): {
 interface PageHeaderProps {
   children: React.ReactNode;
   /**
-   * Replaces the mobile sidebar trigger at the far left.
+   * Replaces the mobile sidebar trigger at the far left; `false` leaves the
+   * slot empty.
    *
-   * For a surface a phone reaches by drilling in rather than by navigating —
-   * the inbox's issue detail — "go back" is the leading affordance that
-   * matters, and the sidebar is still one step away behind it. Rendering both
-   * would spend two of the header's 48px on navigation chrome and leave the
-   * title nothing to truncate into.
+   * Replacing it takes the nav away from a phone on this screen, so only a
+   * surface whose own chrome still reaches the nav should. A drill-in detail
+   * is not one: a "back to the list" here locks the reader out of the nav
+   * sheet, which is where the Inbox's list lives (MUL-10233).
    */
   leading?: React.ReactNode;
   className?: string;
@@ -161,6 +161,7 @@ export function PageHeader({ children, leading, className }: PageHeaderProps) {
   const titleBar = usePageHeaderTitleBar();
   return (
     <header
+      data-mc="page-header"
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b",
         className,

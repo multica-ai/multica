@@ -15,7 +15,7 @@ La règle est enregistrée sur la tâche : rien ne tourne pendant l'attente. Les
 <Steps>
 <Step>
 
-Ouvrez la tâche et cliquez sur **+** à côté de **Réveils** dans la barre latérale.
+Ouvrez la tâche et cliquez sur **+** à côté de **Réveils** dans la barre latérale. Tant que la tâche n'a aucun réveil, la section est masquée : utilisez plutôt la ligne **Ajouter …** en bas de la barre latérale, par exemple **Ajouter un réveil** ou **Ajouter un réveil ou une pull request**.
 
 </Step>
 <Step>
@@ -25,7 +25,7 @@ Après **Quand**, choisissez une condition et complétez ce qu'elle demande : un
 </Step>
 <Step>
 
-Après **Réveiller**, choisissez l'agent. Si l'assigné de la tâche est un agent, il est déjà sélectionné. Seuls les agents liés à un runtime et que vous avez le droit d'exécuter sont proposés ; voir [Permissions et accès](/agents#permissions-et-accès).
+Après **Réveiller**, choisissez l'agent. Si l'assigné de la tâche est un agent que vous pouvez exécuter, il est déjà sélectionné. Seuls les agents liés à un runtime et que vous avez le droit d'exécuter sont proposés ; voir [Permissions et accès](/agents#permissions-et-accès).
 
 </Step>
 <Step>
@@ -42,7 +42,7 @@ Cliquez sur **Créer**.
 
 Les exécutions lancées par un réveil agissent au nom de la personne qui l'a créé, et Multica vérifie de nouveau, avant que l'exécution ne démarre, que cette personne peut toujours exécuter l'agent.
 
-Dans la tâche ci-dessous, Assistant ops a demandé des devis et attend les réponses des fournisseurs. Ajoutez un réveil, puis avancez jusqu'à l'heure prévue. Avec « Vérifier régulièrement », vous verrez aussi comment l'agent termine une vérification sans commenter quand rien n'est encore arrivé.
+La séquence ci-dessous ajoute un réveil dans une heure pour Engineer depuis la barre latérale de la tâche, renseigne l'instruction à exécuter puis enregistre la règle.
 
 <WakeupDemo />
 
@@ -76,7 +76,22 @@ Quand l'assigné de la tâche est un agent, les commentaires des membres le déc
 - Quand une vérification régulière ne trouve rien qui demande une réponse, l'agent peut terminer par une **vérification silencieuse** : pas de commentaire, seulement une note dans l'historique de la tâche et dans l'historique de la règle. Les vérifications silencieuses successives sont regroupées en une seule entrée.
 - Les commentaires et les modifications d'un agent ne le réveillent jamais lui-même.
 - Si le même agent a déjà une exécution en attente de démarrage sur la tâche, le réveil rejoint cette exécution au lieu d'en lancer une autre.
-- Tant qu'un réveil attend, l'en-tête de la tâche indique ce qu'elle attend, par exemple « Assistant ops : Attend une réponse ». Un clic mène à la section Réveils.
+
+## Étapes de workflow sur un travail poursuivi [#workflow-steps]
+
+Une exécution possède une liaison à une étape de workflow en plus de son identifiant d'exécution. Un nouvel identifiant d'exécution ou une conversation d'agent réutilisée ne détermine pas l'étape qu'elle peut faire avancer.
+
+| Origine du travail | Liaison d'étape |
+|---|---|
+| Réveil créé par un agent pendant une exécution | Hérite de l'étape de l'exécution source, lorsqu'elle en a une. |
+| Réveil créé par un membre qui démarre une nouvelle exécution | Le statut actuel de la tâche au moment où le réveil se déclenche. |
+| Nouvelle tentative automatique | Conserve la liaison de l'exécution parente. |
+| Relance explicite par un membre | Le statut actuel de la tâche lorsque la nouvelle exécution est mise en file d'attente. |
+| Réveil qui rejoint une exécution déjà en attente | Conserve la liaison de cette exécution en attente. |
+
+Les workflows nommés et les workflows **Par défaut** avec passages de relais protègent contre les changements de statut obsolètes. Si un autre acteur déplace la tâche hors de l'étape liée à une exécution, cette exécution ne peut plus faire avancer la tâche. Son brief affiche les deux étapes et lui demande de laisser le statut actuel inchangé et de commenter si une attention est nécessaire. Un changement de statut refusé renvoie `409 workflow_step_moved` ; réessayer ne rafraîchit pas la liaison.
+
+Pour poursuivre à partir du nouvel état, un membre doit examiner le déplacement externe et relancer explicitement le travail depuis le journal d'exécution. L'ancienne exécution n'est pas reliée automatiquement.
 
 ## Consulter et gérer [#manage]
 
@@ -84,7 +99,7 @@ La section Réveils de la barre latérale liste les règles de la tâche : la co
 
 | Action | Effet |
 |---|---|
-| Désactiver l'interrupteur | Arrête les réveils suivants et retire les exécutions pas encore démarrées. Une exécution déjà lancée continue ; arrêtez-la depuis le journal d'exécution si besoin. |
+| Désactiver l'interrupteur dans ses détails | Arrête les réveils suivants et retire les exécutions pas encore démarrées. Une exécution déjà lancée continue ; arrêtez-la depuis le journal d'exécution si besoin. |
 | **Réveiller maintenant** | Réveille l'agent une fois tout de suite, sans attendre la condition. |
 | Modifier l'instruction | Ne vaut que pour les réveils suivants ; une exécution en cours ne change pas. |
 | **Supprimer** | La règle ne réveille plus personne. Les exécutions pas encore démarrées sont retirées, celles qui ont démarré continuent. |
@@ -92,7 +107,7 @@ La section Réveils de la barre latérale liste les règles de la tâche : la co
 
 Les règles terminées passent dans l'**Historique des réveils**. Seuls le créateur de la règle et les owners et admins de l'espace de travail peuvent la gérer. Un réveil créé par un agent pendant une exécution appartient au membre qui a lancé cette exécution, et s'affiche ainsi : « Assistant ops, pour Lei Li ».
 
-Pour voir tous les réveils de l'espace de travail, ouvrez **Automatisation** et passez à l'onglet **Réveils de tâches**. Vous pouvez filtrer par état (En attente ou en cours, En pause, Désactivés, Terminés), type de déclencheur, source et agent, en désactiver plusieurs à la fois, ou créer un réveil après avoir choisi sa tâche.
+Pour voir tous les réveils de l'espace de travail, ouvrez **Auto** dans la barre de navigation et passez à l'onglet **Réveils de tâches**. Vous pouvez filtrer par état (En attente ou en cours, En pause, Désactivés, Terminés), type de déclencheur, source et agent, en désactiver plusieurs à la fois, ou créer un réveil après avoir choisi sa tâche.
 
 ## Fins et pauses automatiques [#limits]
 
@@ -103,14 +118,15 @@ Pour voir tous les réveils de l'espace de travail, ouvrez **Automatisation** et
 
 ## Réveiller le parent quand les sous-tâches se terminent [#child-done]
 
-Quand une tâche a des sous-tâches, sa section Réveils affiche une règle marquée **Système**. Personne n'a besoin de la créer :
+Quand une tâche a des sous-tâches, une puce à côté de l'en-tête **Sous-tâches** affiche une règle marquée **Système**, par exemple « Réveille Lambda à la fin ». Cliquez dessus pour voir sa progression, son instruction et l'interrupteur qui la désactive pour cette tâche. Personne n'a besoin de la créer :
 
-- Quand toutes les sous-tâches d'une étape sont closes alors qu'une étape suivante attend, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
+- Quand toutes les sous-tâches d'une étape sont closes alors que l'étape suivante a des sous-tâches en `backlog` à lancer, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Les sous-tâches de l'étape suivante déjà en `todo` démarrent automatiquement à la fin des étapes précédentes sans réveiller le parent entre-temps. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
+- Ajouter ou rouvrir une sous-tâche ne réveille personne, y compris une étape ajoutée après la clôture de toutes les autres : sortez-la de `backlog` pour la lancer, ou mentionnez l'assigné pour qu'il l'organise.
 - Un agent assigné est réveillé ; pour un squad, c'est son chef ; un membre assigné reçoit plutôt une notification dans sa boîte de réception. Sans assigné, personne n'est réveillé.
 - Tant que le parent est en `backlog`, rien n'est réveillé ; le réveil a lieu une fois le parent sorti de `backlog`.
 - L'instruction par défaut indique à l'agent quelle étape s'est close et laquelle suit : vérifier ses dépendances, puis sortir de `backlog` les sous-tâches de l'étape suivante. Quand tout est clos, il rassemble les résultats sur le parent.
 
-L'assigné du parent est déjà réveillé par cette règle : inutile d'ajouter un réveil « Les sous-tâches se terminent » pour la même chose. Pour définir des étapes, voir [Tâches](/issues#projets-et-sous-tâches).
+L'assigné du parent est déjà réveillé par cette règle : inutile d'ajouter un réveil « Les sous-tâches se terminent » pour la même chose. Pour définir des étapes, voir [Tâches](/issues#projets-et-sous-tâches). Les tâches qui attendent des [bloqueurs](/issues#relations) manuels ou d'étape disposent aussi d'un réveil système de dépendance qui démarre automatiquement leur assigné (ou notifie un membre) dès que tous les bloqueurs sont terminés, sauf si la tâche est en `backlog`.
 
 Sur une tâche donnée, tout membre de l'espace de travail peut désactiver cette règle ou réécrire son instruction (jusqu'à 4 000 octets) ; les agents ne peuvent pas la modifier. Une fois modifiée, la tâche ne suit plus la valeur par défaut de l'espace de travail.
 

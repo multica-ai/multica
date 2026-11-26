@@ -27,6 +27,7 @@ import {
 import { useMessagingChannels } from "./use-messaging-channels";
 import { LarkChannelAuthorization } from "./lark-channel-authorization";
 import { WecomChannelAuthorization } from "./wecom-channel-authorization";
+import { WeixinChannelAuthorization } from "./weixin-channel-authorization";
 
 export function ChannelConnectDialog({
   agents,
@@ -99,13 +100,16 @@ function ChannelConnectSteps({
       (entry) =>
         entry.channel === id && entry.installation.agent_id === agent?.id,
     );
-  const allowed =
-    !!agent &&
-    !!channel &&
-    canManage(channel, agent) &&
-    available(channel) &&
-    !connected(channel) &&
-    !agent.archived_at;
+  // Picking a platform is the only choice left once the agent is known, so the
+  // row itself starts the connection instead of waiting for a Continue click.
+  const connect = (id: ChannelIntegration) => {
+    setChannel(id);
+    setAuthorizing(true);
+  };
+  const openGuide = () =>
+    openExternal(
+      `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/${channel}-bot-integration`,
+    );
   const scanWecom =
     channel === "wecom" &&
     queries.wecom.data?.scan_install_supported === true &&
@@ -175,9 +179,13 @@ function ChannelConnectSteps({
                       key={id}
                       variant={channel === id ? "secondary" : "outline"}
                       className="w-full justify-start"
-                      aria-pressed={channel === id}
-                      disabled={!available(id) || (!!agent && !permitted)}
-                      onClick={() => setChannel(id)}
+                      disabled={
+                        !agent ||
+                        !!agent.archived_at ||
+                        !available(id) ||
+                        !permitted
+                      }
+                      onClick={() => connect(id)}
                     >
                       <IntegrationChannelIcon channel={id} />
                       <span>
@@ -198,38 +206,10 @@ function ChannelConnectSteps({
                   );
                 })}
             </div>
-            {channel === "wecom" &&
-            queries.wecom.data?.scan_install_supported ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="channel-method">
-                  {t(($) => $.channels.method_label)}
-                </Label>
-                <select
-                  id="channel-method"
-                  value={wecomMethod}
-                  onChange={(event) =>
-                    setWecomMethod(
-                      event.target.value === "scan" ? "scan" : "credentials",
-                    )
-                  }
-                  className="h-9 w-full rounded-md border bg-background px-3 text-body"
-                >
-                  <option value="scan">
-                    {t(($) => $.wecom.scan_option_title)}
-                  </option>
-                  <option value="credentials">
-                    {t(($) => $.wecom.byo_dialog_title)}
-                  </option>
-                </select>
-              </div>
-            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>
               {t(($) => $.lark.install_close)}
-            </Button>
-            <Button disabled={!allowed} onClick={() => setAuthorizing(true)}>
-              {t(($) => $.channels.continue)}
             </Button>
           </DialogFooter>
         </>
@@ -249,17 +229,35 @@ function ChannelConnectSteps({
         </>
       ) : (
         <>
-          <Button
-            variant="link"
-            className="w-fit p-0"
-            onClick={() =>
-              openExternal(
-                `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/${channel === "lark" ? "lark" : channel}-bot-integration`,
-              )
-            }
-          >
-            {t(($) => $.channels.setup_guide)}
-          </Button>
+          {channel === "weixin" ? null : (
+            <Button variant="link" className="w-fit p-0" onClick={openGuide}>
+              {t(($) => $.channels.setup_guide)}
+            </Button>
+          )}
+          {channel === "wecom" && queries.wecom.data?.scan_install_supported ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="channel-method">
+                {t(($) => $.channels.method_label)}
+              </Label>
+              <select
+                id="channel-method"
+                value={wecomMethod}
+                onChange={(event) =>
+                  setWecomMethod(
+                    event.target.value === "scan" ? "scan" : "credentials",
+                  )
+                }
+                className="h-9 w-full rounded-md border bg-background px-3 text-body"
+              >
+                <option value="scan">
+                  {t(($) => $.wecom.scan_option_title)}
+                </option>
+                <option value="credentials">
+                  {t(($) => $.wecom.byo_dialog_title)}
+                </option>
+              </select>
+            </div>
+          ) : null}
           {channel === "lark" ? (
             <LarkChannelAuthorization
               wsId={wsId}
@@ -267,6 +265,14 @@ function ChannelConnectSteps({
               // International installs remain disabled until the persistence
               // issue is fixed; existing Lark bots stay manageable.
               region="feishu"
+              onClose={onClose}
+            />
+          ) : channel === "weixin" ? (
+            // The QR is the whole step, so its guide moves below it.
+            <WeixinChannelAuthorization
+              wsId={wsId}
+              agentId={agent.id}
+              onOpenGuide={openGuide}
               onClose={onClose}
             />
           ) : scanWecom ? (
@@ -297,7 +303,7 @@ function ChannelCredentials({
   onClose,
   onBusyChange,
 }: {
-  channel: Exclude<ChannelIntegration, "lark">;
+  channel: Exclude<ChannelIntegration, "lark" | "weixin">;
   wsId: string;
   agentId: string;
   onClose: () => void;

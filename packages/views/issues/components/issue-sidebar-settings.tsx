@@ -55,16 +55,19 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
     wakeups: t(($) => $.wakeups.title),
     plugins: t(($) => $.plugins.panels),
     parent: t(($) => $.detail.section_parent_issue),
-    duplicates: t(($) => $.duplicates.section_title),
+    relations: t(($) => $.relations.title),
     pull_requests: t(($) => $.detail.section_pull_requests),
     environments: t(($) => $.environments.section_title),
     deliverables: t(($) => $.deliverables.section_title),
     apps: t(($) => $.app_calls.section_title),
     execution_log: t(($) => $.execution_log.section),
-    details: t(($) => $.detail.section_details),
     metadata: t(($) => $.detail.section_metadata),
   };
 }
+
+// A rule above every rendered section that follows another rendered one.
+const SECTION_DIVIDER =
+  "[[data-issue-sidebar-section]:not(:empty)~&]:before:mx-4 [[data-issue-sidebar-section]:not(:empty)~&]:before:mb-3.5 [[data-issue-sidebar-section]:not(:empty)~&]:before:block [[data-issue-sidebar-section]:not(:empty)~&]:before:h-px [[data-issue-sidebar-section]:not(:empty)~&]:before:bg-border [[data-issue-sidebar-section]:not(:empty)~&]:before:content-['']";
 
 /**
  * The issue sidebar's sections in the reader's order, minus the ones they
@@ -74,29 +77,22 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
 export function IssueSidebarSections({
   sections,
   available,
-  revealed = [],
-  onRevealEnd,
+  addRow,
+  footer,
 }: {
   sections: Record<IssueSidebarSection, ReactNode>;
   available: readonly IssueSidebarSection[];
-  /**
-   * Hidden sections to show anyway, such as the one a header chip jumped to.
-   * Switching one of them in settings ends its reveal, so the switch wins.
-   */
-  revealed?: readonly IssueSidebarSection[];
-  onRevealEnd?: (section: IssueSidebarSection) => void;
+  /** Offers sections that are empty on this issue; rendered after the last section. */
+  addRow?: ReactNode;
+  footer?: ReactNode;
 }) {
   const { t } = useT("issues");
   const order = useIssueSidebarSectionsStore(selectIssueSidebarOrder);
   const hidden = useIssueSidebarSectionsStore((s) => s.hidden);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const isShown = (id: IssueSidebarSection) => !hidden.includes(id) || revealed.includes(id);
-  const visible = order.filter((id) => available.includes(id) && isShown(id));
-  const hiddenCount = available.filter((id) => !isShown(id)).length;
-  const onShownChange = (id: IssueSidebarSection) => {
-    if (revealed.includes(id)) onRevealEnd?.(id);
-  };
+  const visible = order.filter((id) => available.includes(id) && !hidden.includes(id));
+  const hiddenCount = available.filter((id) => hidden.includes(id)).length;
   const getEmptySections = () =>
     new Set(
       visible.filter(
@@ -105,35 +101,34 @@ export function IssueSidebarSections({
     );
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} data-mc="issue-properties" className="relative">
       <IssueSidebarSettings
         available={available}
         getEmptySections={getEmptySections}
-        onShownChange={onShownChange}
         trigger={
           <IconButton
             variant="ghost"
             size="icon-xs"
             label={t(($) => $.detail.sidebar_settings.open)}
-            className="absolute top-0.5 right-2 z-10 text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
+            className="absolute top-0.5 right-2.5 z-10 text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
           >
             <SlidersHorizontal />
           </IconButton>
         }
       />
       {/* The first header to render shares its row with the settings button. */}
-      <IssueSidebarStack className="[&>:nth-child(1_of_:not(:empty))>*>[data-slot=issue-sidebar-section-header]]:pr-9">
+      <IssueSidebarStack className="[&>:nth-child(1_of_:not(:empty))>*>[data-slot=issue-sidebar-section-header]]:pr-[38px]">
         {visible.map((id) => (
-          <div key={id} data-issue-sidebar-section={id} className="empty:hidden">
+          <div key={id} data-issue-sidebar-section={id} className={cn("empty:hidden", SECTION_DIVIDER)}>
             {sections[id]}
           </div>
         ))}
+        {addRow}
         {hiddenCount > 0 && (
           <div className="px-2">
             <IssueSidebarSettings
               available={available}
               getEmptySections={getEmptySections}
-              onShownChange={onShownChange}
               side="top"
               align="start"
               trigger={
@@ -141,7 +136,7 @@ export function IssueSidebarSections({
                   type="button"
                   className="flex h-7 max-w-full items-center gap-1.5 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/50"
                 >
-                  <EyeOff className="size-3.5 shrink-0" />
+                  <EyeOff className="mr-1 size-3.5 shrink-0" />
                   <span className="truncate">{t(($) => $.detail.sidebar_settings.hidden_count, { count: hiddenCount })}</span>
                   <span aria-hidden="true" className="text-faint-foreground">·</span>
                   <span className="shrink-0 font-medium text-foreground">{t(($) => $.detail.sidebar_settings.customize)}</span>
@@ -150,6 +145,7 @@ export function IssueSidebarSections({
             />
           </div>
         )}
+        {footer}
       </IssueSidebarStack>
     </div>
   );
@@ -163,7 +159,6 @@ export function IssueSidebarSettings({
   available,
   trigger,
   getEmptySections,
-  onShownChange,
   side = "bottom",
   align = "end",
 }: {
@@ -172,7 +167,6 @@ export function IssueSidebarSettings({
   trigger: ReactElement;
   /** Shown sections with nothing to render on this issue, read when the popover opens. */
   getEmptySections?: () => ReadonlySet<IssueSidebarSection>;
-  onShownChange?: (section: IssueSidebarSection, shown: boolean) => void;
   side?: "top" | "bottom";
   align?: "start" | "end";
 }) {
@@ -234,10 +228,7 @@ export function IssueSidebarSettings({
                     note={note}
                     shown={shown}
                     locked={locked}
-                    onShownChange={(next) => {
-                      setHidden(id, !next);
-                      onShownChange?.(id, next);
-                    }}
+                    onShownChange={(next) => setHidden(id, !next)}
                   />
                 );
               })}

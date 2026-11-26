@@ -1,5 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Root, RootContent, Code } from "mdast";
+import { parseFenceTitle } from "../editor/utils/fence-title";
 
 /**
  * Fenced-code closedness gate for streaming RichContent (MUL-4922).
@@ -73,19 +74,6 @@ function endsWithClosingFence(raw: string): boolean {
 
   const closeFence = closeMatch[1];
   return closeFence[0] === marker && closeFence.length >= openFence.length;
-}
-
-const TITLE_RE = /(?:^|\s)title=(?:"([^"]*)"|'([^']*)'|(\S+))/;
-
-/**
- * The `title` attribute of a fence info string, e.g. `title="Weekly p95"` in
- * ```html title="Weekly p95". Double, single or no quotes.
- */
-export function parseFenceTitle(meta: string | null | undefined): string | null {
-  if (!meta) return null;
-  const match = TITLE_RE.exec(meta);
-  const title = (match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
-  return title || null;
 }
 
 export interface ClosedFence {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createShortcutChord } from "./definitions";
-import { configureShortcutRuntime } from "./platform";
+import { createShortcutChord, createShortcutSequence } from "./definitions";
+import { configureShortcutPlatform, configureShortcutRuntime } from "./platform";
 import {
   findShortcutConflict,
   getShortcut,
@@ -11,6 +11,7 @@ import {
 
 afterEach(() => {
   useShortcutStore.getState().resetAll();
+  configureShortcutPlatform(null);
   configureShortcutRuntime(null);
 });
 
@@ -107,6 +108,36 @@ describe("shortcut store", () => {
     expect(findShortcutConflict("goChat", custom)).toBe("goInbox");
   });
 
+  it("treats an Option chord saved under its glyph as taken by the same keypress", () => {
+    configureShortcutPlatform("macos");
+    useShortcutStore.getState().setShortcut(
+      "goInbox",
+      createShortcutChord("©", { primary: true, alt: true }),
+    );
+    const event = {
+      key: "©",
+      code: "KeyG",
+      metaKey: true,
+      altKey: true,
+      ctrlKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    const physical = createShortcutChord("G", { primary: true, alt: true });
+    expect(findShortcutConflict("goChat", physical)).toBeNull();
+    expect(findShortcutConflict("goChat", physical, event)).toBe("goInbox");
+  });
+
+  it("keeps a persisted Ctrl+Shift+I override on web but not on desktop", () => {
+    const devTools = createShortcutChord("I", { primary: true, shift: true });
+    configureShortcutPlatform("windows");
+    configureShortcutRuntime("web");
+    expect(sanitizeShortcutOverrides({ openSearch: devTools })).toEqual({
+      openSearch: devTools,
+    });
+    configureShortcutRuntime("desktop");
+    expect(sanitizeShortcutOverrides({ openSearch: devTools })).toEqual({});
+  });
+
   it("migrates v1 string overrides without losing disabled actions", () => {
     expect(
       migrateShortcutState({
@@ -151,5 +182,28 @@ describe("shortcut store", () => {
         },
       }, 1),
     ).toEqual({ overrides: { goInbox: null } });
+  });
+});
+
+describe("shortcut sequences in the store", () => {
+  const seq = (first: string, then: string) => createShortcutSequence(first, createShortcutChord(then));
+
+  it("keeps a stored sequence, and drops a malformed or longer one", () => {
+    expect(sanitizeShortcutOverrides({ goSettings: seq("G", "S") })).toEqual({ goSettings: seq("G", "S") });
+    expect(
+      sanitizeShortcutOverrides({ goSettings: { ...createShortcutChord("G"), then: { key: "S" } } }),
+    ).toEqual({});
+    expect(
+      sanitizeShortcutOverrides({ goSettings: createShortcutSequence("G", seq("S", "T")) }),
+    ).toEqual({});
+    expect(sanitizeShortcutOverrides({ createIssue: seq("G", "N") })).toEqual({});
+  });
+
+  it("takes a key that starts another action's sequence, and the other way round", () => {
+    expect(findShortcutConflict("createIssue", createShortcutChord("G"))).toBe("goInbox");
+    expect(findShortcutConflict("goSettings", seq("C", "S"))).toBe("createIssue");
+    expect(findShortcutConflict("goSettings", seq("G", "I"))).toBe("goInbox");
+    expect(findShortcutConflict("goSettings", seq("G", "S"))).toBeNull();
+    expect(findShortcutConflict("goInbox", seq("G", "N"))).toBeNull();
   });
 });

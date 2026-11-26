@@ -52,7 +52,29 @@ Desktop enregistre les onglets par espace de travail. Par exemple, si vous ouvre
 
 Une même ressource ne s'ouvre qu'une seule fois dans l'espace de travail courant. Les onglets peuvent être réordonnés, épinglés et fermés, et chacun conserve son propre historique de navigation avant/arrière et sa position de défilement. Les onglets épinglés se placent à gauche et n'ont pas de bouton de fermeture ; désépinglez un onglet pour le fermer. Ouvrir une autre page depuis un onglet épinglé crée un nouvel onglet, et l'onglet épinglé reste sur sa page. Cliquer sur un lien de l'application pour ce déploiement, ou le coller, l'ouvre directement dans un onglet au lieu de basculer vers le navigateur.
 
+Quand vous passez d’une disposition à l’autre dans un onglet (Tableau, Liste, Grille, Couloirs ou Gantt), chacune conserve sa position de défilement. Dans le tableau, vous retrouvez aussi la même colonne à l’écran et la même position dans chaque colonne.
+
 La déconnexion efface tous les onglets enregistrés sur la machine : la personne suivante qui se connecte ne voit jamais les pages laissées par le compte précédent.
+
+## Saisie vocale
+
+Desktop peut transcrire votre voix sur cet ordinateur pour remplir les chats, commentaires, réponses et descriptions lors de la création de tâches. La saisie vocale est **désactivée par défaut** et n'est pas disponible dans l'application web.
+
+1. Ouvrez **Paramètres → Saisie vocale** et activez **Saisie vocale**.
+2. Téléchargez un modèle vocal adapté aux langues que vous utilisez. Le téléchargement nécessite une connexion Internet ; une fois le modèle installé, la transcription s'effectue localement. Si la page indique que la transcription sur l'appareil est indisponible, cette version de l'application n'a pas de moteur vocal utilisable sur cet ordinateur.
+3. Autorisez l'accès au micro lorsque la demande apparaît. Vous pouvez aussi choisir et tester le micro sur cette page.
+
+Le mode par défaut **Appui ou maintien** permet de cliquer sur le micro pour commencer, puis sur la coche pour insérer le texte, ou de maintenir le micro enfoncé pour parler et de le relâcher pour insérer. Le texte reste dans l'éditeur pour que vous puissiez le relire. Dans les chats et les commentaires, le bouton d'envoi de la barre d'enregistrement, ou `Enter` pendant l'enregistrement dans cette barre, transcrit puis envoie. `Esc` annule.
+
+Le raccourci vocal est **non défini par défaut**. Attribuez-le dans **Paramètres → Raccourcis** ; il fonctionne dès qu'un éditeur compatible est visible, même sans le focus. La page **Saisie vocale** permet aussi de choisir une activation par appui seul ou maintien seul.
+
+### Enregistrements et historique
+
+La transcription s'effectue sur cet ordinateur, sans envoyer l'audio à un service de transcription. Le texte que vous envoyez est soumis comme un message de chat ou un commentaire ordinaire.
+
+Les enregistrements et transcriptions sont conservés localement **30 jours par défaut**. Dans **Paramètres → Saisie vocale → Historique**, vous pouvez écouter les enregistrements, copier le texte, relancer la transcription, supprimer une entrée ou tout effacer. **Conserver l'historique** propose de ne rien conserver, ou de conserver les entrées 1 jour, 7 jours, 30 jours ou toujours.
+
+Désactiver **Saisie vocale** masque le micro et désactive son raccourci. Les enregistrements déjà sauvegardés ne sont pas supprimés ; l'historique reste accessible sur la même page.
 
 ## Daemon intégré
 
@@ -69,6 +91,8 @@ Vous pouvez consulter l'état et les journaux du runtime dans les paramètres de
 ## Mettre à jour Desktop
 
 La mise à jour automatique est activée par défaut. L'application recherche et télécharge les nouvelles versions en arrière-plan ; une fois une version téléchargée, vous pouvez redémarrer pour l'installer immédiatement ou la laisser s'installer à la prochaine fermeture. Vous pouvez aussi désactiver les vérifications automatiques ou rechercher manuellement de nouvelles versions dans **Paramètres → Mises à jour**.
+
+Si une vérification manuelle ou un téléchargement échoue, les réglages affichent un court message et un bouton **Réessayer**. Vous pouvez continuer à utiliser la version actuelle pendant ce temps.
 
 Les mises à jour sont distribuées par système d'exploitation et par architecture de processeur :
 

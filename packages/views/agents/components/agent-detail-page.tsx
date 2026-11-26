@@ -16,7 +16,6 @@ import {
   Server,
   Settings2,
   Square,
-  Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,9 +27,13 @@ import {
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { isArchivableAgent, isMikaAgent } from "@multica/core/onboarding";
 import {
   agentDetailOptions,
   agentListOptions,
@@ -80,12 +83,14 @@ import {
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { availabilityConfig } from "../presence";
 import {
   AgentAdvancedSettings,
   isAdvancedSection,
   type AdvancedSection,
 } from "./agent-advanced-settings";
+import { AgentAppsSection } from "./agent-apps-section";
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
@@ -121,7 +126,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const currentUser = useAuthStore((s) => s.user);
+  const composioAppsEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
 
   const {
     data: agents = [],
@@ -289,11 +296,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           );
         }
         void qc.invalidateQueries({ queryKey });
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+        refreshFeaturesOnLockedError(qc, wsId, e);
+        toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast)));
         throw e;
       }
     },
-    [qc, t, wsId],
+    [paidFeatureError, qc, t, wsId],
   );
 
   const handleArchive = async (id: string) => {
@@ -336,6 +344,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && (agentsLoading || detailQuery.isPending)) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<Skeleton className="h-4 w-40" />}
@@ -349,6 +358,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent && isForbidden) {
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={
@@ -384,6 +394,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       : t(($) => $.detail.load_failed_title);
     return (
       <ObjectPage
+        type="agent"
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
         leaf={<span className="truncate text-muted-foreground">{title}</span>}
@@ -439,8 +450,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
-  // Multica's built-in agents cannot be archived — the server refuses it.
-  const canArchive = canEdit.allowed && !isArchived && !agent.system_key;
+  const canManageLifecycle = canEdit.allowed && isArchivableAgent(agent);
+  const canArchive = canManageLifecycle && !isArchived;
 
   // Chat shares the invocation gate with assignment (MUL-3963): starting a
   // chat triggers agent runs. The button stays visible either way — a denied
@@ -574,7 +585,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 variant="destructive"
                 onClick={() => setConfirmArchive(true)}
               >
-                <Trash2 />
+                <Archive />
                 {t(($) => $.detail.more_archive)}
               </DropdownMenuItem>
             </>
@@ -637,6 +648,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   return (
     <>
       <ObjectPage
+        type="agent"
         scrollRef={setScrollParent}
         layoutId={AGENT_DETAIL_LAYOUT_ID}
         segments={[listSegment]}
@@ -701,13 +713,22 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             onUpdate={handleUpdate}
           />
 
-          {/* Qoder agents take their skills from Qoder Cloud Agents. */}
+          {/* Qoder agents take their skills and apps from Qoder Cloud Agents. */}
           {runtime?.provider === "qoder_cloud" ? null : (
-            <AgentSkillsSection
-              agent={agent}
-              canEdit={canEdit.allowed}
-              onManage={() => openAdvanced("skills")}
-            />
+            <>
+              {composioAppsEnabled && (
+                <AgentAppsSection
+                  agent={agent}
+                  canEdit={canEdit.allowed}
+                  onManage={() => openAdvanced("composio_mcp")}
+                />
+              )}
+              <AgentSkillsSection
+                agent={agent}
+                canEdit={canEdit.allowed}
+                onManage={() => openAdvanced("skills")}
+              />
+            </>
           )}
         </div>
       </ObjectPage>
@@ -722,6 +743,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canEdit={canEdit.allowed}
         section={advancedSection}
         onSectionChange={openAdvanced}
+        lifecycle={
+          canManageLifecycle
+            ? {
+                onArchive: () => setConfirmArchive(true),
+                onRestore: () => void handleRestore(agent.id),
+              }
+            : undefined
+        }
       />
 
       <AgentWorkDialog agent={agent} open={workOpen} onOpenChange={openWork} />
@@ -778,6 +807,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 </DialogTitle>
                 <DialogDescription className="text-caption">
                   {t(($) => $.detail.archive_dialog_description, { name: agent.name })}
+                  {isMikaAgent(agent) && t(($) => $.row_actions.archive_dialog_mika_note)}
                 </DialogDescription>
               </DialogHeader>
             </div>

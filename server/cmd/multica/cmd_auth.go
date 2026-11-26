@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -493,7 +494,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
-		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", replacedTaskTokenHint(token))
 	}
 	serverURL := resolveServerURL(cmd)
 
@@ -512,7 +513,16 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
-		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
+		var httpErr *cli.HTTPError
+		if errors.As(err, &httpErr) && httpErr.Kind() == cli.KindAuthRequired {
+			if taskContext {
+				fmt.Fprintln(os.Stderr, cli.FormatError(err, debugFlag))
+			} else {
+				fmt.Fprintln(os.Stderr, "Token is invalid or expired. Run 'multica login' to re-authenticate.")
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Could not verify the token: %s\n", cli.FormatError(err, debugFlag))
+		}
 		return nil
 	}
 

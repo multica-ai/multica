@@ -36,9 +36,9 @@
     "title": "標題"
   },
   "states": {
-    "loading": "載入中...",
-    "saving": "儲存中...",
-    "sending": "傳送中...",
+    "loading": "載入中…",
+    "saving": "儲存中…",
+    "sending": "傳送中…",
     "offline": "離線",
     "empty": "暫無內容",
     "error": "出現錯誤"
@@ -49,7 +49,5 @@
     "hours_ago_other": "{{count}} 小時前",
     "days_ago_other": "{{count}} 天前",
     "weeks_ago_other": "{{count}} 周前"
-  },
-  "states.empty": "暫無內容",
-  "states.error": "出現錯誤"
+  }
 }

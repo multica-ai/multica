@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
-import { ChatMessageList } from "./chat-message-list";
+import { ChatMessageList, type ChatMessageEnterTransition } from "./chat-message-list";
 import { resetRevealedLists } from "./stick-to-bottom";
 
 // Auto-scroll wiring: the list must keep the live end visible through streaming
@@ -359,8 +360,14 @@ function taskMsg(seq: number, content: string): TaskMessagePayload {
 function renderStreamingChat({
   contentHeight = 2000,
   revealKey,
+  enterTransition,
   onRevealed,
-}: { contentHeight?: number; revealKey?: string; onRevealed?: () => void } = {}) {
+}: {
+  contentHeight?: number;
+  revealKey?: string;
+  enterTransition?: ChatMessageEnterTransition | null;
+  onRevealed?: () => void;
+} = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
@@ -370,6 +377,7 @@ function renderStreamingChat({
         <ChatMessageList
           active={active}
           revealKey={revealKey}
+          enterTransition={enterTransition}
           onRevealed={onRevealed}
           messages={[]}
           pendingTask={{ task_id: TASK_ID, status: "running" }}
@@ -892,5 +900,56 @@ describe("ChatMessageList auto-scroll", () => {
     view.unmount();
 
     expect(observedTargets()).toHaveLength(0);
+  });
+
+  it("defers the directional enter transition until the list reaches its live end, and skips it under reduced motion", () => {
+    const box = (el: Element, top: number, bottom: number) => {
+      el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
+    };
+    const settleFrames = (count: number) => {
+      for (let i = 0; i < count; i++) act(() => renderFrame());
+    };
+
+    useAppearanceStore.setState({ reduceMotion: false });
+    const first = renderStreamingChat({ revealKey: "enter-next", enterTransition: "next" });
+    box(first.scroll.el, 0, VIEWPORT);
+    const liveRow = first.view.container.querySelector("[data-chat-live-end]")!;
+    box(liveRow, VIEWPORT - 120, VIEWPORT - 16);
+
+    // Before landing, the list stays hidden and does not start its reveal animation prematurely.
+    expect(first.scroll.el.className).toContain("invisible");
+    expect(first.scroll.el.className).not.toContain("animate-chat-enter-next");
+
+    settleFrames(12);
+    expect(first.scroll.el.className).not.toContain("invisible");
+    expect(first.scroll.el.className).toContain("animate-chat-enter-next");
+    expect(first.scroll.el).toHaveAttribute("data-chat-enter-transition", "next");
+    first.view.unmount();
+
+    // Either reduced-motion source shows the landed list at once, without even a fade.
+    const landsInstantly = (revealKey: string) => {
+      const reduced = renderStreamingChat({ revealKey, enterTransition: "prev" });
+      box(reduced.scroll.el, 0, VIEWPORT);
+      box(reduced.view.container.querySelector("[data-chat-live-end]")!, VIEWPORT - 120, VIEWPORT - 16);
+      settleFrames(12);
+      expect(reduced.scroll.el.className).not.toContain("invisible");
+      expect(reduced.scroll.el.className).not.toMatch(/animate-chat-enter/);
+      expect(reduced.scroll.el).not.toHaveAttribute("data-chat-enter-transition");
+      reduced.view.unmount();
+    };
+
+    useAppearanceStore.setState({ reduceMotion: true });
+    try {
+      landsInstantly("enter-reduced-switch");
+    } finally {
+      useAppearanceStore.setState({ reduceMotion: false });
+    }
+
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    landsInstantly("enter-reduced-system");
   });
 });

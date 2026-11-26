@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -136,11 +136,48 @@ describe("ThemesButton", () => {
     expect(screen.getByText("by Someone · 1 download")).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Sand", "Ink"]);
 
-    api.listStoreThemes.mockResolvedValue([listed("ink", "Ink", "1.0.0", 2), listed("sand", "Sand", "1.0.0", 1250)]);
-    const [installSand] = screen.getAllByRole("button", { name: "Install" });
-    await user.click(installSand!);
-    expect(await screen.findByText("by Someone · 2 downloads")).toBeTruthy();
+    api.listStoreThemes.mockResolvedValue([listed("ink", "Ink", "1.0.0", 2000), listed("sand", "Sand", "1.0.0", 1250)]);
+    const [, installInk] = screen.getAllByRole("button", { name: "Install" });
+    await user.click(installInk!);
+    expect(await screen.findByText("by Someone · 2K downloads")).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Ink", "Sand"]);
     expect(api.listStoreThemes).toHaveBeenCalledTimes(2);
+  });
+
+  it("ranks installed and available themes together after loading, preserving the order through filters", async () => {
+    for (const [id, name] of [["ink", "Ink"], ["sand", "Sand"], ["paper", "Paper"]] as const) {
+      const parsed = parseTheme({ manifest: manifest(id, name, "1.0.0"), css });
+      if (!parsed.ok) throw new Error("fixture");
+      if (id === "paper") useInstalledThemesStore.getState().install(parsed.theme);
+      else useInstalledThemesStore.getState().installFromStore(parsed.theme, "1.0.0");
+    }
+    let resolveListing!: (themes: StoreTheme[]) => void;
+    api.listStoreThemes.mockReturnValueOnce(new Promise<StoreTheme[]>((resolve) => {
+      resolveListing = resolve;
+    }));
+    const user = userEvent.setup();
+    renderButton();
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    const names = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(names()).toEqual(["Ink", "Sand", "Paper"]);
+
+    await act(async () => resolveListing([
+      listed("ink", "Ink", "1.0.0", 2),
+      listed("ash", "Ash"),
+      listed("sand", "Sand", "1.0.0", 1250),
+      listed("moss", "Moss", "1.0.0", 200),
+      listed("birch", "Birch"),
+    ]));
+    await screen.findByRole("heading", { name: "Moss" });
+    expect(names()).toEqual(["Sand", "Moss", "Ink", "Paper", "Ash", "Birch"]);
+
+    await user.click(screen.getByRole("switch", { name: "Show installed only" }));
+    expect(names()).toEqual(["Sand", "Ink", "Paper"]);
+    await user.click(screen.getByRole("switch", { name: "Show installed only" }));
+    await user.type(screen.getByRole("textbox", { name: "Search themes" }), "a");
+    expect(names()).toEqual(["Sand", "Paper", "Ash"]);
+    await user.clear(screen.getByRole("textbox", { name: "Search themes" }));
+    expect(names()).toEqual(["Sand", "Moss", "Ink", "Paper", "Ash", "Birch"]);
   });
 
   it("offers the listed release as an update", async () => {

@@ -28,7 +28,7 @@ export const PRODUCT_GROUPS: PageGroup[] = [
       { slug: "cloud", title: "Multica Cloud", summary: "Run agents on cloud agent services, with no computer of yours left on." },
       { slug: "desktop", title: "Multica Desktop", summary: "A native app for macOS, Windows, and Linux that turns your computer into a runtime." },
       { slug: "cli", title: "Multica CLI", summary: "Connect a computer as a runtime and work with Multica from the shell." },
-      { slug: "chat", title: "Chat integrations", summary: "Work with agents from Slack, Feishu, DingTalk, WeCom, and Telegram." },
+      { slug: "chat", title: "Chat integrations", summary: "Work with agents from Slack, Lark, DingTalk, WeCom, Telegram, and WeChat." },
       { slug: "mobile", title: "Mobile", summary: "Your inbox, issues, and agent chats on iPhone." },
     ],
   },

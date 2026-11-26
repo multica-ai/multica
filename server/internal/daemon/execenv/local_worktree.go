@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -137,8 +138,8 @@ func (p LocalWorktreeParams) owner() branchOwner {
 // tail. The id is what the branch BELONGS to, and only it decides whether a
 // later task may continue that branch: identifiers are per-workspace and
 // human-chosen, so two workspaces can mint the same one for different issues.
-// Tasks with neither an issue nor a chat session have no conversation to
-// continue and get "", "".
+// Doc discussion runs continue per doc. Tasks with none of these have no
+// conversation to continue and get "", "".
 func localWorktreeConversation(params PrepareParams) (key, id string) {
 	if params.Task.IssueID != "" {
 		if params.IssueIdentifier != "" {
@@ -148,6 +149,9 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 	}
 	if params.Task.ChatSessionID != "" {
 		return "chat-" + taskKey(params.Task.ChatSessionID), params.Task.ChatSessionID
+	}
+	if params.Task.DocID != "" {
+		return "doc-" + taskKey(params.Task.DocID), params.Task.DocID
 	}
 	return "", ""
 }
@@ -162,6 +166,10 @@ type LocalWorktree struct {
 	// WorkDir is the agent's cwd: Path, plus the offset of LocalPath inside
 	// the repo when the user pointed the resource at a subdirectory.
 	WorkDir string
+	// RuntimeConfigSkipWorktree is the tracked instruction file hidden from
+	// agent commits in this worktree's private index. Exported so it survives
+	// environment serialization and can always be restored during teardown.
+	RuntimeConfigSkipWorktree string `json:"runtime_config_skip_worktree,omitempty"`
 	// Branch is the branch created for this task, in the user's repo.
 	Branch string
 	// BaseCommit is the commit the worktree started from — this turn's baseline
@@ -516,8 +524,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// status` shows in the user's checkout, which is theirs, not ours. Instead
 	// the daemon runs the existing CleanupRuntimeConfig + CleanupSidecars pass
 	// over the worktree before Finalize, so the sidecars are simply gone by the
-	// time anything is committed. That also preserves a genuine agent edit to a
-	// tracked CLAUDE.md, which a blanket exclude would have swallowed.
+	// time the daemon commits. ProtectRuntimeConfig separately hides tracked
+	// instruction files from commits the agent makes while the brief is present.
 
 	if logger != nil {
 		logger.Info("execenv: local worktree ready",
@@ -565,6 +573,12 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 		return LocalWorktreeOutcome{}, nil
 	}
 	outcome := LocalWorktreeOutcome{Branch: w.Branch}
+	if err := w.RestoreRuntimeConfigTracking(); err != nil {
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		return outcome, fmt.Errorf("%w; the work is preserved in the worktree at %s (listed by `git worktree list` in %s)",
+			err, w.Path, w.GitRoot)
+	}
 
 	unlock, err := lockGitRoot(w.GitRoot, logger)
 	if err != nil {
@@ -772,6 +786,12 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 // be sure nothing has run in the worktree yet.
 func (w *LocalWorktree) Discard(logger *slog.Logger) {
 	if w == nil {
+		return
+	}
+	if err := w.RestoreRuntimeConfigTracking(); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: could not restore runtime config tracking before discarding worktree", "error", err)
+		}
 		return
 	}
 	unlock, err := lockGitRoot(w.GitRoot, logger)
@@ -1052,23 +1072,60 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 // removeLocalWorktreeDir unregisters the worktree from the user's repo and
 // deletes its directory. The branch is deliberately left alone — it is the
 // task's deliverable.
+//
+// The removal is retried on a short backoff because on Windows a directory
+// that is any process's working directory cannot be deleted, and the handles
+// that pin it — the provider's own shell children finishing late, an antivirus
+// or indexer scan of the tree — close asynchronously after the processes are
+// already gone. Failing the whole task the moment the first unlink hits a
+// sharing violation misreports a delivery that is already committed (the
+// caller fails the task precisely because removal could not be confirmed), so
+// the retry buys the platform's lag, not unlimited patience: the budget stays
+// small enough that a genuinely leaked process still fails the task.
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
-	var removeErr error
-	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
-		removeErr = err
+	for attempt := 0; ; attempt++ {
+		removeErr := removeLocalWorktreeDirOnce(gitRoot, worktreePath, logger)
+		if removeErr == nil || runtime.GOOS != "windows" || attempt >= worktreeRemoveMaxAttempts-1 {
+			return removeErr
+		}
+		backoff := time.Duration(250*(1<<attempt)) * time.Millisecond
 		if logger != nil {
-			logger.Warn("execenv: git worktree remove failed; pruning registration",
-				"path", worktreePath, "output", out, "error", err)
+			logger.Info("execenv: worktree removal blocked (transient lock?); retrying",
+				"path", worktreePath, "attempt", attempt+1, "backoff", backoff.String(), "error", removeErr)
 		}
-		// Fall back to deleting the directory ourselves and dropping the now
-		// dangling registration, so the user's repo isn't left listing a
-		// worktree that no longer exists.
-		if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
-			removeErr = errors.Join(removeErr, rmErr)
-			if logger != nil {
-				logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
-			}
+		time.Sleep(backoff)
+	}
+}
+
+// worktreeRemoveMaxAttempts caps the backoff at 3.75 seconds. Git commands
+// also have their own timeout.
+const worktreeRemoveMaxAttempts = 5
+
+func removeLocalWorktreeDirOnce(gitRoot, worktreePath string, logger *slog.Logger) error {
+	out, gitErr := runGit(gitRoot, "worktree", "remove", "--force", worktreePath)
+	if gitErr == nil {
+		// Git for Windows can unregister a worktree and exit successfully
+		// while leaving directory junctions behind (#7548).
+		if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		} else if statErr != nil {
+			return fmt.Errorf("confirm worktree removal: %w", statErr)
+		} else if runtime.GOOS != "windows" {
+			return errors.New("worktree directory still exists after git removal reported success")
 		}
+	} else if logger != nil {
+		logger.Warn("execenv: git worktree remove failed; pruning registration",
+			"path", worktreePath, "output", out, "error", gitErr)
+	}
+
+	removeErr := gitErr
+	if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
+		removeErr = errors.Join(removeErr, rmErr)
+		if logger != nil {
+			logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
+		}
+	}
+	if gitErr != nil {
 		if out, pruneErr := runGit(gitRoot, "worktree", "prune"); pruneErr != nil && logger != nil {
 			logger.Warn("execenv: git worktree prune failed", "output", out, "error", pruneErr)
 		}
@@ -1083,7 +1140,7 @@ func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) e
 	if removeErr != nil {
 		return fmt.Errorf("worktree directory still exists after removal fallback: %w", removeErr)
 	}
-	return errors.New("worktree directory still exists after git removal reported success")
+	return errors.New("worktree directory still exists after removal fallback")
 }
 
 // deleteBranch drops a task branch that carries nothing worth keeping — an

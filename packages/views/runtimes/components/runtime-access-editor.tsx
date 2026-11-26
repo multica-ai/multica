@@ -3,11 +3,12 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { Globe, Lock, Users } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { refreshFeaturesOnLockedError, usePaidFeatureAccess } from "@multica/core/billing";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -22,6 +23,11 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  PaidFeatureNotice,
+  PaidFeatureUpgradeBadge,
+  usePaidFeatureErrorMessage,
+} from "../../billing";
 import { useT } from "../../i18n";
 import {
   RevokeRuntimeAccessDialog,
@@ -29,13 +35,13 @@ import {
   type RuntimeAccessRevocationPlan,
 } from "./revoke-runtime-access-dialog";
 
-type RuntimeAccessScope = "private" | "public" | "members";
+export type RuntimeAccessScope = "private" | "public" | "members";
 
 // Below this size the member list fits without scrolling, so a search field
 // would only add noise.
 const MEMBER_SEARCH_THRESHOLD = 7;
 
-const SCOPE_ICON = { private: Lock, public: Globe, members: Users } as const;
+export const SCOPE_ICON = { private: Lock, public: Globe, members: Users } as const;
 
 export function runtimeAccessScope(runtime: AgentRuntime): RuntimeAccessScope {
   if (runtime.visibility === "public") return "public";
@@ -60,28 +66,40 @@ export function RuntimeAccessReadout({ runtime }: { runtime: AgentRuntime }) {
 }
 
 /**
- * Owner-only access control. Private and Public apply in one click, as before
- * member sharing existed; restricting access still goes through the reviewed
- * revocation dialog when the server reports affected agents or runs. Choosing
- * members opens a draft popover that persists only on Save, so a partial
- * selection is never shared.
+ * The owner's access controls, shared by the detail page's editor and the
+ * runtime list's menu. Private and Public apply in one call; restricting
+ * access goes through the reviewed revocation dialog when the server reports
+ * affected agents or runs, so the caller must render `revokeDialog`.
  */
-export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
+export function useRuntimeAccess(runtime: AgentRuntime) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const updateRuntime = useUpdateRuntime(wsId);
+  const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const current = runtimeAccessScope(runtime);
   const persisted = useMemo(() => runtime.shared_with ?? [], [runtime.shared_with]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Without the paid feature a runtime keeps the members it is shared with:
+  // they can be removed and the runtime made private or public, but nobody
+  // can be added, and a runtime without a list cannot get one.
+  const memberSharing = usePaidFeatureAccess(wsId, "runtime_member_sharing", {
+    hasExistingConfig: current === "members",
+  });
+  const membersDisabled = !memberSharing.canAdd && current !== "members";
   const [revokePlan, setRevokePlan] = useState<RuntimeAccessRevocationPlan | null>(null);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revokeMembers, setRevokeMembers] = useState<string[]>([]);
-  const disabled = updateRuntime.isPending || revokeOpen;
 
   const recipients = useMemo(
     () => members.filter((member) => persisted.includes(member.user_id)),
     [members, persisted],
+  );
+  const candidates = useMemo(
+    () => members.filter((member) =>
+      member.user_id !== runtime.owner_id &&
+      (memberSharing.canAdd || persisted.includes(member.user_id))),
+    [members, runtime.owner_id, memberSharing.canAdd, persisted],
   );
 
   const apply = (scope: RuntimeAccessScope, sharedWith: string[], onApplied?: () => void) => {
@@ -106,11 +124,42 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             setRevokeOpen(true);
             return;
           }
-          toast.error(err instanceof Error && err.message ? err.message : t(($) => $.detail.visibility_toast_failed));
+          refreshFeaturesOnLockedError(qc, wsId, err);
+          toast.error(paidFeatureError(err, err instanceof Error && err.message ? err.message : t(($) => $.detail.visibility_toast_failed)));
         },
       },
     );
   };
+
+  return {
+    current,
+    persisted,
+    recipients,
+    candidates,
+    memberSharing,
+    membersDisabled,
+    saving: updateRuntime.isPending,
+    disabled: updateRuntime.isPending || revokeOpen,
+    apply,
+    revokeDialog: (
+      <RevokeRuntimeAccessDialog open={revokeOpen} onOpenChange={setRevokeOpen}
+        runtime={runtime} wsId={wsId} initialPlan={revokePlan} sharedWith={revokeMembers} />
+    ),
+  };
+}
+
+/**
+ * Owner-only access control on the detail page. Choosing members opens a
+ * draft popover that persists only on Save, so a partial selection is never
+ * shared.
+ */
+export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const {
+    current, persisted, recipients, candidates, memberSharing, membersDisabled,
+    saving, disabled, apply, revokeDialog,
+  } = useRuntimeAccess(runtime);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <div className="space-y-2">
@@ -130,16 +179,16 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
             }}
           />
         ))}
-        <Popover open={pickerOpen} onOpenChange={(open) => setPickerOpen(open && !disabled)}>
+        <Popover open={pickerOpen} onOpenChange={(open) => setPickerOpen(open && !disabled && !membersDisabled)}>
           <PopoverTrigger
-            render={<ScopeButton scope="members" active={current === "members"} disabled={disabled} />}
+            render={<ScopeButton scope="members" active={current === "members"} disabled={disabled || membersDisabled} />}
           />
           <PopoverContent align="end" className="w-72 p-0">
             {pickerOpen ? (
               <MemberPicker
-                members={members.filter((member) => member.user_id !== runtime.owner_id)}
+                members={candidates}
                 initial={persisted}
-                saving={updateRuntime.isPending}
+                saving={saving}
                 onCancel={() => setPickerOpen(false)}
                 onSave={(ids) => apply("members", ids, () => setPickerOpen(false))}
               />
@@ -169,8 +218,15 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
           </span>
         </button>
       ) : null}
-      <RevokeRuntimeAccessDialog open={revokeOpen} onOpenChange={setRevokeOpen}
-        runtime={runtime} wsId={wsId} initialPlan={revokePlan} sharedWith={revokeMembers} />
+      {memberSharing.state === "read_only" || memberSharing.state === "unavailable" ? (
+        // The badge sits with the notice, not in the scope switcher: the
+        // properties column is too narrow for both without truncating labels.
+        <div className="flex items-start justify-between gap-2">
+          <PaidFeatureNotice state={memberSharing.state} />
+          <PaidFeatureUpgradeBadge feature="runtime_member_sharing" className="shrink-0" />
+        </div>
+      ) : null}
+      {revokeDialog}
     </div>
   );
 }
@@ -212,7 +268,7 @@ function ScopeButton({
   );
 }
 
-function MemberPicker({
+export function MemberPicker({
   members,
   initial,
   saving,

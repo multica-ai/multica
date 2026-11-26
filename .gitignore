@@ -7,10 +7,13 @@ dist
 # build outputs
 .turbo
 .next
+# Written by next dev / build / typegen, with paths that differ between them.
+next-env.d.ts
 out
 build
 bin
 dist-electron
+storybook-static
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
 # config files (entitlements, icons) — not build output.

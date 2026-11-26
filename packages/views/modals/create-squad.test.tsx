@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
 import enCommon from "../locales/en/common.json";
@@ -232,8 +233,8 @@ function makeSquad(overrides: Partial<Squad> = {}): Squad {
 function getSubmitButton(): HTMLButtonElement {
   const btn = screen
     .getAllByRole("button")
-    .find((b) => b.textContent === "Create Squad");
-  if (!btn) throw new Error("Create Squad submit button not found");
+    .find((b) => b.textContent === "Create squad");
+  if (!btn) throw new Error("Create squad submit button not found");
   return btn as HTMLButtonElement;
 }
 
@@ -304,25 +305,29 @@ describe("CreateSquadModal", () => {
     }
   });
 
-  it("binds the name and description inputs in the identity row", () => {
+  it("accepts multiline descriptions without submitting on Enter", async () => {
+    const user = userEvent.setup();
     renderModal();
     const name = screen.getByPlaceholderText(/e\.g\. Frontend Team/i) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Platform Team" } });
     expect(name.value).toBe("Platform Team");
 
-    const desc = screen.getByPlaceholderText(/Describe what this squad/i) as HTMLInputElement;
-    fireEvent.change(desc, { target: { value: "We own infra" } });
-    expect(desc.value).toBe("We own infra");
-    // Char counter reflects the typed length.
-    expect(screen.getByTestId("char-counter").textContent).toMatch(/^12\//);
+    fireEvent.click(firstMatch("MineAgentOne"));
+    expect(getSubmitButton()).toBeEnabled();
+    const desc = screen.getByPlaceholderText(/Describe what this squad/i);
+    expect(desc).toHaveAttribute("rows", "3");
+    await user.type(desc, "Build{Enter}Ship");
+    expect(desc).toHaveValue("Build\nShip");
+    expect(screen.getByTestId("char-counter").textContent).toMatch(/^10\//);
+    expect(mocks.createSquad).not.toHaveBeenCalled();
   });
 
   it("renders the leader picker with 'My Agents' before 'Workspace Agents'", () => {
     renderModal();
     // The leader group headers come from the LeaderPicker — agent name "MineAgentOne"
     // appears under the My Agents section, "OtherAgentOne" under Workspace Agents.
-    const myGroupLabels = screen.getAllByText("My Agents");
-    const wsGroupLabels = screen.getAllByText("Workspace Agents");
+    const myGroupLabels = screen.getAllByText("My agents");
+    const wsGroupLabels = screen.getAllByText("Workspace agents");
     expect(myGroupLabels.length).toBeGreaterThanOrEqual(1);
     expect(wsGroupLabels.length).toBeGreaterThanOrEqual(1);
 
@@ -331,8 +336,8 @@ describe("CreateSquadModal", () => {
     // both sections; the additional-members picker also has them, but both
     // pickers follow the same order so the assertion holds either way).
     const all = Array.from(document.querySelectorAll("*"));
-    const myIdx = all.findIndex((n) => n.textContent === "My Agents");
-    const wsIdx = all.findIndex((n) => n.textContent === "Workspace Agents");
+    const myIdx = all.findIndex((n) => n.textContent === "My agents");
+    const wsIdx = all.findIndex((n) => n.textContent === "Workspace agents");
     expect(myIdx).toBeLessThan(wsIdx);
   });
 

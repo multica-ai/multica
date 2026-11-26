@@ -13,7 +13,21 @@ const selection = vi.hoisted(() => ({
 
 const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: true }),
+}));
+
+const viewer = vi.hoisted(() => ({ guest: false }));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => viewer.guest,
+}));
+
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -95,6 +109,20 @@ vi.mock("./pickers", () => ({
       data-mixed={String(Boolean(mixed))}
     />
   ),
+  DueDatePicker: ({ dueDate }: { dueDate: string | null }) => (
+    <div data-testid="due-date-picker" data-due={dueDate ?? "__none__"} />
+  ),
+  StartDatePicker: () => null,
+}));
+vi.mock("./pickers/batch-label-picker", () => ({
+  BatchLabelPicker: ({ issues }: { issues: Issue[] }) => (
+    <div data-testid="label-picker" data-issues={issues.map((issue) => issue.id).join(",")} />
+  ),
+}));
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({ projectId }: { projectId: string | null | undefined }) => (
+    <div data-testid="project-picker" data-project={projectId === undefined ? "__mixed__" : projectId ?? "__none__"} />
+  ),
 }));
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -127,7 +155,26 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 beforeEach(() => {
   deletionPolicy.allowed = true;
+  viewer.guest = false;
   selection.selectedIds = new Set();
+});
+
+describe("BatchActionToolbar for a guest (MUL-9883)", () => {
+  it("offers only Copy links in place of the field pickers and the More menu", () => {
+    viewer.guest = true;
+    const issues = [makeIssue({ id: "a" }), makeIssue({ id: "b" })];
+    selection.selectedIds = new Set(["a", "b"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    for (const picker of ["status-picker", "priority-picker", "assignee-picker", "label-picker", "project-picker", "due-date-picker"]) {
+      expect(screen.queryByTestId(picker)).not.toBeInTheDocument();
+    }
+    // No More menu: its trigger is the bar's only menu button.
+    expect(document.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+    // Clear selection, then Copy links.
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
 });
 
 describe("BatchActionToolbar picker wiring", () => {
@@ -175,6 +222,25 @@ describe("BatchActionToolbar picker wiring", () => {
     expect(assignee).toHaveAttribute("data-mixed", "false");
     expect(assignee).toHaveAttribute("data-assignee-type", "__null__");
     expect(assignee).toHaveAttribute("data-assignee-id", "__null__");
+  });
+
+  it("hands the label, project and due date pickers the selection's shared values", () => {
+    const issues = [
+      makeIssue({ id: "a", project_id: "p-dev", due_date: "2026-02-01" }),
+      makeIssue({ id: "b", project_id: "p-dev", due_date: "2026-02-01" }),
+      makeIssue({ id: "c", project_id: null, due_date: "2026-03-01" }),
+    ];
+    selection.selectedIds = new Set(["a", "b"]);
+    const view = render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("label-picker")).toHaveAttribute("data-issues", "a,b");
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project", "p-dev");
+    expect(screen.getByTestId("due-date-picker")).toHaveAttribute("data-due", "2026-02-01");
+
+    selection.selectedIds = new Set(["a", "b", "c"]);
+    view.rerender(<BatchActionToolbar issues={[...issues]} />);
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project", "__mixed__");
+    expect(screen.getByTestId("due-date-picker")).toHaveAttribute("data-due", "__none__");
   });
 
   it("offers only the statuses every selected project's workflow allows", () => {

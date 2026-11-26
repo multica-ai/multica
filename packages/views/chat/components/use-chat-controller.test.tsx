@@ -583,8 +583,12 @@ describe("useChatController.advanceSelectionAfterArchive", () => {
 
   it("advances to the next chat and syncs the selected agent across agents", () => {
     const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sA));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sA);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "sB", direction: "next" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("sB");
     // The next chat belongs to a different agent — selectedAgentId must follow
     // so a subsequent "new chat" defaults to the right agent (the review bug).
@@ -597,32 +601,48 @@ describe("useChatController.advanceSelectionAfterArchive", () => {
     const a1 = makeSession({ id: "a1", agent_id: "agent-a", updated_at: "2026-07-08T03:00:00Z" });
     const a2 = makeSession({ id: "a2", agent_id: "agent-a", updated_at: "2026-07-08T02:00:00Z" });
     const result = setup("a1", [a1, a2], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(a1));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(a1);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "a2", direction: "next" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("a2");
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
 
   it("falls back to the previous chat when archiving the last open one", () => {
     const result = setup("sC", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sC));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sC);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "sB", direction: "prev" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("sB");
   });
 
   it("clears the selection when archiving the only chat", () => {
     const only = makeSession({ id: "only", agent_id: "agent-a" });
     const result = setup("only", [only], [agentA]);
-    act(() => result.current.advanceSelectionAfterArchive(only));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(only);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: null, direction: null });
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
 
   it("is a no-op when the archived chat is not the open one", () => {
     const result = setup("sB", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sA));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sA);
+    });
 
+    expect(outcome).toEqual({ moved: false });
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
@@ -1206,6 +1226,32 @@ describe("useChatController.handleSend — compose target tracking", () => {
         }),
     };
   }
+
+  it("keeps the active retry and stores guidance under its root input owner", async () => {
+    h.pendingTask = { task_id: "running-task", status: "running", supports_queue: true };
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "guidance", task_id: "running-task", message_task_id: "root-task", steered: true,
+      created_at: "2026-01-01T00:00:00Z", message_created_at: "2026-01-01T00:01:00Z",
+    });
+    h.queryClient.setQueryData.mockClear();
+    const { send, commitInput } = sendFrom("sA");
+    await send();
+    expect(h.queryClient.setQueryData.mock.calls.filter(([key]) =>
+      JSON.stringify(key) === JSON.stringify(chatKeys.pendingTask("sA"))))
+      .toHaveLength(0);
+    const cacheWrite = h.queryClient.setQueryData.mock.calls.find(([key]) =>
+      JSON.stringify(key) === JSON.stringify(chatKeys.messages("sA")));
+    expect(cacheWrite).toBeDefined();
+    expect(cacheWrite![1](undefined)).toEqual([
+      expect.objectContaining({
+        id: "guidance",
+        task_id: "root-task",
+        created_at: "2026-01-01T00:01:00Z",
+      }),
+    ]);
+    expect(commitInput).toHaveBeenCalled();
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+  });
 
   it("scrubs the composer after a new chat's first send", async () => {
     const { commitInput, send } = sendFrom(null);

@@ -30,6 +30,7 @@ import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentAppsTab } from "./tabs/agent-apps-tab";
 import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
+import { AgentLifecycleSection } from "./agent-lifecycle-section";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentAccessSettings } from "./agent-access-settings";
 import { useT } from "../../i18n";
@@ -90,6 +91,8 @@ interface AgentAdvancedSettingsProps {
   /** The open section, or `null` when the dialog is closed. */
   section: AdvancedSection | null;
   onSectionChange: (section: AdvancedSection | null) => void;
+  /** Present when the caller may archive or restore this agent. */
+  lifecycle?: { onArchive: () => void; onRestore: () => void };
 }
 
 /**
@@ -107,6 +110,7 @@ export function AgentAdvancedSettings({
   canEdit,
   section,
   onSectionChange,
+  lifecycle,
 }: AgentAdvancedSettingsProps) {
   const { t } = useT("agents");
   const composioMCPAppsEnabled = useFeatureEnabled(
@@ -193,7 +197,7 @@ export function AgentAdvancedSettings({
           if (!open) request(null);
         }}
       >
-        <DialogContent className="flex h-[min(85dvh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent className="flex h-[min(85%,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 gap-1 border-b px-5 py-4 pr-12">
             <DialogTitle>{t(($) => $.detail.settings)}</DialogTitle>
             <DialogDescription className="truncate">{agent.name}</DialogDescription>
@@ -265,6 +269,15 @@ export function AgentAdvancedSettings({
                       currentUserId={currentUserId}
                       canEdit={canEdit}
                       onUpdate={onUpdate}
+                      footer={
+                        lifecycle ? (
+                          <AgentLifecycleSection
+                            archived={!!agent.archived_at}
+                            onArchive={lifecycle.onArchive}
+                            onRestore={lifecycle.onRestore}
+                          />
+                        ) : null
+                      }
                     />
                   )}
                   {active.id === "access" && (

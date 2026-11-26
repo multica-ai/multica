@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { workspaceWorkingAgentsKeys } from "@multica/core/agents/queries";
+import { agentTaskSnapshotKeys, workspaceWorkingAgentsKeys } from "@multica/core/agents/queries";
 import { issueUnreadKeys } from "@multica/core/issues/unread";
 import {
   getIssueSurfaceViewStore,
@@ -204,7 +204,6 @@ describe("useIssueSurfaceController", () => {
       ...tableMethods,
       listIssueTableRows,
       listIssueTableFacets,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
       getWorkspaceWorkingAgents,
@@ -378,7 +377,6 @@ describe("useIssueSurfaceController", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
       getChildIssueProgress: vi.fn(() => never()),
@@ -464,7 +462,6 @@ describe("useIssueSurfaceController", () => {
       listIssues: legacyListIssues,
       listIssueTableRows: tableRows,
       listIssueTableFacets: tableFacets,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
       getChildIssueProgress: vi.fn(() => never()),
@@ -754,7 +751,6 @@ describe("useIssueSurfaceController", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableFacets,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
@@ -844,7 +840,6 @@ describe("useIssueSurfaceController", () => {
         listIssues,
         ...tableMethods,
         listIssueTableFacets,
-        listGroupedIssues: vi.fn(() => never()),
         listProjects: vi.fn(() => never()),
         listProperties: vi.fn(() =>
           Promise.resolve({ properties, total: properties.length }),
@@ -906,7 +901,6 @@ describe("useIssueSurfaceController", () => {
         listIssues,
         ...tableMethods,
         listIssueTableGroups,
-        listGroupedIssues: vi.fn(() => never()),
         listProjects: vi.fn(() => Promise.resolve({ projects: [], total: 0 })),
         getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
         getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -950,7 +944,6 @@ describe("useIssueSurfaceController", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
@@ -1004,7 +997,6 @@ describe("useIssueSurfaceController", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
@@ -1059,7 +1051,6 @@ describe("useIssueSurfaceController", () => {
       // a built-in key IS its own category. (MUL-6243)
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve([
@@ -1104,7 +1095,6 @@ describe("useIssueSurfaceController", () => {
       // a built-in key IS its own category. (MUL-6243)
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getWorkspaceWorkingAgents,
@@ -1741,6 +1731,66 @@ describe("useIssueSurfaceController", () => {
     expect(listIssueTableRows).toHaveBeenCalledWith(expect.objectContaining({
       query: expect.objectContaining({ filters: expect.objectContaining({ working_issue_ids: [] }) }),
     }));
+  });
+
+  it.each(["list", "board", "table", "swimlane"] as const)("gates %s Idle on the activity snapshot and keeps the working count unfiltered", async (mode) => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode(mode);
+    store.getState().toggleAgentIdleFilter();
+    let finish!: (tasks: AgentTask[]) => void;
+    getAgentTaskSnapshot.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: [mode] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isEmpty).toBe(false);
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    await waitFor(() => expect(getAgentTaskSnapshot).toHaveBeenCalled());
+    await act(async () => finish([]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.tableQuerySpec.filters).toMatchObject({ idle_only: true });
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toBeUndefined();
+    const chipRequests = listIssueTableFacets.mock.calls.filter(([r]) => r.facets.some((f: { kind: string }) => f.kind === "working_agents"));
+    expect(chipRequests.length).toBeGreaterThan(0);
+    for (const [request] of chipRequests) expect(request.query.filters.idle_only).toBeUndefined();
+  });
+
+  it("retries a failed Idle snapshot instead of claiming everything is idle", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "todo-1", status: "todo" })] });
+    getIssueSurfaceViewStore("project:p1").getState().toggleAgentIdleFilter();
+    getAgentTaskSnapshot.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["list"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("working"));
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    expect(result.current.isEmpty).toBe(false);
+    act(() => result.current.filterDependencyError!.retry());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.filterDependencyError).toBeNull();
+    expect(result.current.tableQuerySpec.filters.idle_only).toBe(true);
+  });
+
+  it("filters the Gantt canvas by the same active set as Inbox and updates as work starts or finishes", async () => {
+    const rows = ["running", "queued", "idle"].map((id) => makeIssue({ id, status: "todo", start_date: "2026-01-01" }));
+    listIssues.mockResolvedValue({ issues: rows, total: rows.length });
+    const tasks = [makeRunningTask("t1", "a1", "running"), { ...makeRunningTask("t2", "a2", "queued"), status: "queued" as const }];
+    getAgentTaskSnapshot.mockResolvedValue(tasks);
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("gantt");
+    store.getState().toggleAgentIdleFilter();
+    const { result } = renderHook(
+      () => useIssueSurfaceController({ scope: { type: "project", projectId: "p1" }, modes: ["gantt"] }),
+      { wrapper: makeWrapper(qc) },
+    );
+    await waitFor(() => expect(result.current.filteredGanttIssues.map((i) => i.id)).toEqual(["idle"]));
+    act(() => qc.setQueryData(agentTaskSnapshotKeys.list("ws-1"), []));
+    await waitFor(() => expect(result.current.filteredGanttIssues).toHaveLength(3));
+    act(() => qc.setQueryData(agentTaskSnapshotKeys.list("ws-1"), [makeRunningTask("t3", "a3", "idle")]));
+    await waitFor(() => expect(result.current.filteredGanttIssues.map((i) => i.id)).toEqual(["running", "queued"]));
   });
 
   it("keeps Table loading until working membership resolves, and lets the filter be disabled while pending", async () => {

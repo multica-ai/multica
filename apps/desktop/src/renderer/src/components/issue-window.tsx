@@ -14,11 +14,14 @@ import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
+import { VoiceWorkspaceWords } from "@multica/views/voice";
 import { DragStrip, WindowTitleBarProvider } from "@multica/views/platform";
+import { useT } from "@multica/views/i18n";
 import type { IssueWindowContext } from "../../../shared/issue-window";
 import { DesktopAuthRecoveryPage } from "../pages/auth-recovery";
 import { IssueDetailPage } from "../pages/issue-detail-page";
 import { IssueWindowNavigationProvider } from "../platform/issue-window-navigation";
+import { DocumentTitleSync } from "./document-title-sync";
 import { TRAFFIC_LIGHT_CLEARANCE } from "./window-toolbar";
 
 export function IssueWindow({ context }: { context: IssueWindowContext }) {
@@ -81,7 +84,9 @@ function IssueWindowRoute() {
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <IssueWindowNavigationProvider>
+        <DocumentTitleSync />
         <WorkspacePresencePrefetch />
+        <VoiceWorkspaceWords />
         <IssueWindowFrame pageOwnsTitleBar>
           <IssueDetailPage onDelete={() => window.desktopAPI.closeWindow()} />
         </IssueWindowFrame>
@@ -117,6 +122,7 @@ function IssueWindowFrame({
 }
 
 function IssueWindowUnavailable() {
+  const { t } = useT("settings");
   return (
     <IssueWindowFrame>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
@@ -124,13 +130,15 @@ function IssueWindowUnavailable() {
           <AlertTriangle className="size-6" aria-hidden="true" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-title font-semibold">Issue unavailable</h1>
+          <h1 className="text-title font-semibold">
+            {t(($) => $.desktop.errors.issue_unavailable_title)}
+          </h1>
           <p className="text-body text-muted-foreground">
-            This workspace is no longer available in your account.
+            {t(($) => $.desktop.errors.issue_unavailable_description)}
           </p>
         </div>
         <Button variant="outline" onClick={() => window.desktopAPI.closeWindow()}>
-          Close window
+          {t(($) => $.desktop.errors.close_window)}
         </Button>
       </div>
     </IssueWindowFrame>
@@ -138,8 +146,12 @@ function IssueWindowUnavailable() {
 }
 
 function IssueWindowRouteError() {
+  const { t } = useT("settings");
   const error = useRouteError();
-  const message = error instanceof Error ? error.message : "Unknown route error";
+  const message =
+    error instanceof Error
+      ? error.message
+      : t(($) => $.desktop.errors.unknown_route_error);
 
   return (
     <IssueWindowFrame>
@@ -151,7 +163,9 @@ function IssueWindowRouteError() {
           <AlertTriangle className="size-6" aria-hidden="true" />
         </div>
         <div className="space-y-1">
-          <h1 className="text-title font-semibold">Something went wrong</h1>
+          <h1 className="text-title font-semibold">
+            {t(($) => $.desktop.errors.something_went_wrong)}
+          </h1>
           <p className="max-w-lg truncate text-body text-muted-foreground">
             {message}
           </p>
@@ -159,11 +173,11 @@ function IssueWindowRouteError() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => window.location.reload()}>
             <RotateCw className="size-4" aria-hidden="true" />
-            Reload
+            {t(($) => $.desktop.errors.reload)}
           </Button>
           <Button variant="outline" onClick={() => window.desktopAPI.closeWindow()}>
             <X className="size-4" aria-hidden="true" />
-            Close window
+            {t(($) => $.desktop.errors.close_window)}
           </Button>
         </div>
       </div>

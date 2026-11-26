@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web 和 Desktop 为每个工作区维护本地搜索索引；设为 `off` 可切回由服务端搜索 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 在数据统计页开启 365 天时间范围；如果整年统计查询对数据库压力过大可设为 `off` |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -185,22 +187,17 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 与连接 state 签名密钥 |
-| GitHub | `GITHUB_APP_ID` | PR 卡片的 CI 状态、可合并性和"从 GitHub 选择"仓库都需要它 |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | 与 App ID 配套的完整 PEM 私钥，用途同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App 的 Client ID。新连接必需，用于校验操作者能否访问该 installation |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | 与 Client ID 配对的 client secret，新连接必需 |
+| GitHub | `GITHUB_APP_ID` | 新连接必需，用于验证安装管理权限；也用于 PR 卡片和仓库浏览 |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | 新连接必需，用于验证安装管理权限；也用于 PR 卡片和仓库浏览 |
 | 飞书 | `MULTICA_LARK_SECRET_KEY` | base64 编码的 32 字节凭据加密密钥 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 编码的 32 字节 token 加密密钥 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 编码的 32 字节 Bot token 加密密钥 |
+| WeChat | `MULTICA_WEIXIN_SECRET_KEY` | Base64 编码的 32 字节密钥，加密微信机器人凭据和扫码状态 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 流式回复中展示的工具步骤：`auto`（默认，私聊显示细节，群聊只显示工作类型）、`off`、`summary` 或 `detail` |
-| Composio | `COMPOSIO_API_KEY` | 启用 Composio 工具连接 |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回调 API 地址；可回退到 `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
-| 插件 | `MULTICA_PLUGIN_SECRET_KEY` | base64 编码的 32 字节密钥，用于加密已存 secret 和 surface 启动 URL |
-| 插件 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到后端的独立无 Cookie 浏览器 origin；必须不同于 app/API origin，并保留 `Host` |
-| 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
-| 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
-| 主题商店 | `MULTICA_THEME_STORE` | 默认开启，读取官方 [multica-themes](https://github.com/multica-ai/multica-themes) 仓库；设为 `off` 关闭社区主题商店，服务端不再请求仓库 |
 | 主题商店 | `MULTICA_THEME_REGISTRY_URL` | 改用其他仓库的 `index.json`，比如官方仓库的 fork；见 [主题与外观](/themes#自托管) |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像，并在合并后改状态，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
@@ -251,7 +248,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止。Cursor 的后台 shell 在它启动的进程退出前一直算作执行中；到达这个上限时，守护进程会停止这些进程，并给 Cursor 一段新的 watchdog 预算来产出终态结果。若进程归属或清理无法验证，则回到普通的运行取消策略 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | idle 与 tool 预算中较大的值；守护进程的 watchdog 关闭时为 `10m` | Codex 语义静默阈值。Codex 的计时器无法判断是否正在执行工具。`MULTICA_AGENT_IDLE_WATCHDOG` 为 `0` 且未设置此变量时，Codex 使用自己的默认值 `10m`。 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `MULTICA_CODEX_MEMORY` | 关闭 | 设为 `1`、`true`、`yes` 或 `on` 时，在守护进程管理的 Codex 运行中保留 Codex 原生记忆；默认按运行关闭，见 [Codex 原生记忆与子智能体](/daemon-runtimes#codex-memory) |
@@ -276,7 +273,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_GC_ENABLED` | `true` | 设为 `false` 或 `0` 关闭整个清理循环 |
 | `MULTICA_GC_INTERVAL` | `2h` | 两轮清理之间的间隔；守护进程启动约 30 秒后先清理一次 |
 | `MULTICA_GC_TTL` | `24h` | 任务进入 `done` 或 `closed` 分类、或聊天会话归档后，再过多久删除对应运行目录 |
-| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自托管 `0` | 任务运行完成多久后删除整个目录，不论任务是否关闭；`0` 表示关闭。不作用于项目本地目录上的运行 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | 运行完成后多久删除托管任务目录；本地目录运行只删除 `codex-home`，保留 daemon 日志、输出和外部会话存储，仍有本地会话记录的 home 不删除。`0` 表示关闭此到期清理 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到归属的目录多久没有改动后删除 |
 | `MULTICA_GC_ARTIFACT_TTL` | `12h` | 从运行结束到守护进程清理可重新生成内容的时间。下一行的目录名规则适用于未关闭的任务，以及使用托管工作目录的未归档聊天。守护进程管理的 Codex 缓存也适用相同时长。设为 `0` 可保留这些缓存 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目录名匹配的可再生成内容，逗号分隔。设置后**替换**默认列表，要保留默认项就一并写上；含 `/` 或 `\` 的项会被忽略 |
@@ -289,15 +286,17 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 ### 守护进程日志 [#daemon-logs]
 
+守护进程默认按 `debug` 级别写日志。设置 `LOG_LEVEL`（`debug`、`info`、`warn` 或 `error`）可以修改，也可以用 `multica config set log_level info` 保存配置档案的默认值。环境变量优先于配置档案。
+
 守护进程在后台运行（不连着终端）时，日志写入 `~/.multica/daemon.log`，命名 profile 为 `~/.multica/profiles/<name>/daemon.log`，并按大小轮转，轮转出的文件用 gzip 压缩。
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` 达到多少 MB 时轮转 |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 最多保留几个轮转文件 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 轮转文件保留的天数 |
+| 变量 | Profile 配置键 | 默认值 | 说明 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log` 达到多少 MB 时轮转 |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 最多保留几个轮转文件 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | 轮转文件保留的天数 |
 
-三个变量都要求正整数；`0`、负数或无法解析的值按默认值处理，不会变成"不限制"。保留数量和天数哪个先到就按哪个删除。崩溃输出写在同目录的 `daemon.err.log`，启动时超过 5 MB 就改名为 `daemon.err.log.1`。
+三个参数都要求正整数。用 `multica --profile dev config set <key> <value>` 保存，`config show` 查看已保存值，传入 `""` 清除对应配置。修改在下次守护进程启动或重启时生效。有效环境变量优先于 profile；未设置、空白、零、负数、格式错误或溢出的环境值回退到有效 profile 值，再回退到表中默认值。大小和天数还必须能安全转换为字节和时长；`config set` 会拒绝无效值。零不能关闭保留限制。保留数量和天数哪个先到就按哪个删除。崩溃输出写在同目录的 `daemon.err.log`，启动时超过 5 MB 就改名为 `daemon.err.log.1`。
 
 ### 各 AI 编程工具的路径、模型与参数
 
@@ -308,6 +307,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 | 工具 | 前缀 | 有模型变量 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（选择 Amp 模式，例如 `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（取值是 `agy models` 显示的完整名称） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -316,7 +316,9 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（取值是 dsh 模型目录中的 id，例如 `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（取值是 dim 模型目录中的 id） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -334,6 +336,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的智能体配置管理） |
 
 </Accordion>
@@ -341,7 +344,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，见下一节。
 
-全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+全机默认参数 `MULTICA_<前缀>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid 和 QwenPaw 七款工具，对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -387,6 +390,7 @@ multica config show
 | `poll_interval` | `30s` | 运行轮询间隔 |
 | `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全轮询的上限，与 `poll_interval` 独立配置；Daemon 会应用向下抖动 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
+| `log_level` | `debug` | 守护进程日志级别：`debug`、`info`、`warn` 或 `error`。`LOG_LEVEL` 优先 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
 | `agent_idle_watchdog` | `2h` | 没有工具执行时的静默上限；`0s` 关闭守护进程的整套 watchdog，`agent_tool_watchdog` 也随之失效 |
 | `agent_tool_watchdog` | 同 `agent_idle_watchdog` | 工具执行期间的静默上限；`0s` 表示守护进程的 watchdog 不会因工具静默而停止执行，此时执行只受 `agent_timeout` 限制，而它默认不限制 |
@@ -395,6 +399,9 @@ multica config show
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` 达到多少 MB 时轮转，见[守护进程日志](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | 最多保留几个轮转文件 |
+| `daemon_log_max_age_days` | `30` | 轮转文件保留的天数 |
 
 几条取值规则：
 

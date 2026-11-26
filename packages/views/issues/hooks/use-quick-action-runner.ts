@@ -22,21 +22,24 @@ export function useQuickActionRunner(issueId: string) {
   const { mutateAsync } = useRunQuickAction(issueId);
 
   return useCallback(
-    (action: QuickAction) => {
+    /** Resolves whether the action's comment was posted. */
+    (action: QuickAction): Promise<boolean> => {
       const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
-      mutateAsync({ quickActionId: action.id }).then(
+      return mutateAsync({ quickActionId: action.id }).then(
         (comment) => {
           const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, t);
           if (kind === "success") toast.success(message);
           else if (kind === "error") toast.error(message);
           else toast.info(message);
+          return true;
         },
         (error: unknown) => {
           if (dispatchReasonCode(error) === "invocation_not_allowed") {
             toast.error(t(($) => $.detail.quick_action_blocked_body, { name: action.name }));
-            return;
+            return false;
           }
           toast.error(error instanceof Error ? error.message : String(error));
+          return false;
         },
       );
     },

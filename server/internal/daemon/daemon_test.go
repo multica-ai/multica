@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -799,6 +800,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
+		// Droid uses the task AGENTS.md; TestDroidRealAgentsMDCanary verifies
+		// native discovery independently of the optional adapter SystemPrompt.
+		{provider: "droid", want: false},
 	}
 
 	for _, tc := range cases {
@@ -2376,6 +2380,33 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 	}
 }
 
+// Antigravity stores conversations under its global app data directory, so a
+// follow-up that lands in a new workdir must keep the prior conversation
+// (#11316).
+func TestGateAntigravityResumeAcrossWorkdirs(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	priorDir := filepath.Join(base, "prior-workdir")
+	envDir := filepath.Join(base, "fresh-workdir")
+	for _, dir := range []string{priorDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	const conversationID = "27a6d8f2-8523-46fc-8fc9-87e630cbe295"
+	task := Task{PriorSessionID: conversationID, PriorWorkDir: priorDir}
+	taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+	if !gateResumeToReachableSession(&task, &taskCtx, "antigravity", envDir, true, false, false, false, slog.Default()) {
+		t.Fatal("antigravity conversation should stay reachable from a new workdir")
+	}
+	if task.PriorSessionID != conversationID || !taskCtx.PriorSessionResumed || taskCtx.PriorSessionResumeUnavailable {
+		t.Fatalf("resume state changed: session=%q resumed=%v unavailable=%v",
+			task.PriorSessionID, taskCtx.PriorSessionResumed, taskCtx.PriorSessionResumeUnavailable)
+	}
+}
+
 func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	t.Parallel()
 
@@ -3920,7 +3951,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "droid", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -4730,6 +4761,45 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 	}
 }
 
+func TestExecuteAndDrain_LogsEffectiveIdleWatchdog(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		global   time.Duration
+		override time.Duration
+		want     string
+	}{
+		{name: "global window", global: 15 * time.Minute, want: "window=15m0s"},
+		{name: "shorter override", global: 15 * time.Minute, override: 5 * time.Minute, want: "window=5m0s"},
+		{name: "longer override", global: 5 * time.Minute, override: 15 * time.Minute, want: "window=5m0s"},
+		{name: "globally disabled", override: 5 * time.Minute},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newTestDaemon(t)
+			d.cfg.AgentIdleWatchdog = tt.global
+			backend := &fakeBackend{results: []agent.Result{{Status: "completed"}}}
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+			_, _, err := d.executeAndDrain(context.Background(), backend, "p",
+				agent.ExecOptions{IdleWatchdogTimeout: tt.override}, log, "t-idle-log", "", new(atomic.Int32))
+			if err != nil {
+				t.Fatalf("run backend: %v", err)
+			}
+
+			line := "msg=\"idle watchdog armed\""
+			if tt.want == "" {
+				if strings.Contains(logs.String(), line) {
+					t.Fatalf("disabled watchdog logged as armed: %s", &logs)
+				}
+			} else if !strings.Contains(logs.String(), line+" "+tt.want) {
+				t.Fatalf("missing armed watchdog with %s: %s", tt.want, &logs)
+			}
+		})
+	}
+}
+
 // longToolCallBackend simulates a legitimate long-running tool call (e.g.
 // `npm install`, `docker build`, full test suite). The backend emits a
 // tool_use, stays silent past the idle window while the tool runs, then emits
@@ -4943,7 +5013,7 @@ func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 		t.Fatalf("precondition: expected co-author hook enabled before checkout")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -4977,7 +5047,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	// URL with trailing whitespace should still resolve to the cached repo.
-	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
 		t.Fatalf("ensureRepoReady with padded URL: %v", err)
 	}
 	// Even on cache hit we refresh settings once so toggle flips feel live.
@@ -5005,7 +5075,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -5054,11 +5124,11 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 		t.Fatalf("expected repo to be cached after registerTaskRepos, but Lookup returned empty")
 	}
 
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
-		t.Fatal("expected project repo to pass workspaceRepoAllowed")
+	if d.resolveWorkspaceRepoURL("ws-1", sourceRepo) != sourceRepo {
+		t.Fatal("expected project repo to resolve to its registered URL")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if _, err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
@@ -5098,7 +5168,7 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 		t.Fatalf("refreshWorkspaceRepos: %v", err)
 	}
 
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
+	if d.resolveWorkspaceRepoURL("ws-1", sourceRepo) != sourceRepo {
 		t.Fatal("project repo URL was wiped by workspace refresh")
 	}
 }
@@ -5148,7 +5218,7 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
 	if !errors.Is(err, ErrRepoNotConfigured) {
 		t.Fatalf("expected ErrRepoNotConfigured, got %v", err)
 	}
@@ -5167,7 +5237,7 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced: git clone --bare:") {
 		t.Fatalf("expected sync failure error with git's output, got %v", err)
 	}
@@ -5226,7 +5296,7 @@ func TestEnsureRepoReadyKeepsSyncFailureDespiteConcurrentSuccess(t *testing.T) {
 	d.repoCache = cache
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
+	_, err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
 	if !cache.raced {
 		t.Fatal("test did not exercise the concurrent sync")
 	}
@@ -5291,7 +5361,8 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			waitCtx := &repoRefreshWaitContext{Context: ctx, waiting: waiting}
-			errCh <- d.ensureRepoReady(waitCtx, "ws-1", sourceRepo)
+			_, err := d.ensureRepoReady(waitCtx, "ws-1", sourceRepo)
+			errCh <- err
 		}()
 	}
 	for range concurrency {
@@ -5509,14 +5580,24 @@ func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T)
 // actually do anything (e.g. provider 429 / out-of-credit).
 func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	t.Parallel()
+	const disconnect = `traecli session/prompt failed: session/prompt: Internal error (code=-32603, data={"message":"stream disconnected before completion: llm response empty stream","trae_stream_errors":[{"trae_error_info":{"response_stream_disconnected":{"http_status_code":null}}}]})`
 
 	cases := []struct {
-		name              string
-		status            string
-		comment           string
-		failureReasonIn   string
-		wantFailureReason string
+		name               string
+		status             string
+		comment            string
+		failureReasonIn    string
+		wantFailureReason  string
+		noToolCallsStarted bool
 	}{
+		{
+			name:   "Trae disconnect without proof is safe for an older server",
+			status: "blocked", comment: disconnect, failureReasonIn: "agent_error.provider_network", wantFailureReason: "agent_error.provider_server_error",
+		},
+		{
+			name:   "Trae disconnect with verified history",
+			status: "blocked", comment: disconnect, failureReasonIn: "agent_error.provider_network", wantFailureReason: "agent_error.provider_network", noToolCallsStarted: true,
+		},
 		{
 			name:              "blocked with explicit reason preserves it",
 			status:            "blocked",
@@ -5567,11 +5648,12 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 
 			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 			d.reportTaskResult(context.Background(), "task-x", TaskResult{
-				Status:        tc.status,
-				Comment:       tc.comment,
-				SessionID:     "ses-x",
-				WorkDir:       "/tmp/x",
-				FailureReason: tc.failureReasonIn,
+				Status:             tc.status,
+				Comment:            tc.comment,
+				SessionID:          "ses-x",
+				WorkDir:            "/tmp/x",
+				FailureReason:      tc.failureReasonIn,
+				NoToolCallsStarted: tc.noToolCallsStarted,
 			}, slog.Default())
 
 			rec.mu.Lock()
@@ -5584,6 +5666,9 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			}
 			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {
 				t.Errorf("failure_reason: got %v, want %q", got, tc.wantFailureReason)
+			}
+			if got, present := rec.payload["no_tool_calls_started"]; present != tc.noToolCallsStarted || (present && got != true) {
+				t.Errorf("no_tool_calls_started = %v, present %t, want present only for a verified turn", got, present)
 			}
 			if rec.payload["session_id"] != "ses-x" {
 				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
@@ -5772,7 +5857,7 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, newTestTaskSlot(0))
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
@@ -5814,7 +5899,7 @@ func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
 		return TaskResult{}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, newTestTaskSlot(0))
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {
@@ -5887,7 +5972,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -5990,7 +6075,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6648,7 +6733,7 @@ func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6717,7 +6802,7 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)

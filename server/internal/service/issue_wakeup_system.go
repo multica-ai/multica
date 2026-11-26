@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	inboxwriter "github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -22,13 +22,14 @@ import (
 
 // The child_done system rule wakes a parent's assignee when a stage of its
 // sub-issues closes while a later stage waits, and once more when every
-// sub-issue is closed. It is an ordinary issue_wakeup row with system_rule set:
-// the shared condition, receipts, runaway protection, activity and run model
-// apply. What differs is owned by the platform: it has no fixed agent or
-// creator (the target is the parent's assignee when it fires, a squad's leader
-// for a squad, an inbox notification for a member), it cannot be deleted or
-// edited by agents, and it is evaluated when sub-issues change instead of on a
-// polling schedule.
+// sub-issue is closed. Only a sub-issue closing, leaving or changing stage can
+// wake; adding or reopening one is recorded without a run. It is an ordinary
+// issue_wakeup row with system_rule set: the shared condition, receipts,
+// runaway protection, activity and run model apply. What differs is owned by
+// the platform: it has no fixed agent or creator (the target is the parent's
+// assignee when it fires, a squad's leader for a squad, an inbox notification
+// for a member), it cannot be deleted or edited by agents, and it is evaluated
+// when sub-issues change instead of on a polling schedule.
 const (
 	SystemRuleChildDone = "child_done"
 	// MaxSystemWakeupInstruction bounds per-issue and workspace instructions.
@@ -383,6 +384,16 @@ func childDoneFacts(receipts []db.IssueWakeupReceipt) map[string]any {
 	return facts
 }
 
+// closingChangePending reports whether a sub-issue change that can close a
+// stage is recorded but has not reached the rule yet: a change not processed,
+// or a hint that arrived after this pass took its own.
+func closingChangePending(ctx context.Context, tx pgx.Tx, w db.IssueWakeup) (bool, error) {
+	var pending bool
+	err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM issue_wakeup_receipt WHERE "+conditionHintSQL+") OR "+
+		"EXISTS(SELECT 1 FROM issue_child_event WHERE parent_id=$2 AND processed_at IS NULL AND kind NOT IN ('attached','reopened'))", w.ID, w.IssueID).Scan(&pending)
+	return pending, err
+}
+
 // dispatchSystem evaluates a system rule and wakes, notifies or records its
 // outcome. It mirrors dispatch: the same lock order, receipts, runaway
 // protection and timeline entries.
@@ -455,27 +466,46 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
+	sleep := func(state string) error {
+		if err := q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state}); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	// A closed parent or a rule that is off or paused keeps its state; a
 	// system rule is never disabled by the platform for a closed issue.
 	if !active || !w.Enabled {
 		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return sleep(w.ConditionState)
+	}
+	blocked, err := q.HasOpenIssueBlockers(ctx, db.HasOpenIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil {
+		return err
 	}
 	// A parked parent holds: nothing fires and nothing is marked as seen, so
 	// a stage that closed meanwhile wakes the assignee once it leaves backlog.
-	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
-		if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" || blocked {
+		if _, _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		state := w.ConditionState
+		if blocked || w.SystemRule.String == SystemRuleBlockersDone {
+			// Dependency completion owns the continuation of a blocked parent.
+			// Retaining old completion inputs would retry the same queue gate.
+			if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+				return err
+			}
+			state = ""
+		}
+		return sleep(state)
 	}
 	var now time.Time
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
 		return err
 	}
-	_, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	_, causes, onlyAdded, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return err
 	}
@@ -483,8 +513,26 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
+	if w.SystemRule.String == SystemRuleBlockersDone && !met {
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+	}
 	state := w.ConditionState
 	switch {
+	case met && fingerprint != state && onlyAdded:
+		// Adding or reopening sub-issues closed nothing: a next stage added
+		// after the last one closed reads as a stage boundary, but the
+		// assignee was already woken for that close. Record it as seen; the
+		// next close wakes again. A close this pass already reads but whose
+		// change is still on its way keeps the state for that change's pass.
+		pending, err := closingChangePending(ctx, tx, w)
+		if err != nil {
+			return err
+		}
+		if !pending {
+			state = fingerprint
+		}
 	case met && fingerprint != state:
 		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
 			return err
@@ -493,6 +541,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	case !met:
 		state = ""
 	}
+	// Issue and dependency writes rearm these rules transactionally. Status
+	// categories are immutable through the API, so waiting needs no polling.
 	if err = q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state}); err != nil {
 		return err
 	}
@@ -501,7 +551,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return err
 	}
 	var activities []wakeupActivity
-	var inbox []db.InboxItem
+	var pendingInbox inboxwriter.Deferred
 	note := func(action string, details map[string]any) error {
 		a, err := recordWakeupActivity(ctx, q, w, action, "system", pgtype.UUID{}, details)
 		if err == nil {
@@ -514,8 +564,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			return err
 		}
 		s.publishWakeupActivities(activities...)
-		for _, item := range inbox {
-			s.publishSystemInbox(item, issue.Status)
+		if s.Tasks != nil {
+			pendingInbox.Flush(s.Tasks.Bus)
 		}
 		return nil
 	}
@@ -535,7 +585,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		if err = q.CountWakeupFires(ctx, w.ID); err != nil {
 			return err
 		}
-		facts := childDoneFacts(run.receipts)
+		facts := systemWakeupFacts(w, run.receipts)
 		facts["target_type"], facts["target_id"] = "agent", util.UUIDToString(run.task.AgentID)
 		if current.Agent.ID == run.task.AgentID {
 			facts["target_type"], facts["target_id"] = current.Type, util.UUIDToString(current.ID)
@@ -549,7 +599,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return commit()
 	}
 	ids := receiptIDs(receipts)
-	facts := childDoneFacts(receipts)
+	facts := systemWakeupFacts(w, receipts)
 	if current.Type != "none" {
 		facts["target_type"], facts["target_id"] = current.Type, util.UUIDToString(current.ID)
 	}
@@ -557,20 +607,24 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	// assignee whose agent cannot run.
 	if current.Type == "member" || !current.Agent.ID.Valid {
 		facts["outcome"] = "none"
+		if w.SystemRule.String == SystemRuleBlockersDone && current.Type != "member" {
+			facts["reason"] = "assignee_unavailable"
+		}
 		if current.Type == "member" {
 			facts["outcome"] = "notified"
 			details, _ := json.Marshal(facts)
-			item, inserted, err := inboxwriter.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
-				ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: current.ID,
-				Type: "children_done", Severity: "info", IssueID: issue.ID, Title: issue.Title,
-				ActorType: pgtype.Text{String: "system", Valid: true}, Details: details,
+			_, inserted, err := inboxwriter.Deliver(ctx, q, &pendingInbox, inboxwriter.Notification{
+				Params: db.CreateInboxItemParams{
+					ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: current.ID,
+					Type: systemInboxType(w), Severity: "info", IssueID: issue.ID, Title: issue.Title,
+					ActorType: pgtype.Text{String: "system", Valid: true}, Details: details,
+				},
+				IssueStatus: &issue.Status,
 			})
 			if err != nil {
 				return err
 			}
-			if inserted {
-				inbox = append(inbox, item)
-			} else {
+			if !inserted {
 				facts["outcome"] = "none"
 			}
 		}
@@ -594,9 +648,9 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	instruction := w
 	if ws, e := q.GetWorkspace(ctx, issue.WorkspaceID); e == nil {
-		instruction.Instruction = ChildDoneInstruction(w.Instruction, ws.Settings)
+		instruction.Instruction = systemWakeupInstruction(w, ws.Settings)
 	} else {
-		instruction.Instruction = ChildDoneInstruction(w.Instruction, nil)
+		instruction.Instruction = systemWakeupInstruction(w, nil)
 	}
 	noteText, evidence := mergeWakeupEvidence(instruction, task, receipts)
 	if taskExists {
@@ -626,9 +680,39 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		}
 		return commit()
 	}
+	if w.SystemRule.String == SystemRuleBlockersDone {
+		var running bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status IN ('queued','deferred','dispatched','running','waiting_local_directory'))", issue.ID, agent.ID).Scan(&running); err != nil {
+			return err
+		}
+		if running {
+			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+				return err
+			}
+			facts["outcome"] = wakeupOutcomeAcknowledged
+			if err = note(wakeupActivityTriggered, facts); err != nil {
+				return err
+			}
+			return commit()
+		}
+	}
 	attr, err := s.childDoneRunAs(ctx, issue, agent)
 	if err != nil {
 		return err
+	}
+	// Recorded without a run, like an assignee whose agent cannot run.
+	if err = s.Tasks.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
+		if !errors.Is(err, ErrProjectAccessDenied) {
+			return err
+		}
+		facts["outcome"], facts["reason"] = "none", string(dispatch.ReasonProjectAccessBlocked)
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityTriggered, facts); err != nil {
+			return err
+		}
+		return commit()
 	}
 	waiting, err := hasWaitingRun(ctx, q, issue.ID, agent.ID, attr.UserID)
 	if err != nil {
@@ -641,14 +725,15 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
-	if recent >= wakeupHourlyRunLimit {
+	// Dependency completion is the queue's automatic admission path; it cannot be paused.
+	if recent >= wakeupHourlyRunLimit && w.SystemRule.String != SystemRuleBlockersDone {
 		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedRate, Valid: true}, BlockRuns: true}); err != nil {
 			return err
 		}
 		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
 			return err
 		}
-		if err = note(wakeupActivityPaused, map[string]any{"rule": SystemRuleChildDone, "reason": wakeupPausedRate, "limit": wakeupHourlyRunLimit}); err != nil {
+		if err = note(wakeupActivityPaused, map[string]any{"rule": w.SystemRule.String, "reason": wakeupPausedRate, "limit": wakeupHourlyRunLimit}); err != nil {
 			return err
 		}
 		return commit()
@@ -658,11 +743,17 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
-	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
+	usageSquadID := current.SquadID
+	if !usageSquadID.Valid {
+		// System wakeups use the issue's origin for run identity. Usage
+		// inheritance from that origin requires squad membership.
+		usageSquadID = resolveIssueOriginSquadID(ctx, q, issue, agent.ID)
+	}
+	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": w.SystemRule.String})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
-		TriggerSummary: pgtype.Text{String: "Wakeup: sub-issues closed", Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true},
-		IsLeaderTask: pgtype.Bool{Bool: current.Type == "squad", Valid: current.Type == "squad"}, SquadID: current.SquadID,
+		TriggerSummary: pgtype.Text{String: systemTriggerSummary(w), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true},
+		IsLeaderTask: pgtype.Bool{Bool: current.Type == "squad", Valid: current.Type == "squad"}, SquadID: current.SquadID, UsageSquadID: usageSquadID,
 		OriginatorUserID: attr.UserID, AccountableUserID: attr.AccountableUserID, OriginatorSource: source, DelegatedFromTaskID: delegatedFrom,
 		RuleVersionID: attr.RuleVersionID, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID,
 		HeadSha: headSHA, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps,
@@ -689,23 +780,6 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	s.Tasks.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.Tasks.NotifyTaskEnqueued(ctx, task)
 	return nil
-}
-
-func (s *IssueWakeupService) publishSystemInbox(item db.InboxItem, issueStatus string) {
-	if s.Tasks == nil || s.Tasks.Bus == nil {
-		return
-	}
-	s.Tasks.Bus.Publish(events.Event{
-		Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "system",
-		Payload: map[string]any{"item": map[string]any{
-			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
-			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
-			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
-			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,
-		}},
-	})
 }
 
 // SystemWakeupInput is a person's change to a system rule on one issue.

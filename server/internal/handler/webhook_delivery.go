@@ -24,29 +24,30 @@ import (
 // populated; the detail endpoint includes both for debugging. We never echo
 // the signing secret or token through this surface.
 type WebhookDeliveryResponse struct {
-	ID                     string  `json:"id"`
-	WorkspaceID            string  `json:"workspace_id"`
-	AutopilotID            string  `json:"autopilot_id"`
-	TriggerID              string  `json:"trigger_id"`
-	Provider               string  `json:"provider"`
-	Event                  string  `json:"event"`
-	DedupeKey              *string `json:"dedupe_key"`
-	DedupeSource           *string `json:"dedupe_source"`
-	SignatureStatus        string  `json:"signature_status"`
-	Status                 string  `json:"status"`
-	AttemptCount           int32   `json:"attempt_count"`
-	DispatchAttempts       int32   `json:"dispatch_attempts"`
-	AvailableAt            string  `json:"available_at"`
-	ContentType            *string `json:"content_type"`
-	ResponseStatus         *int32  `json:"response_status"`
-	AutopilotRunID         *string `json:"autopilot_run_id"`
-	ReplayedFromDeliveryID *string `json:"replayed_from_delivery_id"`
-	Error                  *string `json:"error"`
-	ReasonCode             *string `json:"reason_code"`
-	ReplayIdempotencyKey   *string `json:"replay_idempotency_key"`
-	ReceivedAt             string  `json:"received_at"`
-	LastAttemptAt          string  `json:"last_attempt_at"`
-	CreatedAt              string  `json:"created_at"`
+	PayloadConditionFailure *WebhookPayloadConditionFailure `json:"payload_condition_failure,omitempty"`
+	ID                      string                          `json:"id"`
+	WorkspaceID             string                          `json:"workspace_id"`
+	AutopilotID             string                          `json:"autopilot_id"`
+	TriggerID               string                          `json:"trigger_id"`
+	Provider                string                          `json:"provider"`
+	Event                   string                          `json:"event"`
+	DedupeKey               *string                         `json:"dedupe_key"`
+	DedupeSource            *string                         `json:"dedupe_source"`
+	SignatureStatus         string                          `json:"signature_status"`
+	Status                  string                          `json:"status"`
+	AttemptCount            int32                           `json:"attempt_count"`
+	DispatchAttempts        int32                           `json:"dispatch_attempts"`
+	AvailableAt             string                          `json:"available_at"`
+	ContentType             *string                         `json:"content_type"`
+	ResponseStatus          *int32                          `json:"response_status"`
+	AutopilotRunID          *string                         `json:"autopilot_run_id"`
+	ReplayedFromDeliveryID  *string                         `json:"replayed_from_delivery_id"`
+	Error                   *string                         `json:"error"`
+	ReasonCode              *string                         `json:"reason_code"`
+	ReplayIdempotencyKey    *string                         `json:"replay_idempotency_key"`
+	ReceivedAt              string                          `json:"received_at"`
+	LastAttemptAt           string                          `json:"last_attempt_at"`
+	CreatedAt               string                          `json:"created_at"`
 
 	// Detail-only fields. List responses leave these nil/empty so a page
 	// of N deliveries never serialises ~N × 256 KiB of raw bodies. Detail
@@ -96,6 +97,7 @@ func slimDeliveryToResponse(d db.ListWebhookDeliveriesByAutopilotRow) WebhookDel
 		v := d.Error.String
 		resp.Error = &v
 	}
+	resp.decodePayloadFilterFailure()
 	return resp
 }
 
@@ -150,6 +152,7 @@ func deliveryToResponse(d db.WebhookDelivery, detail bool) WebhookDeliveryRespon
 			resp.ResponseBody = &v
 		}
 	}
+	resp.decodePayloadFilterFailure()
 	return resp
 }
 
@@ -199,7 +202,16 @@ func (h *Handler) ListAutopilotDeliveries(w http.ResponseWriter, r *http.Request
 	for i, row := range rows {
 		resp[i] = slimDeliveryToResponse(row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deliveries": resp, "total": len(resp)})
+	total, err := h.Queries.CountWebhookDeliveriesByAutopilot(r.Context(), db.CountWebhookDeliveriesByAutopilotParams{
+		AutopilotID: autopilot.ID,
+		WorkspaceID: autopilot.WorkspaceID,
+	})
+	if err != nil {
+		slog.Error("count deliveries failed", "error", err, "autopilot_id", autopilotID)
+		writeError(w, http.StatusInternalServerError, "failed to list deliveries")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deliveries": resp, "total": total})
 }
 
 // GetAutopilotDelivery returns one delivery in full, including the raw body

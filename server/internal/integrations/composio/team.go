@@ -15,6 +15,19 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// ErrTeamConnectRefused is returned by a TeamConnectGate, and then by
+// CompleteCallback, when the workspace may not add the team account.
+var ErrTeamConnectRefused = errors.New("composio: team account not included in the workspace's plan")
+
+// TeamConnectGate decides, when a completed handshake is about to write a team
+// account, whether the workspace may add it. It returns ErrTeamConnectRefused
+// to refuse, or admitted, which runs once the account is written. The handler
+// supplies it; nil admits every account, as on a self-hosted deployment.
+type TeamConnectGate func(ctx context.Context, workspaceID pgtype.UUID, toolkitSlug string) (admitted func(context.Context), err error)
+
+// SetTeamConnectGate installs the gate. Call it before serving requests.
+func (s *Service) SetTeamConnectGate(gate TeamConnectGate) { s.teamConnectGate = gate }
+
 // ErrTeamAccountsUnavailable is returned when the configured SDK or store
 // cannot serve team accounts or tool execution (test fakes that predate them).
 var ErrTeamAccountsUnavailable = errors.New("composio: team accounts unavailable")
@@ -48,8 +61,13 @@ type CallbackResult struct {
 	ToolkitSlug string
 	// WorkspaceID is set for a team account.
 	WorkspaceID string
-	// UserID is the member who connected a personal account.
-	UserID string
+	// UserID is the member who connected a personal account, and
+	// PersonalWorkspaceID the workspace it belongs to (empty for a legacy
+	// account).
+	UserID              string
+	PersonalWorkspaceID string
+	// ConnectedBy is the admin who connected a team account.
+	ConnectedBy string
 	// ReturnTo is the app path the flow started from, if any.
 	ReturnTo string
 }
@@ -136,6 +154,19 @@ func (s *Service) completeTeamCallback(ctx context.Context, claims stateClaims, 
 	if err := s.verifyAccountOwnership(ctx, connectedAccountID, claims.UserID, claims.AuthConfigID); err != nil {
 		return err
 	}
+	admitted := func(context.Context) {}
+	if s.teamConnectGate != nil {
+		gateAdmitted, err := s.teamConnectGate(ctx, workspaceID, claims.ToolkitSlug)
+		if err != nil {
+			// Keep the existing connection and drop the account Composio just
+			// created, so it holds no grant Multica does not track.
+			if errors.Is(err, ErrTeamConnectRefused) {
+				s.revokeUpstream(ctx, connectedAccountID)
+			}
+			return err
+		}
+		admitted = gateAdmitted
+	}
 	row, err := store.UpsertWorkspaceComposioConnection(ctx, db.UpsertWorkspaceComposioConnectionParams{
 		WorkspaceID:        workspaceID,
 		ToolkitSlug:        claims.ToolkitSlug,
@@ -158,6 +189,7 @@ func (s *Service) completeTeamCallback(ctx context.Context, claims stateClaims, 
 	for _, old := range replaced {
 		s.revokeUpstream(ctx, old.ConnectedAccountID)
 	}
+	admitted(ctx)
 	return nil
 }
 
@@ -197,10 +229,18 @@ func (s *Service) revokeUpstream(ctx context.Context, connectedAccountID string)
 	_ = s.sdk.DeleteConnectedAccount(ctx, connectedAccountID)
 }
 
-// ensureAuthConfig returns the toolkit's auth config, creating one with
-// Composio's managed app when the project has none and the toolkit offers
-// managed auth. This is what lets every catalog app connect without a
-// dashboard step.
+// customAuthCreator is the part of *sdk.Client that registers an auth config
+// whose credentials each member enters on the Connect Link page. It is
+// separate from ToolSDK so fakes written before it keep working.
+type customAuthCreator interface {
+	CreateCustomAuthConfig(ctx context.Context, toolkitSlug, authScheme, name string) (string, error)
+}
+
+// ensureAuthConfig returns the toolkit's auth config, creating one when the
+// project has none: with Composio's managed app when the toolkit offers one,
+// else with no credentials for a toolkit members connect with their own API
+// key, token, or Basic login. This is what lets every catalog app connect
+// without a dashboard step.
 func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, error) {
 	id, err := s.authConfigForToolkit(ctx, slug)
 	if err != nil || id != "" {
@@ -217,7 +257,10 @@ func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, er
 		}
 		return "", fmt.Errorf("composio: get toolkit: %w", err)
 	}
-	if len(tk.ComposioManagedAuthSchemes) == 0 {
+	managed := len(tk.ComposioManagedAuthSchemes) > 0
+	keyScheme := userKeyScheme(*tk)
+	creator, canCreateKeyConfigs := s.sdk.(customAuthCreator)
+	if !managed && (keyScheme == "" || !canCreateKeyConfigs) {
 		return "", ErrToolkitNotSupported
 	}
 	s.authCreateMu.Lock()
@@ -227,9 +270,20 @@ func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, er
 	if id, err := s.authConfigForToolkit(ctx, slug); err != nil || id != "" {
 		return id, err
 	}
-	id, err = tools.CreateManagedAuthConfig(ctx, slug)
-	if err != nil {
-		return "", fmt.Errorf("composio: create managed auth config: %w", err)
+	if managed {
+		id, err = tools.CreateManagedAuthConfig(ctx, slug)
+		if err != nil {
+			return "", fmt.Errorf("composio: create managed auth config: %w", err)
+		}
+	} else {
+		name := tk.Name
+		if name == "" {
+			name = slug
+		}
+		id, err = creator.CreateCustomAuthConfig(ctx, slug, keyScheme, name)
+		if err != nil {
+			return "", fmt.Errorf("composio: create %s auth config: %w", keyScheme, err)
+		}
 	}
 	s.invalidateAuthConfigs()
 	return id, nil
