@@ -178,14 +178,34 @@ func TestChunkAssemblerRejectsBadInputs(t *testing.T) {
 	}
 }
 
+func TestChunkAssemblerRejectsSumMismatchForPendingMessage(t *testing.T) {
+	t.Parallel()
+	a := newChunkAssembler(time.Second, nil)
+	if _, ok := a.admit("om-mismatch", 2, 0, []byte("A")); ok {
+		t.Fatal("first chunk should be partial")
+	}
+	// A resend carrying a different sum is malformed: it must not index
+	// outside the buffered slice or corrupt the original assembly.
+	if out, ok := a.admit("om-mismatch", 5, 4, []byte("bad")); ok || out != nil {
+		t.Fatalf("mismatched sum should be rejected; got (%q,%v)", out, ok)
+	}
+	if a.pendingCount() != 1 {
+		t.Fatalf("pendingCount after mismatch = %d; want 1", a.pendingCount())
+	}
+	out, ok := a.admit("om-mismatch", 2, 1, []byte("B"))
+	if !ok || !bytes.Equal(out, []byte("AB")) {
+		t.Fatalf("assembly after mismatch = %q,%v; want AB,true", out, ok)
+	}
+}
+
 func TestParseChunkHeaders(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		headers    []FrameHeader
-		wantSum    int
-		wantSeq    int
-		wantMsgID  string
+		name      string
+		headers   []FrameHeader
+		wantSum   int
+		wantSeq   int
+		wantMsgID string
 	}{
 		{
 			name:    "all present",

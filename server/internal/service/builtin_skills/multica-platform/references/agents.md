@@ -21,7 +21,7 @@ These commands read state and have no side effects:
 ```bash
 multica agent get <agent-id> --output json      # full persisted agent record
 multica agent skills list <agent-id> --output json   # current skill bindings
-multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
+multica agent env get <agent-id> --output json  # env keys, values masked as **** (agent owner or ws owner/admin; agents denied)
 ```
 
 An agent can also be **unbound**: `runtime_id` is `NULL` (served as `""` with
@@ -260,6 +260,11 @@ Read-side facts (these are the wrong assumptions to avoid):
   owner** or a workspace **owner/admin**, and **agent actors are denied**
   regardless of the backing member's role — a running agent cannot read another
   agent's secrets, not even one its own human owns.
+- `agent env get` and `agent env set` mask every value as `****` in their
+  output by default; pass `--show-values` to print plaintext. Feeding masked
+  output back into `env set` on the **same** agent keeps each value, but on a
+  different agent the `****` keys are dropped — copy env between agents from
+  `env get --show-values` output.
 - Writing values after creation does NOT go through `agent update`. The generic
   update path rejects any `custom_env` field with a 400 ("use PUT
   /api/agents/{id}/env"). Plaintext env writes are handled by

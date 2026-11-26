@@ -17,10 +17,14 @@ import { useBackOrReplace } from "../navigation";
 import { useT } from "../i18n";
 
 export function DeleteIssueConfirmModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -53,7 +57,11 @@ export function DeleteIssueConfirmModal({
   };
 
   return (
-    <AlertDialog open onOpenChange={(v) => { if (!v && !deleting) onClose(); }}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(v) => { if (!v && !deleting) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t(($) => $.delete_issue.title)}</AlertDialogTitle>

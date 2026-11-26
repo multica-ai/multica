@@ -22,7 +22,7 @@ import { useT } from "../../i18n";
 import { ProjectIcon } from "./project-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 
-const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0";
+const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5";
 
 /** Overview / Issues / Activity switch, sized to sit in a page header and underline at its bottom edge. */
 export function ProjectTabs({
@@ -199,6 +199,9 @@ export function ProjectOverviewBody({
             placeholder={t(($) => $.detail.description_placeholder)}
             onUpdate={(md) => onUpdate({ description: md || null })}
             debounceMs={1500}
+            // Switching tabs or leaving the page within the debounce must keep
+            // what the user last typed.
+            flushPendingOnUnmount
           />
         </ObjectSection>
 

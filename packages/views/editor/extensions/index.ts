@@ -47,7 +47,7 @@ import {
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import { shouldAutoLink } from "@multica/ui/markdown";
+import { shouldAutoLink } from "@multica/ui/markdown/linkify";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
 import {
@@ -129,6 +129,7 @@ export interface EditorExtensionsOptions {
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
   mentionHideGuests?: boolean;
+  mentionHideSquads?: boolean;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
@@ -227,7 +228,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests, hideSquads: options.mentionHideSquads }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a

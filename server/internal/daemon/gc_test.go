@@ -2607,6 +2607,12 @@ func TestGCMetaForTask(t *testing.T) {
 			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
 		},
 		{
+			name: "doc discussion task",
+			task: Task{ID: "t6", WorkspaceID: "ws", DocID: "d1"},
+			want: execenv.GCKindDoc,
+			idOK: func(m execenv.GCMeta) bool { return m.DocID == "d1" },
+		},
+		{
 			name: "chat wins over issue when both set (defensive ordering)",
 			task: Task{ID: "t5", WorkspaceID: "ws", IssueID: "i1", ChatSessionID: "c1"},
 			want: execenv.GCKindChat,

@@ -26,6 +26,7 @@
     "message": "Mensaje del agente",
     "error": "Error",
     "waiting_result": "Esperando el resultado de la herramienta...",
+    "reply_pending_call": "Sigue en curso: esperando a que termine {{step}}",
     "supplement_failure_turn_ended": "la ejecución terminó antes de la entrega",
     "supplement_failure_turn_not_started": "el agente no estaba listo",
     "supplement_failure_provider_rejected": "el agente rechazó el mensaje",
@@ -208,7 +209,7 @@
     "chip_edit": "Editar",
     "chip_save_as": "Guardar como",
     "active_section": "Activos",
-    "section_relation": "Relación conmigo",
+    "section_relation": "Relaciones",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
     "relation_my_agents": "Trabajo de mis agentes",
@@ -270,7 +271,8 @@
     "advanced_group_match_trailing": "de estas condiciones",
     "advanced_group_hint": "Las condiciones de este grupo se unen con «{{word}}»",
     "advanced_add_to_group": "Añadir al grupo",
-    "advanced_turn_into_group": "Convertir en grupo"
+    "advanced_turn_into_group": "Convertir en grupo",
+    "relation_blocked": "Bloqueado"
   },
   "display": {
     "tooltip": "Opciones de visualización",
@@ -468,7 +470,6 @@
     "section_parent_issue": "Tarea principal",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
-    "section_details": "Detalles",
     "sidebar_settings": {
       "open": "Personalizar barra lateral",
       "title": "Barra lateral",
@@ -522,9 +523,6 @@
     "prop_project": "Proyecto",
     "prop_labels": "Etiquetas",
     "add_property_action": "Añadir propiedad",
-    "prop_created_by": "Creada por",
-    "prop_created": "Creada",
-    "prop_updated": "Actualizada",
     "activity_section": "Actividad",
     "subscribe": "Suscribirse",
     "unsubscribe": "Darse de baja",
@@ -584,16 +582,40 @@
     "quick_jump_label": "Navegación rápida",
     "description_nav_label": "Descripción de la tarea",
     "sub_issues_nav_progress": "{{done}}/{{total}} completadas",
-    "sub_issues_show_more_one": "Mostrar {{count}} más",
-    "sub_issues_show_more_other": "Mostrar {{count}} más",
-    "sub_issues_show_less": "Contraer",
     "thread_nav_show_replies_one": "Mostrar {{count}} respuesta",
     "thread_nav_show_replies_other": "Mostrar {{count}} respuestas",
     "thread_nav_hide_replies": "Ocultar respuestas",
     "load_failed": "No se pudo cargar la tarea.",
     "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada",
-    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea."
+    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea.",
+    "open_issue_page": "Abrir la página de la tarea",
+    "add_row": {
+      "wakeups": "Añadir activación",
+      "pull_requests": "Añadir pull request",
+      "environments": "Añadir entorno",
+      "relations": "Añadir relación",
+      "pair": "Añadir {{first}} o {{second}}",
+      "many": "Añadir...",
+      "noun": {
+        "wakeups": "activación",
+        "pull_requests": "pull request",
+        "environments": "entorno",
+        "relations": "relación"
+      },
+      "menu": {
+        "wakeups": "Activación",
+        "pull_requests": "Pull request",
+        "environments": "Entorno",
+        "relations": "Relaciones"
+      }
+    },
+    "footer": {
+      "created": "Creada por {{creator}} · {{date}}",
+      "created_for": "Creada por {{creator}} en nombre de {{requester}} · {{date}}",
+      "created_at": "Creada: {{time}}",
+      "updated_at": "Actualizada: {{time}}"
+    }
   },
   "timeline": {
     "loading": "Cargando...",
@@ -627,6 +649,13 @@
     "squad_leader_no_action_reason": "evaluó: no hacía falta actuar ({{reason}})",
     "squad_leader_failed": "la evaluación falló",
     "squad_leader_failed_reason": "la evaluación falló: {{reason}}",
+    "squad_handoff_to": "se lo pasó a {{name}}",
+    "squad_handoff_human": "pidió a {{name}} que decida",
+    "squad_handoff_leader": "se lo devolvió a {{name}}",
+    "squad_handoff_round": "ronda {{round}}",
+    "squad_handoff_reason_round_limit": "límite de {{limit}} rondas",
+    "squad_handoff_reason_daily_limit": "límite diario de traspasos",
+    "squad_handoff_reason_run_failed": "ejecución fallida",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} actividad",
     "activity_count_other": "{{count}} actividades",
@@ -850,6 +879,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} está trabajando",
+    "is_working_round": "{{label}} · ronda {{round}}",
     "is_queued": "{{name}} está en cola",
     "is_waiting_local_directory": "{{name}} está esperando el directorio local",
     "queued_elapsed_prefix": "en cola desde hace {{elapsed}}",
@@ -912,8 +942,6 @@
     "open_timeline": "Abrir línea temporal",
     "more_runs_one": "{{count}} más",
     "more_runs_other": "{{count}} más",
-    "strip_aria": "Coste acumulado a lo largo del tiempo; abre la línea temporal de ejecuciones",
-    "strip_no_usage": "Sin uso registrado",
     "jump_to_run": "Ir a la ejecución",
     "queued_count_one": "{{count}} en cola",
     "queued_count_other": "{{count}} en cola"
@@ -1020,6 +1048,8 @@
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
     "add_sub_issue": "Añadir subtarea...",
+    "add_blocker": "Esperar a otra tarea...",
+    "add_blocking": "Bloquear otra tarea...",
     "delete_issue": "Eliminar tarea",
     "mark_duplicate": "Marcar como duplicada...",
     "rename_issue": "Renombrar tarea",
@@ -1333,6 +1363,7 @@
       "cancel": "Cancelar",
       "error": "No se ha podido crear la activación. Revisa los ajustes e inténtalo de nuevo.",
       "capacity_error": "Esta tarea o este espacio de trabajo ya tiene el máximo número de activaciones habilitadas.",
+      "agent_error": "No puedes ejecutar este agente. Pide acceso a su propietario o elige otro agente.",
       "missing_condition": "Elige una condición.",
       "missing_agent": "Elige un agente para activar.",
       "missing_events": "Elige al menos un evento.",
@@ -1385,13 +1416,6 @@
       "badge": "Sistema",
       "title_stage": "Cuando terminan todas las subtareas de la etapa {{stage}}",
       "title_all": "Cuando terminan todas las subtareas",
-      "wake_assignee": "Activar al asignado {{name}}",
-      "remaining_one": "{{count}} pendientes",
-      "remaining_other": "{{count}} pendientes",
-      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
-      "blocked_member": "El asignado es un miembro; recibe una notificación en la bandeja de entrada",
-      "blocked_none": "No hay agente asignado; nadie se activa",
-      "turned_off": "Desactivada para esta tarea",
       "target_title": "Activa a",
       "target_current": "Asignado (actualmente {{name}})",
       "target_none": "El asignado: se activa a un agente o squad, o se notifica a un miembro",
@@ -1406,14 +1430,19 @@
       "save_error": "No se ha podido guardar la regla del sistema.",
       "default_on": "Activada por defecto en este espacio de trabajo.",
       "default_off": "Desactivada por defecto en este espacio de trabajo.",
-      "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
       "instruction_invalid": "Las instrucciones deben ocupar menos de 4000 bytes.",
       "paused": "Pausada: {{reason}}",
-      "default_change": "Cambiar el valor por defecto"
+      "default_change": "Cambiar el valor por defecto",
+      "chip_wake": "Activa a {{name}} al terminar",
+      "chip_notify": "Avisa a {{name}} al terminar",
+      "chip_assignee": "Activa al responsable al terminar",
+      "chip_off": "Activación al terminar desactivada",
+      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
+      "blocked_none": "No hay agente asignado; nadie se activa"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",
@@ -1488,7 +1517,14 @@
       "rate": "más de 12 ejecuciones en una hora"
     },
     "upcoming_one": "{{count}} regla de activación activa",
-    "upcoming_other": "{{count}} reglas de activación activadas"
+    "upcoming_other": "{{count}} reglas de activación activadas",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "A la hora programada",
+      "hourly": "Cada hora",
+      "every_hours": "Cada {{hours}} horas",
+      "every_seconds": "Cada {{seconds}} segundos"
+    }
   },
   "duplicates": {
     "banner_prefix": "Duplicada de",
@@ -1524,7 +1560,8 @@
     "unlinked_moved": "{{pr}} eliminado. Todos los PR restantes están fusionados, así que la tarea pasó a {{status}}.",
     "waiting_to_one": "Pasa a {{status}} cuando {{prs}} se fusione",
     "waiting_to_other": "Pasa a {{status}} cuando {{prs}} se fusionen",
-    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}."
+    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}.",
+    "on_merge_to": "Al fusionar → {{status}}"
   },
   "working_filter_error": {
     "title": "No se han podido cargar las tareas con agentes trabajando"
@@ -1734,7 +1771,6 @@
       "target_squad": "Squad · el líder reparte",
       "target_member": "Miembro",
       "instructions_hint": "Se envía al responsable con esta ejecución, junto con la descripción y los comentarios de la tarea.",
-      "next_hint": "El responsable actualiza el estado directamente y la devuelve solo para rehacer trabajo, no por bloqueos. Terminar una ejecución nunca cambia el estado automáticamente.",
       "preview_brief": "Ver el encargo del agente",
       "preview_title": "Encargo del paso “{{status}}”",
       "preview_description": "Lo que recibe la ejecución del responsable cuando una tarea entra en este paso. No hace falta guardar los cambios para verlo.",
@@ -1923,8 +1959,7 @@
       "all_issues": "Todas las tareas",
       "my_work": "Mi trabajo",
       "working": "En ejecución",
-      "subscribed": "Suscritas",
-      "snoozed": "Pospuestos"
+      "subscribed": "Suscritas"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",
@@ -2004,7 +2039,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     }
   },
   "environments": {
@@ -2121,5 +2157,41 @@
     "focus_failed": "No se pudo cambiar a {{name}}",
     "retry": "Reintentar",
     "dismiss": "Descartar"
+  },
+  "relations": {
+    "title": "Relaciones",
+    "add": "Añadir relación",
+    "wait_title": "Esperar a otra tarea",
+    "block_title": "Bloquear otra tarea",
+    "blocked_by": "Bloqueada por",
+    "blocking": "Bloqueando",
+    "stage_tag": "Etapa",
+    "stage_tag_hint": "Lo fijan las etapas de la tarea principal",
+    "add_blocker_hint": "Esta tarea empieza cuando termine",
+    "add_blocking_hint": "Empieza cuando termine esta tarea",
+    "mark_duplicate_hint": "Cancela esta tarea",
+    "blocking_picker_hint": "Selecciona una tarea que no pueda empezar hasta que termine esta."
+  },
+  "waiting": {
+    "remove": "Quitar {{identifier}}",
+    "count": "Esperando {{count}} tareas",
+    "count_one": "Esperando {{count}} tarea",
+    "count_other": "Esperando {{count}} tareas",
+    "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
+    "hint_backlog": "No comenzará automáticamente mientras esté en Backlog.",
+    "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
+    "restricted": "{{count}} requisitos restringidos",
+    "ended": "Las tareas en espera terminaron",
+    "marker_title": "Bloqueada por {{count}} tareas",
+    "marker_title_one": "Bloqueada por {{count}} tarea",
+    "marker_title_other": "Bloqueada por {{count}} tareas",
+    "marker_ended": "{{finished}}/{{total}} terminadas",
+    "marker_more": "{{count}} más",
+    "marker_more_one": "{{count}} más",
+    "marker_more_other": "{{count}} más",
+    "marker_auto_start": "{{name}} comenzará automáticamente cuando terminen.",
+    "marker_notify": "{{name}} recibirá una notificación cuando terminen.",
+    "marker_unavailable": "{{name}} no puede ejecutarse ahora, así que nada comenzará cuando terminen.",
+    "marker_unassigned": "Sin responsable: nada comenzará cuando terminen."
   }
 }

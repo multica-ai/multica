@@ -1,12 +1,22 @@
 import "./env";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import pg from "pg";
 import { createTestApi } from "./helpers";
 
+// An issue without wakeups offers one from the sidebar's add row, which may
+// also offer other empty sections behind a menu.
+async function openNewWakeup(page: Page) {
+  const add = page.getByTestId("issue-sidebar-add-row").getByRole("button");
+  await expect(add).toBeVisible({ timeout: 45_000 });
+  const label = (await add.textContent())?.trim();
+  await add.click();
+  if (label !== "Add wakeup") await page.getByRole("menuitem", { name: "Wakeup", exact: true }).click();
+}
+
 // Rule semantics live in the Go service and handler tests. This browser test
-// covers the sidebar a member uses: the platform's child-done rule is visible
-// and can be turned off, and a new wakeup can be created from the form.
+// covers what a member uses: the platform's child-done rule sits beside the
+// sub-issues and can be turned off, and a new wakeup can be created from the form.
 test("members see the child-done system rule and create a wakeup", async ({ page }) => {
   test.setTimeout(120_000);
   const api = await createTestApi();
@@ -44,11 +54,14 @@ test("members see the child-done system rule and create a wakeup", async ({ page
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`/${workspace.slug}/issues/${parent.identifier}`, { waitUntil: "domcontentloaded" });
 
-    const systemRule = page.getByRole("button", { name: /When stage 1's sub-issues all finish/ });
+    const systemRule = page.getByRole("button", { name: "Wakes Wakeup Emacs when all finish" });
     await expect(systemRule).toBeVisible({ timeout: 45_000 });
-    await expect(systemRule).toContainText("Wake assignee Wakeup Emacs · 1 to go");
+    await systemRule.click();
+    const ruleDetail = page.getByRole("dialog", { name: /When stage 1's sub-issues all finish/ });
+    await expect(ruleDetail).toContainText("1/2 finished");
+    await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: "New wakeup" }).click();
+    await openNewWakeup(page);
     const form = page.getByRole("form", { name: "New wakeup" });
     await expect(form).toBeVisible();
     await form.getByRole("button", { name: /Choose a condition/ }).click();
@@ -61,15 +74,18 @@ test("members see the child-done system rule and create a wakeup", async ({ page
 
     const created = page.getByRole("button", { name: /When this issue receives a new comment/ });
     await expect(created).toBeVisible();
-    await expect(created).toContainText("Wake Wakeup Emacs · Trigger once · 2d 23h left");
+    // The assignee is woken by default, so the row leaves its name out.
+    await expect(created).toContainText("Trigger once · 2d 23h left");
+    await expect(created).not.toContainText("Wakeup Emacs");
     const stored = await db.query<{ expiry_seconds: string; on_timeout: string; created_by: string }>(
       `SELECT expiry_seconds, on_timeout, created_by FROM issue_wakeup WHERE issue_id = $1 AND system_rule IS NULL`,
       [parent.id],
     );
     expect(stored.rows).toEqual([{ expiry_seconds: "259200", on_timeout: "wake", created_by: userId }]);
 
-    await page.getByRole("switch", { name: "Wake the assignee when sub-issues finish" }).first().click();
-    await expect(systemRule).toContainText("Turned off for this issue");
+    await systemRule.click();
+    await page.getByRole("switch", { name: "Wake the assignee when sub-issues finish" }).click();
+    await expect(page.getByRole("button", { name: "Sub-issue wakeup off" })).toBeVisible();
     const override = await db.query<{ enabled: boolean; customized: boolean }>(
       `SELECT enabled, customized_at IS NOT NULL AS customized FROM issue_wakeup WHERE issue_id = $1 AND system_rule = 'child_done'`,
       [parent.id],
@@ -119,7 +135,7 @@ test("a member waits for a condition the platform checks", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`/${workspace.slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
 
-    await page.getByRole("button", { name: "New wakeup" }).click({ timeout: 45_000 });
+    await openNewWakeup(page);
     const form = page.getByRole("form", { name: "New wakeup" });
     await form.getByRole("button", { name: /Choose a condition/ }).click();
     await page.getByRole("menuitem", { name: /A field changes to a value/ }).click();
@@ -131,7 +147,7 @@ test("a member waits for a condition the platform checks", async ({ page }) => {
 
     const rule = page.getByRole("button", { name: /When this issue moves to In Review/ });
     await expect(rule).toBeVisible();
-    await expect(rule).toContainText("Wake Condition Grok · Trigger once");
+    await expect(rule).toContainText("Trigger once");
     const stored = await db.query<{ id: string; condition: unknown; event_types: string[] }>(
       `SELECT id, condition, event_types FROM issue_wakeup WHERE issue_id = $1`,
       [issue.id],

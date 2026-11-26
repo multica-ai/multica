@@ -153,13 +153,21 @@ describe("DeliverablesSection", () => {
   it("shows the latest version of each file and the total", () => {
     renderSection(FILES);
 
-    expect(screen.getByRole("button", { name: /Deliverables/ })).toHaveTextContent("3");
+    expect(screen.getByRole("button", { name: /Deliverables/ })).not.toHaveTextContent("3");
     // One row for the report, marked as its second version.
     const report = screen.getByRole("button", { name: "report.md, version 2" });
     expect(report).toHaveTextContent("v2");
     expect(screen.getAllByTitle("report.md")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "settings.png" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View all 3 deliverables" })).toBeInTheDocument();
+  });
+
+  it("keeps the total in the open header once the section lists only the latest", () => {
+    const files = Array.from({ length: 5 }, (_, i) =>
+      attachment({ id: `doc-${i}`, filename: `notes-${i}.md`, created_at: `2026-09-2${i}T10:00:00Z` }),
+    );
+    renderSection(collectDeliverableFiles([comment("c-5", files)]));
+    expect(screen.getByRole("button", { name: "Deliverables 5" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("opens the latest version in the page's viewer", () => {

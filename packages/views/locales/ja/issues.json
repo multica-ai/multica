@@ -25,6 +25,7 @@
     "message": "エージェントのメッセージ",
     "error": "エラー",
     "waiting_result": "ツールの結果を待っています...",
+    "reply_pending_call": "実行中：{{step}} の終了を待っています",
     "supplement_failure_turn_ended": "配信前に実行が終了しました",
     "supplement_failure_turn_not_started": "エージェントの準備ができていませんでした",
     "supplement_failure_provider_rejected": "エージェントがメッセージを拒否しました",
@@ -189,7 +190,7 @@
     "section_project": "プロジェクト",
     "section_project_status": "プロジェクトステータス",
     "section_label": "ラベル",
-    "section_relation": "自分との関係",
+    "section_relation": "関連",
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
     "relation_my_agents": "マイエージェントの作業",
@@ -273,7 +274,8 @@
     "advanced_group_match_trailing": "に一致",
     "advanced_group_hint": "このグループの条件は「{{word}}」でつながります",
     "advanced_add_to_group": "グループに追加",
-    "advanced_turn_into_group": "グループに変換"
+    "advanced_turn_into_group": "グループに変換",
+    "relation_blocked": "ブロック中"
   },
   "display": {
     "tooltip": "表示設定",
@@ -488,7 +490,6 @@
     "section_parent_issue": "親タスク",
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
-    "section_details": "詳細",
     "sidebar_settings": {
       "open": "サイドバーをカスタマイズ",
       "title": "サイドバー",
@@ -543,9 +544,6 @@
     "prop_project": "プロジェクト",
     "prop_labels": "ラベル",
     "add_property_action": "プロパティを追加",
-    "prop_created_by": "作成者",
-    "prop_created": "作成日",
-    "prop_updated": "更新日",
     "activity_section": "アクティビティ",
     "subscribe": "購読",
     "unsubscribe": "購読解除",
@@ -572,8 +570,6 @@
     "quick_jump_label": "クイックナビゲーション",
     "description_nav_label": "タスクの説明",
     "sub_issues_nav_progress": "{{done}}/{{total}} 完了",
-    "sub_issues_show_more_other": "さらに {{count}} 件表示",
-    "sub_issues_show_less": "折りたたむ",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -598,7 +594,34 @@
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "ローカル作業ディレクトリはまだありません — このタスクはローカルエージェントで実行されていません",
     "pull_requests_empty_title": "関連する PR はありません。",
-    "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。"
+    "guest_readonly_note": "ゲストは閲覧とコメントのみ可能で、タスクのプロパティは変更できません。",
+    "open_issue_page": "タスクページで開く",
+    "add_row": {
+      "wakeups": "ウェイクアップを追加",
+      "pull_requests": "Pull request を追加",
+      "environments": "環境を追加",
+      "relations": "関係を追加",
+      "pair": "{{first}}または{{second}}を追加",
+      "many": "追加...",
+      "noun": {
+        "wakeups": "ウェイクアップ",
+        "pull_requests": "Pull request",
+        "environments": "環境",
+        "relations": "関係"
+      },
+      "menu": {
+        "wakeups": "ウェイクアップ",
+        "pull_requests": "Pull request",
+        "environments": "環境",
+        "relations": "関係"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} が {{date}} に作成",
+      "created_for": "{{creator}} が {{requester}} の代理で {{date}} に作成",
+      "created_at": "作成: {{time}}",
+      "updated_at": "更新: {{time}}"
+    }
   },
   "timeline": {
     "loading": "読み込み中...",
@@ -629,6 +652,13 @@
     "squad_leader_no_action_reason": "評価完了: 必要なアクションはありません（{{reason}}）",
     "squad_leader_failed": "評価に失敗しました",
     "squad_leader_failed_reason": "評価に失敗しました: {{reason}}",
+    "squad_handoff_to": "{{name}} に引き継ぎました",
+    "squad_handoff_human": "{{name}} に判断を依頼しました",
+    "squad_handoff_leader": "{{name}} に差し戻しました",
+    "squad_handoff_round": "{{round}} 往復目",
+    "squad_handoff_reason_round_limit": "{{limit}} 往復の上限に到達",
+    "squad_handoff_reason_daily_limit": "本日の引き継ぎ上限に到達",
+    "squad_handoff_reason_run_failed": "実行失敗",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "アクティビティ {{count}} 件",
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示",
@@ -831,6 +861,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",
+    "is_working_round": "{{label}} · {{round}} 往復目",
     "is_queued": "{{name}} が待機中",
     "is_waiting_local_directory": "{{name}} がローカルディレクトリを待機中",
     "queued_elapsed_prefix": "{{elapsed}} 待機中",
@@ -890,8 +921,6 @@
     "summary_runs_other": "{{count}} 回の実行",
     "open_timeline": "タイムラインを開く",
     "more_runs_other": "残り {{count}} 件を表示",
-    "strip_aria": "実行ごとの費用 — 実行タイムラインを開く",
-    "strip_no_usage": "使用量の記録なし",
     "queued_count_other": "{{count}} 件待機中"
   },
   "runs_timeline": {
@@ -1054,6 +1083,8 @@
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
+    "add_blocker": "他のタスクを待つ...",
+    "add_blocking": "他のタスクをブロック...",
     "delete_issue": "タスクを削除",
     "mark_duplicate": "重複としてマーク...",
     "open_in_new_window": "新しいウィンドウで開く"
@@ -1359,6 +1390,7 @@
       "cancel": "キャンセル",
       "error": "ウェイクアップを作成できませんでした。設定を確認して再試行してください。",
       "capacity_error": "このタスクまたはワークスペースの有効なウェイクアップは上限に達しています。",
+      "agent_error": "このエージェントを実行する権限がありません。オーナーにアクセスを依頼するか、別のエージェントを選択してください。",
       "missing_condition": "条件を選択してください。",
       "missing_agent": "起こすエージェントを選択してください。",
       "missing_events": "イベントを 1 つ以上選択してください。",
@@ -1409,12 +1441,6 @@
       "badge": "システム",
       "title_stage": "ステージ {{stage}} のサブタスクがすべて終わったとき",
       "title_all": "サブタスクがすべて終わったとき",
-      "wake_assignee": "担当者 {{name}} を起こす",
-      "remaining_other": "残り {{count}} 件",
-      "blocked_backlog": "バックログ中のため起こしません",
-      "blocked_member": "担当者がメンバーのため、受信トレイに通知します",
-      "blocked_none": "エージェントの担当者がいないため起こしません",
-      "turned_off": "このタスクではオフ",
       "target_title": "起こす対象",
       "target_current": "担当者（現在 {{name}}）",
       "target_none": "担当者：エージェントやスクワッドは起こし、メンバーには通知します",
@@ -1429,14 +1455,19 @@
       "save_error": "システムルールを保存できませんでした。",
       "default_on": "ワークスペースでは既定でオン。",
       "default_off": "ワークスペースでは既定でオフ。",
-      "notify_member": "{{name}} に受信トレイで通知",
       "instruction": "起きたあとにすること",
       "instruction_edit": "指示を編集",
       "instruction_default": "このタスクでは未設定のため、既定の指示を使います：",
       "instruction_placeholder": "空欄のままなら既定の指示を使います",
       "instruction_invalid": "指示は 4,000 バイト未満にしてください。",
       "paused": "一時停止中：{{reason}}",
-      "default_change": "既定値を変更"
+      "default_change": "既定値を変更",
+      "chip_wake": "完了後に {{name}} を起動",
+      "chip_notify": "完了後に {{name}} に通知",
+      "chip_assignee": "完了後に担当者を起動",
+      "chip_off": "完了後の起動はオフ",
+      "blocked_backlog": "バックログ中のため起こしません",
+      "blocked_none": "エージェントの担当者がいないため起こしません"
     },
     "cond": {
       "status": "ステータスが{{status}}になったとき",
@@ -1509,7 +1540,14 @@
       "loop": "別のルールと互いに起こし合っていました",
       "rate": "1 時間に 12 回を超えて起動"
     },
-    "upcoming_other": "有効なルール {{count}} 件"
+    "upcoming_other": "有効なルール {{count}} 件",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "指定時刻",
+      "hourly": "毎時",
+      "every_hours": "{{hours}} 時間ごと",
+      "every_seconds": "{{seconds}} 秒ごと"
+    }
   },
   "duplicates": {
     "banner_prefix": "重複元:",
@@ -1544,7 +1582,8 @@
     "not_merged_action": "外す",
     "all_merged_to": "PR はすべてマージ済みです。次に PR がマージされると {{status}} に変更します。",
     "issue_disabled": "このタスクは PR マージでステータスを変えません",
-    "issue_disabled_action": "再開"
+    "issue_disabled_action": "再開",
+    "on_merge_to": "マージ後 → {{status}}"
   },
   "deliverables": {
     "section_title": "成果物",
@@ -1667,7 +1706,6 @@
       "target_squad": "スクワッド · リーダーが割り振り",
       "target_member": "メンバー",
       "instructions_hint": "今回の実行の指示として処理者に送られ、タスクの説明やコメントと一緒にコンテキストになります。",
-      "next_hint": "担当者が直接ステータスを更新し、差し戻すのは手直しが必要な場合のみで、ブロック時は差し戻しません。実行が完了してもステータスは自動的に変わりません。",
       "preview_brief": "エージェントが受け取る説明をプレビュー",
       "preview_title": "「{{status}}」ステップの説明",
       "preview_description": "タスクがこのステップに入ったとき、処理者の実行が受け取る内容です。プレビューに保存は不要です。",
@@ -1839,8 +1877,7 @@
       "all_issues": "すべてのタスク",
       "my_work": "自分の作業",
       "working": "実行中",
-      "subscribed": "購読中",
-      "snoozed": "スヌーズ中"
+      "subscribed": "購読中"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",
@@ -1918,7 +1955,8 @@
       "pending": "確認待ち",
       "approved": "承認済み",
       "rejected": "却下",
-      "rate_limited": "レート制限"
+      "rate_limited": "レート制限",
+      "quota_exceeded": "月間上限に到達"
     }
   },
   "environments": {
@@ -2028,5 +2066,38 @@
     "focus_failed": "{{name}} に切り替えられませんでした",
     "retry": "再試行",
     "dismiss": "閉じる"
+  },
+  "relations": {
+    "title": "関係",
+    "add": "関係を追加",
+    "wait_title": "他のタスクを待つ",
+    "block_title": "他のタスクをブロック",
+    "blocked_by": "ブロック元",
+    "blocking": "ブロック中",
+    "stage_tag": "ステージ",
+    "stage_tag_hint": "親タスクのステージで決まります",
+    "add_blocker_hint": "終了後にこのタスクが始まります",
+    "add_blocking_hint": "このタスクの終了後に始まります",
+    "mark_duplicate_hint": "このタスクはキャンセルされます",
+    "blocking_picker_hint": "このタスクが終了するまで開始できないタスクを選択してください。"
+  },
+  "waiting": {
+    "remove": "{{identifier}} を削除",
+    "count": "{{count}} 件のタスクを待機中",
+    "count_other": "{{count}} 件のタスクを待機中",
+    "hint": "すべて終了すると、担当者が自動的に開始するか通知を受け取ります。",
+    "hint_backlog": "バックログにあるため、自動では開始しません。",
+    "picker_hint": "このタスクの前に終了する必要があるタスクを選択してください。",
+    "restricted": "閲覧できない先行タスク {{count}} 件",
+    "ended": "待機中のタスクが終了しました",
+    "marker_title": "{{count}} 件のタスクにブロックされています",
+    "marker_title_other": "{{count}} 件のタスクにブロックされています",
+    "marker_ended": "{{finished}}/{{total}} 件終了",
+    "marker_more": "ほか {{count}} 件",
+    "marker_more_other": "ほか {{count}} 件",
+    "marker_auto_start": "すべて終了すると {{name}} が自動的に開始します。",
+    "marker_notify": "すべて終了すると {{name}} に通知されます。",
+    "marker_unavailable": "{{name}} は現在実行できないため、すべて終了しても自動では開始しません。",
+    "marker_unassigned": "担当者がいないため、すべて終了しても自動では開始しません。"
   }
 }

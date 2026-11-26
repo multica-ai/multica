@@ -16,7 +16,7 @@ Une automatisation lance du travail nouveau à partir d'un calendrier ou d'un we
 
 ## Créer une automatisation
 
-Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou partez de zéro, puis configurez :
+Ouvrez **Auto** dans la barre de navigation, choisissez un modèle ou partez de zéro, puis configurez :
 
 - **Nom** : ce dont cette automatisation est responsable ;
 - **Procédure** : l'objectif, le contexte, les contraintes et les étapes que l'agent lit à chaque exécution ;
@@ -28,7 +28,7 @@ Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou part
 
 Une automatisation est activée par défaut après l'enregistrement. **Exécuter maintenant** lance le flux complet une fois, à tout moment, sans attendre la planification.
 
-Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez sur **Exécuter maintenant**, ou avancez jusqu'à la prochaine exécution planifiée, et regardez-la créer une tâche, la confier à l'agent, puis terminer l'exécution.
+La séquence ci-dessous ouvre une automatisation en mode Créer une tâche (**Weekly dead-code audit**), déclenche **Run now** et montre la tâche créée apparaître dans l'historique d'exécution.
 
 <AutopilotDemo />
 
@@ -189,6 +189,7 @@ La mise en pause manuelle arrête les planifications, les webhooks et **Exécute
 multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
+multica autopilot deliveries <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 

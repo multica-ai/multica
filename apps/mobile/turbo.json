@@ -1,0 +1,13 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        // lib/failure-reason-label.test.ts checks mobile's labels against the
+        // failure reasons the server can emit, kept in one shared fixture.
+        "$TURBO_ROOT$/packages/views/agents/components/tabs/test-fixtures/server-failure-reasons.json"
+      ]
+    }
+  }
+}

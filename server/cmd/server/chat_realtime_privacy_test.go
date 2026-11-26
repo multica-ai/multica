@@ -232,16 +232,19 @@ func TestChatRealtimeStopsAtWorkspaceRemoval(t *testing.T) {
 	bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: otherWS, Payload: map[string]string{}})
 	readChatPrivacyFrames(t, other, protocol.EventIssueUpdated)
 
-	// Use the actual removal API. The shared agent/runtime belongs to the
-	// workspace owner, so this member's removal does not cancel the task.
+	// Use the actual removal API. It cancels the task the member started, even
+	// on the owner's shared agent and runtime.
 	chatPrivacyRequest(t, server, testToken, http.MethodDelete,
 		"/api/workspaces/"+testWorkspaceID+"/members/"+memberID, nil, nil)
 	if fx.Count(t, `SELECT count(*) FROM member WHERE id=$1`, memberID) != 0 {
 		t.Fatal("membership was not removed")
 	}
-	if fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE id=$1 AND status='running'`, sent.TaskID) != 1 {
-		t.Fatal("shared-agent task unexpectedly stopped")
+	if fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE id=$1 AND status='cancelled'`, sent.TaskID) != 1 {
+		t.Fatal("task the removed member started was not cancelled")
 	}
+	// The daemon may not have seen the cancellation yet; its late reports
+	// must still stay out of the member's other-workspace connection.
+	fx.Exec(t, `UPDATE agent_task_queue SET status='running', completed_at=NULL WHERE id=$1`, sent.TaskID)
 	req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/tasks/"+sent.TaskID+"/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+creatorToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)

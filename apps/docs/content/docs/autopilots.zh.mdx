@@ -28,7 +28,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 保存后自动化默认启用。**立即运行**随时手动执行一次完整流程，不用等时间表。
 
-下面是一条输出模式为"创建任务"的自动化。点**立即运行**，或者快进到下次运行时间，看它创建任务、交给智能体，再到这次运行完成。
+下面的录屏打开一条输出模式为「创建任务」的自动化（**Weekly dead-code audit**），点击 **Run now** 立即触发，并展示运行记录中自动创建并关联的新任务。
 
 <AutopilotDemo />
 
@@ -189,6 +189,7 @@ Multica 定期检查近期运行是否持续失败：过去 7 天内已完成或
 multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
+multica autopilot deliveries <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 

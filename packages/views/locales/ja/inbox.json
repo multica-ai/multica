@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "インボックス",
-    "back": "インボックス"
+    "title": "インボックス"
   },
   "menu": {
     "mark_all_read": "すべて既読にする",
@@ -54,6 +53,7 @@
       "days": "{{count}}日"
     },
     "archived_title": "アーカイブ済み",
+    "snoozed_title": "スヌーズ中",
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",
     "actions_aria": "通知の操作",
@@ -63,10 +63,14 @@
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
+    "restore": "インボックスに戻す",
+    "more_actions": "その他の通知操作",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームを開く",
     "autopilot_quota_exceeded_body": "このワークスペースは現在の期間の自動化実行上限 {{limit}} 回に達しました。実行枠が {{resetAt}} にリセットされるか、アップグレードまたは実行回数の追加購入を行うまで、以降の自動化は開始されません。",
+    "app_tool_calls_quota_exceeded_body": "このワークスペースは今月のアプリ呼び出し {{limit}} 回を使い切りました。{{resetAt}} にリセットされるか、アップグレードまたはシートを追加するまで、エージェントはアプリのツールを実行できません。",
+    "app_tool_calls_quota_action": "請求を管理",
     "project_owner_joined_body": "{{name}} はワークスペースのオーナーで、このプライベートプロジェクトに自分を追加しました。タスク、コメント、添付ファイルを閲覧できるようになりました。",
     "open_project": "プロジェクトを開く",
     "open_app": "アプリを開く",
@@ -106,12 +110,14 @@
     "children_done": "サブタスクがすべて終わりました",
     "project_owner_joined": "オーナーがプロジェクトに参加",
     "autopilot_quota_exceeded": "自動化の実行上限に達しました",
+    "app_tool_calls_quota_exceeded": "アプリ呼び出しの上限に達しました",
     "app_action_requested": "確認が必要",
     "app_action_reminder": "確認の期限が近い",
     "app_connect_requested": "アプリの接続依頼",
     "app_action_result": "アプリ操作の結果",
     "doc_comment": "ドキュメントへの新しいコメント",
-    "doc_mentioned": "ドキュメントでメンションされました"
+    "doc_mentioned": "ドキュメントでメンションされました",
+    "blockers_done": "待機中のタスクが終了しました"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",
@@ -127,6 +133,7 @@
     "created_with_agent": "エージェントで作成: {{identifier}}",
     "failed_with_detail": "失敗: {{detail}}",
     "autopilot_quota_blocked": "上限に達したため実行をブロックしました",
+    "app_tool_calls_quota_blocked": "今月はエージェントがアプリのツールを実行できません",
     "children_done_stage": "ステージ {{stage}} のサブタスクがすべて終わりました"
   },
   "toasts": {
@@ -142,13 +149,16 @@
   },
   "kept": {
     "archived": "アーカイブ済み",
+    "undo_archive": "アーカイブを取り消す",
+    "unsubscribed": "購読を解除しました",
     "leaves": "移動するとインボックスから外れます",
     "filtered": "フィルターに一致しなくなりました",
-    "notification_archived": "通知をアーカイブしました",
     "changed_status": "{{status}} に変更",
     "reassigned": "{{name}} に再割り当て",
     "unassigned": "割り当て解除",
     "ran_quick_action": "{{name}} を実行",
+    "agent_triggered": "エージェントを起動しました",
+    "returns_on_activity": "新しい動きがあるとインボックスに戻ります",
     "next": "次へ",
     "next_tooltip": "次を開く：{{title}}"
   },
@@ -177,6 +187,13 @@
     "issue_description": "このビューにあるこのタスクの通知は完全に削除されます。タスクと実行記録は残ります。",
     "cancel": "キャンセル",
     "active_issue_description": "このタスクに対する受信トレイのアクティブな通知を完全に削除します。これまでにアーカイブされた通知、タスク本体、および実行履歴は保持されます。"
+  },
+  "archive_all_dialog": {
+    "title": "すべての通知をアーカイブしますか？",
+    "description": "インボックスのアクティブな通知がすべてアーカイブに移動します。スヌーズ中の課題はそのまま維持され、いつでも復元できます。",
+    "description_count_other": "インボックスのアクティブな通知 {{count}} 件がすべてアーカイブに移動します。スヌーズ中の課題はそのまま維持され、いつでも復元できます。",
+    "cancel": "キャンセル",
+    "confirm": "すべてアーカイブ"
   },
   "unsubscribe": {
     "title": "購読を解除してアーカイブします。このタスクの更新は届かなくなりますが、@メンションは引き続き通知されます。",
@@ -212,9 +229,7 @@
     "failed": "スヌーズできませんでした",
     "unsnooze_failed": "戻せませんでした",
     "view_empty": "スヌーズ中の項目はありません",
-    "view_empty_description": "インボックスでタスクをスヌーズすると、戻る時間までここで待機します。",
-    "col_updates": "スヌーズ中",
-    "col_back": "戻る時間"
+    "view_empty_description": "インボックスでタスクをスヌーズすると、戻る時間までここで待機します。"
   },
   "auto_archive_prompt": {
     "title": "対応済みの通知を自動でアーカイブ",
@@ -234,8 +249,6 @@
     "just_unsubscribed": "{{label}} の購読を解除してアーカイブしました",
     "just_archived_many_other": "{{count}} 件の通知をアーカイブしました",
     "snoozed_summary_other": "スヌーズ中 {{count}} 件 · 最短 {{time}} に復帰",
-    "bar_snoozed_other": "スヌーズ中 {{count}} 件",
-    "go_to_my_work": "自分の作業へ",
     "filtered_title": "このフィルターの通知はすべて処理済みです",
     "filtered_remaining_other": "インボックスに他の通知が {{count}} 件あります",
     "clear_and_continue": "フィルターを解除して続ける",

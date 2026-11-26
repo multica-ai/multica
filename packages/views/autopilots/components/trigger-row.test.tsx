@@ -70,11 +70,16 @@ function trigger(overrides: Partial<AutopilotTrigger> = {}): AutopilotTrigger {
   };
 }
 
-function renderRow(trig: AutopilotTrigger, canWrite = true) {
+function renderRow(trig: AutopilotTrigger, canWrite = true, autopilotActive = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
     <QueryClientProvider client={qc}>
-      <TriggerRow trigger={trig} autopilotId={AUTOPILOT_ID} canWrite={canWrite} />
+      <TriggerRow
+        trigger={trig}
+        autopilotId={AUTOPILOT_ID}
+        canWrite={canWrite}
+        autopilotActive={autopilotActive}
+      />
     </QueryClientProvider>,
   );
 }
@@ -99,6 +104,14 @@ describe("TriggerRow", () => {
     renderRow(trigger({ enabled: false }));
 
     expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
+  });
+
+  it("stops promising a next run while the autopilot is paused", () => {
+    // Pausing the autopilot leaves its triggers enabled and their next_run_at
+    // in place, but the scheduler skips every trigger of a paused autopilot.
+    renderRow(trigger(), true, false);
+
     expect(screen.queryByText(/Next:/)).not.toBeInTheDocument();
   });
 

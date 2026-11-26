@@ -1187,6 +1187,127 @@ WHERE autopilot_id = $1 AND user_id = $2
 	}
 }
 
+// TestDeleteMember_PrunesAutopilotCollaborators: a removed member who is
+// invited back must not regain write access to autopilots they were granted
+// before. The delete is scoped to that user and to this workspace.
+func TestDeleteMember_PrunesAutopilotCollaborators(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-collaborator", "daemon-revoke-autopilot-collaborator")
+
+	insertAutopilot := func(workspaceID string) string {
+		id := dbfx.Insert(t, "autopilot", testutil.Cols{
+			"workspace_id":    workspaceID,
+			"title":           "Revocation autopilot collaborator",
+			"assignee_type":   "agent",
+			"assignee_id":     fx.AgentID,
+			"status":          "active",
+			"execution_mode":  "run_only",
+			"created_by_type": "member",
+			"created_by_id":   testUserID,
+		})
+		dbfx.Cleanup(t, `DELETE FROM autopilot_collaborator WHERE autopilot_id = $1`, id)
+		return id
+	}
+	autopilotID := insertAutopilot(fx.WorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation collaborator other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-collaborator-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RCO",
+	})
+	otherAutopilotID := insertAutopilot(otherWorkspaceID)
+	dbfx.Exec(t, `
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, 'member', $3, $4), ($1, 'member', $4, $4), ($2, 'member', $3, $4)
+`, autopilotID, otherAutopilotID, fx.TargetUserID, testUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	granted := func(autopilotID, userID string) bool {
+		t.Helper()
+		ok, err := testHandler.Queries.IsAutopilotCollaborator(context.Background(), db.IsAutopilotCollaboratorParams{
+			AutopilotID: parseUUID(autopilotID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			t.Fatalf("read collaborator: %v", err)
+		}
+		return ok
+	}
+	if granted(autopilotID, fx.TargetUserID) {
+		t.Error("removed member still holds write access to the autopilot")
+	}
+	if !granted(autopilotID, testUserID) {
+		t.Error("remaining member's access was pruned")
+	}
+	if !granted(otherAutopilotID, fx.TargetUserID) {
+		t.Error("access in another workspace was pruned")
+	}
+}
+
+// TestDeleteMember_PrunesSquadMemberships: a removed member must leave the
+// squads they belonged to, so squad rosters stop listing them and a re-invited
+// user does not silently rejoin. Scoped to that user and to this workspace.
+func TestDeleteMember_PrunesSquadMemberships(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-squad-member", "daemon-revoke-squad-member")
+
+	insertSquad := func(workspaceID string) string {
+		id := dbfx.Insert(t, "squad", testutil.Cols{
+			"workspace_id": workspaceID,
+			"name":         fmt.Sprintf("Revocation squad %d", time.Now().UnixNano()),
+			"leader_id":    fx.AgentID,
+			"creator_id":   testUserID,
+		})
+		dbfx.Cleanup(t, `DELETE FROM squad_member WHERE squad_id = $1`, id)
+		dbfx.Cleanup(t, `DELETE FROM squad WHERE id = $1`, id)
+		return id
+	}
+	squadID := insertSquad(fx.WorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation squad other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-squad-member-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RSO",
+	})
+	otherSquadID := insertSquad(otherWorkspaceID)
+	dbfx.Exec(t, `
+INSERT INTO squad_member (squad_id, member_type, member_id)
+VALUES ($1, 'member', $3), ($1, 'member', $4), ($1, 'agent', $5), ($2, 'member', $3)
+`, squadID, otherSquadID, fx.TargetUserID, testUserID, fx.AgentID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	inSquad := func(squadID, memberType, memberID string) bool {
+		t.Helper()
+		ok, err := testHandler.Queries.IsSquadMember(context.Background(), db.IsSquadMemberParams{
+			SquadID:    parseUUID(squadID),
+			MemberType: memberType,
+			MemberID:   parseUUID(memberID),
+		})
+		if err != nil {
+			t.Fatalf("read squad member: %v", err)
+		}
+		return ok
+	}
+	if inSquad(squadID, "member", fx.TargetUserID) {
+		t.Error("removed member is still in the squad")
+	}
+	if !inSquad(squadID, "member", testUserID) {
+		t.Error("remaining member was removed from the squad")
+	}
+	if !inSquad(squadID, "agent", fx.AgentID) {
+		t.Error("agent member was removed from the squad")
+	}
+	if !inSquad(otherSquadID, "member", fx.TargetUserID) {
+		t.Error("squad membership in another workspace was pruned")
+	}
+}
+
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when
 // a member leaves a workspace voluntarily, their own runtimes are revoked
 // with the same atomic write set as DeleteMember.

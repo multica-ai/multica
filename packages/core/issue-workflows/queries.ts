@@ -79,15 +79,24 @@ export function workflowMiddleKeys(workflow: Pick<IssueWorkflow, "steps">): stri
 
 /**
  * The column a step's handler is told to move to when done: the step's own
- * choice, else the next column (skipping blocked); empty at the end.
+ * choice, else the next column, skipping blocked and closed ones; empty at the
+ * end. With `categoryOf`, it matches the agent's brief for custom statuses
+ * too: a closed column such as Won't Fix is never where finished work goes,
+ * and a done or closed column routes only where its author chose (MUL-9913).
  */
-export function workflowNextStatus(workflow: Pick<IssueWorkflow, "steps">, statusKey: string): string {
+export function workflowNextStatus(
+  workflow: Pick<IssueWorkflow, "steps">,
+  statusKey: string,
+  categoryOf?: (statusKey: string) => string,
+): string {
   const index = workflow.steps.findIndex((s) => s.status_key === statusKey);
   if (index < 0) return "";
   const own = workflow.steps[index]?.next_status_key;
   if (own) return own;
+  const category = categoryOf?.(statusKey);
+  if (category === "done" || category === "closed") return "";
   for (const s of workflow.steps.slice(index + 1)) {
-    if (s.status_key !== "blocked") return s.status_key;
+    if (s.status_key !== "blocked" && categoryOf?.(s.status_key) !== "closed") return s.status_key;
   }
   return "";
 }

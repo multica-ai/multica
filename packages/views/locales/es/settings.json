@@ -386,6 +386,9 @@
     "record_aria": "Cambiar atajo de {{action}}",
     "recording": "Pulsa las teclas",
     "record_hint": "Esc cancela · Supr borra",
+    "record_sequence_hint": "Pulsa una tecla, o dos seguidas para una secuencia como G luego I · Esc cancela",
+    "record_then_hint": "Pulsa la segunda tecla · ↵ deja una sola tecla · Retroceso empieza de nuevo",
+    "then": "luego",
     "unassigned": "Sin asignar",
     "no_results": "Ninguna acción de atajo coincide.",
     "conflict_error": "Ya lo usa {{action}}.",
@@ -396,8 +399,10 @@
     "send_enter_hint": "Shift+Enter inserta un párrafo, continúa una lista o añade un salto de línea en un bloque de código.",
     "categories": {
       "general": "General",
+      "issue": "Tarea",
       "navigation": "Navegación"
     },
+    "issue_scope": "Actúa sobre la tarea que tienes delante: la de la vista previa, las seleccionadas en una lista o la tarea abierta.",
     "actions": {
       "openSearch": {
         "label": "Abrir búsqueda",
@@ -439,9 +444,57 @@
         "label": "Posponer notificación",
         "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
       },
+      "markInboxUnread": {
+        "label": "Marcar notificación como no leída",
+        "description": "Alterna entre leída y no leída en la notificación abierta sin salir de ella."
+      },
+      "nextInboxItem": {
+        "label": "Siguiente notificación",
+        "description": "Abre la siguiente notificación en la lista activa de la bandeja de entrada."
+      },
+      "prevInboxItem": {
+        "label": "Notificación anterior",
+        "description": "Abre la notificación anterior en la lista activa de la bandeja de entrada."
+      },
       "undoInboxAction": {
         "label": "Deshacer acción de la bandeja",
         "description": "Deshace el último archivado, posposición o baja mientras se ve su aviso; después, restaura la notificación abierta una vez archivada o lo que indica Bandeja de entrada vacía."
+      },
+      "setIssueStatus": {
+        "label": "Cambiar estado",
+        "description": "Abre el selector de estado."
+      },
+      "assignIssue": {
+        "label": "Asignar",
+        "description": "Abre el selector de responsable."
+      },
+      "setIssuePriority": {
+        "label": "Establecer prioridad",
+        "description": "Abre el selector de prioridad."
+      },
+      "setIssueLabels": {
+        "label": "Editar etiquetas",
+        "description": "Abre el selector de etiquetas."
+      },
+      "setIssueDueDate": {
+        "label": "Establecer fecha de fin",
+        "description": "Abre el selector de fecha de fin."
+      },
+      "moveIssueToProject": {
+        "label": "Mover a proyecto",
+        "description": "Abre el selector de proyecto."
+      },
+      "runIssueQuickAction": {
+        "label": "Ejecutar acción rápida",
+        "description": "Disponible en una sola tarea cuando hay acciones rápidas activas."
+      },
+      "replyToIssue": {
+        "label": "Responder",
+        "description": "Enfoca el cuadro de comentarios de la tarea abierta."
+      },
+      "showShortcuts": {
+        "label": "Mostrar atajos de teclado",
+        "description": "Abre la lista de atajos, con los de la página actual primero."
       },
       "send": {
         "label": "Enviar",
@@ -519,6 +572,32 @@
       "zoom_out": "Alejar",
       "reset_zoom": "Restablecer zoom",
       "close_dialog": "Cerrar diálogo o menú"
+    },
+    "cheatsheet": {
+      "title": "Atajos de teclado",
+      "current_page": "página actual",
+      "footer_prefix": "Los atajos se guardan en este dispositivo. Cámbialos en ",
+      "footer_link": "Configuración › Atajos",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Bandeja de entrada",
+        "issue": "Tarea",
+        "navigation": "Navegación",
+        "general": "General",
+        "list": "Listas y tableros",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Bajar / subir",
+        "list_columns": "Cambiar de columna del tablero",
+        "list_open": "Abrir",
+        "list_peek": "Vista previa",
+        "list_select": "Seleccionar",
+        "list_extend": "Ampliar la selección",
+        "list_select_all": "Seleccionar todo",
+        "list_clear": "Quitar la selección",
+        "editor_leave": "Salir del campo"
+      }
     }
   },
   "chat": {
@@ -888,10 +967,6 @@
         "dates": "Cambiar fechas",
         "labels": "Cambiar etiquetas"
       },
-      "after_label": "Después de archivar",
-      "after_description": "Cuando la notificación que estás leyendo se archiva así. Archivar a mano (E) sigue abriendo la siguiente.",
-      "after_stay": "Quedarse en la tarea",
-      "after_next": "Abrir la siguiente",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"
@@ -909,6 +984,10 @@
       "comments": {
         "label": "Comentarios",
         "description": "Comentarios nuevos en tareas que sigues"
+      },
+      "squad_handoffs": {
+        "label": "Incluir traspasos del squad",
+        "description": "Comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones, las ejecuciones de agente fallidas y el informe final del squad te siguen llegando."
       },
       "mentions": {
         "label": "Menciones",
@@ -1911,7 +1990,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     },
     "scopes": {
       "team": "Cuenta del equipo",
@@ -1928,7 +2008,7 @@
       "personal": "Tu cuenta"
     },
     "account_row": {
-      "admins_notified": "administradores avisados",
+      "admins_notified": "administrador avisado",
       "withdraw": "Retirar",
       "decline": "Rechazar",
       "toast_declined": "Solicitudes rechazadas. Los agentes en espera siguen sin ella.",
@@ -1989,7 +2069,7 @@
       "title_member_ask": "{{name}} pidió una cuenta del equipo de {{app}}",
       "waiting_for_admin": "Esperando a un administrador",
       "team_note": "Todos los agentes que actúan con la cuenta del equipo podrán usarla.",
-      "admins_notified": "Se avisó a los administradores en la bandeja de entrada.",
+      "admins_notified": "Se avisó a un administrador en la bandeja de entrada.",
       "connect_team": "Conectar para el equipo"
     },
     "tools": {
@@ -2052,7 +2132,76 @@
       "empty_attention": "No hay nada que requiera tu atención.",
       "no_matches": "Ninguna aplicación coincide con tu búsqueda.",
       "unavailable": "Las aplicaciones no están disponibles en este servidor.",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "catalog": "Catálogo",
+      "catalog_failed": "No se pudo cargar el catálogo de aplicaciones.",
+      "category_curated": "Destacadas",
+      "categories_label": "Categorías",
+      "connect_oauth": "Inicio de sesión con OAuth",
+      "connect_key": "Usa una clave de API",
+      "show_more": "Mostrar más",
+      "categories": {
+        "ai_ml": "IA y aprendizaje automático",
+        "developer_tools": "Desarrollo y DevOps",
+        "data_analytics": "Datos y analítica",
+        "productivity": "Productividad y gestión de proyectos",
+        "collaboration": "Colaboración y comunicación",
+        "marketing_social": "Marketing y redes sociales",
+        "documents": "Documentos y archivos",
+        "sales_support": "Ventas y atención al cliente",
+        "crm": "CRM",
+        "finance": "Finanzas y contabilidad",
+        "workflow_automation": "Automatización de flujos de trabajo",
+        "design": "Diseño y herramientas creativas",
+        "ecommerce": "Comercio electrónico",
+        "advertising": "Publicidad",
+        "scheduling": "Agenda y reservas",
+        "entertainment": "Entretenimiento y medios",
+        "hr_recruiting": "RR. HH. y selección",
+        "education": "Educación",
+        "model_context_protocol": "Servidores MCP",
+        "marketing_automation": "Automatización de marketing",
+        "email": "Correo electrónico",
+        "security_identity_tools": "Seguridad e identidad",
+        "forms_surveys": "Formularios y encuestas",
+        "databases": "Bases de datos",
+        "web_scraping_browser": "Web scraping y navegadores",
+        "email_newsletters": "Boletines por correo",
+        "business_intelligence": "Inteligencia de negocio",
+        "ai_web_scraping": "Web scraping con IA",
+        "ai_agents": "Agentes de IA",
+        "web_search_research": "Búsqueda web e investigación",
+        "ai_sales_tools": "Herramientas de ventas con IA",
+        "ai_content_generation": "Generación de contenido con IA",
+        "payment_processing": "Procesamiento de pagos",
+        "server_monitoring": "Monitorización de servidores",
+        "video_audio": "Vídeo y audio",
+        "signatures": "Firma electrónica",
+        "phone_sms": "Teléfono y SMS",
+        "audio_speech": "Audio y voz",
+        "ai_chatbots": "Chatbots de IA",
+        "ai_document_extraction": "Extracción de documentos con IA",
+        "url_shortener": "Acortadores de URL",
+        "people_contact_data": "Datos de personas y contactos",
+        "notifications": "Notificaciones",
+        "event_management": "Gestión de eventos",
+        "places_weather": "Lugares y clima",
+        "market_data": "Datos de mercado",
+        "it_operations": "Operaciones de TI",
+        "internet_of_things": "Internet de las cosas",
+        "spreadsheets": "Hojas de cálculo",
+        "fundraising": "Recaudación de fondos",
+        "website_builders": "Creadores de webs y apps",
+        "reviews": "Reseñas",
+        "company_data": "Datos de empresas",
+        "ai_meeting_assistants": "Asistentes de reuniones con IA",
+        "bookmark_managers": "Gestores de marcadores",
+        "social_creator_data": "Datos sociales y de creadores",
+        "seo_ai_visibility": "SEO y visibilidad en IA",
+        "legal_public_records": "Registros legales y públicos",
+        "ai_safety": "Seguridad y cumplimiento de IA",
+        "other": "Otras"
+      }
     },
     "app_page": {
       "agents_title": "Agentes",

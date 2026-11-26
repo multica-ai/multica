@@ -209,6 +209,8 @@ test.describe("as a guest", () => {
     await expectNoMemberActions(page);
 
     await inbox.getByText(fixture.issues.review.title, { exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/${slug}/inbox\\?issue=${fixture.issues.review.id}`));
+    await page.getByRole("button", { name: "Toggle right sidebar" }).click();
     await expect(page.getByText("Guests can view and comment, but cannot change issue properties.")).toBeVisible();
     await expectClean(seen);
     await expectNoMemberActions(page);
@@ -321,6 +323,48 @@ test.describe("as a guest", () => {
     await expect(page.getByRole("option", { name: new RegExp(issue.title) }).first()).toBeVisible();
     // The doc search fires DOC_SEARCH_DEBOUNCE_MS (300 ms) after the last keystroke.
     await page.waitForTimeout(500);
+    await expectClean(seen);
+  });
+
+  test("an issue's field shortcuts do nothing for a guest, while R still focuses the composer", async ({ page }) => {
+    const issue = fixture.issues.review;
+    const seen = await openAsGuest(page, `/${slug}/issues/${issue.identifier}`);
+    await expect(page.getByText(issue.title).first()).toBeVisible({ timeout: 30_000 });
+    await expectClean(seen);
+
+    for (const key of ["s", "a", "p", "l", "q", "Shift+D", "Shift+P"]) {
+      await page.keyboard.press(key);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+    await expectClean(seen);
+
+    await page.keyboard.press("r");
+    await expect(page.locator('[contenteditable="true"]:focus')).toHaveCount(1);
+    await expectClean(seen);
+  });
+
+  test("the shortcut sheet lists only a guest's keys, and G leads only to its pages", async ({ page }) => {
+    const seen = await openAsGuest(page, `/${slug}/inbox`);
+    await expect(page.getByRole("region", { name: "Inbox" })).toBeVisible({ timeout: 30_000 });
+
+    await page.keyboard.press("Shift+Slash");
+    const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+    await expect(sheet.getByText("Go to Inbox", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("Reply", { exact: true })).toBeVisible();
+    for (const name of ["Go to Chat", "Go to Agents", "Create issue", "Change status", "Toggle chat window"]) {
+      await expect(sheet.getByText(name, { exact: true })).toHaveCount(0);
+    }
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+
+    await page.keyboard.press("g");
+    await page.keyboard.press("c");
+    await page.keyboard.press("g");
+    await page.keyboard.press("a");
+    await expect(page).toHaveURL(new RegExp(`/${slug}/inbox`));
+    await page.keyboard.press("g");
+    await page.keyboard.press("p");
+    await expect(page).toHaveURL(new RegExp(`/${slug}/projects$`));
     await expectClean(seen);
   });
 

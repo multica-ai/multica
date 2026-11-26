@@ -16,13 +16,16 @@ func TestSelectTaskWarmPoolDisablesCustomProfileCommands(t *testing.T) {
 	})
 	defer pool.Close()
 
-	if got := selectTaskWarmPool(pool, false); got != pool {
-		t.Fatalf("selectTaskWarmPool(pool, false) = %v, want %v", got, pool)
+	if got := selectTaskWarmPool(pool, false, false); got != pool {
+		t.Fatalf("selectTaskWarmPool(pool, false, false) = %v, want %v", got, pool)
 	}
-	if got := selectTaskWarmPool(pool, true); got != nil {
-		t.Fatalf("selectTaskWarmPool(pool, true) = %v, want nil for custom profile command", got)
+	if got := selectTaskWarmPool(pool, true, false); got != nil {
+		t.Fatalf("selectTaskWarmPool(pool, true, false) = %v, want nil for custom profile command", got)
 	}
-	if got := selectTaskWarmPool(nil, false); got != nil {
-		t.Fatalf("selectTaskWarmPool(nil, false) = %v, want nil", got)
+	if got := selectTaskWarmPool(pool, false, true); got != nil {
+		t.Fatalf("selectTaskWarmPool(pool, false, true) = %v, want nil for worktree mode", got)
+	}
+	if got := selectTaskWarmPool(nil, false, false); got != nil {
+		t.Fatalf("selectTaskWarmPool(nil, false, false) = %v, want nil", got)
 	}
 }

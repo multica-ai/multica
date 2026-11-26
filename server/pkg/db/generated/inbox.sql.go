@@ -1022,7 +1022,9 @@ SELECT g.issue_id::uuid AS issue_id,
        g.snoozed_until::timestamptz AS snoozed_until,
        g.snoozed_at::timestamptz AS snoozed_at,
        g.updates::bigint AS updates,
-       iss.number AS issue_number
+       iss.number AS issue_number,
+       iss.title AS issue_title,
+       iss.status AS issue_status
 FROM (
     SELECT i.issue_id,
            max(i.snoozed_until) AS snoozed_until,
@@ -1071,12 +1073,15 @@ type ListSnoozedInboxRow struct {
 	SnoozedAt    pgtype.Timestamptz `json:"snoozed_at"`
 	Updates      int64              `json:"updates"`
 	IssueNumber  pgtype.Int4        `json:"issue_number"`
+	IssueTitle   pgtype.Text        `json:"issue_title"`
+	IssueStatus  pgtype.Text        `json:"issue_status"`
 }
 
 // The recipient's snoozed issues, soonest back first (MUL-9333). `updates` is
 // how many rows arrived while snoozed; `item_id` is the issue's newest row,
 // the one the snooze endpoints take. `issue_number` builds the identifier the
-// row links to.
+// row links to; `issue_title` and `issue_status` let the row render without
+// fetching each issue (MUL-10056).
 func (q *Queries) ListSnoozedInbox(ctx context.Context, arg ListSnoozedInboxParams) ([]ListSnoozedInboxRow, error) {
 	rows, err := q.db.Query(ctx, listSnoozedInbox, arg.WorkspaceID, arg.RecipientID, arg.HiddenProjectIds)
 	if err != nil {
@@ -1093,6 +1098,8 @@ func (q *Queries) ListSnoozedInbox(ctx context.Context, arg ListSnoozedInboxPara
 			&i.SnoozedAt,
 			&i.Updates,
 			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.IssueStatus,
 		); err != nil {
 			return nil, err
 		}

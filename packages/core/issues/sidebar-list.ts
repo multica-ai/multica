@@ -245,7 +245,7 @@ export function viewSidebarRequest(
 }
 
 /** What each built-in adds to All issues, as the issues page applies it. */
-const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working" | "snoozed">, IssueTableQuerySpec["filters"]> = {
+const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working">, IssueTableQuerySpec["filters"]> = {
   all_issues: {},
   my_work: { relations: ASSIGNEE_RELATIONS.me_and_my_agents },
   subscribed: { relations: ["subscribed"] },
@@ -255,15 +255,14 @@ const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working" | "snoozed">, Is
  * The request for an expanded built-in view: its filter, listed with the same
  * status, sub-issue and ordering settings as an expanded project. The
  * assignee setting is for projects only: a built-in already says whose
- * issues it lists. Working and Snoozed list `issueIds`: the issues agents are
- * running on, as the page does, and the issues the viewer snoozed. `null` when
- * the settings leave nothing to list.
+ * issues it lists. Working lists `workingIssueIds`, the issues agents are
+ * running on, as the page does. `null` when the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
   builtin: BuiltinViewKey,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
-  issueIds: readonly string[] = [],
+  workingIssueIds: readonly string[] = [],
 ): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
@@ -271,8 +270,8 @@ export function builtinSidebarRequest(
     table: {
       scope: { kind: "workspace" },
       filters: {
-        ...(builtin === "working" || builtin === "snoozed"
-          ? { working_issue_ids: [...issueIds].sort() }
+        ...(builtin === "working"
+          ? { working_issue_ids: [...workingIssueIds].sort() }
           : BUILTIN_FILTERS[builtin]),
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
         include_sub_issues: settings.showSubIssues,

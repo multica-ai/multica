@@ -117,6 +117,19 @@ describe("workflow helpers (MUL-7420)", () => {
     expect(workflowNextStatus(content, "cancelled")).toBe("");
     expect(workflowNextStatus(content, "missing")).toBe("");
   });
+
+  it("matches the agent's brief for custom done and closed columns", () => {
+    const withWontFix = { ...content, steps: columns("drafting", "editing", "wont_fix") };
+    const categoryOf = (key: string) => (key === "wont_fix" || key === "cancelled" ? "closed" : key === "done" ? "done" : "started");
+    // Finished work never goes to a closed column…
+    expect(workflowNextStatus(withWontFix, "editing", categoryOf)).toBe("done");
+    // …and a closed column routes only where its author chose.
+    expect(workflowNextStatus(withWontFix, "wont_fix", categoryOf)).toBe("");
+    const own = { ...withWontFix, steps: withWontFix.steps.map((s) => (s.status_key === "wont_fix" ? { ...s, next_status_key: "done" } : s)) };
+    expect(workflowNextStatus(own, "wont_fix", categoryOf)).toBe("done");
+    // Without a catalog the board order alone decides, as before.
+    expect(workflowNextStatus(withWontFix, "editing")).toBe("wont_fix");
+  });
 });
 
 describe("projectMoveMayHandOff", () => {

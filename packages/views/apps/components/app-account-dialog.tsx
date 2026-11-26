@@ -55,6 +55,7 @@ function ActivityList({ scope, slug }: { scope: AppAccountScope; slug: string })
       case "approved":
       case "rejected":
       case "rate_limited":
+      case "quota_exceeded":
         return t(($) => $.connected_apps.outcomes[outcome]);
       default:
         return outcome;

@@ -1,0 +1,164 @@
+name: Composio spec drift
+
+# The fakes and tests in server/pkg/composio, server/internal/integrations/composio
+# and scripts/fake-composio.mjs agree with a frozen snapshot of Composio's
+# OpenAPI spec, so they keep passing when Composio changes the live API under
+# them. This regenerates the snapshot from the live spec and fails, with the
+# diff and the test results in the job summary, when it no longer matches.
+# Deliberately not part of ci.yml: an outage at Composio must not block merges.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: composio-spec-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT: server/pkg/composio/composiotest/openapi-v3.1.json
+
+jobs:
+  drift:
+    name: Composio OpenAPI spec vs snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # An unreachable or erroring Composio is not drift: warn and skip, and let
+      # the next scheduled run try again. A 404/410 fails, since a spec that is
+      # gone from its URL would otherwise leave this check skipping forever.
+      - name: Fetch Composio's live spec
+        id: fetch
+        run: |
+          url=$(node --input-type=module -e 'import { SPEC_URL } from "./scripts/composio-spec.mjs"; console.log(SPEC_URL)')
+          spec="$RUNNER_TEMP/openapi.json"
+          code=$(curl --silent --show-error --location --retry 4 --retry-all-errors --retry-delay 30 \
+            --max-time 120 --output "$spec" --write-out '%{http_code}' "$url") || code="${code:-000}"
+          if [ "$code" = 404 ] || [ "$code" = 410 ]; then
+            echo "::error::$url answered HTTP $code; update SPEC_URL in scripts/composio-spec.mjs"
+            exit 1
+          fi
+          if [ "$code" = 200 ] && node -e '
+            const spec = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            if (!spec.paths || typeof spec.paths !== "object") process.exit(1);
+          ' "$spec"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::could not fetch Composio's spec from $url (HTTP $code); drift was not checked"
+          echo "Could not fetch Composio's spec from $url (HTTP $code). Drift was not checked; the next scheduled run tries again." >> "$GITHUB_STEP_SUMMARY"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+
+      # `update` throws, before writing anything, when an endpoint or schema the
+      # snapshot needs has left the spec. That is drift too, but the file on
+      # disk is still the old snapshot, so there is nothing to diff or test.
+      - name: Regenerate the snapshot
+        id: compare
+        if: steps.fetch.outputs.ok == 'true'
+        run: |
+          if ! node scripts/composio-spec.mjs update --from "$RUNNER_TEMP/openapi.json" 2> "$RUNNER_TEMP/update.err"; then
+            cat "$RUNNER_TEMP/update.err"
+            echo "result=unbuildable" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet -- "$SNAPSHOT"; then
+            git diff --stat -- "$SNAPSHOT"
+            echo "result=changed" >> "$GITHUB_OUTPUT"
+          else
+            echo "Composio's live spec matches $SNAPSHOT." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "result=match" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report a snapshot that cannot be regenerated
+        if: steps.compare.outputs.result == 'unbuildable'
+        run: |
+          {
+            echo "## Composio's spec no longer has what the snapshot needs"
+            echo
+            echo "\`node scripts/composio-spec.mjs update\` failed against the live spec, so the snapshot was not regenerated:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/update.err"
+            echo '```'
+            echo
+            echo "An endpoint or schema in \`OPERATIONS\` was removed or renamed upstream. Update \`OPERATIONS\` in \`scripts/composio-spec.mjs\` and the code that calls it, then run \`update\` again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Go
+        if: steps.compare.outputs.result == 'changed'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      # Run against the regenerated snapshot: a failure points at the fake or
+      # the parsing code that has to follow Composio's change.
+      - name: Test the fakes and SDK against the new spec
+        if: steps.compare.outputs.result == 'changed'
+        run: |
+          out="$RUNNER_TEMP/drift"
+          mkdir -p "$out"
+          git diff -- "$SNAPSHOT" > "$out/snapshot.diff"
+          cp "$SNAPSHOT" "$out/"
+          node_status=0
+          node --test scripts/fake-composio.test.mjs > "$out/node-test.log" 2>&1 || node_status=$?
+          go_status=0
+          (cd server && go test ./pkg/composio/... ./internal/integrations/composio/...) > "$out/go-test.log" 2>&1 || go_status=$?
+
+          result() { if [ "$1" = 0 ]; then echo "pass"; else echo "**fail**"; fi; }
+          {
+            echo "## Composio's spec has drifted from the snapshot"
+            echo
+            echo "To adopt it, run \`node scripts/composio-spec.mjs update\` locally (or take \`openapi-v3.1.json\` from this run's \`composio-spec-drift\` artifact), commit the snapshot, and fix whatever the tests below flag."
+            echo
+            echo "### Snapshot diff"
+            echo
+            echo '```diff'
+            head -c 300000 "$out/snapshot.diff"
+            echo
+            echo '```'
+            echo
+            echo "### Tests against the new snapshot"
+            echo
+            echo "| Suite | Result |"
+            echo "| --- | --- |"
+            echo "| \`node --test scripts/fake-composio.test.mjs\` | $(result $node_status) |"
+            echo "| \`go test ./pkg/composio/... ./internal/integrations/composio/...\` | $(result $go_status) |"
+            for suite in node go; do
+              status_var="${suite}_status"
+              if [ "${!status_var}" != 0 ]; then
+                echo
+                echo "<details><summary>${suite} test output (last 150 lines)</summary>"
+                echo
+                echo '```'
+                tail -n 150 "$out/$suite-test.log"
+                echo '```'
+                echo "</details>"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the new snapshot, diff and test logs
+        if: steps.compare.outputs.result == 'changed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: composio-spec-drift
+          path: ${{ runner.temp }}/drift
+          if-no-files-found: ignore
+
+      - name: Fail on drift
+        if: steps.compare.outputs.result == 'changed' || steps.compare.outputs.result == 'unbuildable'
+        run: |
+          echo "::error::Composio's live OpenAPI spec no longer matches $SNAPSHOT; see the job summary for the diff and test results"
+          exit 1

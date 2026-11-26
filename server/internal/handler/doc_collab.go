@@ -156,7 +156,7 @@ func (h *Handler) flushDocCollab(ctx context.Context, docID pgtype.UUID) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, docCollabFlushTimeout)
 	defer cancel()
-	if err := h.Collab.Flush(ctx, collab.DocumentName(uuidToString(docID))); err != nil {
+	if _, err := h.Collab.Flush(ctx, collab.DocumentName(uuidToString(docID))); err != nil {
 		slog.Warn("doc collab flush failed", "doc_id", uuidToString(docID), "error", err)
 	}
 }

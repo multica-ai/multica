@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createShortcutChord } from "./definitions";
+import { createShortcutChord, createShortcutSequence } from "./definitions";
 import { configureShortcutPlatform, configureShortcutRuntime } from "./platform";
 import {
   findShortcutConflict,
@@ -182,5 +182,28 @@ describe("shortcut store", () => {
         },
       }, 1),
     ).toEqual({ overrides: { goInbox: null } });
+  });
+});
+
+describe("shortcut sequences in the store", () => {
+  const seq = (first: string, then: string) => createShortcutSequence(first, createShortcutChord(then));
+
+  it("keeps a stored sequence, and drops a malformed or longer one", () => {
+    expect(sanitizeShortcutOverrides({ goSettings: seq("G", "S") })).toEqual({ goSettings: seq("G", "S") });
+    expect(
+      sanitizeShortcutOverrides({ goSettings: { ...createShortcutChord("G"), then: { key: "S" } } }),
+    ).toEqual({});
+    expect(
+      sanitizeShortcutOverrides({ goSettings: createShortcutSequence("G", seq("S", "T")) }),
+    ).toEqual({});
+    expect(sanitizeShortcutOverrides({ createIssue: seq("G", "N") })).toEqual({});
+  });
+
+  it("takes a key that starts another action's sequence, and the other way round", () => {
+    expect(findShortcutConflict("createIssue", createShortcutChord("G"))).toBe("goInbox");
+    expect(findShortcutConflict("goSettings", seq("C", "S"))).toBe("createIssue");
+    expect(findShortcutConflict("goSettings", seq("G", "I"))).toBe("goInbox");
+    expect(findShortcutConflict("goSettings", seq("G", "S"))).toBeNull();
+    expect(findShortcutConflict("goInbox", seq("G", "N"))).toBeNull();
   });
 });

@@ -28,6 +28,11 @@ describe("What's new hero art", () => {
     ["chat-steering", ["Making edits", "Add to current run"]],
     ["weixin-channel", ["Connect messaging channel", "Scan with WeChat and confirm on your phone."]],
     ["project-folders", ["Projects", "Atlas", "Orbit", "API"]],
+    ["inbox-tabs", ["Inbox", "3", "Snoozed", "Archived"]],
+    ["project-overview", ["Overview", "Issues", "Activity", "Progress", "8 of 12 issues done"]],
+    ["inbox-triage", ["Inbox", "Mark as unread", "Archive", "Delete", "J", "K", "U"]],
+    ["quick-switch-agents", ["Create with agent", "Created by", "Builder", "Scout", "Atlas", "2"]],
+    ["issue-relations", ["Relations", "Blocked by", "1/2 ended", "MUL-12", "MUL-15", "Builder starts automatically once these end."]],
   ])("draws %s from the product's own strings", (id, texts) => {
     const { container } = renderHero(id, "en");
     for (const text of texts) expect(container).toHaveTextContent(text);

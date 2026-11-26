@@ -388,8 +388,260 @@ func TestConflictWatchedGitHubPRQueries(t *testing.T) {
 		t.Fatalf("merge refreshed %v, want PRs 1 and 3 once each", got)
 	}
 	m.sweepOnce(ctx)
-	if got := queued(); fmt.Sprint(got) != "[1 2]" && fmt.Sprint(got) != "[2 1]" {
-		t.Fatalf("sweep refreshed %v, want stale watched PRs 1 and 2", got)
+	got := queued()
+	wantSwept := map[int32]bool{1: true, 2: true, 4: true}
+	if len(got) != len(wantSwept) {
+		t.Fatalf("sweep refreshed %v, want stale watched PRs 1, 2 (conflicts) and 4 (checks)", got)
+	}
+	for _, n := range got {
+		if !wantSwept[n] {
+			t.Fatalf("sweep refreshed unexpected PR %d in %v", n, got)
+		}
+	}
+}
+
+func TestListStaleUndecidedGitHubPRsIncludesHeadMismatch(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	now := time.Unix(1_700_020_000, 0)
+	const installationID int64 = 7_313_000_003
+	repo := "head-mismatch-" + randHex(t)
+
+	// Open PR whose previous head had a settled snapshot fetched 30s ago, then
+	// pull_request.synchronize advanced head_sha to a new commit.
+	advanced := seedPRAt(t, pool, q, installationID, repo, 1, "new-head")
+	settled := seedPRAt(t, pool, q, installationID, repo, 2, "same-head")
+	closed := seedPRAt(t, pool, q, installationID, repo, 3, "new-closed")
+	prs := []db.GithubPullRequest{advanced, settled, closed}
+	t.Cleanup(func() {
+		for _, pr := range prs {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request_check_run WHERE pr_id=$1`, pr.ID)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+		}
+	})
+
+	for _, tc := range []struct {
+		pr           db.GithubPullRequest
+		state        string
+		snapshotHead string
+		fetchedAt    time.Time
+	}{
+		{advanced, "open", "old-head", now.Add(-30 * time.Second)},
+		{settled, "open", "same-head", now.Add(-time.Hour)},
+		{closed, "closed", "old-head", now.Add(-time.Hour)},
+	} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE github_pull_request
+			SET state=$2, snapshot_head_sha=$3, snapshot_fetched_at=$4,
+			    api_mergeable='MERGEABLE', checks_rollup_state='FAILURE'
+			WHERE id=$1`,
+			tc.pr.ID, tc.state, tc.snapshotHead, tc.fetchedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan: tsFromTime(now.Add(-10 * time.Minute)),
+		MaxRows:   1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int32
+	for _, r := range rows {
+		if r.InstallationID == installationID && r.RepoName == repo {
+			got = append(got, r.PrNumber)
+		}
+	}
+	if fmt.Sprint(got) != "[1]" {
+		t.Fatalf("stale undecided sweep = %v, want [1] (head_sha != snapshot_head_sha)", got)
+	}
+
+	// Once the snapshot catches up to head_sha with a decided verdict, it leaves the sweep.
+	if _, err := pool.Exec(ctx, `
+		UPDATE github_pull_request
+		SET snapshot_head_sha=head_sha, snapshot_fetched_at=$2,
+		    api_mergeable='MERGEABLE', checks_rollup_state='SUCCESS'
+		WHERE id=$1`, advanced.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan: tsFromTime(now.Add(-10 * time.Minute)),
+		MaxRows:   1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.InstallationID == installationID && r.RepoName == repo {
+			t.Fatalf("caught-up decided PR remained in sweep: %+v", r)
+		}
+	}
+}
+
+func watchPRInChat(t *testing.T, pool *pgxpool.Pool, pr db.GithubPullRequest, repoOverride, event, status string) {
+	t.Helper()
+	ctx := context.Background()
+	repo := pr.RepoOwner + "/" + pr.RepoName
+	if repoOverride != "" {
+		repo = repoOverride
+	}
+	var id pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO chat_wakeup(
+		id, workspace_id, chat_session_id, agent_id, requester_id,
+		title, instruction, kind, condition, next_eval_at, expires_at, status
+	) VALUES (
+		gen_random_uuid(), $1, gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+		'watch checks', 'go', 'condition',
+		jsonb_build_object('type','pull_request','repo',$2::text,'number',$3::int,'event',$4::text),
+		now(), now() + interval '1 hour', $5
+	) RETURNING id`, pr.WorkspaceID, repo, pr.PrNumber, event, status).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_wakeup WHERE id=$1`, id)
+	})
+}
+
+func TestChecksWatchedGitHubPRQueriesAndRotation(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	now := time.Now()
+	const installationID int64 = 7_313_000_004
+	repo := "checks-watch-" + randHex(t)
+
+	seed := func(number int32, state, head, snapshotHead string, fetchedAt time.Time) db.GithubPullRequest {
+		t.Helper()
+		pr := seedPRAt(t, pool, q, installationID, repo, number, head)
+		if _, err := pool.Exec(ctx, `UPDATE github_pull_request
+			SET state=$2, snapshot_head_sha=$3, snapshot_fetched_at=$4,
+			    api_mergeable='MERGEABLE', checks_rollup_state='FAILURE'
+			WHERE id=$1`, pr.ID, state, snapshotHead, fetchedAt); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID) })
+		return pr
+	}
+
+	stale := now.Add(-5 * time.Minute)
+	openIssue := seed(1, "open", "h1", "h1", stale)
+	watchPR(t, pool, openIssue, "checks_finished", true)
+	draftIssue := seed(2, "draft", "h2", "h2", stale)
+	watchPR(t, pool, draftIssue, "checks_finished", true)
+	freshSameHead := seed(3, "open", "h3", "h3", now)
+	watchPR(t, pool, freshSameHead, "checks_finished", true)
+	freshMismatchedHead := seed(4, "open", "h4-new", "h4-old", now)
+	watchPR(t, pool, freshMismatchedHead, "checks_finished", true)
+	activeChat := seed(5, "open", "h5", "h5", stale)
+	watchPRInChat(t, pool, activeChat, "O/"+repo, "checks_finished", "active")
+	endedChat := seed(6, "open", "h6", "h6", stale)
+	watchPRInChat(t, pool, endedChat, "", "checks_finished", "fired")
+	disabledIssue := seed(7, "open", "h7", "h7", stale)
+	watchPR(t, pool, disabledIssue, "checks_finished", false)
+	conflictsOnly := seed(8, "open", "h8", "h8", stale)
+	watchPR(t, pool, conflictsOnly, "conflicts", true)
+	closedWatched := seed(9, "closed", "h9", "h9", stale)
+	watchPR(t, pool, closedWatched, "checks_finished", true)
+
+	rows, err := q.ListStaleChecksWatchedGitHubPRs(ctx, db.ListStaleChecksWatchedGitHubPRsParams{
+		OlderThan: tsFromTime(now.Add(-2 * time.Minute)),
+		MaxRows:   1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int32]bool{}
+	for _, r := range rows {
+		if r.InstallationID == installationID && r.RepoName == repo {
+			got[r.PrNumber] = true
+		}
+	}
+	want := map[int32]bool{1: true, 2: true, 4: true, 5: true}
+	if len(got) != len(want) {
+		t.Fatalf("checks-watched sweep = %v, want %v", got, want)
+	}
+	for n := range want {
+		if !got[n] {
+			t.Fatalf("checks-watched sweep missing PR %d: got %v", n, got)
+		}
+	}
+
+	// Cursor rotation: even when fetches never succeed, bounded sweeps still
+	// visit every watched address instead of pinning the first page.
+	m := NewManager(enabledClient(t), q, pool, nil)
+	m.sweepMaxRows = 1
+	seen := map[int32]bool{}
+	for sweep := 0; sweep < 50 && !(seen[1] && seen[2] && seen[4] && seen[5]); sweep++ {
+		m.sweepChecksWatched(ctx)
+		for len(m.queue) > 0 {
+			addr := <-m.queue
+			if addr.InstallationID == installationID && addr.Repo == repo {
+				seen[addr.Number] = true
+			}
+			m.mu.Lock()
+			delete(m.active, addr)
+			m.mu.Unlock()
+		}
+	}
+	for n := range want {
+		if !seen[n] {
+			t.Fatalf("bounded checks-watch sweeps visited %v, missing PR %d", seen, n)
+		}
+	}
+}
+
+// TestProcessHeadMismatchSchedulesBoundedChase covers the synchronize race
+// where GitHub's REST API transiently returns the previous head SHA after the
+// webhook already updated head_sha in DB (so no trailing edge exists).
+func TestProcessHeadMismatchSchedulesBoundedChase(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pr := seedPRAt(t, pool, q, 7_313_000_005, "mismatch-chase-"+randHex(t), 11, "B")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request_check_run WHERE pr_id=$1`, pr.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+	})
+
+	applied := make(chan struct{}, 1)
+	var calls atomic.Int32
+	m := NewManager(enabledClient(t), q, pool, func(context.Context, pgtype.UUID) {
+		select {
+		case applied <- struct{}{}:
+		default:
+		}
+	})
+	m.concurrency = 1
+	m.sweepInterval = time.Hour
+	m.watchInterval = time.Hour
+	m.chaseBackoff = []time.Duration{5 * time.Millisecond}
+	m.jitter = func() time.Duration { return 0 }
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		if calls.Add(1) == 1 {
+			// GitHub API transiently lags behind the synchronize webhook.
+			return &PRSnapshot{HeadSHA: "A", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", HasChecks: true, RollupState: "FAILURE"}, nil
+		}
+		return &PRSnapshot{HeadSHA: "B", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", HasChecks: true, RollupState: "SUCCESS"}, nil
+	}
+
+	m.Start(ctx)
+	m.Enqueue(pr.InstallationID, pr.RepoOwner, pr.RepoName, pr.PrNumber)
+
+	select {
+	case <-applied:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("head-mismatch chase did not retry and apply new head (fetch calls=%d)", calls.Load())
+	}
+	got, err := q.GetGitHubPullRequestByID(ctx, pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SnapshotHeadSha != "B" || got.ChecksRollupState.String != "SUCCESS" {
+		t.Fatalf("snapshot after head-mismatch chase = %+v, want head B / SUCCESS", got)
 	}
 }
 

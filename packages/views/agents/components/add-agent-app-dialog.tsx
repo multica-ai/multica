@@ -27,7 +27,11 @@ import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { useT } from "../../i18n";
 import { useTeamAppAccess } from "../../common/use-team-app-access";
 import { scopeForNewApp } from "./agent-app-status";
+import { useAppCategoryLabel } from "../../apps/hooks/use-app-category-label";
 import { useAppStatusLabel } from "./use-agent-apps";
+
+/** Rows rendered before "Show more"; the full catalog has well over a thousand apps. */
+const PAGE_SIZE = 50;
 
 /**
  * Adds one catalog app to the agent. The account it uses is decided for the
@@ -51,8 +55,11 @@ export function AddAgentAppDialog({
   const update = useUpdateAgentApps(agent.id);
   const statusLabel = useAppStatusLabel();
   const teamAccess = useTeamAppAccess(overview.data);
+  const { t: ts } = useT("settings");
+  const categoryLabel = useAppCategoryLabel();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
+  const [page, setPage] = useState({ query: "", limit: PAGE_SIZE });
 
   const available = useMemo(() => {
     const onAgent = new Set((appsQuery.data ?? []).map((a) => a.toolkit_slug));
@@ -67,9 +74,11 @@ export function AddAgentAppDialog({
       (app) =>
         app.name.toLowerCase().includes(q) ||
         app.slug.includes(q) ||
-        (app.category ?? "").toLowerCase().includes(q),
+        (app.category ?? "").toLowerCase().includes(q) ||
+        (categoryLabel.entry(app) ?? "").toLowerCase().includes(q),
     );
-  }, [available, query]);
+  }, [available, query, categoryLabel]);
+  const limit = page.query === query ? page.limit : PAGE_SIZE;
 
   const ready = appsQuery.isSuccess && overview.isSuccess;
 
@@ -113,7 +122,7 @@ export function AddAgentAppDialog({
       ? t(($) => $.add_app_dialog.recommended_team)
       : app.recommended_scope === "personal"
         ? t(($) => $.add_app_dialog.recommended_personal)
-        : app.category;
+        : categoryLabel.entry(app);
     return [usual, overview.isSuccess ? status : null].filter(Boolean).join(" · ");
   };
 
@@ -146,7 +155,7 @@ export function AddAgentAppDialog({
             <p className="p-4 text-caption text-muted-foreground">{t(($) => $.add_app_dialog.empty)}</p>
           ) : (
             <ul className="divide-y">
-              {filtered.map((app) => (
+              {filtered.slice(0, limit).map((app) => (
                 <li key={app.slug} className="flex items-center gap-3 px-3 py-2.5">
                   <ComposioToolkitLogo slug={app.slug} name={app.name} fallbackLogo={app.logo} />
                   <div className="min-w-0 flex-1">
@@ -170,6 +179,14 @@ export function AddAgentAppDialog({
                   </Button>
                 </li>
               ))}
+              {filtered.length > limit && (
+                <li className="flex justify-center px-3 py-2">
+                  <Button size="xs" variant="ghost" onClick={() => setPage({ query, limit: limit + PAGE_SIZE })}>
+                    {ts(($) => $.connected_apps.hub.show_more)}
+                    <span className="text-muted-foreground tabular-nums">{filtered.length - limit}</span>
+                  </Button>
+                </li>
+              )}
             </ul>
           )}
         </div>

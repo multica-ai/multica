@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { useT } from "../../i18n";
 import type { SettingsSearchEntry } from "./settings-search";
 import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
@@ -35,6 +39,14 @@ export function useSettingsSearchIndex(
   pages: readonly SettingsSearchPage[],
 ): SettingsSearchIndexEntry[] {
   const { t } = useT("settings");
+  const workspace = useCurrentWorkspace();
+  // Reads what the Notifications tab loaded; never fetches on its own.
+  const { data: notificationPreferences } = useQuery({
+    ...notificationPreferenceOptions(workspace?.id ?? ""),
+    enabled: false,
+  });
+  const commentsOn =
+    notificationPreferenceValue(notificationPreferences?.preferences ?? {}, "comments") !== "muted";
   return useMemo(() => {
     const visible = new Set(pages.map((page) => page.value));
     const rows: SettingsSearchIndexEntry[] = [
@@ -182,6 +194,13 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      // The row is hidden while comments are off; Comments is the closest spot.
+      {
+        tab: "notifications",
+        anchor: commentsOn ? "squad_handoffs" : "comments",
+        title: t(($) => $.notifications.groups.squad_handoffs.label),
+        description: t(($) => $.notifications.groups.squad_handoffs.description),
+      },
       {
         tab: "notifications",
         anchor: "others_issues",
@@ -193,13 +212,6 @@ export function useSettingsSearchIndex(
         anchor: "auto_archive_completed",
         title: t(($) => $.notifications.leaving.auto_label),
         description: t(($) => $.notifications.leaving.auto_description),
-      },
-      // Lands on the row above: this one is hidden while auto-archive is off.
-      {
-        tab: "notifications",
-        anchor: "auto_archive_completed",
-        title: t(($) => $.notifications.leaving.after_label),
-        description: t(($) => $.notifications.leaving.after_description),
       },
       {
         tab: "notifications",
@@ -400,5 +412,5 @@ export function useSettingsSearchIndex(
       ...pageEntries,
       ...rows.filter((row) => row.anchor || row.integration),
     ].filter((entry) => visible.has(entry.tab));
-  }, [pages, t]);
+  }, [pages, t, commentsOn]);
 }

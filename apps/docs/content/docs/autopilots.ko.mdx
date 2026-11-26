@@ -16,7 +16,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 ## 오토파일럿 만들기
 
-사이드바에서 **오토파일럿**를 열고 템플릿을 선택하거나 빈 상태에서 시작한 뒤 다음 항목을 설정합니다.
+앱 탐색 바에서 **자동화**를 열고 템플릿을 선택하거나 빈 상태에서 시작한 뒤 다음 항목을 설정합니다.
 
 - **이름**: 오토파일럿이 담당하는 일을 설명합니다.
 - **런북**: 에이전트가 실행할 때마다 읽는 목표, 배경, 제약, 단계입니다.
@@ -28,7 +28,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 저장하면 오토파일럿이 기본적으로 활성화됩니다. **지금 실행**으로 일정을 기다리지 않고 언제든 전체 과정을 한 번 수동 실행할 수 있습니다.
 
-아래는 출력 모드가 "태스크 생성"인 오토파일럿입니다. **지금 실행**을 클릭하거나 다음 실행 시간으로 건너뛰어, 태스크를 만들고 에이전트에게 맡긴 뒤 이번 실행이 완료되는 과정을 확인해 보세요.
+아래 영상에서는 출력 모드가 "태스크 생성"인 오토파일럿(**Weekly dead-code audit**)을 열고 **Run now**로 즉시 실행해, 실행 기록에 새 태스크가 연결되는 과정을 보여 줍니다.
 
 <AutopilotDemo />
 
@@ -189,6 +189,7 @@ Multica는 최근 실행이 계속 실패하는지 정기적으로 확인합니�
 multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
+multica autopilot deliveries <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 

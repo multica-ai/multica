@@ -55,7 +55,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
-- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own (`sidebarTabIssuesByWorkspace` in `packages/core/inbox/selection-store.ts`).
+- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
@@ -119,6 +119,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 ## Web/Desktop UI Rules
 
 - For Button and Dialog usage, read `packages/ui/docs/button.md` and `packages/ui/docs/dialog.md`.
+- Before building or reviewing an interaction that changes layout (overlays, expand/collapse, list rows, drag and drop, content switches, selection indicators, value feedback), read `packages/ui/docs/motion.md`: tokens, reduced motion, where not to animate, and the shared primitives. Such a PR attaches a GIF and the frame-sampling results from `scripts/motion/capture.mjs`.
 - Prefer existing shadcn/Base UI primitives. Add components with `pnpm ui:add <component>`.
 - For `pnpm ui:add @reui/<name>`, decline overwrite prompts. Keep `REUI_LICENSE_KEY` in the environment, never in repo files. Adapt vendored primitives into `packages/ui/components/ui/` and compositions into `packages/views/`.
 - Import icons from `@multica/ui/icons`; no icon library is installed. If the icon you need is missing, draw it by following `.agents/skills/multica-icons/SKILL.md`. Do not substitute an inline SVG or an emoji. Rewrite icon imports in `ui:add` output before committing. Exception: proportional-width optical keycap glyphs live exclusively in `KBD_GLYPHS` inside `packages/ui/components/ui/kbd.tsx` and are only for `<Kbd>`.
@@ -132,6 +133,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Give each behavior one canonical test layer: helper tests own parsing/state matrices; component tests cover wiring, accessibility, happy paths, and named regressions. Prefer a failing regression test before behavioral fixes.
 - DOM-free `.test.ts` files start with `// @vitest-environment node`; do not use it if it would silently switch the code under test to an SSR path.
 - Every workspace with jsdom suites loads `@multica/vitest-setup/web-storage` in its Vitest setup; do not add per-package `localStorage` shims.
+- A test that reads files outside its package and that package's workspace dependencies declares them as `$TURBO_ROOT$/...` in the package's `turbo.json` `tasks.test.inputs`, and in the CI path group that runs it (`.github/ci-paths.json`); otherwise CI replays a cached pass when only those files change. `scripts/check-test-cache-inputs.mjs` enforces this.
 - Views tests must not mock `next/*` or `react-router-dom`. Mock stores with their Zustand callable shape plus `getState`; mock API calls at `@multica/core/api`.
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.
@@ -150,3 +152,13 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - A new built-in runtime prefix (`MULTICA_<PREFIX>_PATH`/`_ENDPOINT`) or `MULTICA_<PREFIX>_ARGS` variable must appear in every `apps/docs/content/docs/environment-variables*.mdx`; `apps/docs/lib/env-var-coverage.test.ts` enforces this, and its exemption list is for runtimes deliberately kept out of the docs.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. Follow the [pull request requirements](CONTRIBUTING.md#pull-request-requirements): Problem, Goal, Proposal (high-level design understandable without much background), Alternatives (optional), and Screenshots. Attach screenshots or a screen recording for UI or interaction changes (missing both means rejection by default). For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
+
+## Public Repository Writing
+
+This repository is public. PR titles and descriptions, commit messages, code comments, tests and fixtures, docs, screenshots, and GitHub issue or PR comments are readable by anyone, and history on `main` is permanent.
+
+- Write them from what a reader of this repository can verify: the code, its behavior, and the published product. Internal context stays in the tracking issue; refer to it only by its key (`MUL-xxx`).
+- State a motive as its effect in the code ("cap monthly app calls per workspace"), or leave it out. Do not include unpublished business detail (prices, plan limits, costs, vendor terms, customers, competitor or marketing analysis, roadmap), production data (user or workspace names, IDs, logs, query results), private repository internals beyond the interface this code consumes, internal hosts or local paths, or who requested or approved the change internally.
+- Security fixes describe the corrected behavior, not how to exploit the old one, its production scope, or how long it was exposed. An exploitable vulnerability whose fix is not deployed goes through [SECURITY.md](SECURITY.md), not a public PR or issue.
+- Squash merges use the PR title and description as the commit message on `main`. Put `Co-authored-by:` trailers that release notes should credit at the end of the description.
+- Before `gh pr create`, `gh pr edit`, or a push, reread the title, description, and commit messages against this section.

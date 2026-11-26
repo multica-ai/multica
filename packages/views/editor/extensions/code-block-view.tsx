@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { NodeSelection } from "@tiptap/pm/state";
-import { Copy, Check } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useDebouncedValue } from "../../common/use-debounced-value";
@@ -151,11 +151,7 @@ function PlainCodeBlockView({ node }: NodeViewProps) {
             className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             aria-label={t(($) => $.code_block.copy_code)}
           >
-            {copied ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
+            <CopyCheckIcon copied={copied} />
           </button>
         </TooltipHint>
       </div>

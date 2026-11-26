@@ -380,6 +380,9 @@
     "record_aria": "修改\"{{action}}\"的快捷鍵",
     "recording": "請按鍵",
     "record_hint": "Esc 取消 · Delete 清除",
+    "record_sequence_hint": "按一個鍵；連按兩個鍵可設為序列，如 G 然後 I · Esc 取消",
+    "record_then_hint": "按第二個鍵 · ↵ 只用一個鍵 · Backspace 重來",
+    "then": "然後",
     "unassigned": "未設定",
     "no_results": "沒有匹配的快捷鍵操作。",
     "conflict_error": "已被\"{{action}}\"使用。",
@@ -390,8 +393,10 @@
     "send_enter_hint": "Shift+Enter 可插入段落、繼續列表，或在程式碼塊中換行。",
     "categories": {
       "general": "常規",
+      "issue": "任務",
       "navigation": "導航"
     },
+    "issue_scope": "作用於眼前的任務：預覽中的任務、列表中選取的任務，或目前開啟的任務。",
     "actions": {
       "openSearch": {
         "label": "開啟搜尋",
@@ -433,9 +438,57 @@
         "label": "延後通知",
         "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
       },
+      "markInboxUnread": {
+        "label": "切換通知未讀狀態",
+        "description": "在目前開啟的收件匣通知上切換已讀或未讀，不離開目前頁面。"
+      },
+      "nextInboxItem": {
+        "label": "下一則通知",
+        "description": "開啟目前收件匣清單中的下一則通知。"
+      },
+      "prevInboxItem": {
+        "label": "上一則通知",
+        "description": "開啟目前收件匣清單中的上一則通知。"
+      },
       "undoInboxAction": {
         "label": "復原收件箱操作",
         "description": "提示還在時，復原上一次歸檔、延後或取消訂閱；提示消失後，開啟的通知已歸檔時把它放回收件箱，在「收件箱已清空」頁復原頁面上寫明的操作。"
+      },
+      "setIssueStatus": {
+        "label": "變更狀態",
+        "description": "開啟狀態選擇。"
+      },
+      "assignIssue": {
+        "label": "指派負責人",
+        "description": "開啟負責人選擇。"
+      },
+      "setIssuePriority": {
+        "label": "設定優先級",
+        "description": "開啟優先級選擇。"
+      },
+      "setIssueLabels": {
+        "label": "編輯標籤",
+        "description": "開啟標籤選擇。"
+      },
+      "setIssueDueDate": {
+        "label": "設定截止日期",
+        "description": "開啟截止日期選擇。"
+      },
+      "moveIssueToProject": {
+        "label": "移動到專案",
+        "description": "開啟專案選擇。"
+      },
+      "runIssueQuickAction": {
+        "label": "執行快捷操作",
+        "description": "僅在單一任務且有可用的快捷操作時可用。"
+      },
+      "replyToIssue": {
+        "label": "回覆",
+        "description": "聚焦目前任務的留言框。"
+      },
+      "showShortcuts": {
+        "label": "顯示快捷鍵",
+        "description": "開啟快捷鍵列表，目前頁面相關的排在前面。"
       },
       "send": {
         "label": "傳送",
@@ -513,6 +566,32 @@
       "zoom_out": "縮小",
       "reset_zoom": "重置縮放",
       "close_dialog": "關閉對話方塊或選單"
+    },
+    "cheatsheet": {
+      "title": "快捷鍵",
+      "current_page": "目前頁面",
+      "footer_prefix": "快捷鍵僅儲存在本裝置，可在 ",
+      "footer_link": "設定 › 快捷鍵",
+      "footer_suffix": " 中修改。",
+      "groups": {
+        "inbox": "收件匣",
+        "issue": "任務",
+        "navigation": "導航",
+        "general": "常規",
+        "list": "列表與看板",
+        "editor": "編輯器"
+      },
+      "rows": {
+        "list_move": "下移 / 上移",
+        "list_columns": "在看板欄之間移動",
+        "list_open": "開啟",
+        "list_peek": "預覽",
+        "list_select": "選取",
+        "list_extend": "擴展選取",
+        "list_select_all": "全選",
+        "list_clear": "取消選取",
+        "editor_leave": "離開輸入框"
+      }
     }
   },
   "chat": {
@@ -878,10 +957,6 @@
         "dates": "改日期",
         "labels": "改標籤"
       },
-      "after_label": "歸檔後",
-      "after_description": "正在看的通知被自動歸檔時。手動歸檔（E）照舊打開下一條。",
-      "after_stay": "停在目前任務",
-      "after_next": "打開下一條",
       "archived_label": "已歸檔的通知",
       "archived_description": "可以在這裡找回並取消歸檔",
       "archived_action": "查看已歸檔"
@@ -899,6 +974,10 @@
       "comments": {
         "label": "評論",
         "description": "你訂閱的任務有新評論時"
+      },
+      "squad_handoffs": {
+        "label": "包含小隊內部交接",
+        "description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和小隊收尾時的最終回報照常通知。"
       },
       "mentions": {
         "label": "提及",
@@ -1894,7 +1973,8 @@
       "pending": "等待確認",
       "approved": "已核准",
       "rejected": "已拒絕",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已達每月上限"
     },
     "scopes": {
       "team": "團隊帳號",
@@ -2030,7 +2110,76 @@
       "empty_attention": "沒有需要你處理的事項。",
       "no_matches": "沒有符合的應用。",
       "unavailable": "此伺服器未提供應用功能。",
-      "retry": "重試"
+      "retry": "重試",
+      "catalog": "目錄",
+      "catalog_failed": "無法載入應用目錄。",
+      "category_curated": "精選",
+      "categories_label": "分類",
+      "connect_oauth": "OAuth 登入",
+      "connect_key": "填寫 API key",
+      "show_more": "顯示更多",
+      "categories": {
+        "ai_ml": "AI 與機器學習",
+        "developer_tools": "開發與維運",
+        "data_analytics": "資料分析",
+        "productivity": "效率與專案管理",
+        "collaboration": "協作與溝通",
+        "marketing_social": "行銷與社群媒體",
+        "documents": "文件與檔案",
+        "sales_support": "銷售與客服",
+        "crm": "CRM",
+        "finance": "財務與會計",
+        "workflow_automation": "工作流程自動化",
+        "design": "設計與創意",
+        "ecommerce": "電子商務",
+        "advertising": "廣告投放",
+        "scheduling": "排程與預約",
+        "entertainment": "娛樂與媒體",
+        "hr_recruiting": "人資與招募",
+        "education": "教育",
+        "model_context_protocol": "MCP 伺服器",
+        "marketing_automation": "行銷自動化",
+        "email": "電子郵件",
+        "security_identity_tools": "安全與身分",
+        "forms_surveys": "表單與問卷",
+        "databases": "資料庫",
+        "web_scraping_browser": "網頁擷取與瀏覽器",
+        "email_newsletters": "電子報",
+        "business_intelligence": "商業智慧",
+        "ai_web_scraping": "AI 網頁擷取",
+        "ai_agents": "AI 代理",
+        "web_search_research": "網頁搜尋與研究",
+        "ai_sales_tools": "AI 銷售工具",
+        "ai_content_generation": "AI 內容生成",
+        "payment_processing": "付款處理",
+        "server_monitoring": "伺服器監控",
+        "video_audio": "影片與音訊",
+        "signatures": "電子簽章",
+        "phone_sms": "電話與簡訊",
+        "audio_speech": "音訊與語音",
+        "ai_chatbots": "AI 聊天機器人",
+        "ai_document_extraction": "AI 文件擷取",
+        "url_shortener": "短網址",
+        "people_contact_data": "人員與聯絡人資料",
+        "notifications": "通知",
+        "event_management": "活動管理",
+        "places_weather": "地點與天氣",
+        "market_data": "市場資料",
+        "it_operations": "IT 維運",
+        "internet_of_things": "物聯網",
+        "spreadsheets": "試算表",
+        "fundraising": "募款",
+        "website_builders": "網站與應用程式建置",
+        "reviews": "評價",
+        "company_data": "企業資料",
+        "ai_meeting_assistants": "AI 會議助理",
+        "bookmark_managers": "書籤管理",
+        "social_creator_data": "社群與創作者資料",
+        "seo_ai_visibility": "SEO 與 AI 能見度",
+        "legal_public_records": "法律與公開紀錄",
+        "ai_safety": "AI 安全與合規",
+        "other": "其他"
+      }
     },
     "app_page": {
       "agents_title": "AI 代理",

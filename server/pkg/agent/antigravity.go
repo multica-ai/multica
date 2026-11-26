@@ -510,6 +510,18 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		scanner := newAgentStreamScanner(stdout)
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+		// Announce the conversation id the moment agy names it so the daemon
+		// pins the resume pointer mid-run. A run that is cancelled or killed
+		// never reaches the terminal Result, and without the pin its follow-up
+		// would start a brand-new conversation.
+		var announcedSessionID string
+		announceSession := func(id string) {
+			if id == "" || id == announcedSessionID {
+				return
+			}
+			announcedSessionID = id
+			trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: id})
+		}
 
 	streamLoop:
 		for scanner.Scan() {
@@ -521,6 +533,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					streamSessionID = event.ConversationID
 					streamModel = event.Init.Model
 					supplements.activate(streamSessionID)
+					announceSession(streamSessionID)
 				case "step_update":
 					if event.StepUpdate == nil {
 						turn.invalid = true
@@ -541,6 +554,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.StepUpdate.ConversationID != "" {
 						streamSessionID = event.StepUpdate.ConversationID
 						supplements.activate(streamSessionID)
+						announceSession(streamSessionID)
 					}
 					turn.confirmInjected(supplements, transcript, streamSessionID)
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {

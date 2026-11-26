@@ -380,6 +380,9 @@
     "record_aria": "修改\"{{action}}\"的快捷键",
     "recording": "请按键",
     "record_hint": "Esc 取消 · Delete 清除",
+    "record_sequence_hint": "按一个键；连按两个键可设为序列，如 G 然后 I · Esc 取消",
+    "record_then_hint": "按第二个键 · ↵ 只用一个键 · Backspace 重来",
+    "then": "然后",
     "unassigned": "未设置",
     "no_results": "没有匹配的快捷键操作。",
     "conflict_error": "已被\"{{action}}\"使用。",
@@ -390,8 +393,10 @@
     "send_enter_hint": "Shift+Enter 可插入段落、继续列表，或在代码块中换行。",
     "categories": {
       "general": "常规",
+      "issue": "任务",
       "navigation": "导航"
     },
+    "issue_scope": "作用于眼前的任务：预览中的任务、列表中选中的任务，或当前打开的任务。",
     "actions": {
       "openSearch": {
         "label": "打开搜索",
@@ -433,9 +438,57 @@
         "label": "延后通知",
         "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
       },
+      "markInboxUnread": {
+        "label": "切换通知未读状态",
+        "description": "在当前打开的收件箱通知上切换已读或未读，不离开当前页面。"
+      },
+      "nextInboxItem": {
+        "label": "下一条通知",
+        "description": "打开当前收件箱列表中的下一条通知。"
+      },
+      "prevInboxItem": {
+        "label": "上一条通知",
+        "description": "打开当前收件箱列表中的上一条通知。"
+      },
       "undoInboxAction": {
         "label": "撤销收件箱操作",
         "description": "提示还在时，撤销上一次归档、延后或取消订阅；提示消失后，打开的通知已归档时把它放回收件箱，在\"收件箱已清空\"页撤销页面上写明的操作。"
+      },
+      "setIssueStatus": {
+        "label": "更改状态",
+        "description": "打开状态选择。"
+      },
+      "assignIssue": {
+        "label": "指派负责人",
+        "description": "打开负责人选择。"
+      },
+      "setIssuePriority": {
+        "label": "设置优先级",
+        "description": "打开优先级选择。"
+      },
+      "setIssueLabels": {
+        "label": "编辑标签",
+        "description": "打开标签选择。"
+      },
+      "setIssueDueDate": {
+        "label": "设置截止日期",
+        "description": "打开截止日期选择。"
+      },
+      "moveIssueToProject": {
+        "label": "移动到项目",
+        "description": "打开项目选择。"
+      },
+      "runIssueQuickAction": {
+        "label": "运行快捷操作",
+        "description": "仅在单个任务且有可用的快捷操作时可用。"
+      },
+      "replyToIssue": {
+        "label": "回复",
+        "description": "聚焦当前任务的评论框。"
+      },
+      "showShortcuts": {
+        "label": "显示快捷键",
+        "description": "打开快捷键列表，当前页面相关的排在前面。"
       },
       "send": {
         "label": "发送",
@@ -513,6 +566,32 @@
       "zoom_out": "缩小",
       "reset_zoom": "重置缩放",
       "close_dialog": "关闭对话框或菜单"
+    },
+    "cheatsheet": {
+      "title": "快捷键",
+      "current_page": "当前页面",
+      "footer_prefix": "快捷键仅保存在本设备，可在 ",
+      "footer_link": "设置 › 快捷键",
+      "footer_suffix": " 中修改。",
+      "groups": {
+        "inbox": "收件箱",
+        "issue": "任务",
+        "navigation": "导航",
+        "general": "常规",
+        "list": "列表与看板",
+        "editor": "编辑器"
+      },
+      "rows": {
+        "list_move": "下移 / 上移",
+        "list_columns": "在看板列之间移动",
+        "list_open": "打开",
+        "list_peek": "预览",
+        "list_select": "选中",
+        "list_extend": "扩展选择",
+        "list_select_all": "全选",
+        "list_clear": "取消选择",
+        "editor_leave": "离开输入框"
+      }
     }
   },
   "chat": {
@@ -878,10 +957,6 @@
         "dates": "改日期",
         "labels": "改标签"
       },
-      "after_label": "归档后",
-      "after_description": "正在看的通知被自动归档时。手动归档（E）照旧打开下一条。",
-      "after_stay": "停在当前任务",
-      "after_next": "打开下一条",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
@@ -899,6 +974,10 @@
       "comments": {
         "label": "评论",
         "description": "你订阅的任务有新评论时"
+      },
+      "squad_handoffs": {
+        "label": "包含小队内部交接",
+        "description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和小队收尾时的最终回报照常通知。"
       },
       "mentions": {
         "label": "提及",
@@ -1894,7 +1973,8 @@
       "pending": "等待确认",
       "approved": "已批准",
       "rejected": "已拒绝",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已达月度上限"
     },
     "scopes": {
       "team": "团队账号",
@@ -2030,7 +2110,76 @@
       "empty_attention": "没有需要你处理的事项。",
       "no_matches": "没有匹配的应用。",
       "unavailable": "此服务器未提供应用功能。",
-      "retry": "重试"
+      "retry": "重试",
+      "catalog": "目录",
+      "catalog_failed": "无法加载应用目录。",
+      "category_curated": "精选",
+      "categories_label": "分类",
+      "connect_oauth": "OAuth 登录",
+      "connect_key": "填写 API key",
+      "show_more": "显示更多",
+      "categories": {
+        "ai_ml": "AI 与机器学习",
+        "developer_tools": "开发与运维",
+        "data_analytics": "数据分析",
+        "productivity": "效率与项目管理",
+        "collaboration": "协作与沟通",
+        "marketing_social": "营销与社交媒体",
+        "documents": "文档与文件",
+        "sales_support": "销售与客服",
+        "crm": "CRM",
+        "finance": "财务与会计",
+        "workflow_automation": "工作流自动化",
+        "design": "设计与创意",
+        "ecommerce": "电商",
+        "advertising": "广告投放",
+        "scheduling": "日程与预约",
+        "entertainment": "娱乐与媒体",
+        "hr_recruiting": "人事与招聘",
+        "education": "教育",
+        "model_context_protocol": "MCP 服务器",
+        "marketing_automation": "营销自动化",
+        "email": "邮件",
+        "security_identity_tools": "安全与身份",
+        "forms_surveys": "表单与问卷",
+        "databases": "数据库",
+        "web_scraping_browser": "网页抓取与浏览器",
+        "email_newsletters": "邮件订阅",
+        "business_intelligence": "商业智能",
+        "ai_web_scraping": "AI 网页抓取",
+        "ai_agents": "AI 智能体",
+        "web_search_research": "网页搜索与研究",
+        "ai_sales_tools": "AI 销售工具",
+        "ai_content_generation": "AI 内容生成",
+        "payment_processing": "支付处理",
+        "server_monitoring": "服务器监控",
+        "video_audio": "视频与音频",
+        "signatures": "电子签名",
+        "phone_sms": "电话与短信",
+        "audio_speech": "音频与语音",
+        "ai_chatbots": "AI 聊天机器人",
+        "ai_document_extraction": "AI 文档提取",
+        "url_shortener": "短链接",
+        "people_contact_data": "人员与联系人数据",
+        "notifications": "通知",
+        "event_management": "活动管理",
+        "places_weather": "地点与天气",
+        "market_data": "市场数据",
+        "it_operations": "IT 运维",
+        "internet_of_things": "物联网",
+        "spreadsheets": "电子表格",
+        "fundraising": "筹款",
+        "website_builders": "网站与应用搭建",
+        "reviews": "评价",
+        "company_data": "企业数据",
+        "ai_meeting_assistants": "AI 会议助手",
+        "bookmark_managers": "书签管理",
+        "social_creator_data": "社交与创作者数据",
+        "seo_ai_visibility": "SEO 与 AI 可见度",
+        "legal_public_records": "法律与公共记录",
+        "ai_safety": "AI 安全与合规",
+        "other": "其他"
+      }
     },
     "app_page": {
       "agents_title": "智能体",

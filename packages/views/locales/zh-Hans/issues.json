@@ -25,6 +25,7 @@
     "message": "智能体消息",
     "error": "错误",
     "waiting_result": "等待工具返回结果...",
+    "reply_pending_call": "仍在运行：等待 {{step}} 结束",
     "supplement_failure_turn_ended": "送达前运行已结束",
     "supplement_failure_turn_not_started": "智能体尚未就绪",
     "supplement_failure_provider_rejected": "智能体拒绝了该消息",
@@ -189,7 +190,7 @@
     "section_project": "项目",
     "section_project_status": "项目状态",
     "section_label": "标签",
-    "section_relation": "与我的关系",
+    "section_relation": "任务关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "我的智能体在做",
@@ -273,7 +274,8 @@
     "advanced_group_match_trailing": "条件",
     "advanced_group_hint": "组内条件之间用\"{{word}}\"连接",
     "advanced_add_to_group": "添加到条件组",
-    "advanced_turn_into_group": "转为条件组"
+    "advanced_turn_into_group": "转为条件组",
+    "relation_blocked": "被阻塞"
   },
   "display": {
     "tooltip": "显示设置",
@@ -488,7 +490,6 @@
     "section_parent_issue": "父任务",
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
-    "section_details": "详情",
     "sidebar_settings": {
       "open": "自定义侧边栏",
       "title": "侧边栏",
@@ -543,9 +544,6 @@
     "prop_project": "项目",
     "prop_labels": "标签",
     "add_property_action": "添加属性",
-    "prop_created_by": "创建者",
-    "prop_created": "创建时间",
-    "prop_updated": "更新时间",
     "activity_section": "动态",
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
@@ -570,8 +568,6 @@
     "quick_jump_label": "快捷跳转",
     "description_nav_label": "任务描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
-    "sub_issues_show_more_other": "再显示 {{count}} 条",
-    "sub_issues_show_less": "收起",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -598,7 +594,34 @@
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
     "pull_requests_empty_title": "暂无关联 PR。",
-    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。"
+    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。",
+    "open_issue_page": "在任务页打开",
+    "add_row": {
+      "wakeups": "添加唤醒",
+      "pull_requests": "添加 Pull Request",
+      "environments": "添加环境",
+      "relations": "添加关系",
+      "pair": "添加{{first}}或{{second}}",
+      "many": "添加...",
+      "noun": {
+        "wakeups": "唤醒",
+        "pull_requests": "Pull Request",
+        "environments": "环境",
+        "relations": "关系"
+      },
+      "menu": {
+        "wakeups": "唤醒",
+        "pull_requests": "Pull Request",
+        "environments": "环境",
+        "relations": "关系"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} 创建于 {{date}}",
+      "created_for": "{{creator}} 代表 {{requester}} 创建于 {{date}}",
+      "created_at": "创建于 {{time}}",
+      "updated_at": "更新于 {{time}}"
+    }
   },
   "timeline": {
     "loading": "加载中...",
@@ -629,6 +652,13 @@
     "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
     "squad_leader_failed": "评估失败",
     "squad_leader_failed_reason": "评估失败：{{reason}}",
+    "squad_handoff_to": "交给了 {{name}}",
+    "squad_handoff_human": "请 {{name}} 决定",
+    "squad_handoff_leader": "交回 {{name}}",
+    "squad_handoff_round": "第 {{round}} 轮",
+    "squad_handoff_reason_round_limit": "已来回 {{limit}} 轮",
+    "squad_handoff_reason_daily_limit": "今日交接已达上限",
+    "squad_handoff_reason_run_failed": "运行失败",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} 条动态",
     "show_more_activities_other": "展开更早 {{count}} 条动态",
@@ -831,6 +861,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",
+    "is_working_round": "{{label}} · 第 {{round}} 轮",
     "is_queued": "{{name}} 排队中",
     "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
@@ -890,8 +921,6 @@
     "summary_runs_other": "{{count}} 次运行",
     "open_timeline": "打开时间线",
     "more_runs_other": "显示其余 {{count}} 次运行",
-    "strip_aria": "每次运行的费用——打开运行时间线",
-    "strip_no_usage": "没有用量记录",
     "queued_count_other": "{{count}} 个排队中"
   },
   "runs_timeline": {
@@ -1054,6 +1083,8 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
+    "add_blocker": "等待其他任务...",
+    "add_blocking": "阻塞其他任务...",
     "delete_issue": "删除任务",
     "mark_duplicate": "标记为重复...",
     "open_in_new_window": "在新窗口中打开"
@@ -1359,6 +1390,7 @@
       "cancel": "取消",
       "error": "无法创建唤醒，请检查设置后重试。",
       "capacity_error": "此任务或工作区开启的唤醒已达上限。",
+      "agent_error": "你无权运行这个智能体。请联系它的所有者开通权限，或选择其他智能体。",
       "missing_condition": "请选择条件。",
       "missing_agent": "请选择要唤醒的智能体。",
       "missing_events": "请至少选择一个事件。",
@@ -1409,12 +1441,6 @@
       "badge": "系统",
       "title_stage": "当第 {{stage}} 阶段的子任务全部结束时",
       "title_all": "当子任务全部结束时",
-      "wake_assignee": "唤醒负责人 {{name}}",
-      "remaining_other": "还差 {{count}} 个",
-      "blocked_backlog": "任务在待规划中，暂不唤醒",
-      "blocked_member": "负责人是成员，会收到收件箱通知",
-      "blocked_none": "没有智能体负责人，不会唤醒",
-      "turned_off": "已在此任务上关闭",
       "target_title": "唤醒",
       "target_current": "负责人（当前 {{name}}）",
       "target_none": "负责人：智能体或小队会被唤醒，成员会收到通知",
@@ -1429,14 +1455,19 @@
       "save_error": "无法保存系统规则。",
       "default_on": "工作区默认开启。",
       "default_off": "工作区默认关闭。",
-      "notify_member": "通过收件箱通知 {{name}}",
       "instruction": "唤醒后要做什么",
       "instruction_edit": "编辑指令",
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令长度不能超过 4,000 字节。",
       "paused": "已暂停：{{reason}}",
-      "default_change": "修改默认值"
+      "default_change": "修改默认值",
+      "chip_wake": "结束后唤醒 {{name}}",
+      "chip_notify": "结束后通知 {{name}}",
+      "chip_assignee": "结束后唤醒负责人",
+      "chip_off": "结束后唤醒已关闭",
+      "blocked_backlog": "任务在待规划中，暂不唤醒",
+      "blocked_none": "没有智能体负责人，不会唤醒"
     },
     "cond": {
       "status": "当状态变为{{status}}时",
@@ -1509,7 +1540,14 @@
       "loop": "与其他唤醒规则互相触发",
       "rate": "1 小时内触发超过 12 次"
     },
-    "upcoming_other": "已开启 {{count}} 条唤醒规则"
+    "upcoming_other": "已开启 {{count}} 条唤醒规则",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "指定时间",
+      "hourly": "每小时",
+      "every_hours": "每 {{hours}} 小时",
+      "every_seconds": "每 {{seconds}} 秒"
+    }
   },
   "duplicates": {
     "banner_prefix": "重复于",
@@ -1544,7 +1582,8 @@
     "not_merged_action": "移除",
     "all_merged_to": "PR 均已合并。之后有新 PR 合并时会改为 {{status}}。",
     "issue_disabled": "此任务合并后不改状态",
-    "issue_disabled_action": "恢复"
+    "issue_disabled_action": "恢复",
+    "on_merge_to": "合并后 → {{status}}"
   },
   "deliverables": {
     "section_title": "产物",
@@ -1667,7 +1706,6 @@
       "target_squad": "小队 · 由队长分派",
       "target_member": "成员",
       "instructions_hint": "作为这次运行的说明发给处理人，和任务描述、评论一起作为上下文。",
-      "next_hint": "由处理人自己改状态，只有需要返工时才退回，受阻不用退回。运行结束不会自动改状态。",
       "preview_brief": "预览智能体收到的说明",
       "preview_title": "\"{{status}}\"这一步的说明",
       "preview_description": "任务进入这一步时，处理人的运行会收到这段说明。预览不需要先保存。",
@@ -1839,8 +1877,7 @@
       "all_issues": "全部任务",
       "my_work": "我的工作",
       "working": "运行中",
-      "subscribed": "已订阅",
-      "snoozed": "已延后"
+      "subscribed": "已订阅"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",
@@ -1918,7 +1955,8 @@
       "pending": "等待确认",
       "approved": "已批准",
       "rejected": "已拒绝",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已达月度上限"
     }
   },
   "environments": {
@@ -2028,5 +2066,38 @@
     "focus_failed": "无法切到 {{name}}",
     "retry": "重试",
     "dismiss": "忽略"
+  },
+  "relations": {
+    "title": "关系",
+    "add": "添加关系",
+    "wait_title": "等待其他任务",
+    "block_title": "阻塞其他任务",
+    "blocked_by": "被阻塞",
+    "blocking": "正在阻塞",
+    "stage_tag": "阶段",
+    "stage_tag_hint": "由父任务的阶段决定",
+    "add_blocker_hint": "它们结束后，本任务才开工",
+    "add_blocking_hint": "本任务结束后，它们才开工",
+    "mark_duplicate_hint": "本任务会被取消",
+    "blocking_picker_hint": "选择一个要等本任务结束才能开工的任务。"
+  },
+  "waiting": {
+    "remove": "移除 {{identifier}}",
+    "count": "等待 {{count}} 个任务",
+    "count_other": "等待 {{count}} 个任务",
+    "hint": "全部结束后，负责人将自动开工或收到通知。",
+    "hint_backlog": "在待规划中，不会自动开始。",
+    "picker_hint": "选择一个必须先结束的任务。",
+    "restricted": "{{count}} 个无权查看的前置任务",
+    "ended": "等待的任务已结束",
+    "marker_title": "被 {{count}} 个任务阻塞",
+    "marker_title_other": "被 {{count}} 个任务阻塞",
+    "marker_ended": "已结束 {{finished}}/{{total}}",
+    "marker_more": "还有 {{count}} 个",
+    "marker_more_other": "还有 {{count}} 个",
+    "marker_auto_start": "阻塞结束后 {{name}} 自动开始。",
+    "marker_notify": "阻塞结束后通知 {{name}}。",
+    "marker_unavailable": "{{name}} 当前无法运行，阻塞结束后不会自动开始。",
+    "marker_unassigned": "未指派负责人，阻塞结束后不会自动开始。"
   }
 }

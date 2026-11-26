@@ -509,6 +509,10 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	if refusal := s.refuseCall(ctx, rn, app, &call, policy); refusal != nil {
 		return refusal
 	}
+	// Last: it counts the call, which runs as soon as this returns nil.
+	if exceeded := s.overQuota(ctx, &call); exceeded != nil {
+		return textResult(exceeded.Message(), true)
+	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, rn.workspaceID, acct)
 	if err != nil {
@@ -529,7 +533,8 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 }
 
 // refuseCall applies what stands between an allowed policy and executing a
-// call: a blocking rule, the run losing access, and the account's rate limit.
+// call: a blocking rule, the run losing access and the account's rate limit.
+// Composio calls then check the workspace's monthly app call allowance.
 // It records and returns the refusal, or nil when the call may run.
 func (s *Service) refuseCall(ctx context.Context, rn *run, app db.AgentApp, call *toolCall, policy string) map[string]any {
 	if policy == PolicyBlock {

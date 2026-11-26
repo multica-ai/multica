@@ -10,7 +10,7 @@ import {
   isKnownWorkspacePath,
   workspaceSlugForPath,
 } from "@multica/core/paths";
-import { isIssueIdentifier } from "@multica/ui/markdown";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import type { LinkClickIntent } from "../../navigation/click-intent";
 
 /**

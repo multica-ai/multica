@@ -42,7 +42,7 @@ Select a column and choose what happens when an issue enters it: **No handoff**,
 </Step>
 <Step>
 
-For an agent step, write what it should do. Then set **When done, move to** (the next column if you leave it unset) and **If rejected, send back to** (used when this step finds the work it received unacceptable and it needs rework). Use **Blocked**, not send-back, when the step cannot continue for an outside reason.
+For an agent step, write what it should do. Then set **When done, move to** (if you leave it unset, the next column, skipping closed columns such as Won't Fix; a Done or Closed column moves nowhere by default) and **If rejected, send back to** (used when this step finds the work it received unacceptable and it needs rework). Use **Blocked**, not send-back, when the step cannot continue for an outside reason; the step sends the issue back instead only when the workflow has no Blocked column, or at a Done or Closed column.
 
 </Step>
 <Step>
@@ -72,6 +72,8 @@ Change an issue's status or drag its card to another column. If that step has a 
 
 When you create an issue in a project without picking an assignee, and its status has a handoff, the issue goes straight to that step's handler; an agent starts right away. The create dialog shows who it will be handed to. To create it without starting anything yet, put it in Backlog.
 
+If the step's agent, squad, or squad leader was archived, or its member left the workspace, the issue can still enter the step. A moved issue keeps its assignee. A new issue created without an assignee stays unassigned.
+
 When the previous assignee is an agent with a run underway or waiting to start, the confirmation adds an option to stop or cancel it, selected by default. Leave it selected unless you want both agents working at once; the comments and work it already saved are kept.
 
 **When done, move to** and **If rejected, send back to** tell the agent where to move the issue next. A run finishing does not move the issue by itself: the member or agent handling the step updates its status. When an agent moves the issue into the next step, that step's handoff runs just as it would for a member.
@@ -87,8 +89,6 @@ Admins can also set a handoff from the project board: hover a column header and 
 Removing a column may ask you to choose a new status for issues already in it. Other issues stay where they are, and this move does not start agents. The status library below the workflows is where you rename or recolor statuses; those changes are shared wherever the status is used.
 
 To delete a workflow, first switch the projects using it to another workflow. Issues keep their current status.
-
-If **Settings** does not include **Workflows**, the feature is not available in this workspace yet, and statuses are still managed in **Settings → Issue Statuses**.
 
 ## Related guides
 

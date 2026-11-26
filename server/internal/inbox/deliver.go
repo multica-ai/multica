@@ -50,7 +50,9 @@ func Deliver(ctx context.Context, queries *db.Queries, pub Publisher, n Notifica
 		if prefs == nil {
 			prefs = LoadPreferences(ctx, queries, n.Params.WorkspaceID, []pgtype.UUID{n.Params.RecipientID})
 		}
-		if Muted(prefs[util.UUIDToString(n.Params.RecipientID)], n.Params.Type) {
+		recipientPrefs := prefs[util.UUIDToString(n.Params.RecipientID)]
+		if Muted(recipientPrefs, n.Params.Type) ||
+			MutedSquadHandoff(recipientPrefs, n.Params.Type, n.Params.Details) {
 			return db.InboxItem{}, false, nil
 		}
 	}

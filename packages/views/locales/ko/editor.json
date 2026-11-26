@@ -255,5 +255,9 @@
     "turn_into": "변환",
     "duplicate": "복제",
     "delete": "삭제"
+  },
+  "plain_text": {
+    "notice": "내용이 너무 길어 일반 텍스트로 표시합니다.",
+    "download": ".txt로 다운로드"
   }
 }

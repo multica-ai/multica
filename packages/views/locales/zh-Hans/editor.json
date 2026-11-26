@@ -255,5 +255,9 @@
     "turn_into": "转换为",
     "duplicate": "创建副本",
     "delete": "删除"
+  },
+  "plain_text": {
+    "notice": "内容过长，以纯文本显示。",
+    "download": "下载为 .txt"
   }
 }

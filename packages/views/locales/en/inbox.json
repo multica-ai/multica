@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "Inbox",
-    "back": "Inbox"
+    "title": "Inbox"
   },
   "menu": {
     "mark_all_read": "Mark all as read",
@@ -56,6 +55,7 @@
       "days": "{{count}}d"
     },
     "archived_title": "Archived",
+    "snoozed_title": "Snoozed",
     "archived_empty": "No archived notifications",
     "unarchive_tooltip": "Unarchive",
     "actions_aria": "Notification actions",
@@ -65,10 +65,14 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
+    "restore": "Move back to Inbox",
+    "more_actions": "More notification actions",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
+    "app_tool_calls_quota_exceeded_body": "This workspace has used its {{limit}} app calls for this month. Agents can't run app tools until the allowance resets {{resetAt}}, or until the workspace upgrades or adds seats.",
+    "app_tool_calls_quota_action": "Manage billing",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
     "open_app": "Open app",
@@ -108,12 +112,14 @@
     "children_done": "Sub-issues finished",
     "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
+    "app_tool_calls_quota_exceeded": "App call limit reached",
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
     "app_connect_requested": "Connect an app",
     "app_action_result": "App action result",
     "doc_comment": "New comment on a doc",
-    "doc_mentioned": "Mentioned in a doc"
+    "doc_mentioned": "Mentioned in a doc",
+    "blockers_done": "Waiting tasks ended"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -129,6 +135,7 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
+    "app_tool_calls_quota_blocked": "Agents can no longer run app tools this month",
     "children_done_stage": "Stage {{stage}}'s sub-issues finished"
   },
   "toasts": {
@@ -145,13 +152,16 @@
   },
   "kept": {
     "archived": "Archived",
+    "undo_archive": "Undo archive",
+    "unsubscribed": "Unsubscribed",
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
-    "notification_archived": "Notification archived",
     "changed_status": "Changed to {{status}}",
     "reassigned": "Reassigned to {{name}}",
     "unassigned": "Unassigned",
     "ran_quick_action": "Ran {{name}}",
+    "agent_triggered": "Agent triggered",
+    "returns_on_activity": "Returns to Inbox on new activity",
     "next": "Next",
     "next_tooltip": "Open next: {{title}}"
   },
@@ -180,6 +190,14 @@
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
     "active_issue_description": "This permanently deletes active inbox notifications for this issue. Previously archived notifications, the issue, and its runs are kept."
+  },
+  "archive_all_dialog": {
+    "title": "Archive all notifications?",
+    "description": "Every active notification in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore notifications anytime.",
+    "description_count_one": "{{count}} active notification in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore it anytime.",
+    "description_count_other": "All {{count}} active notifications in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore them anytime.",
+    "cancel": "Cancel",
+    "confirm": "Archive all"
   },
   "unsubscribe": {
     "title": "Unsubscribe and archive. Its updates stop reaching you; an @mention still does.",
@@ -217,9 +235,7 @@
     "failed": "Failed to snooze",
     "unsnooze_failed": "Failed to bring back",
     "view_empty": "Nothing snoozed",
-    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
-    "col_updates": "While snoozed",
-    "col_back": "Back"
+    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back."
   },
   "auto_archive_prompt": {
     "title": "Archive notifications once you've handled them",
@@ -241,9 +257,6 @@
     "just_archived_many_other": "Archived {{count}} notifications",
     "snoozed_summary_one": "{{count}} snoozed · returns {{time}}",
     "snoozed_summary_other": "{{count}} snoozed · next returns {{time}}",
-    "bar_snoozed_one": "{{count}} snoozed",
-    "bar_snoozed_other": "{{count}} snoozed",
-    "go_to_my_work": "Go to My work",
     "filtered_title": "All caught up for this filter",
     "filtered_remaining_one": "{{count}} other notification in your inbox",
     "filtered_remaining_other": "{{count}} other notifications in your inbox",

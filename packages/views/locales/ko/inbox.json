@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "인박스",
-    "back": "인박스"
+    "title": "인박스"
   },
   "menu": {
     "mark_all_read": "모두 읽음으로 표시",
@@ -54,6 +53,7 @@
       "days": "{{count}}일"
     },
     "archived_title": "보관됨",
+    "snoozed_title": "미뤄둔 항목",
     "archived_empty": "보관된 알림이 없습니다",
     "unarchive_tooltip": "보관 해제",
     "actions_aria": "알림 작업",
@@ -63,10 +63,14 @@
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
+    "restore": "인박스로 되돌리기",
+    "more_actions": "알림 작업 더 보기",
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "전체 양식 열기",
     "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 오토파일럿 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화되거나 업그레이드 또는 실행 횟수를 추가 구매할 때까지 이후 오토파일럿 실행은 시작되지 않습니다.",
+    "app_tool_calls_quota_exceeded_body": "이 워크스페이스는 이번 달 앱 호출 {{limit}}회를 모두 사용했습니다. 한도가 {{resetAt}}에 초기화되거나 업그레이드 또는 시트를 추가할 때까지 에이전트는 앱 도구를 실행할 수 없습니다.",
+    "app_tool_calls_quota_action": "결제 관리",
     "project_owner_joined_body": "{{name}} 님은 워크스페이스 소유자이며 이 비공개 프로젝트에 자신을 추가했습니다. 이제 태스크, 댓글, 첨부 파일을 볼 수 있습니다.",
     "open_project": "프로젝트 열기",
     "open_app": "앱 열기",
@@ -106,12 +110,14 @@
     "children_done": "하위 태스크가 모두 끝났습니다",
     "project_owner_joined": "소유자가 프로젝트에 참여함",
     "autopilot_quota_exceeded": "자동화 실행 한도 도달",
+    "app_tool_calls_quota_exceeded": "앱 호출 한도 도달",
     "app_action_requested": "확인 필요",
     "app_action_reminder": "확인 곧 만료",
     "app_connect_requested": "앱 연결 요청",
     "app_action_result": "앱 작업 결과",
     "doc_comment": "문서에 새 댓글",
-    "doc_mentioned": "문서에서 멘션됨"
+    "doc_mentioned": "문서에서 멘션됨",
+    "blockers_done": "대기 중인 작업 종료"
   },
   "labels": {
     "set_status_to": "상태 변경:",
@@ -127,6 +133,7 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
     "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
+    "app_tool_calls_quota_blocked": "이번 달에는 에이전트가 앱 도구를 더 이상 실행할 수 없습니다",
     "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다"
   },
   "toasts": {
@@ -142,13 +149,16 @@
   },
   "kept": {
     "archived": "보관됨",
+    "undo_archive": "보관 취소",
+    "unsubscribed": "구독 해제됨",
     "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
     "filtered": "더 이상 필터와 일치하지 않음",
-    "notification_archived": "알림이 보관됨",
     "changed_status": "상태 변경됨: {{status}}",
     "reassigned": "{{name}}님에게 재할당됨",
     "unassigned": "할당 해제됨",
     "ran_quick_action": "{{name}} 실행됨",
+    "agent_triggered": "에이전트를 실행함",
+    "returns_on_activity": "새 활동이 있으면 인박스로 돌아옵니다",
     "next": "다음",
     "next_tooltip": "다음 열기: {{title}}"
   },
@@ -177,6 +187,13 @@
     "issue_description": "이 보기에서 해당 작업의 알림이 영구적으로 삭제됩니다. 작업과 실행 기록은 유지됩니다.",
     "cancel": "취소",
     "active_issue_description": "이 태스크의 활성 받은 편지함 알림이 영구적으로 삭제됩니다. 이전에 보관한 알림과 태스크, 실행 기록은 유지됩니다."
+  },
+  "archive_all_dialog": {
+    "title": "모든 알림을 보관할까요?",
+    "description": "인박스의 모든 활성 알림이 보관함으로 이동합니다. 다시 알림으로 미룬 이슈는 유지되며 언제든 복원할 수 있습니다.",
+    "description_count_other": "인박스의 활성 알림 {{count}}개가 모두 보관함으로 이동합니다. 다시 알림으로 미룬 이슈는 유지되며 언제든 복원할 수 있습니다.",
+    "cancel": "취소",
+    "confirm": "모두 보관"
   },
   "unsubscribe": {
     "title": "구독을 해제하고 보관합니다. 이 태스크의 업데이트 알림은 오지 않지만 @멘션은 계속 알림을 받습니다.",
@@ -212,9 +229,7 @@
     "failed": "미루지 못했습니다",
     "unsnooze_failed": "되돌리지 못했습니다",
     "view_empty": "미뤄둔 항목이 없습니다",
-    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다.",
-    "col_updates": "미뤄둔 동안",
-    "col_back": "돌아오는 시간"
+    "view_empty_description": "인박스에서 태스크를 미루면 돌아올 시간까지 여기에서 기다립니다."
   },
   "auto_archive_prompt": {
     "title": "처리한 알림을 자동으로 보관하세요",
@@ -234,8 +249,6 @@
     "just_unsubscribed": "{{label}} 구독을 취소하고 보관했습니다",
     "just_archived_many_other": "알림 {{count}}개를 보관했습니다",
     "snoozed_summary_other": "미룬 알림 {{count}}개 · 가장 빠른 복귀 {{time}}",
-    "bar_snoozed_other": "미룸 {{count}}개",
-    "go_to_my_work": "내 작업으로 이동",
     "filtered_title": "현재 필터의 알림을 모두 처리했습니다",
     "filtered_remaining_other": "인박스에 다른 알림 {{count}}개가 남아 있습니다",
     "clear_and_continue": "필터 지우고 계속하기",

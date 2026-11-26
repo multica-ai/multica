@@ -380,6 +380,9 @@
     "record_aria": "{{action}}のショートカットを変更",
     "recording": "キーを入力",
     "record_hint": "Esc でキャンセル · Delete でクリア",
+    "record_sequence_hint": "キーを押すか、G → I のように 2 つ続けて押すとシーケンスになります · Esc でキャンセル",
+    "record_then_hint": "2 つ目のキーを押す · ↵ で 1 キーのまま · Backspace でやり直し",
+    "then": "→",
     "unassigned": "未設定",
     "no_results": "一致するショートカット操作はありません。",
     "conflict_error": "すでに{{action}}で使用されています。",
@@ -390,8 +393,10 @@
     "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
     "categories": {
       "general": "一般",
+      "issue": "タスク",
       "navigation": "ナビゲーション"
     },
+    "issue_scope": "目の前のタスクに作用します：プレビュー中のタスク、リストで選択したタスク、または開いているタスク。",
     "actions": {
       "openSearch": {
         "label": "検索を開く",
@@ -433,9 +438,57 @@
         "label": "通知をスヌーズ",
         "description": "インボックスから開いたタスクをスヌーズします。スヌーズ中なら今すぐ戻します。"
       },
+      "markInboxUnread": {
+        "label": "通知を未読にする",
+        "description": "開いているインボックス通知の既読・未読を切り替えます。"
+      },
+      "nextInboxItem": {
+        "label": "次の通知",
+        "description": "現在のインボックス一覧で次の通知を開きます。"
+      },
+      "prevInboxItem": {
+        "label": "前の通知",
+        "description": "現在のインボックス一覧で前の通知を開きます。"
+      },
       "undoInboxAction": {
         "label": "インボックスの操作を取り消す",
         "description": "トーストが表示されている間は直前のアーカイブ・スヌーズ・購読解除を取り消します。トーストが消えた後は、開いている通知がアーカイブ済みならインボックスに戻し、「インボックスは空です」画面ではそこに表示された操作を取り消します。"
+      },
+      "setIssueStatus": {
+        "label": "ステータスを変更",
+        "description": "ステータスの選択を開きます。"
+      },
+      "assignIssue": {
+        "label": "担当者を設定",
+        "description": "担当者の選択を開きます。"
+      },
+      "setIssuePriority": {
+        "label": "優先度を設定",
+        "description": "優先度の選択を開きます。"
+      },
+      "setIssueLabels": {
+        "label": "ラベルを編集",
+        "description": "ラベルの選択を開きます。"
+      },
+      "setIssueDueDate": {
+        "label": "期限を設定",
+        "description": "期限の選択を開きます。"
+      },
+      "moveIssueToProject": {
+        "label": "プロジェクトに移動",
+        "description": "プロジェクトの選択を開きます。"
+      },
+      "runIssueQuickAction": {
+        "label": "クイックアクションを実行",
+        "description": "有効なクイックアクションがある単一のタスクで使えます。"
+      },
+      "replyToIssue": {
+        "label": "返信",
+        "description": "開いているタスクのコメント欄にフォーカスします。"
+      },
+      "showShortcuts": {
+        "label": "キーボードショートカットを表示",
+        "description": "ショートカットの一覧を開きます。今のページのものが先頭です。"
       },
       "send": {
         "label": "送信",
@@ -513,6 +566,32 @@
       "zoom_out": "縮小",
       "reset_zoom": "ズームをリセット",
       "close_dialog": "ダイアログまたはメニューを閉じる"
+    },
+    "cheatsheet": {
+      "title": "キーボードショートカット",
+      "current_page": "現在のページ",
+      "footer_prefix": "ショートカットはこのデバイスに保存されます。変更は ",
+      "footer_link": "設定 › ショートカット",
+      "footer_suffix": " から。",
+      "groups": {
+        "inbox": "受信箱",
+        "issue": "タスク",
+        "navigation": "ナビゲーション",
+        "general": "一般",
+        "list": "リストとボード",
+        "editor": "エディター"
+      },
+      "rows": {
+        "list_move": "下 / 上へ移動",
+        "list_columns": "ボードの列を移動",
+        "list_open": "開く",
+        "list_peek": "プレビュー",
+        "list_select": "選択",
+        "list_extend": "選択を広げる",
+        "list_select_all": "すべて選択",
+        "list_clear": "選択を解除",
+        "editor_leave": "入力欄から出る"
+      }
     }
   },
   "chat": {
@@ -878,10 +957,6 @@
         "dates": "日付変更",
         "labels": "ラベル変更"
       },
-      "after_label": "アーカイブ後",
-      "after_description": "表示中の通知がこの方法でアーカイブされたとき。手動のアーカイブ（E）は従来どおり次を開きます。",
-      "after_stay": "このタスクに留まる",
-      "after_next": "次の通知を開く",
       "archived_label": "アーカイブ済みの通知",
       "archived_description": "ここから見つけてアーカイブを解除できます",
       "archived_action": "アーカイブ済みを表示"
@@ -899,6 +974,10 @@
       "comments": {
         "label": "コメント",
         "description": "フォロー中のタスクに新しいコメントが付いたとき"
+      },
+      "squad_handoffs": {
+        "label": "スクワッド内の引き継ぎを含める",
+        "description": "スクワッドのリーダーとエージェントが作業を受け渡すコメントです。@メンション、エージェントの実行失敗、スクワッドが作業を終えたときの最終報告は引き続き通知されます。"
       },
       "mentions": {
         "label": "メンション",
@@ -1894,7 +1973,8 @@
       "pending": "確認待ち",
       "approved": "承認済み",
       "rejected": "却下",
-      "rate_limited": "レート制限"
+      "rate_limited": "レート制限",
+      "quota_exceeded": "月間上限に到達"
     },
     "scopes": {
       "team": "チームアカウント",
@@ -2030,7 +2110,76 @@
       "empty_attention": "対応が必要なものはありません。",
       "no_matches": "検索に一致するアプリはありません。",
       "unavailable": "このサーバーではアプリを利用できません。",
-      "retry": "再試行"
+      "retry": "再試行",
+      "catalog": "カタログ",
+      "catalog_failed": "アプリカタログを読み込めませんでした。",
+      "category_curated": "おすすめ",
+      "categories_label": "カテゴリ",
+      "connect_oauth": "OAuth でログイン",
+      "connect_key": "API キーを入力",
+      "show_more": "さらに表示",
+      "categories": {
+        "ai_ml": "AI・機械学習",
+        "developer_tools": "開発ツール・DevOps",
+        "data_analytics": "データ・分析",
+        "productivity": "生産性・プロジェクト管理",
+        "collaboration": "コラボレーション・コミュニケーション",
+        "marketing_social": "マーケティング・SNS",
+        "documents": "ドキュメント・ファイル",
+        "sales_support": "営業・カスタマーサポート",
+        "crm": "CRM",
+        "finance": "財務・会計",
+        "workflow_automation": "ワークフロー自動化",
+        "design": "デザイン・クリエイティブ",
+        "ecommerce": "EC",
+        "advertising": "広告",
+        "scheduling": "スケジュール・予約",
+        "entertainment": "エンタメ・メディア",
+        "hr_recruiting": "人事・採用",
+        "education": "教育",
+        "model_context_protocol": "MCP サーバー",
+        "marketing_automation": "マーケティングオートメーション",
+        "email": "メール",
+        "security_identity_tools": "セキュリティ・ID 管理",
+        "forms_surveys": "フォーム・アンケート",
+        "databases": "データベース",
+        "web_scraping_browser": "Web スクレイピング・ブラウザ",
+        "email_newsletters": "メールマガジン",
+        "business_intelligence": "ビジネスインテリジェンス",
+        "ai_web_scraping": "AI Web スクレイピング",
+        "ai_agents": "AI エージェント",
+        "web_search_research": "Web 検索・リサーチ",
+        "ai_sales_tools": "AI 営業ツール",
+        "ai_content_generation": "AI コンテンツ生成",
+        "payment_processing": "決済処理",
+        "server_monitoring": "サーバー監視",
+        "video_audio": "動画・オーディオ",
+        "signatures": "電子署名",
+        "phone_sms": "電話・SMS",
+        "audio_speech": "オーディオ・音声",
+        "ai_chatbots": "AI チャットボット",
+        "ai_document_extraction": "AI ドキュメント抽出",
+        "url_shortener": "短縮 URL",
+        "people_contact_data": "人物・連絡先データ",
+        "notifications": "通知",
+        "event_management": "イベント管理",
+        "places_weather": "場所・天気",
+        "market_data": "市場データ",
+        "it_operations": "IT 運用",
+        "internet_of_things": "IoT",
+        "spreadsheets": "スプレッドシート",
+        "fundraising": "募金・寄付",
+        "website_builders": "Web サイト・アプリ作成",
+        "reviews": "レビュー",
+        "company_data": "企業データ",
+        "ai_meeting_assistants": "AI 会議アシスタント",
+        "bookmark_managers": "ブックマーク管理",
+        "social_creator_data": "SNS・クリエイターデータ",
+        "seo_ai_visibility": "SEO・AI 可視性",
+        "legal_public_records": "法務・公的記録",
+        "ai_safety": "AI 安全・コンプライアンス",
+        "other": "その他"
+      }
     },
     "app_page": {
       "agents_title": "エージェント",

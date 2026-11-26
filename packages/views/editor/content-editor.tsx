@@ -48,7 +48,7 @@ import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import { issueIdentifierOptions } from "@multica/core/issues/queries";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { isIssueIdentifier } from "@multica/ui/markdown";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import type { Attachment } from "@multica/core/types";
 import {
   parseMarkdownChunked,
@@ -204,6 +204,8 @@ interface ContentEditorBaseProps {
   mentionContextItems?: MentionItem[];
   /** Leave guests out of the @ list, for places guests cannot open (docs). */
   mentionHideGuests?: boolean;
+  /** Leave squads out of the @ list, for places a squad cannot be asked (doc discussions). */
+  mentionHideSquads?: boolean;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
@@ -415,6 +417,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       mentionHideGuests = false,
+      mentionHideSquads = false,
       enableSlashCommands = false,
       slashCommandMode = "skill",
       showBlockHandles = false,
@@ -639,6 +642,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         mentionHideGuests,
+        mentionHideSquads,
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

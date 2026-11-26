@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Terminal } from "@multica/ui/icons";
+import { Terminal } from "@multica/ui/icons";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
@@ -32,11 +33,7 @@ function CopyButton({ text }: { text: string }) {
         className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         aria-label={t(($) => $.cli_install.copy_aria)}
       >
-        {copied ? (
-          <Check className="h-3.5 w-3.5 text-success" />
-        ) : (
-          <Copy className="h-3.5 w-3.5" />
-        )}
+        <CopyCheckIcon copied={copied} />
       </button>
     </TooltipHint>
   );

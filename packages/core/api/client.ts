@@ -11,6 +11,7 @@ import {
   DocCommentSchema,
   DocCommentListSchema,
   DocCollabTicketSchema,
+  DocTaskRunListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -22,6 +23,7 @@ import type {
   DocTree,
   DocVersion,
   DocCollabTicket,
+  DocTaskRun,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -114,10 +116,13 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageBySquad,
   DashboardAgentRunTime,
+  DashboardSquadRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardFailureBySquad,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -126,6 +131,7 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
+  TaskTranscriptPurge,
   RuntimeRateLimitsResponse,
   Attachment,
   ChatSession,
@@ -134,6 +140,7 @@ import type {
   ChatMessagesPage,
   ChatDraftRestoresResponse,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -277,6 +284,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadBriefsResponse,
+  SquadHandoffMode,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -294,6 +303,7 @@ import type {
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -360,10 +370,13 @@ import {
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
+  DashboardSquadRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
+  DashboardFailureBySquadListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -440,9 +453,13 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  SquadBriefsResponseSchema,
+  EMPTY_SQUAD_BRIEFS,
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
+  TaskTranscriptPurgeSchema,
+  EMPTY_TASK_TRANSCRIPT_PURGE,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -463,6 +480,7 @@ import {
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
   StorageUsageSchema,
+  AppCallUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -696,6 +714,7 @@ export function parseDashboardHistoryLimit(value: string | null): number | null 
 export interface DashboardRequestParams {
   days?: number;
   project_id?: string | null;
+  squad_id?: string | null;
   tz?: string;
   onHistoryLimit?: (limitDays: number | null) => void;
 }
@@ -1086,6 +1105,14 @@ export class ApiClient {
   }
   async deleteDocComment(docId: string, commentId: string): Promise<void> {
     await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
+  }
+  async listDocTaskRuns(docId: string): Promise<DocTaskRun[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/task-runs`),
+      DocTaskRunListSchema,
+      { tasks: [] },
+      { endpoint: "GET /api/docs/{id}/task-runs" },
+    ).tasks;
   }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(
@@ -1544,6 +1571,7 @@ export class ApiClient {
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
+    if (params?.blocked) search.set("blocked", "true");
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -2724,6 +2752,18 @@ export class ApiClient {
     );
   }
 
+  // The plan's monthly app call limit (MUL-10047). A response that cannot be
+  // read falls back to no limit: the gateway still checks every call.
+  async getAppCallUsage(workspaceId: string): Promise<AppCallUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/app-call-usage`);
+    return parseWithFallback<AppCallUsage>(
+      raw,
+      AppCallUsageSchema,
+      { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] },
+      { endpoint: "GET /api/workspaces/:id/app-call-usage" },
+    );
+  }
+
   async getWorkspaceSubscriptionPrices(): Promise<WorkspaceSubscriptionPrices | null> {
     const raw = await this.fetch<unknown>("/api/cloud-subscriptions/prices");
     return parseWithFallback<WorkspaceSubscriptionPrices | null>(
@@ -3154,6 +3194,7 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     if (params.tz) search.set("tz", params.tz);
     const res = await this.fetchRaw(`${path}?${search}`, {
       extraHeaders: { "Content-Type": "application/json" },
@@ -3216,6 +3257,33 @@ export class ApiClient {
       params,
       DashboardFailureByAgentListSchema,
       "GET /api/dashboard/failures/by-agent",
+    );
+  }
+
+  async getDashboardUsageBySquad(params: DashboardRequestParams): Promise<DashboardUsageBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-squad",
+      params,
+      DashboardUsageBySquadListSchema,
+      "GET /api/dashboard/usage/by-squad",
+    );
+  }
+
+  async getDashboardSquadRunTime(params: DashboardRequestParams): Promise<DashboardSquadRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/squad-runtime",
+      params,
+      DashboardSquadRunTimeListSchema,
+      "GET /api/dashboard/squad-runtime",
+    );
+  }
+
+  async getDashboardFailuresBySquad(params: DashboardRequestParams): Promise<DashboardFailureBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-squad",
+      params,
+      DashboardFailureBySquadListSchema,
+      "GET /api/dashboard/failures/by-squad",
     );
   }
 
@@ -3406,6 +3474,14 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
       endpoint: "GET /api/tasks/:id/messages",
+    });
+  }
+
+  /** Clears a finished run's log. Workspace owners and admins only. */
+  async purgeTaskTranscript(taskId: string): Promise<TaskTranscriptPurge> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`, { method: "DELETE" });
+    return parseWithFallback<TaskTranscriptPurge>(raw, TaskTranscriptPurgeSchema, EMPTY_TASK_TRANSCRIPT_PURGE, {
+      endpoint: "DELETE /api/tasks/:id/messages",
     });
   }
 
@@ -4696,6 +4772,13 @@ export class ApiClient {
     });
   }
 
+  async rescheduleChatWakeup(sessionId: string, wakeupId: string, timing: ChatWakeupTiming): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(timing),
+    });
+  }
+
   async cancelChatWakeup(sessionId: string, wakeupId: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}/cancel`, {
       method: "POST",
@@ -5585,7 +5668,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string; handoff_mode?: SquadHandoffMode }): Promise<Squad> {
     const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
@@ -5621,6 +5704,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  // What each agent of the squad receives as squad context on its runs.
+  // Restricted server-side to the people who can edit the squad.
+  async getSquadBriefs(squadId: string): Promise<SquadBriefsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/briefs`);
+    return parseWithFallback(raw, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+      endpoint: "GET /api/squads/:id/briefs",
+    }) as SquadBriefsResponse;
   }
 
   // Autopilots

@@ -17,13 +17,12 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  Check,
   Code as CodeIcon,
-  Copy,
   Download,
   Image as ImageIcon,
   X,
 } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -225,7 +224,7 @@ function MermaidViewerContent({
               onClick={handleCopySource}
               label={t(($) => $.mermaid.copy_source)}
             >
-              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              <CopyCheckIcon copied={copied} className="size-4" />
             </ToolbarButton>
             <DropdownMenu>
               <TooltipHint label={t(($) => $.mermaid.export)} side="bottom">

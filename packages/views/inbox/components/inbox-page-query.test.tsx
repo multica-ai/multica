@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
@@ -7,7 +7,7 @@ import type { ApiClient } from "@multica/core/api/client";
 import { EMPTY_INBOX_FILTERS, filterInboxItems, useInboxFilterStore, type InboxFilters } from "@multica/core/inbox/filter-store";
 import { archivedInboxLookupOptions, inboxKeys } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import { onInboxInvalidate, onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
+import { onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
 import type { ArchivedInboxPage } from "@multica/core/types/inbox";
 import type { InboxItem } from "@multica/core/types";
 import { InboxPage } from "./inbox-page";
@@ -28,16 +28,17 @@ vi.mock("../../modals/use-limit-recovery-prompt", () => ({
 
 const detailUnmounted = vi.hoisted(() => vi.fn());
 vi.mock("../../issues/components/issue-detail", () => ({
-  IssueDetail: ({ issueId, notice }: { issueId: string; notice?: (issueActions: ReactNode) => ReactNode }) => {
+  IssueDetail: ({ issueId }: { issueId: string }) => {
     useEffect(() => () => detailUnmounted(issueId), [issueId]);
-    return <div data-testid="detail">{issueId}<div data-testid="notice">{notice?.(null)}</div></div>;
+    return <div data-testid="detail">{issueId}</div>;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, replace, push }),
   useReportNavigating: () => {},
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => true }));
@@ -86,6 +87,7 @@ beforeEach(() => {
   } });
   searchParams = new URLSearchParams();
   replace.mockClear();
+  push.mockClear();
   detailUnmounted.mockClear();
   filterMenuUnmounted.mockClear();
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
@@ -417,37 +419,3 @@ it("lets the open notification go once its issue is deleted, rather than keep it
   expect(replace).toHaveBeenLastCalledWith("/acme/inbox");
 });
 
-it("undoes a remote snooze from the phone kept-row notice by ending the snooze", async () => {
-  useInboxFilterStore.setState({ filtersByWorkspace: {} });
-  useInboxSelectionStore.setState({ heldRows: {}, leftRowKeyByWorkspace: {} });
-  searchParams = new URLSearchParams("issue=issue-a");
-  let rows = [item({ read: true })];
-  const until = new Date(Date.now() + 3600000).toISOString();
-  const snoozed = [{ issue_id: "issue-a", item_id: "inbox-a", snoozed_until: until, snoozed_at: new Date().toISOString(), updates: 0 }];
-  let isSnoozed = false;
-  const unarchiveInbox = vi.fn(async () => item({ read: true, snoozed_until: until }));
-  const unsnoozeInbox = vi.fn(async () => {
-    rows = [item({ read: true })];
-    isSnoozed = false;
-    return { issue_id: "issue-a" };
-  });
-  setApiInstance({
-    listInbox: async () => rows,
-    listSnoozedInbox: async () => isSnoozed ? snoozed : [],
-    getInboxUnreadSummary: async () => [],
-    unarchiveInbox,
-    unsnoozeInbox,
-  } as unknown as ApiClient);
-  renderPage();
-  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
-
-  // ListInboxItems excludes snoozed notifications; the separate Snoozed query knows why.
-  rows = [];
-  isSnoozed = true;
-  qc.setQueryData(inboxKeys.snoozed("workspace-1"), snoozed);
-  await act(async () => { await onInboxInvalidate(qc, "workspace-1"); });
-  fireEvent.click(await within(screen.getByTestId("notice")).findByRole("button", { name: "Inbox" }));
-  await waitFor(() => expect(unsnoozeInbox.mock.calls.length + unarchiveInbox.mock.calls.length).toBe(1));
-  expect(unarchiveInbox).not.toHaveBeenCalled();
-  expect(unsnoozeInbox).toHaveBeenCalledWith("inbox-a", { read: undefined });
-});

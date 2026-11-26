@@ -2,8 +2,9 @@
 
 import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useAppearanceStore } from "@multica/core/appearance";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
@@ -631,6 +632,35 @@ describe("ChatPage archive and session transitions", () => {
 
     const prompt = screen.getByText("Pick a conversation, or start a new one with +");
     expect(prompt.parentElement?.className).toContain("animate-chat-enter-fade");
+  });
+
+  describe("under reduced motion", () => {
+    function archiveOnlyThread() {
+      mockHasMessages.current = true;
+      storeRef.current = { activeSessionId: "session-only" };
+      mockArchiveOutcome.current = { moved: true, targetSessionId: null, direction: null };
+      renderPage("session=session-only");
+      fireEvent.click(screen.getByRole("button", { name: "archive-active-thread" }));
+      return screen.getByText("Pick a conversation, or start a new one with +").parentElement!;
+    }
+    afterEach(() => {
+      useAppearanceStore.getState().reset();
+      vi.unstubAllGlobals();
+    });
+
+    it("shows the select prompt at once with the Appearance Reduce motion switch", () => {
+      useAppearanceStore.getState().set({ reduceMotion: true });
+      expect(archiveOnlyThread().className).not.toMatch(/animate-chat-enter/);
+    });
+
+    it("shows the select prompt at once with the system reduced-motion setting", () => {
+      vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })));
+      expect(archiveOnlyThread().className).not.toMatch(/animate-chat-enter/);
+    });
   });
 
   it("applies a gentle fade when selecting another thread directly", () => {

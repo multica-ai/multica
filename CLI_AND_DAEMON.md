@@ -379,7 +379,10 @@ Daemon behavior is configured via flags or environment variables:
 | Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` (catch-up fallback; WebSocket wake signals deliver work sooner) |
 | Healthy WebSocket claim poll upper bound | `--ws-claim-poll-interval` | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` (configured independently of `--poll-interval`; downward jitter makes the normal interval `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval) |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
-| Daemon log level | — | `LOG_LEVEL` | `debug` |
+| Daemon log level | — | `LOG_LEVEL` | `debug` (or persist per profile with `multica config set log_level <level>`; `LOG_LEVEL` takes precedence) |
+| Daemon log max size (MB) | — | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` (or persist per profile with `daemon_log_max_size_mb`) |
+| Daemon log max backups | — | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` (or persist per profile with `daemon_log_max_backups`) |
+| Daemon log max age (days) | — | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` (or persist per profile with `daemon_log_max_age_days`) |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
@@ -644,6 +647,7 @@ multica workspace member list <workspace-id>
 ```bash
 multica issue list
 multica issue list --status in_progress
+multica issue list --blocked
 multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --full-id
@@ -654,7 +658,7 @@ multica issue list --output json --fields=id,title,status,priority  # narrow the
 multica issue list --output json --resolve-properties  # property names beside the ids
 ```
 
-Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--blocked` (only issues waiting for unfinished manual blockers or earlier stages), `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
 If the server cannot count the matching issues, the list request fails with `failed to count issues` instead of returning the page length as a fabricated total. Successful response fields are unchanged. This trades availability of a partial page for an explicit failure that callers can retry.
 
@@ -710,9 +714,12 @@ multica issue get <id> --resolve-properties   # property names beside the ids, a
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+multica issue create --title "Ship release" --assignee "Lambda" --status todo --blocked-by MUL-101 --blocked-by MUL-102
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--stage`, `--blocked-by` (repeatable; issue key or UUID to wait for before starting), `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate`, `--pr-auto-complete`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+
+For issues with unfinished blockers (`--blocked-by`, or earlier `--stage` siblings under the same parent), creating, assigning, or changing status does not start an agent run until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed. Once unblocked, a non-`backlog` issue starts automatically (or notifies a member assignee); a `backlog` issue stays parked until it leaves `backlog`. `issue get --output json` includes `blocked_by` (each with `via: "manual"` or `"stage"`), `blocked_count`, and `blocking` (issues waiting on this one). Direct @-mentions and comment replies still start runs while blockers remain.
 
 ### Update Issue
 
@@ -720,12 +727,14 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
 multica issue update <id> --attachment revised.png
+multica issue update <id> --blocked-by MUL-101 --remove-blocked-by MUL-99
 multica issue update <id> --description-file ./desc.md --description-base-revision <rev>
 multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
-`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+`--blocked-by` and `--remove-blocked-by` (both repeatable; issue key or UUID) add or remove manual blockers. Stage blockers follow `--stage` and `--parent` and cannot be removed with `--remove-blocked-by`.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`.
 `--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
 To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
 
@@ -844,6 +853,12 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 # start it; an agent never steers itself and adds at most 3 messages to one
 # run. Prints per run whether it was steered.
 multica issue comment add <issue-id> --content-file note.md --steer <run-id>
+
+# Supply an explicit idempotency key so retrying after a timeout or lost
+# connection returns the already-saved comment instead of posting twice.
+# Inside an agent run, the CLI derives this key automatically from the run,
+# issue, parent, content, steer flags, and attachments.
+multica issue comment add <issue-id> --content-file note.md --idempotency-key <key>
 
 # Delete a comment
 multica issue comment delete <comment-id>
@@ -1119,9 +1134,17 @@ Shows config file path, server URL, app URL, and default workspace.
 multica config set server_url https://api.example.com
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
+
+# Persist daemon log level and rotation settings per profile
+multica config set log_level info
+multica config set daemon_log_max_size_mb 50
+multica config set daemon_log_max_backups 10
+multica config set daemon_log_max_age_days 14
 ```
 
 `config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
+
+Daemon profile keys (`device_name`, `runtime_name`, `workspaces_root`, `max_concurrent_tasks`, `poll_interval`, `ws_claim_poll_interval`, `heartbeat_interval`, `log_level`, `daemon_log_max_size_mb`, `daemon_log_max_backups`, `daemon_log_max_age_days`, `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval`, `disable_auto_reload`) are read when the daemon starts. Pass `""` to clear a saved setting. Precedence is `--flag` > environment variable (`MULTICA_*` or `LOG_LEVEL`) > `config.json` > built-in default.
 
 ## Autopilot Commands
 
@@ -1203,6 +1226,19 @@ multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
 ```
 
+### Webhook Deliveries
+
+```bash
+multica autopilot deliveries <id>
+multica autopilot deliveries <id> --limit 50 --output json
+```
+
+Every webhook request the autopilot received, newest first — including
+`ignored` ones that created no run and so never appear in `runs`. The table
+shows `REASON` (`reason_code`) and `ERROR`; `--output json` also carries
+`payload_condition_failure`, the condition that rejected a `payload_filtered`
+delivery and the payload value it saw.
+
 ### Schedule Triggers
 
 ```bash
@@ -1223,13 +1259,20 @@ The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
 
-### Webhook Event and Action Filters
+### Webhook Event, Action, and Payload Filters
 
-Use a JSON file to configure the same event/action filters as the web UI:
+Use a JSON file to configure the same event, action, and optional payload-field `conditions` filters as the web UI:
 
 ```json
 [
   {"event": "pull_request_review", "actions": ["submitted"]},
+  {
+    "event": "pull_request",
+    "conditions": [
+      {"path": "pull_request.draft", "op": "equals", "value": false},
+      {"path": "pull_request.base.ref", "op": "equals", "value": "main"}
+    ]
+  },
   {"event": "push"}
 ]
 ```
@@ -1243,8 +1286,11 @@ multica autopilot get <autopilot-id> --output json
 ```
 
 An event without `actions` (or with an empty actions array) accepts every action
-for that event. Filters apply only to webhook triggers; schedule triggers reject
-them. The server validates the filters using the same rules as UI submissions.
+for that event. Each row supports up to 20 payload `conditions` (field path up
+to 256 characters; `in` list up to 100 values), using the same operators and
+matching rules as the app. Filters apply only to webhook triggers; schedule
+triggers reject them. The server validates the filters using the same rules as
+UI submissions.
 
 Omitting `--event-filters-file` on update preserves the saved filters. Replacing
 filters requires a nonempty array; `null`, an empty array, unknown fields, and
@@ -1255,8 +1301,72 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 ```
 
 `--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
-without a filter file accepts all events. These flags configure existing event
-and action matching; they do not add payload-field conditions.
+without a filter file accepts all events.
+
+## Squads
+
+Manage squads, collaboration handoff modes, member rosters, and generated member briefs:
+
+```bash
+# List and inspect squads (get shows the current handoff mode)
+multica squad list
+multica squad get <squad-id>
+
+# Create and configure a squad
+multica squad create --name "Product Delivery" --leader <agent-name-or-id>
+multica squad update <squad-id> --handoff-mode direct
+multica squad update <squad-id> --instructions "Route DB tasks to Alice and UI to Bob."
+
+# Manage members
+multica squad member list <squad-id>
+multica squad member add <squad-id> --member-id <agent-or-member-id> --type agent --role "Owns frontend"
+multica squad member set-role <squad-id> --member-id <agent-or-member-id> --role "Owns backend and migrations"
+multica squad member remove <squad-id> --member-id <agent-or-member-id>
+
+# Preview the squad context each agent member receives (requires squad manage permission)
+multica squad briefs <squad-id>
+multica squad briefs <squad-id> --agent <agent-name-or-id>
+
+# Record a leader evaluation on an issue
+multica squad activity <issue-id> action --reason "Delegated implementation to Frontend Agent"
+
+# Archive a squad (transfers active issues, autopilots, and workflow steps to the former leader)
+multica squad delete <squad-id>
+```
+
+Member type flags default to `agent`; pass `--type member` to `squad member add` / `remove`, or `--member-type member` to `squad member set-role`, for a human member.
+
+`--handoff-mode` accepts `leader` (default: a member reply returns to the leader unless it `@`-mentions an agent or squad, which then runs instead) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
+
+## Quick Actions
+
+Manage and run saved quick actions (reusable prompts with an optional agent or squad target) from the CLI:
+
+```bash
+# List active quick actions (add --include-archived to include archived ones)
+multica quick-action list
+multica quick-action list --include-archived --full-id --output json
+
+# Inspect one action by UUID, unique UUID prefix, or exact name (case-insensitive)
+multica quick-action get "Code Review"
+
+# Create a quick action (--visibility defaults to private; omit --agent/--squad for targetless)
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action create --name "Handoff" --squad "Backend Squad" --visibility public --prompt "Take over from here."
+
+# Update, archive, restore (alias: unarchive), or permanently delete
+multica quick-action update "Code Review" --squad "Review Squad"
+multica quick-action update "Code Review" --clear-target
+multica quick-action archive "Code Review"
+multica quick-action restore "Code Review"
+multica quick-action delete "Code Review"
+
+# Run a quick action on an issue (or preview without posting)
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Creating, updating, archiving, restoring, and deleting quick actions require a human member (`--visibility public` requires workspace `owner` or `admin` and a publicly invocable target). During an agent run, private quick actions are reachable only when the run was started by their creator on a runtime that member still owns; runs started by another member see only public actions.
 
 ## Other Commands
 

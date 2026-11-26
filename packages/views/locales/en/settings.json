@@ -386,6 +386,9 @@
     "record_aria": "Change shortcut for {{action}}",
     "recording": "Press keys",
     "record_hint": "Esc cancels · Delete clears",
+    "record_sequence_hint": "Press a key, or two in a row for a sequence such as G then I · Esc cancels",
+    "record_then_hint": "Press the second key · ↵ keeps one key · Backspace starts over",
+    "then": "then",
     "unassigned": "Unassigned",
     "no_results": "No matching shortcut actions.",
     "conflict_error": "Already used by {{action}}.",
@@ -396,8 +399,10 @@
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",
+      "issue": "Issue",
       "navigation": "Navigation"
     },
+    "issue_scope": "Act on the issue in front of you: the one in a peek, the issues selected in a list, or the open issue.",
     "actions": {
       "openSearch": {
         "label": "Open search",
@@ -439,9 +444,57 @@
         "label": "Snooze notification",
         "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
+      "markInboxUnread": {
+        "label": "Mark notification unread",
+        "description": "Toggle read or unread on the open inbox notification without leaving it."
+      },
+      "nextInboxItem": {
+        "label": "Next notification",
+        "description": "Open the next notification in the active inbox list."
+      },
+      "prevInboxItem": {
+        "label": "Previous notification",
+        "description": "Open the previous notification in the active inbox list."
+      },
       "undoInboxAction": {
         "label": "Undo inbox action",
         "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
+      },
+      "setIssueStatus": {
+        "label": "Change status",
+        "description": "Open the status picker."
+      },
+      "assignIssue": {
+        "label": "Assign",
+        "description": "Open the assignee picker."
+      },
+      "setIssuePriority": {
+        "label": "Set priority",
+        "description": "Open the priority picker."
+      },
+      "setIssueLabels": {
+        "label": "Edit labels",
+        "description": "Open the label picker."
+      },
+      "setIssueDueDate": {
+        "label": "Set due date",
+        "description": "Open the due date picker."
+      },
+      "moveIssueToProject": {
+        "label": "Move to project",
+        "description": "Open the project picker."
+      },
+      "runIssueQuickAction": {
+        "label": "Run quick action",
+        "description": "Available on a single issue when quick actions are active."
+      },
+      "replyToIssue": {
+        "label": "Reply",
+        "description": "Focus the open issue's comment box."
+      },
+      "showShortcuts": {
+        "label": "Show keyboard shortcuts",
+        "description": "Open the list of shortcuts, with the current page's first."
       },
       "send": {
         "label": "Send",
@@ -519,6 +572,32 @@
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",
       "close_dialog": "Close dialog or menu"
+    },
+    "cheatsheet": {
+      "title": "Keyboard shortcuts",
+      "current_page": "current page",
+      "footer_prefix": "Shortcuts are saved on this device. Change them in ",
+      "footer_link": "Settings › Shortcuts",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Inbox",
+        "issue": "Issue",
+        "navigation": "Navigation",
+        "general": "General",
+        "list": "Lists and boards",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Move down / up",
+        "list_columns": "Move across board columns",
+        "list_open": "Open",
+        "list_peek": "Preview",
+        "list_select": "Select",
+        "list_extend": "Extend selection",
+        "list_select_all": "Select all",
+        "list_clear": "Clear selection",
+        "editor_leave": "Leave the field"
+      }
     }
   },
   "chat": {
@@ -888,10 +967,6 @@
         "dates": "Change dates",
         "labels": "Change labels"
       },
-      "after_label": "After archiving",
-      "after_description": "When the notification you're reading is archived this way. Archiving by hand (E) still opens the next one.",
-      "after_stay": "Stay on the issue",
-      "after_next": "Open the next one",
       "archived_label": "Archived notifications",
       "archived_description": "Find them again and unarchive them",
       "archived_action": "View archived"
@@ -909,6 +984,10 @@
       "comments": {
         "label": "Comments",
         "description": "New comments on issues you follow"
+      },
+      "squad_handoffs": {
+        "label": "Include squad handoffs",
+        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and the report a squad finishes with still arrive."
       },
       "mentions": {
         "label": "Mentions",
@@ -1911,7 +1990,8 @@
       "pending": "Waiting",
       "approved": "Approved",
       "rejected": "Declined",
-      "rate_limited": "Rate limited"
+      "rate_limited": "Rate limited",
+      "quota_exceeded": "Monthly limit reached"
     },
     "scopes": {
       "team": "Team account",
@@ -1959,7 +2039,7 @@
       "title_member_ask": "{{name}} asked for a team {{app}} account",
       "waiting_for_admin": "Waiting for an admin",
       "team_note": "Every agent that acts as the team account can use it.",
-      "admins_notified": "Workspace admins were notified in Inbox.",
+      "admins_notified": "A workspace admin was notified in Inbox.",
       "connect_team": "Connect for the team"
     },
     "tools": {
@@ -2008,7 +2088,7 @@
       "personal": "Your account"
     },
     "account_row": {
-      "admins_notified": "admins notified",
+      "admins_notified": "admin notified",
       "withdraw": "Withdraw",
       "decline": "Decline",
       "toast_declined": "Requests declined. Waiting agents continue without it.",
@@ -2052,7 +2132,76 @@
       "empty_attention": "Nothing needs your attention.",
       "no_matches": "No apps match your search.",
       "unavailable": "Apps aren't available on this server.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "catalog": "Catalog",
+      "catalog_failed": "Couldn't load the app catalog.",
+      "category_curated": "Featured",
+      "categories_label": "Categories",
+      "connect_oauth": "Signs in with OAuth",
+      "connect_key": "Uses an API key",
+      "show_more": "Show more",
+      "categories": {
+        "ai_ml": "AI & Machine Learning",
+        "developer_tools": "Developer Tools & DevOps",
+        "data_analytics": "Data & Analytics",
+        "productivity": "Productivity & Project Management",
+        "collaboration": "Collaboration & Communication",
+        "marketing_social": "Marketing & Social Media",
+        "documents": "Documents & Files",
+        "sales_support": "Sales & Customer Support",
+        "crm": "CRM",
+        "finance": "Finance & Accounting",
+        "workflow_automation": "Workflow Automation",
+        "design": "Design & Creative Tools",
+        "ecommerce": "E-commerce",
+        "advertising": "Advertising",
+        "scheduling": "Scheduling & Booking",
+        "entertainment": "Entertainment & Media",
+        "hr_recruiting": "HR & Recruiting",
+        "education": "Education",
+        "model_context_protocol": "MCP Servers",
+        "marketing_automation": "Marketing Automation",
+        "email": "Email",
+        "security_identity_tools": "Security & Identity",
+        "forms_surveys": "Forms & Surveys",
+        "databases": "Databases",
+        "web_scraping_browser": "Web Scraping & Browsers",
+        "email_newsletters": "Email Newsletters",
+        "business_intelligence": "Business Intelligence",
+        "ai_web_scraping": "AI Web Scraping",
+        "ai_agents": "AI Agents",
+        "web_search_research": "Web Search & Research",
+        "ai_sales_tools": "AI Sales Tools",
+        "ai_content_generation": "AI Content Generation",
+        "payment_processing": "Payment Processing",
+        "server_monitoring": "Server Monitoring",
+        "video_audio": "Video & Audio",
+        "signatures": "E-signatures",
+        "phone_sms": "Phone & SMS",
+        "audio_speech": "Audio & Speech",
+        "ai_chatbots": "AI Chatbots",
+        "ai_document_extraction": "AI Document Extraction",
+        "url_shortener": "URL Shorteners",
+        "people_contact_data": "People & Contact Data",
+        "notifications": "Notifications",
+        "event_management": "Event Management",
+        "places_weather": "Places & Weather",
+        "market_data": "Market Data",
+        "it_operations": "IT Operations",
+        "internet_of_things": "Internet of Things",
+        "spreadsheets": "Spreadsheets",
+        "fundraising": "Fundraising",
+        "website_builders": "Website & App Builders",
+        "reviews": "Reviews",
+        "company_data": "Company Data",
+        "ai_meeting_assistants": "AI Meeting Assistants",
+        "bookmark_managers": "Bookmark Managers",
+        "social_creator_data": "Social & Creator Data",
+        "seo_ai_visibility": "SEO & AI Visibility",
+        "legal_public_records": "Legal & Public Records",
+        "ai_safety": "AI Safety & Compliance",
+        "other": "Other"
+      }
     },
     "app_page": {
       "agents_title": "Agents",
