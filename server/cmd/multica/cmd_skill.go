@@ -230,10 +230,8 @@ func newSkillAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 
 // skillFileSizeCell renders the `size` field of a file-metadata response.
 //
-// It cannot go through strVal: JSON numbers decode as float64, and strVal's
-// %v prints a 1.2MB file as "1.234567e+06" — unreadable exactly when the file
-// is big enough to be the one you are looking for. formatBytes is the same
-// renderer the daemon table uses.
+// It does not go through strVal, which prints a 1.2MB file as a raw byte
+// count; formatBytes is the same renderer the daemon table uses.
 func skillFileSizeCell(m map[string]any) string {
 	size, ok := m["size"].(float64)
 	if !ok {
