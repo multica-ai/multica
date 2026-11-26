@@ -235,6 +235,66 @@ func TestRunCreatesCounterpartsWhenAsked(t *testing.T) {
 	}
 }
 
+// A counterpart created without a marker is unpaired again on the next run, so
+// every run would create another copy of it. The marker has to travel in the
+// create call itself.
+func TestRunCreatesCounterpartsWithMarkers(t *testing.T) {
+	multica := &fakeMultica{issues: []Issue{{Side: SideMultica, Key: "PROJECT-1", Title: "Only here"}}}
+	tracker := &fakeTracker{issues: []Issue{{Side: SideGitLab, Key: "7", Title: "Only there"}}}
+
+	if _, err := Run(context.Background(), multica, tracker, Options{CreateMissing: true, TrackerProjectID: 42}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(tracker.creates) != 1 {
+		t.Fatalf("tracker creates = %d, want 1", len(tracker.creates))
+	}
+	m, ok := ParseMarker(tracker.creates[0].Body, SideMultica)
+	if !ok {
+		t.Fatalf("created tracker issue has no multica marker: %q", tracker.creates[0].Body)
+	}
+	if m.Identifier != "PROJECT-1" {
+		t.Errorf("marker identifier = %q, want PROJECT-1", m.Identifier)
+	}
+
+	if len(multica.creates) != 1 {
+		t.Fatalf("multica creates = %d, want 1", len(multica.creates))
+	}
+	g, ok := ParseMarker(multica.creates[0].Body, SideGitLab)
+	if !ok {
+		t.Fatalf("created multica issue has no tracker marker: %q", multica.creates[0].Body)
+	}
+	if g.Project != 42 || g.IID != 7 {
+		t.Errorf("marker = project %d iid %d, want 42/7", g.Project, g.IID)
+	}
+}
+
+// The created pair must be linked by the next run, not created a second time.
+func TestRunRelinksWhatItCreated(t *testing.T) {
+	multica := &fakeMultica{issues: []Issue{{Side: SideMultica, Key: "PROJECT-1", Title: "Only here"}}}
+	tracker := &fakeTracker{issues: []Issue{{Side: SideGitLab, Key: "7", Title: "Only there"}}}
+
+	if _, err := Run(context.Background(), multica, tracker, Options{CreateMissing: true, TrackerProjectID: 42}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	// The second run sees what the first one wrote, as a real board would.
+	multica.issues = append(multica.issues, multica.creates...)
+	tracker.issues = append(tracker.issues, tracker.creates...)
+	multica.creates, tracker.creates = nil, nil
+
+	report, err := Run(context.Background(), multica, tracker, Options{CreateMissing: true, TrackerProjectID: 42})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if report.Created != 0 {
+		t.Errorf("Created = %d on the second run, want 0", report.Created)
+	}
+	if len(report.Unpaired) != 0 {
+		t.Errorf("Unpaired = %d on the second run, want 0", len(report.Unpaired))
+	}
+}
+
 func TestRunContinuesPastAFailedWrite(t *testing.T) {
 	// The Multica side is newer in both pairs, so both writes go to the tracker.
 	// The first one is refused; the second must still sync.

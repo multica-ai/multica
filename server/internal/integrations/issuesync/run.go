@@ -126,7 +126,12 @@ func Run(ctx context.Context, multica MulticaStore, tracker TrackerStore, opts O
 		if !opts.CreateMissing || opts.DryRun {
 			continue
 		}
-		created, err := tracker.CreateIssue(ctx, issue)
+		// The marker goes into the create call itself. A counterpart created
+		// without one is unpaired again on the next run, which would create a
+		// second copy of it — and a third, once per run.
+		from := issue
+		from.Body = SetMarker(issue.Body, SideMultica, Marker{Identifier: issue.Key})
+		created, err := tracker.CreateIssue(ctx, from)
 		if err != nil {
 			report.Errors = append(report.Errors, err)
 			continue
@@ -141,7 +146,9 @@ func Run(ctx context.Context, multica MulticaStore, tracker TrackerStore, opts O
 		if !opts.CreateMissing || opts.DryRun {
 			continue
 		}
-		created, err := multica.CreateIssue(ctx, issue, opts.ProjectID)
+		from := issue
+		from.Body = SetMarker(issue.Body, SideGitLab, Marker{Project: opts.TrackerProjectID, IID: iidOf(issue)})
+		created, err := multica.CreateIssue(ctx, from, opts.ProjectID)
 		if err != nil {
 			report.Errors = append(report.Errors, err)
 			continue
