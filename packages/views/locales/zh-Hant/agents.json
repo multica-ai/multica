@@ -881,6 +881,7 @@
     "copy_filtered": "複製篩選結果",
     "copied": "已複製",
     "waiting_events": "等待事件中...",
+    "openclaw_live_unavailable": "OpenClaw 不提供即時日誌。執行結束後會顯示回覆。",
     "no_data": "未記錄執行資料。",
     "sort_chronological": "最早在前",
     "sort_newest_first": "最新在前",
