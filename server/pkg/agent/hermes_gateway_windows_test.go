@@ -56,6 +56,7 @@ func TestHermesGatewayWindowsCleanupOwnsDescendants(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(strconv.FormatBool(cancelled), func(t *testing.T) {
 			home := t.TempDir()
+			writeCommittedHermesInstalls(t, home)
 			exe, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)
