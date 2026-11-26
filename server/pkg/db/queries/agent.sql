@@ -228,6 +228,31 @@ WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
   AND (system_key IS NULL OR system_key = '')
 RETURNING *;
 
+-- name: ArchiveAgentsByOwner :many
+-- Archives every active user agent a departing member owns in the workspace,
+-- wherever it runs. ArchiveAgentsByRuntime only reaches the member's own
+-- runtimes, so an agent they own on a colleague's public runtime would keep
+-- running their instructions and configuration after they are gone. System
+-- agents are exempt for the same reason as there; their ownership is handed
+-- over instead (TransferProductAgentsOwner).
+UPDATE agent
+SET archived_at = now(), archived_by = @archived_by, updated_at = now()
+WHERE workspace_id = @workspace_id AND owner_id = @owner_id AND archived_at IS NULL
+  AND (system_key IS NULL OR system_key = '')
+RETURNING *;
+
+-- name: TransferProductAgentsOwner :many
+-- Hands the product-defined agents (Mika: kind='user' with a system_key) a
+-- departing member owns to another member. They belong to the workspace and
+-- are never archived, but their owner decides who may manage them and whose
+-- connected apps they use, so a departed owner must not keep them. Builder
+-- carriers (kind='system') are personal and are left alone.
+UPDATE agent
+SET owner_id = @new_owner_id, updated_at = now()
+WHERE workspace_id = @workspace_id AND owner_id = @owner_id
+  AND kind = 'user' AND system_key IS NOT NULL AND system_key <> ''
+RETURNING *;
+
 -- name: ArchiveAgentsByIDs :many
 -- Narrow archive that only touches the explicit ID list. Used by the
 -- cascade-delete endpoint so the user's expected_active_agent_ids list

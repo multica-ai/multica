@@ -139,6 +139,21 @@ WHERE status = 'active'
   AND project_id = @project_id
 RETURNING *;
 
+-- name: PauseAutopilotsByCreator :many
+-- A departing member's automations stop with them: an automation whose
+-- trigger another member owns would otherwise keep running the departed
+-- member's prompt under that member's authority. The configuration is kept
+-- so an admin can take it over and resume it.
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'member_removed',
+    updated_at = now()
+WHERE workspace_id = @workspace_id
+  AND created_by_type = 'member'
+  AND created_by_id = @user_id
+  AND status = 'active'
+RETURNING *;
+
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
