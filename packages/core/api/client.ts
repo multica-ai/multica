@@ -2172,9 +2172,10 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
+  async listTimeline(issueId: string, options?: { signal?: AbortSignal }): Promise<TimelineEntry[]> {
     const raw = await this.fetch<unknown>(
       `/api/issues/${issueId}/timeline`,
+      options,
     );
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",

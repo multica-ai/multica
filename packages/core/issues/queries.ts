@@ -667,7 +667,7 @@ export function childrenByParentsOptions(
 export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryFn: ({ signal }) => api.listTimeline(issueId, { signal }),
   });
 }
 
