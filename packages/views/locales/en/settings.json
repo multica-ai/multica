@@ -1029,7 +1029,7 @@
   "tokens": {
     "title": "API tokens",
     "description": "Personal access tokens allow the CLI and external integrations to authenticate with your account. Use one via multica login --token, or as a Bearer token when calling the API.",
-    "security_note": "A token grants full access to your account — treat it like a password.",
+    "security_note": "A token acts as you wherever it has access — treat it like a password.",
     "empty": "No API tokens yet.",
     "load_failed": "Could not load your API tokens. Reload the page to try again.",
     "name_placeholder": "Token name (e.g. My CLI)",
@@ -1038,6 +1038,12 @@
       "90": "90 days",
       "365": "1 year",
       "never": "No expiry"
+    },
+    "scope": {
+      "all": "All workspaces",
+      "label": "Workspace access",
+      "metadata": " · {{workspace}} only",
+      "metadata_unknown": " · One workspace only"
     },
     "create": "Create",
     "creating": "Creating...",

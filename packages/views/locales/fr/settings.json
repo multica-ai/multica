@@ -1029,7 +1029,7 @@
   "tokens": {
     "title": "Jetons d'API",
     "description": "Les jetons d'accès personnels permettent au CLI et aux intégrations externes de s'authentifier avec votre compte. Utilisez-en un via multica login --token, ou comme jeton Bearer lors des appels à l'API.",
-    "security_note": "Un jeton donne un accès complet à votre compte — traitez-le comme un mot de passe.",
+    "security_note": "Un jeton agit en votre nom partout où il a accès — traitez-le comme un mot de passe.",
     "empty": "Aucun token API pour l’instant.",
     "load_failed": "Impossible de charger vos jetons d'API. Rechargez la page pour réessayer.",
     "name_placeholder": "Nom du jeton (ex. Mon CLI)",
@@ -1038,6 +1038,12 @@
       "90": "90 jours",
       "365": "1 an",
       "never": "Sans expiration"
+    },
+    "scope": {
+      "all": "Tous les espaces de travail",
+      "label": "Accès aux espaces de travail",
+      "metadata": " · {{workspace}} uniquement",
+      "metadata_unknown": " · Un seul espace de travail"
     },
     "create": "Créer",
     "creating": "Création...",

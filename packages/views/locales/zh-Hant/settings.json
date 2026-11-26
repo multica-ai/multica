@@ -1019,7 +1019,7 @@
   "tokens": {
     "title": "API Token",
     "description": "個人訪問 token 讓 CLI 和外部整合可以代表你的帳號進行身份驗證。可透過 multica login --token 使用，或在呼叫 API 時作為 Bearer token 傳送。",
-    "security_note": "Token 擁有你帳號的完整訪問權限，請像密碼一樣妥善保管。",
+    "security_note": "Token 在其可訪問的範圍內代表你本人，請像密碼一樣妥善保管。",
     "empty": "暫無 API token。",
     "load_failed": "無法載入 API token，請重新整理頁面重試。",
     "name_placeholder": "Token 名稱（例如：我的 CLI）",
@@ -1028,6 +1028,12 @@
       "90": "90 天",
       "365": "1 年",
       "never": "永不過期"
+    },
+    "scope": {
+      "all": "所有工作區",
+      "label": "可訪問的工作區",
+      "metadata": " · 僅限 {{workspace}}",
+      "metadata_unknown": " · 僅限一個工作區"
     },
     "create": "建立",
     "creating": "建立中...",
