@@ -39,10 +39,7 @@ func TestDaemonRegister_RefreshEventCarriesNoRuntimeRows(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload = %#v, want a map", refreshes[0].Payload)
 	}
-	if _, leaked := payload["runtimes"]; leaked {
-		t.Fatalf("workspace-wide event carries runtime rows (private runtime %s): %#v", runtimeID, payload)
-	}
-	if payload["action"] != "register" {
-		t.Fatalf("payload action = %#v, want register", payload["action"])
+	if len(payload) != 1 || payload["action"] != "register" {
+		t.Fatalf("workspace-wide event payload = %#v, want only {action: register} (private runtime %s)", payload, runtimeID)
 	}
 }

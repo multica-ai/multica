@@ -1120,9 +1120,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	// The event reaches every member of the workspace, so it only asks clients
 	// to refetch; the list endpoint applies runtime visibility.
-	h.publish(protocol.EventDaemonRegister, req.WorkspaceID, "system", "", map[string]any{
-		"action": "register",
-	})
+	h.PublishRuntimeRefresh(req.WorkspaceID, "system", "", "register")
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts)
 	if !h.daemonCredentialSeesWorkspaceConfig(r, req.WorkspaceID) {
