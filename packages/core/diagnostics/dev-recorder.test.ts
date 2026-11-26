@@ -163,6 +163,46 @@ describe("dev recorder", () => {
     expect(getDevRecording().errors).toEqual([]);
   });
 
+  it("attributes a long task to the scripts and React renders that ran in it", () => {
+    const observers: { types: string[]; callback: (list: { getEntries: () => unknown[] }) => void }[] = [];
+    class FakePerformanceObserver {
+      static supportedEntryTypes = ["longtask", "long-animation-frame", "measure"];
+      types: string[] = [];
+      constructor(callback: (list: { getEntries: () => unknown[] }) => void) {
+        observers.push({ types: this.types, callback });
+      }
+      observe({ type }: { type: string }) {
+        this.types.push(type);
+      }
+      disconnect() {}
+    }
+    const emit = (type: string, entries: object[]) =>
+      observers.find((o) => o.types.includes(type))!.callback({ getEntries: () => entries.map((e) => ({ entryType: type, ...e })) });
+    vi.stubGlobal("PerformanceObserver", FakePerformanceObserver);
+    installDevRecorder();
+    recordDevRoute("/acme/issues/MUL-1");
+
+    emit("measure", [
+      { name: "\u200bCommentList", startTime: 1010, duration: 150, detail: { devtools: { track: "Components \u269b" } } },
+    ]);
+    emit("long-animation-frame", [
+      {
+        startTime: 1000,
+        duration: 200,
+        blockingDuration: 150,
+        scripts: [{ startTime: 1000, duration: 170, invoker: "MessagePort.onmessage", invokerType: "event-listener" }],
+      },
+    ]);
+    emit("longtask", [{ startTime: 1000, duration: 180 }]);
+    expect(getDevRecording().longTasks[0]).toMatchObject({ durationMs: 180, route: "/acme/issues/MUL-1", attribution: null });
+
+    vi.advanceTimersByTime(300);
+    const { attribution } = getDevRecording().longTasks[0]!;
+    expect(attribution?.scripts.map((s) => s.invoker)).toEqual(["MessagePort.onmessage"]);
+    expect(attribution?.components).toMatchObject([{ name: "CommentList", renders: 1, selfMs: 150 }]);
+    vi.unstubAllGlobals();
+  });
+
   it("leaves a running recording alone when a second install is stopped", () => {
     installDevRecorder();
     const stopSecond = installDevRecorder();

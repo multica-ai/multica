@@ -211,8 +211,9 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
           label="Jank"
           value={blocked === null ? "—" : `${Math.round(blocked * 100)}%`}
           tone={blocked === null ? "normal" : jankTone(blocked)}
+          wide
         >
-          <LongTaskPanel recording={recording} blocked={blocked} />
+          <LongTaskPanel recording={recording} blocked={blocked} build={build} apiUrl={apiUrl} route={route} />
         </Metric>
         <Metric
           label="Net"
