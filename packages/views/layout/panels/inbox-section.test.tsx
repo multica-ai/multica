@@ -349,17 +349,26 @@ describe("InboxSection", () => {
     expect(rows()[0]!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
   });
 
-  it("puts a read row's agents at a tree row's right edge, with nothing after them", () => {
+  it("puts a read row's agents at a tree row's right edge, and leaves an unread row's dot in the dots' column", () => {
     useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: true } });
     renderSection(
-      [item({ id: "n1", issue_id: "issue-a", title: "Working one", read: true })],
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Read one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Unread one", created_at: "2026-11-09T08:00:00Z" }),
+      ],
       null,
       "/acme/issues",
-      [{ id: "t1", issue_id: "issue-a", agent_id: "a1", status: "running" }],
+      [
+        { id: "t1", issue_id: "issue-a", agent_id: "a1", status: "running" },
+        { id: "t2", issue_id: "issue-b", agent_id: "a2", status: "running" },
+      ],
     );
-    const link = screen.getByRole("link", { name: /^Working one/ });
+    const link = screen.getByRole("link", { name: /^Read one/ });
     expect(link.lastElementChild).toContainElement(within(link).getByTestId("agents"));
-    expect(rows()[0]!.querySelector("[data-mc='nav-item']")).toHaveClass("pr-2");
+    const [read, unread] = rows().map((row) => row.querySelector("[data-mc='nav-item']"));
+    expect(read).toHaveClass("pr-2");
+    expect(unread).not.toHaveClass("pr-2");
+    expect(unread!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
   });
 
   it("shows the whole notification on hover, with its actions", async () => {
