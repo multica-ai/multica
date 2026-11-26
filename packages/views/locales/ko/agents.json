@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "모든 실행 취소",
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 실행은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
+    "archive_dialog_mika_note": " Mika를 복원하기 전까지 'Mika와 시작' 안내가 다시 표시되지 않습니다.",
     "archive_dialog_cancel": "취소",
     "archive_dialog_confirm": "보관",
     "set_access_applies_to_other": "{{count}}개 agent에 적용됩니다."
@@ -1107,5 +1108,9 @@
     "new_app": "이 에이전트의 새 앱",
     "adds_app_note": "응답하면 이후 실행부터 {{agent}}이(가) {{app}}을(를) 사용할 수 있습니다.",
     "add_to_agent": "{{agent}}에 {{app}} 추가"
+  },
+  "lifecycle": {
+    "danger_zone": "위험 영역",
+    "restore_label": "에이전트 복원"
   }
 }

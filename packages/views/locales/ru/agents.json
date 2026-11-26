@@ -139,6 +139,7 @@
     "cancel_dialog_confirm": "Отменить все запуски",
     "archive_dialog_title": "Архивировать «{{name}}»?",
     "archive_dialog_description": "Агента нельзя будет назначить или упомянуть, а все активные запуски будут отменены. Вся история сохраняется, и позже вы сможете его восстановить.",
+    "archive_dialog_mika_note": " Предложение «Начать с Mika» не появится, пока Mika не будет восстановлена.",
     "archive_dialog_cancel": "Отмена",
     "archive_dialog_confirm": "Архивировать",
     "cancelled_tasks_toast_few": "Отменено запусков: {{count}}",
@@ -1203,5 +1204,9 @@
     "new_app": "Новое приложение для этого агента",
     "adds_app_note": "Ответ добавит {{app}} агенту {{agent}} для будущих запусков.",
     "add_to_agent": "Добавить {{app}} агенту {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Опасная зона",
+    "restore_label": "Восстановить агента"
   }
 }

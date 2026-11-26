@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   Agent,
   AgentConversationStarter,
@@ -48,6 +48,8 @@ interface InspectorProps {
   currentUserId: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /** Rendered last in the form column, below the execution settings. */
+  footer?: ReactNode;
 }
 
 interface ProfileDraft {
@@ -88,6 +90,7 @@ export function AgentDetailInspector({
   currentUserId,
   canEdit,
   onUpdate,
+  footer,
 }: InspectorProps) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
@@ -369,6 +372,8 @@ export function AgentDetailInspector({
               </SettingsRow>
             </SettingsCard>
           </SettingsSection>
+
+          {footer}
         </div>
 
         <SettingsSection

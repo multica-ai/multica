@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Cancelar todas las ejecuciones",
     "archive_dialog_title": "¿Archivar \"{{name}}\"?",
     "archive_dialog_description": "El agente no podrá asignarse ni mencionarse, y sus ejecuciones activas se cancelarán. Todo el historial se conserva y podrás restaurarlo más tarde.",
+    "archive_dialog_mika_note": " La sugerencia «Empezar con Mika» no volverá a aparecer hasta que restaures a Mika.",
     "archive_dialog_cancel": "Cancelar",
     "archive_dialog_confirm": "Archivar",
     "set_access_applies_to_one": "Se aplica a {{count}} agente.",
@@ -1139,5 +1140,9 @@
     "new_app": "Nueva aplicación para este agente",
     "adds_app_note": "Al responder, se añade {{app}} a {{agent}} para las próximas ejecuciones.",
     "add_to_agent": "Añadir {{app}} a {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Zona peligrosa",
+    "restore_label": "Restaurar agente"
   }
 }

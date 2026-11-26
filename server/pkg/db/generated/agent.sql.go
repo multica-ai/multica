@@ -4079,8 +4079,8 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 
 const getAgentBySystemKey = `-- name: GetAgentBySystemKey :one
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
-WHERE workspace_id = $1 AND system_key = $2 AND archived_at IS NULL
-ORDER BY created_at ASC, id ASC
+WHERE workspace_id = $1 AND system_key = $2
+ORDER BY (archived_at IS NOT NULL) ASC, created_at ASC, id ASC
 LIMIT 1
 `
 
@@ -4092,6 +4092,10 @@ type GetAgentBySystemKeyParams struct {
 // Resolves a workspace's built-in agent by its stable system_key. This is the
 // identity lookup for system agents: their display name is owner-editable, so
 // nothing server-side may key off it.
+//
+// Archived rows are included (an active row wins): an archived Mika still holds
+// the workspace's slot and her name, so callers must see it to refuse a second
+// one rather than insert past it.
 func (q *Queries) GetAgentBySystemKey(ctx context.Context, arg GetAgentBySystemKeyParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, getAgentBySystemKey, arg.WorkspaceID, arg.SystemKey)
 	var i Agent
