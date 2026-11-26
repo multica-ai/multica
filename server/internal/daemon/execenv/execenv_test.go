@@ -5423,7 +5423,7 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			// Notifying FOLLOWERS is a false need: delivery already happens.
 			// Scoped to followers on purpose — for a non-follower, a mention
 			// IS how they find out (Elon's review catch on #7245).
-			"followers of the issue already see your comment",
+			"followers already see your comment",
 			"completion notifications are platform-owned",
 			// The one real function, with its scope.
 			"pulls someone into work they are not doing yet",

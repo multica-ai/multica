@@ -33,6 +33,14 @@ func TestBuildPromptDocCommentNamesDiscussionAndReplyCommand(t *testing.T) {
 	if strings.Contains(prompt, "multica issue") {
 		t.Fatalf("doc prompt must not send the agent to issue commands:\n%s", prompt)
 	}
+	// Rules that hold for every turn live once in the brief
+	// (writeWorkflowDocComment, Output); the per-turn prompt carries only what
+	// changes per turn.
+	for _, stable := range []string{"doc's history", "left to people", "progress updates"} {
+		if strings.Contains(prompt, stable) {
+			t.Fatalf("doc prompt repeats the brief's stable rule %q:\n%s", stable, prompt)
+		}
+	}
 
 	task.DocCommentContent = ""
 	if prompt := BuildPrompt(task, "claude"); !strings.Contains(prompt, "has been deleted") {
