@@ -185,11 +185,17 @@ describe("IssueViewHeader setup of a new view", () => {
     );
     expect(screen.queryByRole("menu", { name: "Filter menu" })).toBeNull();
 
+    const input = screen.getByRole("textbox", { name: "Rename" });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+    expect(input).toHaveFocus();
+    expect(rename).not.toHaveBeenCalled();
     const user = userEvent.setup();
     await user.clear(screen.getByRole("textbox", { name: "Rename" }));
     await user.type(screen.getByRole("textbox", { name: "Rename" }), "Open bugs{Enter}");
 
     expect(rename).toHaveBeenCalledWith(active.view, "Open bugs");
+    expect(rename).toHaveBeenCalledTimes(1);
     expect(useIssueViewRenameStore.getState().target).toBeNull();
     expect(screen.getByRole("menu", { name: "Filter menu" })).toBeInTheDocument();
   });
