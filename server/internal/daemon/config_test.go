@@ -731,6 +731,28 @@ func TestLoadConfig_CodexTurnInterruptTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CodexResumeContextPercent(t *testing.T) {
+	stageFakeAgent(t)
+	load := func(value string) (Config, error) {
+		t.Setenv("MULTICA_CODEX_RESUME_CONTEXT_PERCENT", value)
+		return LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+	}
+	for value, want := range map[string]int{"": DefaultCodexResumeContextPercent, "0": 0, "75": 75} {
+		cfg, err := load(value)
+		if err != nil {
+			t.Fatalf("LoadConfig(%q): %v", value, err)
+		}
+		if cfg.CodexResumeContextPercent != want {
+			t.Fatalf("CodexResumeContextPercent for %q = %d, want %d", value, cfg.CodexResumeContextPercent, want)
+		}
+	}
+	for _, value := range []string{"-1", "101", "half"} {
+		if _, err := load(value); err == nil {
+			t.Fatalf("LoadConfig(%q) succeeded, want an error", value)
+		}
+	}
+}
+
 // TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
 // MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
 // explicit "0" both mean "keep the backend default" (0 = unset), while a positive
