@@ -12,6 +12,7 @@ export const defaultStorage: StorageAdapter = {
   },
   keys: () => {
     if (typeof window === "undefined") return [];
-    return Object.keys(localStorage);
+    return Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((key): key is string => key !== null);
   },
 };
