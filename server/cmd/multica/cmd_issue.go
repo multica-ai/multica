@@ -670,7 +670,7 @@ func init() {
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
-	issueListCmd.Flags().Bool("blocked", false, "Only issues waiting for unfinished tasks (manual blockers or earlier stages)")
+	issueListCmd.Flags().Bool("blocked", false, "Only issues still waiting on unfinished blockers (issues added with --blocked-by, or earlier stages)")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
