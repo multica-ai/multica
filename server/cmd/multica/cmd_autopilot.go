@@ -836,13 +836,23 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, map[string]any{"triggers": triggers, "total": len(triggers)})
 	}
 
+	// The scheduler only fires enabled triggers of an active autopilot; the
+	// others keep a stale next_run_at, so leave NEXT_RUN blank for them.
+	autopilot, _ := resp["autopilot"].(map[string]any)
+	autopilotActive := strVal(autopilot, "status") == "active"
+
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "LABEL"}
 	rows := make([][]string, 0, len(triggers))
 	for _, t := range triggers {
 		enabled := "no"
-		if b, ok := t["enabled"].(bool); ok && b {
+		triggerEnabled, _ := t["enabled"].(bool)
+		if triggerEnabled {
 			enabled = "yes"
+		}
+		nextRun := ""
+		if triggerEnabled && autopilotActive {
+			nextRun = strVal(t, "next_run_at")
 		}
 		schedule := strVal(t, "cron_expression")
 		if tz := strVal(t, "timezone"); schedule != "" && tz != "" {
@@ -853,7 +863,7 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 			strVal(t, "kind"),
 			enabled,
 			schedule,
-			relativeTimestamp(strVal(t, "next_run_at")),
+			relativeTimestamp(nextRun),
 			strVal(t, "label"),
 		})
 	}
