@@ -370,7 +370,7 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 			fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
 		}
 		if task.TriggerCommentID != "" {
-			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+			b.WriteString(execenv.BuildWakeupReplyInstructions(task.IssueID, task.TriggerCommentID))
 		}
 		return b.String()
 	}

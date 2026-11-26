@@ -396,3 +396,40 @@ func TestBuildDocCommentReplyInstructionsWindowsVariants(t *testing.T) {
 		t.Fatalf("doc runs have no ## Comment Formatting section to point at:\n%s", got)
 	}
 }
+
+// TestBuildWakeupReplyInstructionsWindowsVariants pins the wakeup delivery
+// reply (MUL-10271) to the shared per-shell cookbook: it used to be a bash
+// one-liner that PowerShell 5.1 cannot parse. The non-Windows command must
+// stay byte-identical to the old one.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestBuildWakeupReplyInstructionsWindowsVariants(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+
+	const bash = "    multica issue comment add issue-1 --parent c-1 --content-file ./reply.md --output table && rm ./reply.md\n"
+
+	runtimeGOOS = "linux"
+	got := BuildWakeupReplyInstructions("issue-1", "c-1")
+	for _, want := range []string{bash, "original delivery thread", "not a new comment trigger"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("non-Windows wakeup reply missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "PowerShell") {
+		t.Fatalf("non-Windows wakeup reply must not carry the PowerShell variant:\n%s", got)
+	}
+
+	runtimeGOOS = "windows"
+	got = BuildWakeupReplyInstructions("issue-1", "c-1")
+	for _, want := range []string{
+		"PowerShell:\n\n    multica issue comment add issue-1 --parent c-1 --content-file ./reply.md --output table\n    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n    Remove-Item ./reply.md\n",
+		"Git Bash:\n\n" + bash,
+		"never pipe via `--content-stdin`",
+		"not a new comment trigger",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Windows wakeup reply missing %q:\n%s", want, got)
+		}
+	}
+}
