@@ -183,3 +183,11 @@ WHERE d.autopilot_id = $1
   AND a.workspace_id = $2
 ORDER BY d.created_at DESC
 LIMIT $3 OFFSET $4;
+
+-- name: CountWebhookDeliveriesByAutopilot :one
+-- Workspace-scoped the same way as ListWebhookDeliveriesByAutopilot.
+SELECT count(*)
+FROM webhook_delivery d
+JOIN autopilot a ON a.id = d.autopilot_id
+WHERE d.autopilot_id = $1
+  AND a.workspace_id = $2;
