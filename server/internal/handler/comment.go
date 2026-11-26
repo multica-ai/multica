@@ -1860,13 +1860,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	content, commentSaved := h.scanComment(r.Context(), issue.WorkspaceID, req.Content, false)
 	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   authorType,
 		AuthorID:     parseUUID(authorID),
-		Content:      req.Content,
+		Content:      content,
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
@@ -1962,6 +1963,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
+	if commentSaved != nil {
+		commentSaved(r.Context(), comment)
+	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
@@ -3542,6 +3546,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if h.refuseGuestMention(w, r, workspaceID, userID, actorType, req.Content) {
 		return
 	}
+	var commentSaved func(context.Context, db.Comment)
+	req.Content, commentSaved = h.scanComment(r.Context(), wsUUID, req.Content, true)
 	if req.ExpectedRevision != nil {
 		if *req.ExpectedRevision < 1 {
 			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
@@ -3767,6 +3773,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update comment")
 		return
 	}
+	if commentSaved != nil {
+		commentSaved(r.Context(), comment)
+	}
 	retriggerEditedComment := func() []CommentTriggerOutcome {
 		if oldContent == comment.Content {
 			return nil
@@ -3802,6 +3811,54 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	resp.TriggerOutcomes = retriggerEditedComment()
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) scanComment(ctx context.Context, workspaceID pgtype.UUID, content string, edit bool) (string, func(context.Context, db.Comment)) {
+	if h.commentScanner == nil {
+		return content, nil
+	}
+	return h.commentScanner.ScanComment(ctx, workspaceID, content, edit)
+}
+
+// RewriteComment replaces a comment's text with rewrite(current text) on the
+// actor's behalf and broadcasts the edit. Unlike an edit through
+// UpdateComment it neither cancels nor starts agent runs: the text is being
+// cleaned, not changed. It reports false when rewrite left the text as is,
+// and pgx.ErrNoRows when the comment is gone or changed underneath it.
+func (h *Handler) RewriteComment(r *http.Request, workspaceID, commentID pgtype.UUID, rewrite func(string) string, actorType, actorID string) (db.Comment, bool, error) {
+	existing, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentID, WorkspaceID: workspaceID})
+	if err != nil {
+		return db.Comment{}, false, err
+	}
+	if existing.DeletedAt.Valid {
+		return db.Comment{}, false, pgx.ErrNoRows
+	}
+	content := rewrite(existing.Content)
+	if content == existing.Content {
+		return existing, false, nil
+	}
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.UpdateCommentRow, error) {
+		return q.UpdateComment(r.Context(), db.UpdateCommentParams{
+			ID:                 commentID,
+			Content:            content,
+			SourceTaskID:       existing.SourceTaskID,
+			SuppressedAgentIds: existing.SuppressedAgentIds,
+			ExpectedRevision:   pgtype.Int8{Int64: existing.Revision, Valid: true},
+		})
+	})
+	if err != nil {
+		return db.Comment{}, false, err
+	}
+	comment := updated.Comment()
+	cid := uuidToString(comment.ID)
+	resp := commentToResponse(comment, h.groupReactions(r, []pgtype.UUID{comment.ID})[cid], h.groupAttachments(r, []pgtype.UUID{comment.ID})[cid])
+	resp.IssueRevision = updated.IssueRevision
+	payload := map[string]any{"comment": resp}
+	if updated.IssueRevision > 0 {
+		payload["issue_revision"] = updated.IssueRevision
+	}
+	h.publish(protocol.EventCommentUpdated, uuidToString(workspaceID), actorType, actorID, payload)
+	return comment, true, nil
 }
 
 func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {

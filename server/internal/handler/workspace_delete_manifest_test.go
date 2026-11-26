@@ -143,6 +143,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"search_index_change":                workspaceDelete,
 	"search_index_prune_mark":            workspaceDeleteKeep,
 	"seat_capacity_outbox":               workspaceDeleteSettle,
+	"secret_finding":                     workspaceDelete,
+	"secret_scan_setting":                workspaceDelete,
 	"site_counter":                       workspaceDeleteKeep,
 	"skill":                              workspaceDelete,
 	"skill_file":                         workspaceDelete,

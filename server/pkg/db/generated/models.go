@@ -1933,6 +1933,36 @@ type SeatCapacityOutbox struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SecretFinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Rule           string             `json:"rule"`
+	Masked         string             `json:"masked"`
+	Fingerprint    string             `json:"fingerprint"`
+	Status         string             `json:"status"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SecretScanSetting struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Mode               string             `json:"mode"`
+	Salt               []byte             `json:"salt"`
+	BackfillStatus     string             `json:"backfill_status"`
+	BackfillCursor     pgtype.UUID        `json:"backfill_cursor"`
+	BackfillScanned    int64              `json:"backfill_scanned"`
+	BackfillStartedAt  pgtype.Timestamptz `json:"backfill_started_at"`
+	BackfillFinishedAt pgtype.Timestamptz `json:"backfill_finished_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SiteCounter struct {
 	Name      string             `json:"name"`
 	Value     int64              `json:"value"`

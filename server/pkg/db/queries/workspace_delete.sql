@@ -368,6 +368,12 @@ deleted_comment_reactions AS (
 deleted_comment_idempotency_receipts AS (
     DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
 ),
+deleted_secret_findings AS (
+    DELETE FROM secret_finding WHERE secret_finding.workspace_id = $1
+),
+deleted_secret_scan_settings AS (
+    DELETE FROM secret_scan_setting WHERE secret_scan_setting.workspace_id = $1
+),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
 ),

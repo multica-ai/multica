@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_secret_finding_comment_fingerprint;
