@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1071,23 +1072,60 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 // removeLocalWorktreeDir unregisters the worktree from the user's repo and
 // deletes its directory. The branch is deliberately left alone — it is the
 // task's deliverable.
+//
+// The removal is retried on a short backoff because on Windows a directory
+// that is any process's working directory cannot be deleted, and the handles
+// that pin it — the provider's own shell children finishing late, an antivirus
+// or indexer scan of the tree — close asynchronously after the processes are
+// already gone. Failing the whole task the moment the first unlink hits a
+// sharing violation misreports a delivery that is already committed (the
+// caller fails the task precisely because removal could not be confirmed), so
+// the retry buys the platform's lag, not unlimited patience: the budget stays
+// small enough that a genuinely leaked process still fails the task.
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
-	var removeErr error
-	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
-		removeErr = err
+	for attempt := 0; ; attempt++ {
+		removeErr := removeLocalWorktreeDirOnce(gitRoot, worktreePath, logger)
+		if removeErr == nil || runtime.GOOS != "windows" || attempt >= worktreeRemoveMaxAttempts-1 {
+			return removeErr
+		}
+		backoff := time.Duration(250*(1<<attempt)) * time.Millisecond
 		if logger != nil {
-			logger.Warn("execenv: git worktree remove failed; pruning registration",
-				"path", worktreePath, "output", out, "error", err)
+			logger.Info("execenv: worktree removal blocked (transient lock?); retrying",
+				"path", worktreePath, "attempt", attempt+1, "backoff", backoff.String(), "error", removeErr)
 		}
-		// Fall back to deleting the directory ourselves and dropping the now
-		// dangling registration, so the user's repo isn't left listing a
-		// worktree that no longer exists.
-		if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
-			removeErr = errors.Join(removeErr, rmErr)
-			if logger != nil {
-				logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
-			}
+		time.Sleep(backoff)
+	}
+}
+
+// worktreeRemoveMaxAttempts caps the backoff at 3.75 seconds. Git commands
+// also have their own timeout.
+const worktreeRemoveMaxAttempts = 5
+
+func removeLocalWorktreeDirOnce(gitRoot, worktreePath string, logger *slog.Logger) error {
+	out, gitErr := runGit(gitRoot, "worktree", "remove", "--force", worktreePath)
+	if gitErr == nil {
+		// Git for Windows can unregister a worktree and exit successfully
+		// while leaving directory junctions behind (#7548).
+		if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		} else if statErr != nil {
+			return fmt.Errorf("confirm worktree removal: %w", statErr)
+		} else if runtime.GOOS != "windows" {
+			return errors.New("worktree directory still exists after git removal reported success")
 		}
+	} else if logger != nil {
+		logger.Warn("execenv: git worktree remove failed; pruning registration",
+			"path", worktreePath, "output", out, "error", gitErr)
+	}
+
+	removeErr := gitErr
+	if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
+		removeErr = errors.Join(removeErr, rmErr)
+		if logger != nil {
+			logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
+		}
+	}
+	if gitErr != nil {
 		if out, pruneErr := runGit(gitRoot, "worktree", "prune"); pruneErr != nil && logger != nil {
 			logger.Warn("execenv: git worktree prune failed", "output", out, "error", pruneErr)
 		}
@@ -1102,7 +1140,7 @@ func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) e
 	if removeErr != nil {
 		return fmt.Errorf("worktree directory still exists after removal fallback: %w", removeErr)
 	}
-	return errors.New("worktree directory still exists after git removal reported success")
+	return errors.New("worktree directory still exists after removal fallback")
 }
 
 // deleteBranch drops a task branch that carries nothing worth keeping — an
