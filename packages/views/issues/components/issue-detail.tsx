@@ -3936,6 +3936,10 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             isPeek
               ? "mx-auto w-full px-6 py-5"
               : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
+            // A sticky box only pins once the content overflows; on a short
+            // issue the column fills the viewport so the composer still sits
+            // at its bottom (see the spacer above the composer).
+            stickyComposer && "flex min-h-full flex-col",
             hideUnalignedLanding && "opacity-0",
             !hideUnalignedLanding &&
               !reduceMotion &&
@@ -4589,7 +4593,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               (the anchor's or the composer's margin), so it never covers the
               last comment for good. */}
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
-          {!stickyComposer && (
+          {stickyComposer ? (
+            <div aria-hidden className="grow" />
+          ) : (
             <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
               <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
             </div>
