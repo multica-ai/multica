@@ -170,6 +170,9 @@ function formatStepDuration(ms: number): string {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
+/** Characters in the narrowest offset, "+00:00". */
+const MIN_OFFSET_CHARS = 6;
+
 /** Offset from the run's start, which is what a step's position means. */
 function formatOffset(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -550,6 +553,15 @@ export function AgentTranscriptDialog({
     return undefined;
   }, [steps]);
   const runEnd = task.completed_at ?? lastStamp;
+  // Offsets only grow, so the widest label the list shows is the run's last
+  // one. Sizing the column to it in `ch` keeps every rail in one line at any
+  // run length or font size. Take the later end: a step stamped past
+  // completed_at (clock skew) still shows its own offset.
+  const offsetChars = useMemo(() => {
+    const ends = [task.completed_at, lastStamp].flatMap((iso) => timeMs(iso ?? undefined) ?? []);
+    if (runStartMs === undefined || ends.length === 0) return MIN_OFFSET_CHARS;
+    return formatOffset(Math.max(...ends) - runStartMs).length;
+  }, [task.completed_at, lastStamp, runStartMs]);
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
@@ -1306,6 +1318,7 @@ export function AgentTranscriptDialog({
                     row={row}
                     formatText={formatText}
                     runStartMs={runStartMs}
+                    offsetChars={offsetChars}
                     isLive={isLive}
                     entering={isLive && enteringSeqs.has(row.seq)}
                     selectedSeq={selectedSeq}
@@ -1492,6 +1505,7 @@ interface TranscriptRowProps {
   formatText: (text: string) => string;
   row: TraceRow;
   runStartMs?: number;
+  offsetChars: number;
   isLive: boolean;
   entering?: boolean;
   selectedSeq: number | null;
@@ -1524,14 +1538,29 @@ function TranscriptRow(props: TranscriptRowProps) {
   return entering ? <div ref={rowRef}>{content}</div> : content;
 }
 
-/** The offset column: where in the run this happened. */
-function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+/**
+ * The offset column: where in the run this happened. Every row gets the same
+ * `chars` so the rails beside it line up; without `startedAt` it is a blank
+ * spacer of the same width.
+ */
+function OffsetCell({
+  startedAt,
+  runStartMs,
+  chars,
+}: {
+  startedAt?: string;
+  runStartMs?: number;
+  chars: number;
+}) {
   const locale = useLocale();
   const at = timeMs(startedAt);
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
-      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      // `ch` is this cell's own monospace glyph, so the width follows the font
+      // size; min-w-11 keeps the minutes-only column as it always was.
+      className="min-w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      style={{ width: `${chars}ch` }}
       title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
@@ -1596,10 +1625,10 @@ function StepDuration({
  * identity — the glyph says "the agent's own words", which is what the facet
  * selects, and it says it in 12px without a repeated string.
  */
-function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageStep }) {
+function ProseRow({ row, runStartMs, offsetChars }: TranscriptRowProps & { row: TraceMessageStep }) {
   return (
     <div className="group flex items-start gap-2 px-4 py-2.5">
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
       <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 pr-2">
@@ -1619,6 +1648,7 @@ function StepRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   isLive,
   selectedSeq,
   onSelect,
@@ -1656,7 +1686,7 @@ function StepRow({
         row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span
         aria-hidden
         className={cn(
@@ -1699,6 +1729,7 @@ function GroupRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   selectedSeq,
   expanded,
   onToggleGroup,
@@ -1722,7 +1753,7 @@ function GroupRow({
         aria-expanded={expanded}
         className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
       >
-        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
         <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
         <ChevronRight
           aria-hidden
@@ -1745,31 +1776,36 @@ function GroupRow({
         <DurationCell ms={row.durationMs} />
       </button>
       {expanded && (
-        <div className="ml-[4.4rem] border-l pl-3">
-          {row.steps.map((step) => (
-            <button
-              key={step.seq}
-              type="button"
-              onClick={() => onSelect(step.seq)}
-              className={cn(
-                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
-                selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
-              )}
-            >
-              <span className="truncate font-mono text-muted-foreground">
-                {callSummary(step, summaryLabels) || step.tool}
-              </span>
-              {step.durationMs === undefined ? (
-                <span className="ml-auto shrink-0" />
-              ) : (
-                <StepDuration
-                  ms={step.durationMs}
-                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
-                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
-                />
-              )}
-            </button>
-          ))}
+        // Laid out like a row, with a blank offset cell, so the border lands
+        // on the rail at whatever width the column has.
+        <div className="flex gap-2 pl-4">
+          <OffsetCell chars={offsetChars} />
+          <div className="min-w-0 flex-1 border-l pl-3">
+            {row.steps.map((step) => (
+              <button
+                key={step.seq}
+                type="button"
+                onClick={() => onSelect(step.seq)}
+                className={cn(
+                  "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
+                  selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
+                )}
+              >
+                <span className="truncate font-mono text-muted-foreground">
+                  {callSummary(step, summaryLabels) || step.tool}
+                </span>
+                {step.durationMs === undefined ? (
+                  <span className="ml-auto shrink-0" />
+                ) : (
+                  <StepDuration
+                    ms={step.durationMs}
+                    unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                    className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
