@@ -1247,6 +1247,19 @@ export interface DashboardMemberTask {
   usage: DashboardMemberUsage[];
 }
 
+// One project's usage for the dashboard's "By project" tab. A run's project
+// is its issue's. `project_id` is "__no_project__" for runs outside any
+// project and "__restricted_projects__" for the one bucket that holds the
+// usage of private projects the viewer cannot see; `project_title` is empty
+// for both. A caller below admin only receives the runs they are accountable
+// for.
+export interface DashboardUsageByProject {
+  project_id: string;
+  project_title: string;
+  task_count: number;
+  usage: DashboardMemberUsage[];
+}
+
 // Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab.
 // squad_id is "" for standalone (non-squad-triggered) agent runs.
 export interface DashboardFailureBySquad {

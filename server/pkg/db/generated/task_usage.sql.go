@@ -549,13 +549,15 @@ WITH recent AS (
           OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
           OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
       )
+      AND (NOT $6::bool OR i.project_id IS NULL)
       AND (
-            ($6::bool AND atq.accountable_user_id IS NULL)
-         OR (NOT $6::bool AND atq.accountable_user_id = $7::uuid)
+            $7::bool
+         OR ($8::bool AND atq.accountable_user_id IS NULL)
+         OR (NOT $8::bool AND atq.accountable_user_id = $9::uuid)
       )
     GROUP BY atq.id
     ORDER BY MAX(tu.created_at) DESC, atq.id
-    LIMIT $8::int
+    LIMIT $10::int
 )
 SELECT
     r.task_id,
@@ -593,14 +595,16 @@ ORDER BY r.last_used_at DESC, r.task_id, LOWER(tu.provider), tu.model
 `
 
 type ListDashboardMemberTaskUsageParams struct {
-	SinceHour    pgtype.Timestamptz `json:"since_hour"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	ProjectID    pgtype.UUID        `json:"project_id"`
-	SquadScope   string             `json:"squad_scope"`
-	SquadID      pgtype.UUID        `json:"squad_id"`
-	Unattributed bool               `json:"unattributed"`
-	UserID       pgtype.UUID        `json:"user_id"`
-	TaskLimit    int32              `json:"task_limit"`
+	SinceHour      pgtype.Timestamptz `json:"since_hour"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	SquadScope     string             `json:"squad_scope"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	WithoutProject bool               `json:"without_project"`
+	AllUsers       bool               `json:"all_users"`
+	Unattributed   bool               `json:"unattributed"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	TaskLimit      int32              `json:"task_limit"`
 }
 
 type ListDashboardMemberTaskUsageRow struct {
@@ -635,6 +639,10 @@ type ListDashboardMemberTaskUsageRow struct {
 // another workspace matches nothing: every run is pinned to this workspace
 // through its agent.
 //
+// The "By project" tab reuses it: @all_users drops the accountable-user
+// filter (owner/admin), and @without_project keeps only the runs whose issue
+// has no project, or that have no issue at all.
+//
 // autopilot_run_id and context ride along so the handler can resolve the
 // projects a run is about (projectaccess.TasksProjects) without re-reading the
 // runs, and chat_creator_id so it can withhold a chat's title from everyone
@@ -646,6 +654,8 @@ func (q *Queries) ListDashboardMemberTaskUsage(ctx context.Context, arg ListDash
 		arg.ProjectID,
 		arg.SquadScope,
 		arg.SquadID,
+		arg.WithoutProject,
+		arg.AllUsers,
 		arg.Unattributed,
 		arg.UserID,
 		arg.TaskLimit,
@@ -1144,6 +1154,148 @@ func (q *Queries) ListDashboardUsageByMember(ctx context.Context, arg ListDashbo
 		var i ListDashboardUsageByMemberRow
 		if err := rows.Scan(
 			&i.AccountableUserID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByProject = `-- name: ListDashboardUsageByProject :many
+WITH scoped AS (
+    SELECT
+        tu.task_id,
+        LOWER(tu.provider) AS provider,
+        tu.model,
+        tu.input_tokens,
+        tu.output_tokens,
+        tu.cache_read_tokens,
+        tu.cache_write_tokens,
+        tu.cost_usd_ticks,
+        CASE
+            WHEN COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid)
+                 = ANY($2::uuid[]) THEN '__restricted_projects__'
+            WHEN i.project_id IS NULL THEN '__no_project__'
+            ELSE i.project_id::text
+        END AS project_key
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    JOIN agent a ON a.id = atq.agent_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE a.workspace_id = $1
+      AND atq.runtime_id IS NOT NULL
+      AND tu.created_at >= $3::timestamptz
+      AND ($4::uuid IS NULL OR i.project_id = $4)
+      AND (
+          $5::text = ''
+          OR ($5::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+          OR ($5::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $6::uuid)
+      )
+      AND ($7::uuid IS NULL OR atq.accountable_user_id = $7)
+), counts AS (
+    SELECT project_key, COUNT(DISTINCT task_id)::int AS task_count
+    FROM scoped
+    GROUP BY project_key
+)
+SELECT
+    s.project_key::text AS project_key,
+    COALESCE(p.title, '')::text AS project_title,
+    c.task_count,
+    s.provider::text AS provider,
+    s.model,
+    SUM(s.input_tokens)::bigint       AS input_tokens,
+    SUM(s.output_tokens)::bigint      AS output_tokens,
+    SUM(s.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(s.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(s.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(s.input_tokens)       FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(s.output_tokens)      FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(s.cache_read_tokens)  FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(s.cache_write_tokens) FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM scoped s
+JOIN counts c ON c.project_key = s.project_key
+LEFT JOIN project p ON p.id::text = s.project_key AND p.workspace_id = $1
+GROUP BY s.project_key, p.title, c.task_count, s.provider, s.model
+ORDER BY s.project_key, s.provider, s.model
+`
+
+type ListDashboardUsageByProjectParams struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
+	SinceHour        pgtype.Timestamptz `json:"since_hour"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	SquadScope       string             `json:"squad_scope"`
+	SquadID          pgtype.UUID        `json:"squad_id"`
+	OnlyUserID       pgtype.UUID        `json:"only_user_id"`
+}
+
+type ListDashboardUsageByProjectRow struct {
+	ProjectKey               string `json:"project_key"`
+	ProjectTitle             string `json:"project_title"`
+	TaskCount                int32  `json:"task_count"`
+	Provider                 string `json:"provider"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadTokens          int64  `json:"cache_read_tokens"`
+	CacheWriteTokens         int64  `json:"cache_write_tokens"`
+	CostUsdTicks             int64  `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64  `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64  `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64  `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64  `json:"uncosted_cache_write_tokens"`
+}
+
+// Per-(project, provider, model) token aggregates for the "By project" tab, on
+// the same filters and window as ListDashboardUsageByMember, so the project
+// rows add up to the Cost / Tokens totals. A run's project is its issue's, the
+// project dimension of the hourly rollup.
+//
+// project_key is the project id, '__no_project__' for runs whose issue has no
+// project (or that have no issue), or '__restricted_projects__' for runs about
+// a project in @hidden_project_ids. Masking happens before grouping, so hidden
+// projects merge into one bucket that names none of them and keeps their usage.
+// A guest's hidden set holds projectaccess.NoProject (the nil UUID), which
+// folds the project-less runs into that bucket too.
+//
+// task_count is distinct runs with usage per project_key, repeated on each of
+// its rows: a run that used two models counts once.
+func (q *Queries) ListDashboardUsageByProject(ctx context.Context, arg ListDashboardUsageByProjectParams) ([]ListDashboardUsageByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByProject,
+		arg.WorkspaceID,
+		arg.HiddenProjectIds,
+		arg.SinceHour,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+		arg.OnlyUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByProjectRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByProjectRow
+		if err := rows.Scan(
+			&i.ProjectKey,
+			&i.ProjectTitle,
+			&i.TaskCount,
 			&i.Provider,
 			&i.Model,
 			&i.InputTokens,

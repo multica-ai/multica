@@ -125,6 +125,7 @@ import type {
   DashboardFailureBySquad,
   DashboardUsageByMember,
   DashboardMemberTask,
+  DashboardUsageByProject,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -378,6 +379,7 @@ import {
   DashboardFailureBySquadListSchema,
   DashboardUsageByMemberListSchema,
   DashboardMemberTaskListSchema,
+  DashboardUsageByProjectListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
@@ -3314,6 +3316,29 @@ export class ApiClient {
       DashboardMemberTaskListSchema,
       "GET /api/dashboard/usage/member-tasks",
       { user_id: userId },
+    );
+  }
+
+  // Per-project usage: one row per project, plus the "__no_project__" and
+  // "__restricted_projects__" buckets. A caller below admin only gets the
+  // runs they are accountable for.
+  async getDashboardUsageByProject(params: DashboardRequestParams): Promise<DashboardUsageByProject[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-project",
+      params,
+      DashboardUsageByProjectListSchema,
+      "GET /api/dashboard/usage/by-project",
+    );
+  }
+
+  // One project's most recent runs. `params.project_id` is the project, or
+  // "__no_project__" for runs outside any project.
+  async getDashboardProjectTasks(params: DashboardRequestParams): Promise<DashboardMemberTask[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/project-tasks",
+      params,
+      DashboardMemberTaskListSchema,
+      "GET /api/dashboard/usage/project-tasks",
     );
   }
 

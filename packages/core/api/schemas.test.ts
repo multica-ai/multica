@@ -28,6 +28,7 @@ import {
   DashboardFailureDailyListSchema,
   DashboardUsageByMemberListSchema,
   DashboardMemberTaskListSchema,
+  DashboardUsageByProjectListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
@@ -1274,6 +1275,21 @@ describe("dashboard + runtime usage schema drift", () => {
     expect(row?.usage[0]?.uncosted_input_tokens).toBeUndefined();
     expect(broken?.usage).toEqual([]);
     expect(broken?.task_count).toBe(3);
+  });
+
+  it("fills missing fields on by-project rows and keeps a row whose usage is malformed", () => {
+    const [row, broken] = DashboardUsageByProjectListSchema.parse([
+      { usage: [{ model: "m" }] },
+      { project_id: "__no_project__", task_count: 2, usage: "nope" },
+    ]);
+    expect(row?.project_id).toBe("");
+    expect(row?.project_title).toBe("");
+    expect(row?.task_count).toBe(0);
+    expect(row?.usage[0]?.input_tokens).toBe(0);
+    expect(row?.usage[0]?.uncosted_input_tokens).toBeUndefined();
+    expect(broken?.usage).toEqual([]);
+    expect(broken?.task_count).toBe(2);
+    expect(DashboardUsageByProjectListSchema.safeParse(null).success).toBe(false);
   });
 
   it("degrades unknown member-task kinds and bad usage to safe defaults", () => {

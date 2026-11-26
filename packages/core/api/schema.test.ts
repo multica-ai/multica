@@ -2396,6 +2396,8 @@ describe("dashboard history limit (MUL-9490)", () => {
       client.getDashboardFailuresByAgent.bind(client),
       client.getDashboardUsageByMember.bind(client),
       (params: DashboardRequestParams) => client.getDashboardMemberTasks("user-1", params),
+      client.getDashboardUsageByProject.bind(client),
+      client.getDashboardProjectTasks.bind(client),
     ];
     for (const call of calls) {
       for (const [header, want] of [
@@ -2439,6 +2441,28 @@ describe("dashboard history limit (MUL-9490)", () => {
       squad_id: "__standalone__",
       tz: "UTC",
       user_id: "__unattributed__",
+    });
+  });
+
+  it("sends the expanded project as project_id to project-tasks", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await client.getDashboardProjectTasks({
+      days: 7,
+      project_id: "__no_project__",
+      squad_id: "squad-1",
+      tz: "UTC",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe("/api/dashboard/usage/project-tasks");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      days: "7",
+      project_id: "__no_project__",
+      squad_id: "squad-1",
+      tz: "UTC",
     });
   });
 });

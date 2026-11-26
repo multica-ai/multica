@@ -159,5 +159,17 @@
     "header_task": "執行",
     "header_agent": "AI 代理",
     "header_time": "最近使用"
+  },
+  "projects": {
+    "tab": "按專案",
+    "title": "按專案統計用量",
+    "description": "每次執行都算在它所處理任務的專案名下；聊天和不屬於任何專案的任務，歸入「無專案」。",
+    "caption_other": "{{count}} 個專案",
+    "header_project": "專案",
+    "no_project": "無專案",
+    "restricted": "你無權查看的專案",
+    "no_data": "所選時間範圍內暫無專案用量。",
+    "show_tasks": "展開 {{name}} 最近的執行",
+    "hide_tasks": "收起 {{name}} 最近的執行"
   }
 }

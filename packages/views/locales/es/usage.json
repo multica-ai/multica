@@ -162,5 +162,18 @@
     "header_task": "Ejecución",
     "header_agent": "Agente",
     "header_time": "Último uso"
+  },
+  "projects": {
+    "tab": "Por proyecto",
+    "title": "Uso por proyecto",
+    "description": "Cada ejecución se cuenta para el proyecto de la tarea en la que trabajó. Los chats y las ejecuciones sin una tarea de proyecto aparecen en Sin proyecto.",
+    "caption_one": "{{count}} proyecto",
+    "caption_other": "{{count}} proyectos",
+    "header_project": "Proyecto",
+    "no_project": "Sin proyecto",
+    "restricted": "Proyectos que no puedes ver",
+    "no_data": "Sin uso de proyectos en este periodo.",
+    "show_tasks": "Mostrar ejecuciones recientes de {{name}}",
+    "hide_tasks": "Ocultar ejecuciones recientes de {{name}}"
   }
 }

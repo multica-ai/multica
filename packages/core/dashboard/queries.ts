@@ -27,7 +27,9 @@ type DashboardKeyPart =
   | "failures-by-agent"
   | "failures-by-squad"
   | "by-member"
-  | "member-tasks";
+  | "member-tasks"
+  | "by-project"
+  | "project-tasks";
 
 const dashboardKey = (
   wsId: string,
@@ -140,6 +142,24 @@ export const dashboardKeys = {
       "user",
       userId,
     ] as const,
+  byProject: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "by-project", days, projectId, tz, historyLimit, squadId),
+  // The expanded row's project (or "__no_project__") takes the project slot,
+  // so one project's runs are never shown as a placeholder under another's.
+  projectTasks: (
+    wsId: string,
+    days: number,
+    projectKey: string,
+    tz: string,
+    historyLimit: DashboardHistoryLimitParam,
+    squadId: string | null,
+  ) => dashboardKey(wsId, "project-tasks", days, projectKey, tz, historyLimit, squadId),
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -454,5 +474,49 @@ export function dashboardMemberTasksOptions(
     squadId,
     ["user", userId ?? ""],
     !!userId,
+  );
+}
+
+export function dashboardUsageByProjectOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "by-project",
+    (params) => api.getDashboardUsageByProject(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+// Fetched only when a project row is expanded, hence the projectKey gate.
+// projectKey is a project id or "__no_project__"; it is sent as project_id.
+export function dashboardProjectTasksOptions(
+  wsId: string,
+  days: number,
+  projectKey: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null,
+) {
+  return dashboardOptions(
+    "project-tasks",
+    (params) => api.getDashboardProjectTasks(params),
+    wsId,
+    days,
+    projectKey,
+    tz,
+    historyLimit,
+    squadId,
+    [],
+    !!projectKey,
   );
 }

@@ -159,5 +159,17 @@
     "header_task": "실행",
     "header_agent": "에이전트",
     "header_time": "마지막 사용"
+  },
+  "projects": {
+    "tab": "프로젝트별",
+    "title": "프로젝트별 사용량",
+    "description": "각 실행은 작업한 태스크가 속한 프로젝트에 집계됩니다. 채팅과 프로젝트가 없는 태스크의 실행은 '프로젝트 없음'에 모입니다.",
+    "caption_other": "프로젝트 {{count}}개",
+    "header_project": "프로젝트",
+    "no_project": "프로젝트 없음",
+    "restricted": "볼 수 없는 프로젝트",
+    "no_data": "이 기간에는 프로젝트 사용량이 없습니다.",
+    "show_tasks": "{{name}}의 최근 실행 보기",
+    "hide_tasks": "{{name}}의 최근 실행 숨기기"
   }
 }

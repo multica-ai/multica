@@ -265,7 +265,6 @@ function MemberTasks({
   scope: MembersTabScope;
   agents: Agent[];
 }) {
-  const { t } = useT("usage");
   const query = useQuery(
     dashboardMemberTasksOptions(
       scope.wsId,
@@ -277,9 +276,20 @@ function MemberTasks({
       userId,
     ),
   );
+  return <RecentRuns query={query} agents={agents} />;
+}
 
+/** The expanded list of recent runs, shared with the "By project" tab. */
+export function RecentRuns({
+  query,
+  agents,
+}: {
+  query: { isPending: boolean; isError: boolean; data?: DashboardMemberTask[] };
+  agents: Agent[];
+}) {
+  const { t } = useT("usage");
   if (query.isPending) return <Skeleton className="h-24 rounded-md" />;
-  if (query.isError) {
+  if (query.isError || !query.data) {
     return (
       <p role="alert" className="text-caption text-muted-foreground">
         {t(($) => $.members.recent_error)}

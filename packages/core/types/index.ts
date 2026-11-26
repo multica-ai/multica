@@ -104,6 +104,7 @@ export type {
   DashboardMemberUsage,
   DashboardUsageByMember,
   DashboardMemberTask,
+  DashboardUsageByProject,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,

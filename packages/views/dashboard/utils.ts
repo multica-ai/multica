@@ -10,6 +10,7 @@ import type {
   DashboardFailureBySquad,
   DashboardMemberUsage,
   DashboardUsageByMember,
+  DashboardUsageByProject,
 } from "@multica/core/types";
 import {
   FAILURE_CLASSES,
@@ -1082,4 +1083,51 @@ export function aggregateMemberUsage(rows: DashboardUsageByMember[]): MemberDash
     if (aUnattributed !== bUnattributed) return aUnattributed ? 1 : -1;
     return b.cost - a.cost || b.tokens - a.tokens;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Per-project usage (the "By project" tab).
+// ---------------------------------------------------------------------------
+
+/** Server bucket for runs outside any project. Never a real project id. */
+export const NO_PROJECT_ID = "__no_project__";
+/** Server bucket for private projects the viewer cannot see. Never expandable. */
+export const RESTRICTED_PROJECTS_ID = "__restricted_projects__";
+
+export interface ProjectDashboardRow {
+  projectId: string;
+  /** The server's title; empty for the two buckets. */
+  title: string;
+  tokens: number;
+  cost: number;
+  /** Distinct runs with usage in the window, counted server-side. */
+  taskCount: number;
+}
+
+/**
+ * One row per project, priced like aggregateMemberUsage. Sorted by cost, then
+ * tokens; the no-project bucket and then the restricted bucket always sort
+ * last.
+ */
+export function aggregateProjectUsage(rows: DashboardUsageByProject[]): ProjectDashboardRow[] {
+  const byProject = new Map<string, ProjectDashboardRow>();
+  for (const r of rows) {
+    const { tokens, cost } = summarizeMemberUsage(r.usage);
+    const entry = byProject.get(r.project_id) ?? {
+      projectId: r.project_id,
+      title: r.project_title,
+      tokens: 0,
+      cost: 0,
+      taskCount: 0,
+    };
+    entry.tokens += tokens;
+    entry.cost += cost;
+    entry.taskCount += r.task_count;
+    byProject.set(r.project_id, entry);
+  }
+  const rank = (id: string) =>
+    id === RESTRICTED_PROJECTS_ID ? 2 : id === NO_PROJECT_ID ? 1 : 0;
+  return Array.from(byProject.values()).toSorted(
+    (a, b) => rank(a.projectId) - rank(b.projectId) || b.cost - a.cost || b.tokens - a.tokens,
+  );
 }

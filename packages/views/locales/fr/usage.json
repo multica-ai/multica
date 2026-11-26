@@ -162,5 +162,18 @@
     "header_task": "Exécution",
     "header_agent": "Agent",
     "header_time": "Dernière utilisation"
+  },
+  "projects": {
+    "tab": "Par projet",
+    "title": "Consommation par projet",
+    "description": "Chaque exécution est comptée pour le projet de la tâche sur laquelle elle a porté. Les conversations et les exécutions sans tâche de projet sont classées dans Aucun projet.",
+    "caption_one": "{{count}} projet",
+    "caption_other": "{{count}} projets",
+    "header_project": "Projet",
+    "no_project": "Aucun projet",
+    "restricted": "Projets auxquels vous n'avez pas accès",
+    "no_data": "Aucune consommation de projet sur cette fenêtre.",
+    "show_tasks": "Afficher les exécutions récentes de {{name}}",
+    "hide_tasks": "Masquer les exécutions récentes de {{name}}"
   }
 }

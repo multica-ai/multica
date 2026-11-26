@@ -162,5 +162,18 @@
     "header_task": "Run",
     "header_agent": "Agent",
     "header_time": "Last used"
+  },
+  "projects": {
+    "tab": "By project",
+    "title": "Usage by project",
+    "description": "Each run counts for the project of the issue it worked on. Chats and runs without a project issue are under No project.",
+    "caption_one": "{{count}} project",
+    "caption_other": "{{count}} projects",
+    "header_project": "Project",
+    "no_project": "No project",
+    "restricted": "Projects you can't see",
+    "no_data": "No project usage in this window.",
+    "show_tasks": "Show recent runs for {{name}}",
+    "hide_tasks": "Hide recent runs for {{name}}"
   }
 }

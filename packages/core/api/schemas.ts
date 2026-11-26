@@ -2386,6 +2386,17 @@ const DashboardMemberTaskSchema = z.object({
 
 export const DashboardMemberTaskListSchema = z.array(DashboardMemberTaskSchema);
 
+// Per-project usage (`/api/dashboard/usage/by-project`); its recent runs
+// (`/usage/project-tasks`) share DashboardMemberTaskListSchema.
+const DashboardUsageByProjectSchema = z.object({
+  project_id: z.string().default(""),
+  project_title: z.string().default(""),
+  task_count: z.number().default(0),
+  usage: z.array(DashboardMemberUsageSchema).catch([]),
+}).loose();
+
+export const DashboardUsageByProjectListSchema = z.array(DashboardUsageByProjectSchema);
+
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes

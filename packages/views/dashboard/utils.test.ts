@@ -7,6 +7,9 @@ import {
   UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
   aggregateMemberUsage,
+  aggregateProjectUsage,
+  NO_PROJECT_ID,
+  RESTRICTED_PROJECTS_ID,
   aggregateDailyCost,
   aggregateDailyErrors,
   aggregateDailyTasks,
@@ -1083,5 +1086,34 @@ describe("aggregateMemberUsage", () => {
     expect(priced.cost).toBeCloseTo(5);
     expect(priced.tokens).toBe(1_000_000);
     expect(summarizeMemberUsage([])).toEqual({ tokens: 0, cost: 0 });
+  });
+});
+
+describe("aggregateProjectUsage", () => {
+  const row = (model: string, input: number) => ({
+    provider: "claude",
+    model,
+    input_tokens: input,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  });
+
+  it("prices each project's models, ranks by cost and keeps the buckets last", () => {
+    const rows = aggregateProjectUsage([
+      { project_id: RESTRICTED_PROJECTS_ID, project_title: "", task_count: 4, usage: [row("claude-sonnet-4-6", 9_000_000)] },
+      { project_id: NO_PROJECT_ID, project_title: "", task_count: 3, usage: [row("claude-sonnet-4-6", 8_000_000)] },
+      { project_id: "small", project_title: "Small", task_count: 1, usage: [row("claude-sonnet-4-6", 100_000)] },
+      {
+        project_id: "big",
+        project_title: "Big",
+        task_count: 2,
+        usage: [row("claude-sonnet-4-6", 1_000_000), row("claude-haiku-4-5", 1_000_000)],
+      },
+    ]);
+
+    expect(rows.map((r) => r.projectId)).toEqual(["big", "small", NO_PROJECT_ID, RESTRICTED_PROJECTS_ID]);
+    expect(rows[0]).toMatchObject({ title: "Big", tokens: 2_000_000, taskCount: 2 });
+    expect(rows[0]!.cost).toBeGreaterThan(rows[1]!.cost);
   });
 });

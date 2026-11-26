@@ -554,6 +554,10 @@ GROUP BY atq.accountable_user_id;
 -- another workspace matches nothing: every run is pinned to this workspace
 -- through its agent.
 --
+-- The "By project" tab reuses it: @all_users drops the accountable-user
+-- filter (owner/admin), and @without_project keeps only the runs whose issue
+-- has no project, or that have no issue at all.
+--
 -- autopilot_run_id and context ride along so the handler can resolve the
 -- projects a run is about (projectaccess.TasksProjects) without re-reading the
 -- runs, and chat_creator_id so it can withhold a chat's title from everyone
@@ -575,8 +579,10 @@ WITH recent AS (
           OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
           OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
       )
+      AND (NOT @without_project::bool OR i.project_id IS NULL)
       AND (
-            (@unattributed::bool AND atq.accountable_user_id IS NULL)
+            @all_users::bool
+         OR (@unattributed::bool AND atq.accountable_user_id IS NULL)
          OR (NOT @unattributed::bool AND atq.accountable_user_id = sqlc.narg('user_id')::uuid)
       )
     GROUP BY atq.id
@@ -616,3 +622,74 @@ WHERE tu.created_at >= @since_hour::timestamptz
 GROUP BY r.task_id, r.last_used_at, atq.id, i.number, i.title, cs.title, cs.creator_id,
          LOWER(tu.provider), tu.model
 ORDER BY r.last_used_at DESC, r.task_id, LOWER(tu.provider), tu.model;
+
+-- name: ListDashboardUsageByProject :many
+-- Per-(project, provider, model) token aggregates for the "By project" tab, on
+-- the same filters and window as ListDashboardUsageByMember, so the project
+-- rows add up to the Cost / Tokens totals. A run's project is its issue's, the
+-- project dimension of the hourly rollup.
+--
+-- project_key is the project id, '__no_project__' for runs whose issue has no
+-- project (or that have no issue), or '__restricted_projects__' for runs about
+-- a project in @hidden_project_ids. Masking happens before grouping, so hidden
+-- projects merge into one bucket that names none of them and keeps their usage.
+-- A guest's hidden set holds projectaccess.NoProject (the nil UUID), which
+-- folds the project-less runs into that bucket too.
+--
+-- task_count is distinct runs with usage per project_key, repeated on each of
+-- its rows: a run that used two models counts once.
+WITH scoped AS (
+    SELECT
+        tu.task_id,
+        LOWER(tu.provider) AS provider,
+        tu.model,
+        tu.input_tokens,
+        tu.output_tokens,
+        tu.cache_read_tokens,
+        tu.cache_write_tokens,
+        tu.cost_usd_ticks,
+        CASE
+            WHEN COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid)
+                 = ANY(sqlc.narg('hidden_project_ids')::uuid[]) THEN '__restricted_projects__'
+            WHEN i.project_id IS NULL THEN '__no_project__'
+            ELSE i.project_id::text
+        END AS project_key
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    JOIN agent a ON a.id = atq.agent_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE a.workspace_id = @workspace_id
+      AND atq.runtime_id IS NOT NULL
+      AND tu.created_at >= @since_hour::timestamptz
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+      AND (
+          sqlc.arg('squad_scope')::text = ''
+          OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+          OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
+      )
+      AND (sqlc.narg('only_user_id')::uuid IS NULL OR atq.accountable_user_id = sqlc.narg('only_user_id'))
+), counts AS (
+    SELECT project_key, COUNT(DISTINCT task_id)::int AS task_count
+    FROM scoped
+    GROUP BY project_key
+)
+SELECT
+    s.project_key::text AS project_key,
+    COALESCE(p.title, '')::text AS project_title,
+    c.task_count,
+    s.provider::text AS provider,
+    s.model,
+    SUM(s.input_tokens)::bigint       AS input_tokens,
+    SUM(s.output_tokens)::bigint      AS output_tokens,
+    SUM(s.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(s.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(s.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(s.input_tokens)       FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(s.output_tokens)      FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(s.cache_read_tokens)  FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(s.cache_write_tokens) FILTER (WHERE s.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM scoped s
+JOIN counts c ON c.project_key = s.project_key
+LEFT JOIN project p ON p.id::text = s.project_key AND p.workspace_id = @workspace_id
+GROUP BY s.project_key, p.title, c.task_count, s.provider, s.model
+ORDER BY s.project_key, s.provider, s.model;

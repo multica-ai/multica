@@ -230,6 +230,28 @@ func (h *Handler) GetDashboardMemberTasks(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, []struct{}{})
 		return
 	}
+	h.writeDashboardTasks(w, r, workspaceID, member, hidden, db.ListDashboardMemberTaskUsageParams{
+		ProjectID:    projectID,
+		SquadScope:   squadScope,
+		SquadID:      squadID,
+		Unattributed: unattributed,
+		UserID:       userID,
+	})
+}
+
+// writeDashboardTasks lists the most recent runs matching params (member-tasks
+// and project-tasks) and applies the per-run rules: agents the caller may not
+// see fold onto restrictedAgentsRowID, a run about a private project the
+// caller cannot see loses its issue, and a chat is named only to its creator.
+// It fills in the workspace, window and limit itself.
+func (h *Handler) writeDashboardTasks(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID string,
+	member db.Member,
+	hidden projectaccess.Hidden,
+	params db.ListDashboardMemberTaskUsageParams,
+) {
 	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
 	if !ok {
 		return
@@ -237,18 +259,12 @@ func (h *Handler) GetDashboardMemberTasks(w http.ResponseWriter, r *http.Request
 	tz := h.resolveViewingTZ(r)
 	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
 
-	rows, err := h.Queries.ListDashboardMemberTaskUsage(r.Context(), db.ListDashboardMemberTaskUsageParams{
-		WorkspaceID:  parseUUID(workspaceID),
-		SinceHour:    usageHourCutoff(window.since),
-		ProjectID:    projectID,
-		SquadScope:   squadScope,
-		SquadID:      squadID,
-		Unattributed: unattributed,
-		UserID:       userID,
-		TaskLimit:    memberTaskLimit,
-	})
+	params.WorkspaceID = parseUUID(workspaceID)
+	params.SinceHour = usageHourCutoff(window.since)
+	params.TaskLimit = memberTaskLimit
+	rows, err := h.Queries.ListDashboardMemberTaskUsage(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list member tasks")
+		writeError(w, http.StatusInternalServerError, "failed to list recent runs")
 		return
 	}
 	hiddenTasks, err := dashboardHiddenProjectTasks(r, h.Queries, hidden, rows)

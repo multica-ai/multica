@@ -159,5 +159,17 @@
     "header_task": "运行",
     "header_agent": "智能体",
     "header_time": "最近使用"
+  },
+  "projects": {
+    "tab": "按项目",
+    "title": "按项目统计用量",
+    "description": "每次运行都算在它所处理任务的项目名下；聊天和不属于任何项目的任务，归入\"无项目\"。",
+    "caption_other": "{{count}} 个项目",
+    "header_project": "项目",
+    "no_project": "无项目",
+    "restricted": "你无权查看的项目",
+    "no_data": "所选时间范围内暂无项目用量。",
+    "show_tasks": "展开 {{name}} 最近的运行",
+    "hide_tasks": "收起 {{name}} 最近的运行"
   }
 }

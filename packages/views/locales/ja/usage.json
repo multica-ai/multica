@@ -159,5 +159,17 @@
     "header_task": "実行",
     "header_agent": "エージェント",
     "header_time": "最終使用"
+  },
+  "projects": {
+    "tab": "プロジェクト別",
+    "title": "プロジェクト別の使用量",
+    "description": "各実行は、対象のタスクが属するプロジェクトに計上されます。チャットやプロジェクトのないタスクの実行は「プロジェクトなし」にまとめられます。",
+    "caption_other": "{{count}} 件のプロジェクト",
+    "header_project": "プロジェクト",
+    "no_project": "プロジェクトなし",
+    "restricted": "閲覧できないプロジェクト",
+    "no_data": "この期間にプロジェクトの使用量はありません。",
+    "show_tasks": "{{name}} の最近の実行を表示",
+    "hide_tasks": "{{name}} の最近の実行を隠す"
   }
 }
