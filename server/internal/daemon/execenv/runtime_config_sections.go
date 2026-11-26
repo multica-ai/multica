@@ -945,9 +945,11 @@ func writeMentions(b *strings.Builder, docsEnabled bool) {
 	// The notify caveat is scoped to FOLLOWERS on
 	// purpose — for a human who does not follow the issue, a mention is
 	// exactly how they find out, and that escalation must stay available
-	// (Elon's review catch on #7245). The cost asymmetry line is what breaks
-	// the ambiguous middle.
-	b.WriteString("A mention pulls someone into work they are not doing yet: escalate to a human owner, hand another agent a concrete new sub-task, loop someone in because the user asked. It is not needed merely to notify — followers of the issue already see your comment, and completion notifications are platform-owned. Nor is it how a name is written — crediting a decision or citing someone's earlier point is prose about them, not work for them; the link form dispatches whoever it names, so a reference stays plain text. A thank-you / sign-off / FYI mention of another agent enqueues a paid run whose only possible reply is another courtesy; a missed mention costs one follow-up ask, a stray one costs a run. Silence ends conversations.\n\n")
+	// (Elon's review catch on #7245). It does not say "of the issue": doc
+	// discussion runs get this section too, and there the people already
+	// notified are the discussion's earlier writers (NotifyDocComment). The
+	// cost asymmetry line is what breaks the ambiguous middle.
+	b.WriteString("A mention pulls someone into work they are not doing yet: escalate to a human owner, hand another agent a concrete new sub-task, loop someone in because the user asked. It is not needed merely to notify — followers already see your comment, and completion notifications are platform-owned. Nor is it how a name is written — crediting a decision or citing someone's earlier point is prose about them, not work for them; the link form dispatches whoever it names, so a reference stays plain text. A thank-you / sign-off / FYI mention of another agent enqueues a paid run whose only possible reply is another courtesy; a missed mention costs one follow-up ask, a stray one costs a run. Silence ends conversations.\n\n")
 }
 
 // writeAttachments emits the Attachments pointer.
