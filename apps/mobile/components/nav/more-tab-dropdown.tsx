@@ -23,7 +23,7 @@
  * leaves the real tab button entirely alone.
  *
  * Visual conventions inside the popover (apps/mobile/CLAUDE.md):
- *   - All glyphs are SF Symbols rendered via expo-image (`sf:` source),
+ *   - Menu glyphs use platform-specific icons,
  *     so they share the visual language of the bottom tab bar icons.
  *   - All colours route through THEME tokens (foreground /
  *     mutedForeground / secondary), so dark mode is automatic.
@@ -36,7 +36,7 @@
  */
 import { useMemo } from "react";
 import { Image, Pressable, View } from "react-native";
-import { Image as ExpoImage } from "expo-image";
+import { PlatformIcon, type PlatformIconProps } from "@/components/ui/platform-icon";
 import { router, usePathname } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -70,14 +70,15 @@ interface NavItem {
   labelKey: "more_menu.pinned" | "more_menu.issues" | "more_menu.projects";
   /** SF Symbol name, rendered via expo-image `source: "sf:<name>"`. */
   icon: string;
+  androidIcon: PlatformIconProps["android"];
   /** Path under /:slug/ — final href is `/${slug}${path}`. */
   path: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { labelKey: "more_menu.pinned", icon: "pin", path: "/more/pins" },
-  { labelKey: "more_menu.issues", icon: "list.bullet", path: "/more/issues" },
-  { labelKey: "more_menu.projects", icon: "square.stack", path: "/more/projects" },
+  { labelKey: "more_menu.pinned", icon: "pin", androidIcon: "pin-outline", path: "/more/pins" },
+  { labelKey: "more_menu.issues", icon: "list.bullet", androidIcon: "list-outline", path: "/more/issues" },
+  { labelKey: "more_menu.projects", icon: "square.stack", androidIcon: "layers-outline", path: "/more/projects" },
 ];
 
 export function MoreTabDropdownAnchor({
@@ -160,10 +161,11 @@ export function MoreTabDropdownAnchor({
                 isActive(item.path) && "bg-secondary",
               )}
             >
-              <ExpoImage
-                source={`sf:${item.icon}`}
-                tintColor={theme.foreground}
-                style={{ width: 18, height: 18 }}
+              <PlatformIcon
+                ios={item.icon}
+                android={item.androidIcon}
+                color={theme.foreground}
+                size={18}
               />
               <Text className="text-sm text-foreground">{t(item.labelKey)}</Text>
             </DropdownMenuItem>
@@ -225,10 +227,11 @@ function UserCard({
           </Text>
         ) : null}
       </View>
-      <ExpoImage
-        source="sf:chevron.right"
-        tintColor={chevronTint}
-        style={{ width: 12, height: 12 }}
+      <PlatformIcon
+        ios="chevron.right"
+        android="chevron-forward"
+        color={chevronTint}
+        size={12}
       />
     </DropdownMenuItem>
   );
@@ -289,10 +292,11 @@ function WorkspaceCard({
         </Text>
       </View>
       {canSwitch ? (
-        <ExpoImage
-          source="sf:chevron.right"
-          tintColor={chevronTint}
-          style={{ width: 12, height: 12 }}
+        <PlatformIcon
+          ios="chevron.right"
+          android="chevron-forward"
+          color={chevronTint}
+          size={12}
         />
       ) : null}
     </DropdownMenuItem>

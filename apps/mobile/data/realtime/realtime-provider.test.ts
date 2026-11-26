@@ -16,6 +16,7 @@ vi.mock("react", async (importOriginal) => ({
   useState: () => [lifecycle.clientState, (value: unknown) => { lifecycle.clientState = value; }],
 }));
 vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
   AppState: {
     addEventListener: (_event: string, handler: (state: string) => void) => {
       lifecycle.onAppState = handler;
@@ -34,7 +35,7 @@ vi.mock("@/data/api", () => ({ api: { getToken: () => "token" } }));
 // Run the provider's effect and its actual WSClient, without rendering RN.
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
-  constructor() { MockWebSocket.instances.push(this); }
+  constructor(readonly url: string) { MockWebSocket.instances.push(this); }
   close() {}
 }
 
@@ -68,6 +69,7 @@ describe("RealtimeProvider foreground recovery", () => {
     // Let the effect finish reading the token and install native listeners.
     await Promise.resolve();
     expect(MockWebSocket.instances).toHaveLength(1);
+    expect(new URL(MockWebSocket.instances[0].url).searchParams.get("client_os")).toBe("android");
 
     lifecycle.onAppState!("background");
     expect(MockWebSocket.instances).toHaveLength(1);

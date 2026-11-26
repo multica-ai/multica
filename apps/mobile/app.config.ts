@@ -32,6 +32,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // is the white ring from #6995. Expo prebuild generates every required iOS
     // icon size from this single PNG.
     icon: "./assets/icon.png",
+    android: {
+      package: "ai.multica.mobile.androiddebug",
+      softwareKeyboardLayoutMode: "resize",
+      blockedPermissions: [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+      ],
+    },
     ios: {
       // Expo keeps the top-level portrait policy for iPhone while adding all
       // iPad orientations required for multitasking when tablet support is on.

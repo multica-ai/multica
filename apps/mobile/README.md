@@ -155,3 +155,25 @@ Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.
 - For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
 
 For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+
+## Local Android debug APK
+
+Use JDK 17, Android SDK and ADB, and the workspace's Node.js and pnpm versions.
+From `apps/mobile`, build the debug APK for an ARM64 Android device:
+
+```bash
+APP_ENV=staging pnpm android:apk:debug
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+The APK uses the separate application ID `ai.multica.mobile.androiddebug`.
+It loads JavaScript from Metro. To use the checked-in staging endpoint, start
+Metro on the Mac and forward its port over USB:
+
+```bash
+adb reverse tcp:8081 tcp:8081
+NODE_OPTIONS=--dns-result-order=ipv4first pnpm dev:staging --localhost
+```
+
+Open the installed app and connect its development client to
+`http://127.0.0.1:8081`. Keep Metro running while testing.

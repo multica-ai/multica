@@ -1,10 +1,10 @@
 import { useCallback, useMemo } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   FlatList,
   View,
 } from "react-native";
+import { useActionSheet } from "@/lib/use-action-sheet";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +35,7 @@ import {
 } from "@/lib/inbox-display";
 
 export default function Inbox() {
+  const { showActionSheetWithOptions } = useActionSheet();
   const { t } = useT("inbox");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -76,7 +77,7 @@ export default function Inbox() {
       t("actions.archive_completed"),
       t("actions.archive_all"),
     ];
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,

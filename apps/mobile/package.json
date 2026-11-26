@@ -4,6 +4,7 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "android:apk:debug": "expo prebuild --platform android --no-install && cd android && ./gradlew -PreactNativeArchitectures=arm64-v8a :app:assembleDebug",
     "dev": "expo start",
     "dev:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo start",
     "dev:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production expo start",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",
+    "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/vector-icons": "^15.1.1",
     "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "9.1.0",

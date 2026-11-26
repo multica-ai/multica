@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
   View,
 } from "react-native";
+import { useActionSheet } from "@/lib/use-action-sheet";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
@@ -47,6 +47,7 @@ import { useT } from "@/lib/i18n";
 import { useIsGuest } from "@/lib/use-is-guest";
 
 export default function IssueDetail() {
+  const { showActionSheetWithOptions } = useActionSheet();
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
   // [workspace]/(tabs)/inbox.tsx). `highlight` is the target comment id;
   // `h` is a per-tap nonce so re-tapping the same row re-fires the
@@ -144,7 +145,7 @@ export default function IssueDetail() {
                   : t("menu.delete_issue"),
     );
     const destructiveIndex = actions.indexOf("delete");
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
@@ -178,7 +179,7 @@ export default function IssueDetail() {
         }
       },
     );
-  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin, guest, t]);
+  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin, guest, t, showActionSheetWithOptions]);
 
   return (
     <View className="flex-1 bg-background">
