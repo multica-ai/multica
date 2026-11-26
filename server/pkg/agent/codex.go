@@ -46,8 +46,8 @@ const (
 const (
 	codexStderrTailBytes                  = 2048
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
-	// defaultCodexFirstTurnNoProgressTimeout caps how long the first turn may
-	// stay completely silent after the app-server reports turn/started. Its only
+	// defaultCodexFirstTurnNoProgressTimeout caps how long a turn may go
+	// without model progress after the app-server accepts turn/start. Its only
 	// job is to fail fast instead of waiting out
 	// defaultCodexSemanticInactivityTimeout, so it only has to stay well under
 	// that 10 minute backstop.
@@ -183,7 +183,8 @@ func classifyCodexStartupStderr(stderr string, timedOut bool) codexStderrClassif
 const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
 
 // CodexFirstTurnNoProgressMarker identifies the app-server failure mode where
-// Codex accepts a turn and then never emits any item, completion, or error.
+// Codex accepts a turn and then never emits model progress, completion, or a
+// terminal error — including a turn that only echoes its input and reconnects.
 const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 
 // CodexHandshakeTimeoutMarker identifies a Codex app-server startup RPC that
@@ -325,10 +326,13 @@ type codexTimeoutDiagnostic struct {
 	Kind         codexTimeoutKind
 	Timeout      time.Duration
 	LastActivity string
-	ThreadID     string
-	TurnID       string
-	Model        string
-	CodexVersion string
+	// LastReconnect is the latest reconnect reason since the last progress;
+	// empty when Codex was not reconnecting when the watchdog fired.
+	LastReconnect string
+	ThreadID      string
+	TurnID        string
+	Model         string
+	CodexVersion  string
 }
 
 // codexFirstItemWaitObservation records the interval from turn/started to the
@@ -1192,7 +1196,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
-	semanticActivityCh := make(chan string, 256)
+	semanticActivityCh := make(chan codexWatchdogEvent, 256)
 	guardianRateLimitTrip := make(chan struct{}, 1)
 	var guardianRateLimitTripped atomic.Bool
 
@@ -1215,7 +1219,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if activity == "status:running" {
 			firstItemWait.start(time.Now(), c.activeTurnID())
 		}
-		trySendString(semanticActivityCh, activity)
+		trySendWatchdogEvent(semanticActivityCh, codexWatchdogEvent{activity: activity})
 		if activity != "" {
 			semanticObserved.Store(true)
 		}
@@ -1276,7 +1280,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		onSemanticActivity: func(description string) {
 			semanticObserved.Store(true)
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
-			trySendString(semanticActivityCh, description)
+			trySendWatchdogEvent(semanticActivityCh, codexWatchdogEvent{activity: description})
+		},
+		onReconnect: func(reason string) {
+			semanticObserved.Store(true)
+			trySendWatchdogEvent(semanticActivityCh, codexWatchdogEvent{reconnect: reason})
 		},
 		onTurnDone: func(aborted bool) {
 			select {
@@ -1536,14 +1544,23 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 		lastSemanticActivity := time.Now()
 		lastSemanticActivityDescription := "turn/start"
+		// lastReconnect is the latest reconnect reason since the last progress.
+		// Reconnects never postpone a watchdog; they only explain its timeout.
+		lastReconnect := ""
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
+		// The first-turn watchdog runs from the accepted turn/start rather than
+		// from turn/started, so an app-server that never reports the turn as
+		// started still fails fast instead of waiting out the semantic timer.
 		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, opts.FirstTurnNoProgressTimeout)
 		var firstTurnNoProgressTimer *time.Timer
 		var firstTurnNoProgressTimerC <-chan time.Time
-		firstTurnStarted := false
 		firstTurnProgressObserved := false
+		if waitingForTurn {
+			firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
+			firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
+		}
 		stopFirstTurnNoProgressTimer := func() {
 			if firstTurnNoProgressTimer == nil {
 				return
@@ -1565,23 +1582,28 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
 					proc.stopProcess()
 				}
-			case activity := <-semanticActivityCh:
+			case event := <-semanticActivityCh:
+				if event.reconnect != "" {
+					lastReconnect = event.reconnect
+					break
+				}
+				activity := event.activity
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
 				resetTimer(semanticTimer, semanticInactivityTimeout)
-				if activity == "status:running" && !firstTurnStarted {
-					firstTurnStarted = true
+				if activity == "status:running" {
 					firstItemWait.start(time.Now(), c.activeTurnID())
-					firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
-					firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
-				} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
-					firstTurnProgressObserved = true
-					if activity == "error:terminal" {
-						finishFirstItemWait("turn_failed")
-					} else {
-						finishFirstItemWait("progress")
+				} else if isCodexFirstTurnProgressActivity(activity) {
+					lastReconnect = ""
+					if !firstTurnProgressObserved {
+						firstTurnProgressObserved = true
+						if activity == "error:terminal" {
+							finishFirstItemWait("turn_failed")
+						} else {
+							finishFirstItemWait("progress")
+						}
+						stopFirstTurnNoProgressTimer()
 					}
-					stopFirstTurnNoProgressTimer()
 				}
 			case <-firstTurnNoProgressTimerC:
 				waitingForTurn = false
@@ -1589,12 +1611,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				finalStatus = "timeout"
 				turnID := c.activeTurnID()
 				timeoutDiagnostic = codexTimeoutDiagnostic{
-					Kind:         codexTimeoutFirstTurnNoProgress,
-					Timeout:      firstTurnNoProgressTimeout,
-					LastActivity: lastSemanticActivityDescription,
-					ThreadID:     threadID,
-					TurnID:       turnID,
-					Model:        opts.Model,
+					Kind:          codexTimeoutFirstTurnNoProgress,
+					Timeout:       firstTurnNoProgressTimeout,
+					LastActivity:  lastSemanticActivityDescription,
+					LastReconnect: lastReconnect,
+					ThreadID:      threadID,
+					TurnID:        turnID,
+					Model:         opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
 					"pid", proc.cmd.Process.Pid,
@@ -1602,6 +1625,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"turn_id", turnID,
 					"timeout", firstTurnNoProgressTimeout.String(),
 					"last_activity", lastSemanticActivityDescription,
+					"last_reconnect", lastReconnect,
 				)
 			case <-semanticTimer.C:
 				waitingForTurn = false
@@ -1609,12 +1633,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				finalStatus = "timeout"
 				turnID := c.activeTurnID()
 				timeoutDiagnostic = codexTimeoutDiagnostic{
-					Kind:         codexTimeoutSemanticInactivity,
-					Timeout:      semanticInactivityTimeout,
-					LastActivity: lastSemanticActivityDescription,
-					ThreadID:     threadID,
-					TurnID:       turnID,
-					Model:        opts.Model,
+					Kind:          codexTimeoutSemanticInactivity,
+					Timeout:       semanticInactivityTimeout,
+					LastActivity:  lastSemanticActivityDescription,
+					LastReconnect: lastReconnect,
+					ThreadID:      threadID,
+					TurnID:        turnID,
+					Model:         opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
 					"pid", proc.cmd.Process.Pid,
@@ -1622,6 +1647,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"turn_id", turnID,
 					"timeout", semanticInactivityTimeout.String(),
 					"last_activity", lastSemanticActivityDescription,
+					"last_reconnect", lastReconnect,
 					"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
 				)
 			case <-runCtx.Done():
@@ -2062,10 +2088,10 @@ func stopTimer(timer *time.Timer) {
 }
 
 // codexFirstTurnNoProgressTimeout resolves the first-turn watchdog ceiling:
-// how long the first turn may stay silent after turn/started before that one
-// watchdog fails it. This is only the first-turn timer's own duration — NOT
-// the effective first-item wait. The semantic-inactivity timer is armed
-// concurrently (the same first status:running resets it and starts this one),
+// how long a turn may go without model progress after turn/start is accepted
+// before that one watchdog fails it. This is only the first-turn timer's own
+// duration — NOT the effective first-item wait. The semantic-inactivity timer
+// is armed concurrently (both start at the accepted turn/start),
 // so the real wait is min(this, semanticInactivityTimeout, execution timeout).
 // Raising the override above the semantic timeout therefore does not extend the
 // wait unless the semantic timeout is raised too; LoadConfig warns when it does
@@ -2096,7 +2122,7 @@ func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, configured time.
 }
 
 func isCodexFirstTurnProgressActivity(activity string) bool {
-	return activity != "" && activity != "status:running" && activity != "error:retry"
+	return activity != "" && activity != "status:running"
 }
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
@@ -2104,18 +2130,37 @@ func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail st
 	var msg string
 	switch diag.Kind {
 	case codexTimeoutFirstTurnNoProgress:
-		msg = fmt.Sprintf("%s after %s: received turn start but no item, message, tool, turn/completed, or error event (%s)",
-			CodexFirstTurnNoProgressMarker,
-			diag.Timeout,
-			formatCodexDiagnosticFields(diag),
-		)
+		if diag.LastReconnect != "" {
+			msg = fmt.Sprintf("%s after %s: Codex kept reconnecting to the model service and made no progress (last reconnect: %s; %s)",
+				CodexFirstTurnNoProgressMarker,
+				diag.Timeout,
+				diag.LastReconnect,
+				formatCodexDiagnosticFields(diag),
+			)
+		} else {
+			msg = fmt.Sprintf("%s after %s: received turn start but no item, message, tool, turn/completed, or error event (%s)",
+				CodexFirstTurnNoProgressMarker,
+				diag.Timeout,
+				formatCodexDiagnosticFields(diag),
+			)
+		}
 	case codexTimeoutSemanticInactivity:
-		msg = fmt.Sprintf("%s after %s without agent progress (last activity: %s; %s)",
-			CodexSemanticInactivityMarker,
-			diag.Timeout,
-			nonEmptyCodexDiagnosticValue(diag.LastActivity),
-			formatCodexDiagnosticFields(diag),
-		)
+		if diag.LastReconnect != "" {
+			msg = fmt.Sprintf("%s after %s: Codex kept reconnecting to the model service without agent progress (last reconnect: %s; last activity: %s; %s)",
+				CodexSemanticInactivityMarker,
+				diag.Timeout,
+				diag.LastReconnect,
+				nonEmptyCodexDiagnosticValue(diag.LastActivity),
+				formatCodexDiagnosticFields(diag),
+			)
+		} else {
+			msg = fmt.Sprintf("%s after %s without agent progress (last activity: %s; %s)",
+				CodexSemanticInactivityMarker,
+				diag.Timeout,
+				nonEmptyCodexDiagnosticValue(diag.LastActivity),
+				formatCodexDiagnosticFields(diag),
+			)
+		}
 	default:
 		msg = "codex timed out"
 	}
@@ -2173,9 +2218,17 @@ func detectCodexVersionForDiagnostics(ctx context.Context, runtimeCmd Command, e
 	return version
 }
 
-func trySendString(ch chan<- string, value string) {
+// codexWatchdogEvent is one observation for the turn watchdogs. Exactly one
+// field is set: activity describes semantic activity, reconnect carries the
+// reason of a retrying error notification.
+type codexWatchdogEvent struct {
+	activity  string
+	reconnect string
+}
+
+func trySendWatchdogEvent(ch chan<- codexWatchdogEvent, event codexWatchdogEvent) {
 	select {
-	case ch <- value:
+	case ch <- event:
 	default:
 	}
 }
@@ -2293,8 +2346,12 @@ type codexClient struct {
 	// message and its phase label ("" when the protocol carries none).
 	// onAgentMessageChunk may deliver that text incrementally, so
 	// Result.Output fallbacks must use this callback rather than the last chunk.
-	onAgentMessage           func(text, phase string)
-	onSemanticActivity       func(description string)
+	onAgentMessage     func(text, phase string)
+	onSemanticActivity func(description string)
+	// onReconnect receives the reason of each retrying error notification.
+	// A reconnect proves the app-server is alive, not that the model made
+	// progress, so it is reported apart from onSemanticActivity.
+	onReconnect              func(reason string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
@@ -3467,14 +3524,14 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		}
 		if errMsg != "" {
 			c.cfg.Logger.Warn("codex error notification", "message", errMsg, "will_retry", willRetry)
-			if c.onSemanticActivity != nil {
-				if willRetry {
-					c.onSemanticActivity("error:retry")
-				} else {
+			if willRetry {
+				if c.onReconnect != nil {
+					c.onReconnect(codexReconnectReason(errMsg, params))
+				}
+			} else {
+				if c.onSemanticActivity != nil {
 					c.onSemanticActivity("error:terminal")
 				}
-			}
-			if !willRetry {
 				c.setTurnError(errMsg)
 			}
 		}
@@ -3656,7 +3713,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		itemType = "agentMessage"
 		itemID, _ = params["itemId"].(string)
 	}
-	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+	if isCodexItemProgressActivity(method, itemType) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
 	}
 	if item == nil && method != "item/agentMessage/delta" {
@@ -3813,8 +3870,23 @@ func codexRawTokenUsageFromV2(usage map[string]any) codexRawTokenUsage {
 	}
 }
 
-func isCodexItemProgressActivity(method string) bool {
-	return strings.HasPrefix(method, "item/")
+// isCodexItemProgressActivity reports whether an item notification shows the
+// model working. userMessage items are app-server echoing the submitted input,
+// which it does before reaching the model service, so they prove nothing about
+// the model and must not satisfy either watchdog (GH #5901, #11618).
+func isCodexItemProgressActivity(method, itemType string) bool {
+	return strings.HasPrefix(method, "item/") && itemType != "userMessage"
+}
+
+// codexReconnectReason renders a retrying error notification for timeout
+// diagnostics, e.g. "Reconnecting... waiting for network; Connection failed:
+// error sending request".
+func codexReconnectReason(message string, params map[string]any) string {
+	reason := message
+	if details := strings.TrimSpace(extractNestedString(params, "error", "additionalDetails")); details != "" {
+		reason += "; " + details
+	}
+	return sanitizeCodexDiagnostic(reason)
 }
 
 func describeCodexItemProgressActivity(method, itemType, itemID string) string {

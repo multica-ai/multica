@@ -819,20 +819,59 @@ func TestCodexRawErrorNotificationRetryingIgnored(t *testing.T) {
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	var activities []string
+	var activities, reconnects []string
 	c.onSemanticActivity = func(activity string) {
 		activities = append(activities, activity)
+	}
+	c.onReconnect = func(reason string) {
+		reconnects = append(reconnects, reason)
 	}
 	c.onTurnDone = func(aborted bool) {
 		t.Fatal("retrying error should not finish the turn")
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"reconnecting"},"willRetry":true}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Reconnecting... 2/5"},"willRetry":true}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Reconnecting... waiting for network","additionalDetails":"Connection failed: error sending request"},"willRetry":true}}`)
 
 	if got := c.getTurnError(); got != "" {
 		t.Fatalf("retrying error should not be captured, got %q", got)
 	}
-	if got, want := strings.Join(activities, ","), "error:retry"; got != want {
+	// A reconnect is not semantic activity: it must not feed either watchdog
+	// (GH #11618).
+	if len(activities) != 0 {
+		t.Fatalf("retrying error must not report semantic activity, got %q", activities)
+	}
+	want := []string{
+		"Reconnecting... 2/5",
+		"Reconnecting... waiting for network; Connection failed: error sending request",
+	}
+	if got := strings.Join(reconnects, "|"); got != strings.Join(want, "|") {
+		t.Fatalf("reconnect reasons = %q, want %q", reconnects, want)
+	}
+}
+
+// TestCodexUserMessageItemsAreNotProgress pins the input-echo half of GH
+// #11618 (and #5901): app-server echoes the submitted prompt as userMessage
+// items before it reaches the model service, so those items must not report
+// semantic activity, while every other item still does.
+func TestCodexUserMessageItemsAreNotProgress(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var activities []string
+	c.onSemanticActivity = func(activity string) {
+		activities = append(activities, activity)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"userMessage","id":"user-1"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"userMessage","id":"user-1"}}}`)
+	if len(activities) != 0 {
+		t.Fatalf("userMessage echo must not report semantic activity, got %q", activities)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"reasoning","id":"rs-1"}}}`)
+	if got, want := strings.Join(activities, ","), "item/started:reasoning:rs-1"; got != want {
 		t.Fatalf("semantic activity = %q, want %q", got, want)
 	}
 }
@@ -846,7 +885,6 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 	}{
 		{activity: "", want: false},
 		{activity: "status:running", want: false},
-		{activity: "error:retry", want: false},
 		{activity: "error", want: true},
 		{activity: "text", want: true},
 		{activity: "tool-use:exec_command", want: true},
@@ -3371,7 +3409,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 
 // TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
 // timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
-// first status:running arms the semantic-inactivity timer and the first-turn
+// accepted turn/start arms the semantic-inactivity timer and the first-turn
 // timer together, so a first-turn override ABOVE the semantic timeout cannot
 // extend the first-item wait — the semantic timer fires first. That also
 // reclassifies the failure as semantic inactivity, so the model-catalog startup
@@ -4786,6 +4824,246 @@ func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *test
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
 	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// codexReconnectLoopFixture emits the reconnect notification Codex sends while
+// it cannot reach the model service (GH #11618), every 100ms for ~3s.
+func codexReconnectLoopFixture(threadID string) string {
+	return `i=0` + "\n" +
+		`while [ $i -lt 30 ]; do` + "\n" +
+		`  echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"` + threadID + `","error":{"message":"Reconnecting... waiting for network","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}},"additionalDetails":"Connection failed: error sending request"},"willRetry":true}}'` + "\n" +
+		`  sleep 0.1` + "\n" +
+		`  i=$((i+1))` + "\n" +
+		`done` + "\n"
+}
+
+// TestCodexExecuteFirstTurnFailsWhileOnlyReconnecting replays GH #11618: Codex
+// accepts the turn, echoes the input, then only reconnects to an unreachable
+// model service. Neither the echo nor the reconnects are model progress, so the
+// first-turn watchdog must fail the attempt and name the reconnect reason,
+// instead of the reconnects holding the run open until the execution timeout.
+func TestCodexExecuteFirstTurnFailsWhileOnlyReconnecting(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-offline"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-offline","turn":{"id":"turn-offline"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-offline","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-offline","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		codexReconnectLoopFixture("thr-offline"))
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  2 * time.Second,
+		FirstTurnNoProgressTimeout: 400 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexFirstTurnNoProgressMarker,
+		"Codex kept reconnecting to the model service",
+		"last reconnect: Reconnecting... waiting for network; Connection failed: error sending request",
+		"turn-offline",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+	// No model catalog signal: the existing retry gate stays closed.
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteFirstTurnWatchdogRunsWithoutTurnStarted covers an
+// app-server that accepts turn/start but never reports turn/started: the
+// first-turn watchdog is armed by the accepted request, so the attempt fails
+// fast instead of waiting out the semantic-inactivity backstop.
+func TestCodexExecuteFirstTurnWatchdogRunsWithoutTurnStarted(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unstarted"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`sleep 3`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  2 * time.Second,
+		FirstTurnNoProgressTimeout: 300 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("expected the first-turn watchdog to fire, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "kept reconnecting") {
+		t.Fatalf("no reconnect happened, error must not claim one: %q", result.Error)
+	}
+}
+
+// TestCodexExecuteSemanticInactivityFiresWhileReconnectingAfterProgress covers
+// a turn that made progress and then lost the model service: reconnects must
+// not keep resetting the semantic-inactivity timer, and its timeout names the
+// reconnect reason.
+func TestCodexExecuteSemanticInactivityFiresWhileReconnectingAfterProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-dropped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-dropped","turn":{"id":"turn-dropped"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-dropped","item":{"type":"agentMessage","id":"msg-1","text":"Working on it"}}}'`+"\n"+
+		codexReconnectLoopFixture("thr-dropped"))
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  400 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 300 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexSemanticInactivityMarker,
+		"Codex kept reconnecting to the model service",
+		"last reconnect: Reconnecting... waiting for network",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+}
+
+// TestCodexExecuteRecoveredReconnectIsNotReported checks that progress after a
+// reconnect clears it: a later timeout must not blame a reconnect that already
+// recovered.
+func TestCodexExecuteRecoveredReconnectIsNotReported(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-blip"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-blip","turn":{"id":"turn-blip"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-blip","error":{"message":"Reconnecting... 1/5"},"willRetry":true}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-blip","item":{"type":"agentMessage","id":"msg-1","text":"Back online"}}}'`+"\n"+
+		`sleep 3`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  300 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 200 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("expected semantic inactivity, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "kept reconnecting") {
+		t.Fatalf("a recovered reconnect must not be reported, got %q", result.Error)
+	}
+}
+
+// TestCodexExecuteCatalogRefreshRetryAfterUserMessageEcho replays GH #5901:
+// app-server echoes the input, reconnects, and fails to refresh the model
+// catalog. The echo must not count as progress, so the first-turn watchdog
+// fires and the existing fresh-process catalog retry recovers the run.
+func TestCodexExecuteCatalogRefreshRetryAfterUserMessageEcho(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-stuck"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-stuck","turn":{"id":"turn-echo-stuck"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-echo-stuck","error":{"message":"Reconnecting... 2/5"},"willRetry":true}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-recovered"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-recovered","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered after echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("user-message echo must not suppress the catalog retry: status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered after echo" {
+		t.Fatalf("expected output from the recovered attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-echo-recovered" {
+		t.Fatalf("expected the recovered thread id, got %q", result.SessionID)
+	}
+	assertCodexAttemptCount(t, fakePath, "2")
 }
 
 func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
