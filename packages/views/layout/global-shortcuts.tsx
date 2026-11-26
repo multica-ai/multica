@@ -5,10 +5,16 @@ import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import {
   getShortcut,
   isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
+  isShortcutModifierKey,
+  isShortcutRecorderTarget,
+  shortcutChordEquals,
+  shortcutFirstStep,
   shortcutMatchesEvent,
   SHORTCUT_ACTION_BY_ID,
   useShortcutStore,
   type ShortcutActionId,
+  type ShortcutChord,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
 import { useSearchStore } from "@multica/core/command-bar";
@@ -27,6 +33,7 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "toggleSidebar",
   "toggleChat",
   "newChat",
+  "showShortcuts",
   "goBack",
   "goForward",
   "goInbox",
@@ -47,13 +54,44 @@ export function shouldIgnoreGlobalShortcutEvent(event: KeyboardEvent): boolean {
   return event.defaultPrevented || event.repeat || isImeComposing(event);
 }
 
+/**
+ * What a guest (MUL-9420) cannot do from the keyboard: it has only the Work
+ * pages (any other page sends it back to the Inbox) and edits no issue. Its
+ * keys stay unclaimed, and the shortcut sheet leaves them out.
+ */
+const GUEST_UNAVAILABLE_ACTIONS = new Set<ShortcutActionId>([
+  "createIssue",
+  "toggleChat",
+  "newChat",
+  "goChat",
+  "goAutopilots",
+  "goAgents",
+  "goSquads",
+  "goUsage",
+  "goRuntimes",
+  "goSkills",
+  "setIssueStatus",
+  "assignIssue",
+  "setIssuePriority",
+  "setIssueLabels",
+  "setIssueDueDate",
+  "moveIssueToProject",
+  "runIssueQuickAction",
+]);
+
+export function isShortcutActionAvailable(actionId: ShortcutActionId, guest: boolean): boolean {
+  return !guest || !GUEST_UNAVAILABLE_ACTIONS.has(actionId);
+}
+
+/** How long the first key of a sequence (G) waits for the second. */
+export const SHORTCUT_SEQUENCE_TIMEOUT_MS = 1500;
+
 /** Executes configurable product-level shortcuts inside the dashboard shell. */
 export function GlobalShortcuts() {
   const { toggleSidebar } = useSidebar();
   const toggleNav = useAppShell()?.toggleNav ?? toggleSidebar;
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
-  // A guest (MUL-9420) cannot create issues, so its `C` stays unclaimed.
   const guest = useIsGuest(useCurrentWorkspace()?.id);
 
   // Subscribe so changing a binding in Settings immediately refreshes the
@@ -86,26 +124,7 @@ export function GlobalShortcuts() {
       useChatStore.getState().floatingChatEnabled &&
       !isFloatingChatRouteSuppressed(navigation.pathname, chatPath);
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Component/editor handlers run before this document-level listener.
-      // Respect their preventDefault instead of double-triggering a product
-      // action after the focused control already consumed the same chord.
-      if (shouldIgnoreGlobalShortcutEvent(event)) return;
-
-      const actionId = GLOBAL_ACTIONS.find((candidate) => {
-        const action = SHORTCUT_ACTION_BY_ID[candidate];
-        if (!action.allowInEditable && isEditableShortcutTarget(event.target)) {
-          return false;
-        }
-        if ((candidate === "toggleChat" || candidate === "newChat") && !canUseFloatingChat()) {
-          return false;
-        }
-        if (candidate === "createIssue" && guest) return false;
-        return shortcutMatchesEvent(getShortcut(candidate), event);
-      });
-      if (!actionId) return;
-
-      event.preventDefault();
+    const run = (actionId: ShortcutActionId) => {
       if (actionId === "openSearch") {
         useSearchStore.getState().toggle();
         return;
@@ -140,6 +159,11 @@ export function GlobalShortcuts() {
         openCreateIssueForPath(navigation.pathname);
         return;
       }
+      if (actionId === "showShortcuts") {
+        if (useModalStore.getState().modal) return;
+        useModalStore.getState().open("keyboard-shortcuts");
+        return;
+      }
 
       const destination = destinations[actionId];
       if (destination && destination !== navigation.pathname) {
@@ -147,8 +171,84 @@ export function GlobalShortcuts() {
       }
     };
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Component/editor handlers run before this document-level listener.
+      // Respect their preventDefault instead of double-triggering a product
+      // action after the focused control already consumed the same chord.
+      if (shouldIgnoreGlobalShortcutEvent(event)) return;
+
+      const actionId = GLOBAL_ACTIONS.find((candidate) => {
+        const action = SHORTCUT_ACTION_BY_ID[candidate];
+        if (!action.allowInEditable && isEditableShortcutTarget(event.target)) {
+          return false;
+        }
+        if ((candidate === "toggleChat" || candidate === "newChat") && !canUseFloatingChat()) {
+          return false;
+        }
+        if (!isShortcutActionAvailable(candidate, guest)) return false;
+        return shortcutMatchesEvent(getShortcut(candidate), event);
+      });
+      if (!actionId) return;
+
+      event.preventDefault();
+      run(actionId);
+    };
+
+    // Sequences (G then I) are followed on the window, capturing: the second key
+    // is often a page's own single-key shortcut (P is priority, C creates an
+    // issue), and a pending sequence must take it before any of them.
+    let pending: { first: ShortcutChord; timer: ReturnType<typeof setTimeout> } | null = null;
+    const clearPending = () => {
+      if (pending) clearTimeout(pending.timer);
+      pending = null;
+    };
+    const sequences = () =>
+      GLOBAL_ACTIONS.flatMap((id) => {
+        if (!isShortcutActionAvailable(id, guest)) return [];
+        const shortcut = getShortcut(id);
+        return shortcut?.then ? [{ id, first: shortcutFirstStep(shortcut), then: shortcut.then }] : [];
+      });
+
+    const handleSequenceKey = (event: KeyboardEvent) => {
+      if (shouldIgnoreGlobalShortcutEvent(event) || isShortcutModifierKey(event.key)) return;
+      // A field, a menu, a dialog or a shortcut being recorded owns its keys,
+      // even when the pointer took focus there between the two keys.
+      if (
+        isShortcutRecorderTarget(event.target) ||
+        isEditableShortcutTarget(event.target) ||
+        isPortalLayerShortcutTarget(event.target) ||
+        useModalStore.getState().modal
+      ) {
+        clearPending();
+        return;
+      }
+      if (pending) {
+        const { first } = pending;
+        clearPending();
+        const match = sequences().find(
+          (sequence) => shortcutChordEquals(sequence.first, first) && shortcutMatchesEvent(sequence.then, event),
+        );
+        // Any other key ends the sequence and keeps its own meaning.
+        if (!match) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        run(match.id);
+        return;
+      }
+      const first = sequences().find((sequence) => shortcutMatchesEvent(sequence.first, event))?.first;
+      if (!first) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pending = { first, timer: setTimeout(clearPending, SHORTCUT_SEQUENCE_TIMEOUT_MS) };
+    };
+
+    window.addEventListener("keydown", handleSequenceKey, true);
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      clearPending();
+      window.removeEventListener("keydown", handleSequenceKey, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [guest, navigation, overrides, toggleNav, workspacePaths]);
 
   return null;

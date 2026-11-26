@@ -3,6 +3,7 @@
 import {
   formatShortcut,
   getShortcutPlatform,
+  shortcutFirstStep,
   useShortcut,
   type ShortcutActionId,
   type ShortcutChord,
@@ -95,6 +96,7 @@ export function ShortcutKeycaps({
   size = "sm",
   layout = "pill",
   decorative = false,
+  thenLabel,
   className,
   keyClassName,
 }: {
@@ -109,10 +111,30 @@ export function ShortcutKeycaps({
   layout?: ShortcutKeycapsLayout;
   /** Hide a redundant hint when its parent already names the action. */
   decorative?: boolean;
+  /** Shown between the keys of a sequence (G then I); without it they sit side by side. */
+  thenLabel?: string;
   className?: string;
   keyClassName?: string;
 }) {
   const accessibleLabel = formatShortcut(shortcut, platform);
+
+  if (shortcut.then) {
+    const step = { platform, size, layout, decorative: true, keyClassName };
+    return (
+      <span
+        className={cn("inline-flex items-center gap-1", className)}
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : accessibleLabel}
+        aria-hidden={decorative || undefined}
+        data-slot="shortcut-keycaps"
+        data-sequence=""
+      >
+        <ShortcutKeycaps shortcut={shortcutFirstStep(shortcut)} {...step} />
+        {thenLabel ? <span className="text-micro text-muted-foreground">{thenLabel}</span> : null}
+        <ShortcutKeycaps shortcut={shortcut.then} {...step} />
+      </span>
+    );
+  }
   const tokens = shortcutTokens(shortcut, platform);
 
   if (layout === "pill") {

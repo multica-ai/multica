@@ -27,6 +27,8 @@ import { useT } from "../i18n";
 import { PaletteContext, type PaletteApi } from "./palette-context";
 import { PaletteFooter } from "./footer";
 import { PaletteHostDialogs } from "./host-dialogs";
+import { IssueShortcuts } from "./issue-shortcuts";
+import { clearPendingPalettePage, usePendingPalettePage } from "./palette-launch";
 import { PageView } from "./pages/page-view";
 import { RootView } from "./root-view";
 import { useRootModel } from "./use-root-model";
@@ -44,6 +46,7 @@ export function SearchCommand() {
   const workspaceSlug = useWorkspaceSlug();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
+  const launchPage = usePendingPalettePage();
   const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
   const close = useCallback(() => setOpen(false), [setOpen]);
   const openHostDialog = useCallback(
@@ -70,26 +73,46 @@ export function SearchCommand() {
               selection and pending searches together with their workspace.
               Base UI's Portal keeps the body mounted through the exit animation
               and unmounts it once closed, so no `{open && ...}` gate is needed. */}
-          <PaletteBody key={workspaceSlug} active={open} close={close} openHostDialog={openHostDialog} />
+          <PaletteBody
+            key={workspaceSlug}
+            active={open}
+            launchPage={launchPage}
+            close={close}
+            openHostDialog={openHostDialog}
+          />
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
+      <IssueShortcuts />
     </>
   );
 }
 
 function PaletteBody({
   active,
+  launchPage,
   close,
   openHostDialog,
 }: {
   active: boolean;
+  /** The page an issue shortcut opened the palette on (`openPalettePage`). */
+  launchPage: PaletteStackEntry | null;
   close: () => void;
   openHostDialog: (dialog: PaletteHostDialog) => void;
 }) {
   const intentNavigate = useIntentNavigate();
   const [pageQuery, setPageQuery] = useState("");
-  const [stack, setStack] = useState<PaletteStackEntry[]>([]);
+  const [stack, setStack] = useState<PaletteStackEntry[]>(() => (launchPage ? [launchPage] : []));
+
+  // The body mounts as the palette opens, so the launch page is its first
+  // page; one that arrives while it is still mounted (reopened mid-exit)
+  // replaces the stack.
+  useEffect(() => {
+    if (!launchPage) return;
+    clearPendingPalettePage();
+    setStack((prev) => (prev.length === 1 && prev[0] === launchPage ? prev : [launchPage]));
+    setPageQuery("");
+  }, [launchPage]);
 
   // cmdk's onSelect carries no event, so the activating gesture's modifiers
   // are recorded on the capture phase (click on a result, Enter in the input)
@@ -157,6 +180,13 @@ function PaletteBody({
 }
 
 const PALETTE_NAV_DURATION = 0.14;
+const ENABLED_ITEM = '[cmdk-item=""]:not([aria-disabled="true"])';
+
+/** Keys cmdk moves the selection on: arrows, and ⌃N/⌃J/⌃P/⌃K. */
+function isSelectionKey(e: Pick<KeyboardEvent, "key" | "ctrlKey">) {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") return true;
+  return e.ctrlKey && (e.key === "n" || e.key === "j" || e.key === "p" || e.key === "k");
+}
 
 /** Everything that reads the palette API lives under its provider. */
 function PaletteFrame({
@@ -184,6 +214,12 @@ function PaletteFrame({
 
   // The selected row's value. cmdk picks the first row only when it is empty.
   const [selected, setSelected] = useState("");
+  // cmdk picks the first enabled row when the input changes, while the new
+  // query's server rows are still loading and disabled, and keeps that pick
+  // when they land above it. Until the user moves the selection, the effect
+  // below keeps it on the top row.
+  const selectionMovedRef = useRef(false);
+  const selectionScopeRef = useRef("");
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -198,6 +234,11 @@ function PaletteFrame({
   }
   const navDirection = navDirectionRef.current;
   const pageKey = current ? `${stack.length}:${current.page.type}` : "root";
+  const selectionScope = `${pageKey}\n${inputValue}`;
+  if (selectionScope !== selectionScopeRef.current) {
+    selectionScopeRef.current = selectionScope;
+    selectionMovedRef.current = false;
+  }
 
   const [listHeight, setListHeight] = useState<number | undefined>(undefined);
   const [animateHeight, setAnimateHeight] = useState(false);
@@ -265,6 +306,18 @@ function PaletteFrame({
   // items and search results from clearing on frame 1 of the exit animation.
   const model = useRootModel(rawQuery, contexts, { active: true });
 
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!active || !list || selectionMovedRef.current) return;
+    const first = list.querySelector(ENABLED_ITEM);
+    const value = first?.getAttribute("data-value");
+    if (!first || !value || value === selected) return;
+    setSelected(value);
+    // cmdk scrolls only selections it makes itself, and this one lands first.
+    list.scrollTop = 0;
+    first.scrollIntoView({ block: "nearest" });
+  }, [active, selected, model, current, pageQuery]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // cmdk's root handler intercepts Home/End for list navigation; stop
     // propagation so the browser moves the text caret instead.
@@ -292,6 +345,7 @@ function PaletteFrame({
           if (e.key === "Enter") {
             recordIntent({ button: 0, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
           }
+          if (isSelectionKey(e)) selectionMovedRef.current = true;
         }}
         className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
       >
@@ -337,6 +391,10 @@ function PaletteFrame({
 
         <CommandPrimitive.List
           ref={listRef}
+          // cmdk selects the enabled row under a moving pointer, and nothing else.
+          onPointerMove={(e) => {
+            if ((e.target as Element).closest(ENABLED_ITEM)) selectionMovedRef.current = true;
+          }}
           style={listHeight !== undefined ? { height: listHeight } : undefined}
           className={cn(
             "max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1",
