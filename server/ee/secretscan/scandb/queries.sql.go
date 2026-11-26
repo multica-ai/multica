@@ -31,24 +31,30 @@ func (q *Queries) AdvanceBackfill(ctx context.Context, arg AdvanceBackfillParams
 }
 
 const countFindings = `-- name: CountFindings :many
-SELECT f.status, i.project_id, count(DISTINCT f.fingerprint)::bigint AS total
+SELECT f.status, count(DISTINCT f.fingerprint)::bigint AS total
 FROM secret_finding f
 JOIN comment c ON c.id = f.comment_id AND c.deleted_at IS NULL
 JOIN issue i ON i.id = f.issue_id
 WHERE f.workspace_id = $1
-GROUP BY f.status, i.project_id
+  AND ($2::uuid[] IS NULL
+       OR NOT COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($2::uuid[]))
+GROUP BY f.status
 `
 
-type CountFindingsRow struct {
-	Status    string      `json:"status"`
-	ProjectID pgtype.UUID `json:"project_id"`
-	Total     int64       `json:"total"`
+type CountFindingsParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
-// Counts secrets, not comments: one pasted into three comments is one row
-// in the list.
-func (q *Queries) CountFindings(ctx context.Context, workspaceID pgtype.UUID) ([]CountFindingsRow, error) {
-	rows, err := q.db.Query(ctx, countFindings, workspaceID)
+type CountFindingsRow struct {
+	Status string `json:"status"`
+	Total  int64  `json:"total"`
+}
+
+// Counts secrets, not comments: one pasted into three comments, even across
+// projects, is one row in the list.
+func (q *Queries) CountFindings(ctx context.Context, arg CountFindingsParams) ([]CountFindingsRow, error) {
+	rows, err := q.db.Query(ctx, countFindings, arg.WorkspaceID, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +62,7 @@ func (q *Queries) CountFindings(ctx context.Context, workspaceID pgtype.UUID) ([
 	items := []CountFindingsRow{}
 	for rows.Next() {
 		var i CountFindingsRow
-		if err := rows.Scan(&i.Status, &i.ProjectID, &i.Total); err != nil {
+		if err := rows.Scan(&i.Status, &i.Total); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -303,30 +309,37 @@ func (q *Queries) ListCommentsAfter(ctx context.Context, arg ListCommentsAfterPa
 }
 
 const listFindings = `-- name: ListFindings :many
-SELECT f.id, f.workspace_id, f.issue_id, f.comment_id, f.author_type, f.author_id, f.rule, f.masked, f.fingerprint, f.status, f.resolved_by_type, f.resolved_by_id, f.resolved_at, f.created_at, f.updated_at, i.number AS issue_number, i.title AS issue_title, i.project_id
+SELECT f.id, f.workspace_id, f.issue_id, f.comment_id, f.author_type, f.author_id, f.rule, f.masked, f.fingerprint, f.status, f.resolved_by_type, f.resolved_by_id, f.resolved_at, f.created_at, f.updated_at, i.number AS issue_number, i.title AS issue_title
 FROM secret_finding f
 JOIN comment c ON c.id = f.comment_id AND c.deleted_at IS NULL
 JOIN issue i ON i.id = f.issue_id
 WHERE f.workspace_id = $1 AND f.status = $2
+  AND ($3::uuid[] IS NULL
+       OR NOT COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[]))
 ORDER BY f.created_at DESC
-LIMIT $3
+LIMIT $4
 `
 
 type ListFindingsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Status      string      `json:"status"`
-	Limit       int32       `json:"limit"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	Status           string        `json:"status"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+	RowLimit         int32         `json:"row_limit"`
 }
 
 type ListFindingsRow struct {
 	SecretFinding SecretFinding `json:"secret_finding"`
 	IssueNumber   int32         `json:"issue_number"`
 	IssueTitle    string        `json:"issue_title"`
-	ProjectID     pgtype.UUID   `json:"project_id"`
 }
 
 func (q *Queries) ListFindings(ctx context.Context, arg ListFindingsParams) ([]ListFindingsRow, error) {
-	rows, err := q.db.Query(ctx, listFindings, arg.WorkspaceID, arg.Status, arg.Limit)
+	rows, err := q.db.Query(ctx, listFindings,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.HiddenProjectIds,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +365,6 @@ func (q *Queries) ListFindings(ctx context.Context, arg ListFindingsParams) ([]L
 			&i.SecretFinding.UpdatedAt,
 			&i.IssueNumber,
 			&i.IssueTitle,
-			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}

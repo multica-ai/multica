@@ -41,23 +41,27 @@ WHERE comment_id = sqlc.arg(comment_id)
   AND NOT (fingerprint = ANY(sqlc.arg(keep)::text[]));
 
 -- name: ListFindings :many
-SELECT sqlc.embed(f), i.number AS issue_number, i.title AS issue_title, i.project_id
+SELECT sqlc.embed(f), i.number AS issue_number, i.title AS issue_title
 FROM secret_finding f
 JOIN comment c ON c.id = f.comment_id AND c.deleted_at IS NULL
 JOIN issue i ON i.id = f.issue_id
-WHERE f.workspace_id = $1 AND f.status = $2
+WHERE f.workspace_id = sqlc.arg(workspace_id) AND f.status = sqlc.arg(status)
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL
+       OR NOT COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[]))
 ORDER BY f.created_at DESC
-LIMIT $3;
+LIMIT sqlc.arg(row_limit);
 
 -- name: CountFindings :many
--- Counts secrets, not comments: one pasted into three comments is one row
--- in the list.
-SELECT f.status, i.project_id, count(DISTINCT f.fingerprint)::bigint AS total
+-- Counts secrets, not comments: one pasted into three comments, even across
+-- projects, is one row in the list.
+SELECT f.status, count(DISTINCT f.fingerprint)::bigint AS total
 FROM secret_finding f
 JOIN comment c ON c.id = f.comment_id AND c.deleted_at IS NULL
 JOIN issue i ON i.id = f.issue_id
-WHERE f.workspace_id = $1
-GROUP BY f.status, i.project_id;
+WHERE f.workspace_id = sqlc.arg(workspace_id)
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL
+       OR NOT COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[]))
+GROUP BY f.status;
 
 -- name: ListOpenIssueFindings :many
 SELECT f.*

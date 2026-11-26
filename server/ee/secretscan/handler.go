@@ -197,16 +197,15 @@ func (s *Service) ListFindings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	visible := func(projectID pgtype.UUID) bool {
-		return hidden.Empty() || !projectID.Valid || hidden.CanSeeProject(projectID)
-	}
-	rows, err := s.q.ListFindings(r.Context(), scandb.ListFindingsParams{WorkspaceID: c.workspace, Status: status, Limit: listLimit})
+	rows, err := s.q.ListFindings(r.Context(), scandb.ListFindingsParams{
+		WorkspaceID: c.workspace, Status: status, HiddenProjectIds: hidden.Param(), RowLimit: listLimit,
+	})
 	if err != nil {
 		slog.Warn("secret scan: list findings", append(logger.RequestAttrs(r), "error", err)...)
 		handler.WriteError(w, http.StatusInternalServerError, "failed to list findings")
 		return
 	}
-	counts, err := s.q.CountFindings(r.Context(), c.workspace)
+	counts, err := s.q.CountFindings(r.Context(), scandb.CountFindingsParams{WorkspaceID: c.workspace, HiddenProjectIds: hidden.Param()})
 	if err != nil {
 		slog.Warn("secret scan: count findings", append(logger.RequestAttrs(r), "error", err)...)
 		handler.WriteError(w, http.StatusInternalServerError, "failed to list findings")
@@ -218,18 +217,12 @@ func (s *Service) ListFindings(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := ListFindingsResponse{Findings: make([]FindingResponse, 0, len(rows))}
 	for _, row := range rows {
-		if !visible(row.ProjectID) {
-			continue
-		}
 		f := findingResponse(row.SecretFinding)
 		f.IssueIdentifier = fmt.Sprintf("%s-%d", prefix, row.IssueNumber)
 		f.IssueTitle = row.IssueTitle
 		resp.Findings = append(resp.Findings, f)
 	}
 	for _, n := range counts {
-		if !visible(n.ProjectID) {
-			continue
-		}
 		switch n.Status {
 		case StatusOpen:
 			resp.Counts.Open += n.Total

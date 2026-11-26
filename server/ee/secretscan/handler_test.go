@@ -102,9 +102,14 @@ func (e env) request(userID, method, path string, body any, params ...string) *h
 
 func (e env) comment(t *testing.T, userID, content string) handler.CommentResponse {
 	t.Helper()
+	return e.commentOn(t, userID, e.issueID, content)
+}
+
+func (e env) commentOn(t *testing.T, userID, issueID, content string) handler.CommentResponse {
+	t.Helper()
 	var c handler.CommentResponse
-	testutil.Call(t, testHandler.CreateComment, e.request(userID, http.MethodPost, "/api/issues/"+e.issueID+"/comments",
-		map[string]any{"content": content}, "id", e.issueID)).Want(http.StatusCreated).JSON(&c)
+	testutil.Call(t, testHandler.CreateComment, e.request(userID, http.MethodPost, "/api/issues/"+issueID+"/comments",
+		map[string]any{"content": content}, "id", issueID)).Want(http.StatusCreated).JSON(&c)
 	return c
 }
 
@@ -262,6 +267,30 @@ func TestSettingsAreForAdmins(t *testing.T) {
 	testutil.Call(t, testService.GetSettings, e.request(e.ownerID, http.MethodGet, "/api/secret-scan/settings", nil)).Want(http.StatusOK).JSON(&s)
 	if s.Mode != ModeNotify || s.Backfill.Status != "idle" {
 		t.Fatalf("default settings = %+v", s)
+	}
+}
+
+func TestAdminListCountsSecretsOnceAndHidesPrivateProjects(t *testing.T) {
+	e := newEnv(t)
+	billing := e.fx.Issue(t, "Billing export", testutil.Cols{"project_id": e.fx.Project(t, "Billing")})
+	private := e.fx.Project(t, "Private", testutil.Cols{"visibility": "private"})
+	e.fx.InsertNoID(t, "project_member", testutil.Cols{"workspace_id": e.workspaceID, "project_id": private, "user_id": e.authorID},
+		`project_id = $1`, private)
+	hidden := e.fx.Issue(t, "Private rollout", testutil.Cols{"project_id": private})
+
+	e.comment(t, e.authorID, "token "+githubToken)
+	e.commentOn(t, e.authorID, billing, "same token "+githubToken)
+	e.commentOn(t, e.authorID, hidden, "another "+asm("ghp_", "Zr8Kd2Qw5Lx1Vn7Bt4Hy9Pm3Cf6Js0Ga2Ue"))
+
+	var list ListFindingsResponse
+	testutil.Call(t, testService.ListFindings, e.request(e.ownerID, http.MethodGet, "/api/secret-scan/findings", nil)).Want(http.StatusOK).JSON(&list)
+	if list.Counts.Open != 1 || len(list.Findings) != 2 {
+		t.Fatalf("counts = %+v, findings = %d; want one secret in two comments", list.Counts, len(list.Findings))
+	}
+	for _, f := range list.Findings {
+		if f.IssueID == hidden {
+			t.Fatalf("admin outside the private project sees %+v", f)
+		}
 	}
 }
 
