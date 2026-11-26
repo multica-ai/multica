@@ -456,6 +456,8 @@ type AgentTaskResponse struct {
 	DispatchedAt       *string                  `json:"dispatched_at"`
 	StartedAt          *string                  `json:"started_at"`
 	CompletedAt        *string                  `json:"completed_at"`
+	TranscriptPurgedAt *string                  `json:"transcript_purged_at,omitempty"`
+	TranscriptPurgedBy string                   `json:"transcript_purged_by,omitempty"`
 	Result             any                      `json:"result"`
 	Error              *string                  `json:"error"`
 	FailureReason      string                   `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
@@ -954,6 +956,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		DispatchedAt:           timestampToPtr(t.DispatchedAt),
 		StartedAt:              timestampToPtr(t.StartedAt),
 		CompletedAt:            timestampToPtr(t.CompletedAt),
+		TranscriptPurgedAt:     timestampToPtr(t.TranscriptPurgedAt),
+		TranscriptPurgedBy:     uuidToString(t.TranscriptPurgedBy),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,

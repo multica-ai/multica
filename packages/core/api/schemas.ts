@@ -2536,6 +2536,8 @@ export const AgentTaskSchema = z.object({
   dispatched_at: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
+  transcript_purged_at: z.string().nullable().optional().catch(undefined),
+  transcript_purged_by: z.string().optional().catch(undefined),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),

@@ -216,6 +216,7 @@ export function TranscriptButton({
             isLive={isLive}
             finalFocus={returnFocus}
             headerSlot={headerSlot}
+            onTranscriptPurged={() => setLoadedItems([])}
           />
         ))}
     </>

@@ -131,6 +131,7 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
+  TaskTranscriptPurge,
   RuntimeRateLimitsResponse,
   Attachment,
   ChatSession,
@@ -3472,6 +3473,11 @@ export class ApiClient {
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
       endpoint: "GET /api/tasks/:id/messages",
     });
+  }
+
+  /** Clears a finished run's log. Workspace owners and admins only. */
+  async purgeTaskTranscript(taskId: string): Promise<TaskTranscriptPurge> {
+    return this.fetch(`/api/tasks/${taskId}/messages`, { method: "DELETE" });
   }
 
   async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {
