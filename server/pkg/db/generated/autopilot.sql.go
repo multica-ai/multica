@@ -1836,6 +1836,64 @@ func (q *Queries) PauseAutopilotsByArchivedProject(ctx context.Context, arg Paus
 	return items, nil
 }
 
+const pauseAutopilotsByCreator = `-- name: PauseAutopilotsByCreator :many
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'member_removed',
+    updated_at = now()
+WHERE workspace_id = $1
+  AND created_by_type = 'member'
+  AND created_by_id = $2
+  AND status = 'active'
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, pause_reason
+`
+
+type PauseAutopilotsByCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// A departing member's automations stop with them: an automation whose
+// trigger another member owns would otherwise keep running the departed
+// member's prompt under that member's authority. The configuration is kept
+// so an admin can take it over and resume it.
+func (q *Queries) PauseAutopilotsByCreator(ctx context.Context, arg PauseAutopilotsByCreatorParams) ([]Autopilot, error) {
+	rows, err := q.db.Query(ctx, pauseAutopilotsByCreator, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Autopilot{}
+	for rows.Next() {
+		var i Autopilot
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.AssigneeID,
+			&i.Status,
+			&i.ExecutionMode,
+			&i.IssueTitleTemplate,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.LastRunAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AssigneeType,
+			&i.ProjectID,
+			&i.PauseReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pauseAutopilotsByUnboundAgents = `-- name: PauseAutopilotsByUnboundAgents :many
 UPDATE autopilot a
 SET status = 'paused',

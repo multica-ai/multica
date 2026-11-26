@@ -646,6 +646,25 @@ func (q *Queries) DisableIssueWakeups(ctx context.Context, issueID pgtype.UUID) 
 	return err
 }
 
+const disableIssueWakeupsByCreator = `-- name: DisableIssueWakeupsByCreator :execrows
+UPDATE issue_wakeup SET enabled=false,disabled_at=clock_timestamp(),updated_at=clock_timestamp()
+WHERE workspace_id= $1 AND created_by= $2 AND disabled_at IS NULL AND system_rule IS NULL
+`
+
+type DisableIssueWakeupsByCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// A departing member's wakeups would keep waking agents on their behalf.
+func (q *Queries) DisableIssueWakeupsByCreator(ctx context.Context, arg DisableIssueWakeupsByCreatorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, disableIssueWakeupsByCreator, arg.WorkspaceID, arg.CreatedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const discardWakeupReceipts = `-- name: DiscardWakeupReceipts :exec
 UPDATE issue_wakeup_receipt SET processed_at=now() WHERE wakeup_id= $1 AND processed_at IS NULL
 `

@@ -170,6 +170,16 @@ SET status = 'cancelled',
 WHERE chat_session_id = @chat_session_id AND status = 'active'
 RETURNING *;
 
+-- name: EndActiveChatWakeupsForRequester :execrows
+-- A departing member's chat wakeups would start turns answering to someone
+-- who is no longer in the workspace.
+UPDATE chat_wakeup
+SET status = 'cancelled',
+    end_reason = 'member_removed',
+    ended_at = now(),
+    updated_at = now()
+WHERE workspace_id = @workspace_id AND requester_id = @requester_id AND status = 'active';
+
 -- name: GetChatWakeupInputForTask :one
 -- The hidden wakeup row a turn was started for, if any. $1 is the task's input
 -- owner (chat_input_task_id), so an auto-retry finds its root's row.
