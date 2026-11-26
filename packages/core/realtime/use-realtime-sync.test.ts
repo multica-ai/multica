@@ -6,7 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { chatKeys } from "../chat/queries";
+import { chatKeys, invalidateChatMessageQueries } from "../chat/queries";
 import { inboxKeys } from "../inbox/queries";
 import { issueKeys } from "../issues/queries";
 import { notificationPreferenceKeys } from "../notification-preferences/queries";
@@ -29,7 +29,6 @@ import {
   applyChatSessionUpdatedToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
-  invalidateChatMessageQueries,
   refetchPendingChatAggregate,
   resolveInboxSourceSlug,
 } from "./use-realtime-sync";
