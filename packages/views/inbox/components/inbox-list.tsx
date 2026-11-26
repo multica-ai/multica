@@ -15,7 +15,7 @@ import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
 import { InboxListItem } from "./inbox-list-item";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
-import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
+import { useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
 
 // Sizing only (like the board's card estimate): the seed's trailing spacer
@@ -81,11 +81,10 @@ export function InboxList({
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): assign the saved offset at
   // ref-attach (the seed's estimate spacer gives the container a truthful
-  // height on the first commit, so the assignment sticks pre-paint) and feed
-  // the same offset into the Virtuoso as its initial position.
-  const savedScrollTop = useRestoredScrollOffset("list");
+  // height on the first commit, so the assignment sticks pre-paint). The
+  // Virtuoso reads its first range from that scroll position; see
+  // board-column.tsx for why it gets no `initialScrollTop`.
   const restoreScrollRef = useRestoredScrollRef("list");
-  const restoredScrollTop = scrollRestoration ? savedScrollTop : undefined;
   const attachScrollEl = useCallback(
     (el: HTMLDivElement | null) => {
       setScrollEl(el);
@@ -229,7 +228,6 @@ export function InboxList({
             data={items}
             endReached={loadMore}
             computeItemKey={computeItemKey}
-            initialScrollTop={restoredScrollTop}
             initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
             defaultItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
             increaseViewportBy={{ top: 400, bottom: 400 }}

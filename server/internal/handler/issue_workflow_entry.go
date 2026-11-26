@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
@@ -28,7 +29,8 @@ import (
 //     enters the column it lands on only when the caller asks for it.
 //
 // Handoffs reuse assignment wholesale: the resolved handler goes through the
-// same permission gate as a hand-picked assignee, and the run starts through
+// same permission gate as a hand-picked assignee (a handler archived or gone
+// since the step was set hands off to nobody), and the run starts through
 // the same WillEnqueueRun predicate, with the step's brief as its handoff note.
 
 // workflowHandoff is a handoff an issue write triggers.
@@ -107,12 +109,38 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 		return nil, nil
 	}
 	assigneeType, assigneeID, ok := issueworkflow.ResolveHandler(step, project, prev.CreatorType, prev.CreatorID)
-	if !ok {
+	if !ok || h.handoffTargetRetired(ctx, prev.WorkspaceID, assigneeType, assigneeID) {
 		return nil, nil
 	}
 	params.AssigneeType = pgtype.Text{String: assigneeType, Valid: true}
 	params.AssigneeID = assigneeID
 	return &workflowHandoff{def: *def, step: step, project: project}, nil
+}
+
+// handoffTargetRetired reports whether a resolved handler can no longer take
+// work: an archived agent or squad, a squad without an active leader, or a
+// user who left the workspace. The step then behaves like a relative handler
+// with nobody to resolve to.
+func (h *Handler) handoffTargetRetired(ctx context.Context, workspaceID pgtype.UUID, assigneeType string, assigneeID pgtype.UUID) bool {
+	switch assigneeType {
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: assigneeID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows) || (err == nil && agent.ArchivedAt.Valid)
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: assigneeID, WorkspaceID: workspaceID})
+		if err != nil {
+			return errors.Is(err, pgx.ErrNoRows)
+		}
+		if squad.ArchivedAt.Valid {
+			return true
+		}
+		leader, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: squad.LeaderID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows) || (err == nil && leader.ArchivedAt.Valid)
+	case "member":
+		_, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: assigneeID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows)
+	}
+	return false
 }
 
 // workflowStepMoved shares the step guard with the claim brief so a run is
@@ -268,6 +296,15 @@ func (h *Handler) workflowBriefInput(ctx context.Context, issue db.Issue, def is
 		StatusName: func(key string) string {
 			return resolver.Name(ctx, h.Queries, key)
 		},
+		EffectiveStatus: func(key string) string {
+			return resolver.Effective(ctx, h.Queries, key)
+		},
+		StatusCategory: func(key string) string {
+			return resolver.Category(ctx, h.Queries, key)
+		},
+		StatusDescription: func(key string) string {
+			return resolver.Description(ctx, h.Queries, key)
+		},
 		HandlerName: func(step issueworkflow.Step) string {
 			if !step.HandsOff() {
 				return ""
@@ -354,8 +391,10 @@ func (h *Handler) assigneeActiveRuns(ctx context.Context, issue db.Issue) []db.L
 // gets the observer brief, so it does not move a step it does not own.
 //
 // legacyRuntimeRules is true for a daemon that does not advertise
-// protocol.DaemonCapabilityWorkflowStatusRulesV1; see BriefInput.
-func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task *db.AgentTaskQueue, legacyRuntimeRules bool) *TaskProjectWorkflowData {
+// protocol.DaemonCapabilityWorkflowStatusRulesV1, and stepCommands for one
+// that does not advertise protocol.DaemonCapabilityWorkflowStatusMapV1; see
+// BriefInput.
+func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task *db.AgentTaskQueue, legacyRuntimeRules, stepCommands bool) *TaskProjectWorkflowData {
 	def, project, err := issueworkflow.ForProject(ctx, h.Queries, issue.WorkspaceID, issue.ProjectID)
 	if err != nil {
 		slog.Warn("task claim: failed to load project workflow for brief injection",
@@ -367,6 +406,7 @@ func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task
 	}
 	in := h.workflowBriefInput(ctx, issue, *def, project)
 	in.LegacyRuntimeRules = legacyRuntimeRules
+	in.StepCommands = stepCommands
 	stepMoved := workflowStepMoved(def, issue.Status, task)
 	if stepMoved {
 		in.BoundStep = task.WorkflowStep.String
@@ -377,7 +417,11 @@ func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task
 			in.AssigneeName = h.actorDisplayName(ctx, issue.WorkspaceID, issue.AssigneeType.String, issue.AssigneeID)
 		}
 	}
-	return &TaskProjectWorkflowData{Brief: issueworkflow.Brief(in), stepMoved: stepMoved}
+	return &TaskProjectWorkflowData{
+		Brief:     issueworkflow.Brief(in),
+		StatusMap: !legacyRuntimeRules && !stepCommands,
+		stepMoved: stepMoved,
+	}
 }
 
 // taskRunsForAssignee reports whether a run works on the issue as its

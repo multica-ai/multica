@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Loader2, Zap } from "@multica/ui/icons";
+import { Loader2, Zap } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { dispatchReasonCode } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -29,7 +29,8 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 
 // Quick Actions sidebar section (MUL-5465).
@@ -78,8 +79,8 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
 
   return (
     <div>
-      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} open={open} onOpenChange={setOpen} />
-      {open ? (
+      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} countWhenOpen={hiddenCount > 0} open={open} onOpenChange={setOpen} />
+      <IssueSidebarCollapsible open={open}>
         <div className="space-y-0.5 px-2">
           {isError && <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
             {t(($) => $.detail.section_load_failed_retry)}
@@ -102,7 +103,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
             </button>
           )}
         </div>
-      ) : null}
+      </IssueSidebarCollapsible>
 
       <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
     </div>
@@ -262,16 +263,19 @@ function QuickActionRow({
 }
 
 /**
- * The quick actions behind one button, for the Inbox bar. Nothing configured
- * renders nothing.
+ * The quick actions behind one icon button, for the Inbox's floating group and
+ * the issue page header. Nothing configured renders nothing.
  */
 export function QuickActionsMenu({
   issueId,
   onRun,
+  side,
 }: {
   issueId: string;
   /** Called as an action starts, with whether its comment was posted. */
   onRun?: (action: QuickAction, ran: Promise<boolean>) => void;
+  /** Where the menu and its tooltip open: up from the Inbox's floating group, down from the header. */
+  side: "top" | "bottom";
 }) {
   const { t } = useT("issues");
   const wsId = useCurrentWorkspace()?.id ?? "";
@@ -288,16 +292,14 @@ export function QuickActionsMenu({
   return (
     <>
       <DropdownMenu>
-        <TooltipHint label={label} side="bottom">
+        <TooltipHint label={label} shortcut={<ActionShortcutKeycaps action="runIssueQuickAction" />} side={side}>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="sm" aria-label={label} className="shrink-0" disabled={running} />}
+            render={<Button variant="ghost" size="icon-sm" aria-label={label} className="shrink-0" disabled={running} />}
           >
             {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
-            <span className="@max-[56rem]/inbox-bar:hidden">{label}</span>
-            <ChevronDown className="size-3 text-muted-foreground @max-[30rem]/inbox-bar:hidden" />
           </DropdownMenuTrigger>
         </TooltipHint>
-        <DropdownMenuContent align="start" className="w-auto min-w-56 max-w-80">
+        <DropdownMenuContent side={side} align="start" className="w-auto min-w-56 max-w-80">
           {actions.map((action) => (
             <DropdownMenuItem
               key={action.id}

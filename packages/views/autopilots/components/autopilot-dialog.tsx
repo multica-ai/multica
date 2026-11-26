@@ -54,6 +54,7 @@ import type {
   AutopilotCollaborator,
   AutopilotExecutionMode,
   AutopilotTrigger,
+  UpdateAutopilotRequest,
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor, type TitleEditorRef } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -91,6 +92,7 @@ export type AutopilotDialogProps =
       mode: "create";
       open: boolean;
       onOpenChange: (v: boolean) => void;
+      onOpenChangeComplete?: (open: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialSchedule?: Pick<ScheduleConfig, "time" | "days">;
     }
@@ -98,6 +100,7 @@ export type AutopilotDialogProps =
       mode: "edit";
       open: boolean;
       onOpenChange: (v: boolean) => void;
+      onOpenChangeComplete?: (open: boolean) => void;
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
@@ -130,6 +133,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const initial: Partial<AutopilotInitial> = isCreate
     ? props.initial ?? {}
     : props.initial;
+
+  // What this form opened with. `initial` follows the server, so a save compares
+  // against this to leave fields the user never touched to whoever changed them.
+  const openedRef = useRef(initial);
 
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
@@ -353,19 +360,23 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           toast.error(formatSchedulePartialFailureToast(t, "create", triggerErrMessage));
         }
       } else {
-        await updateAutopilot.mutateAsync({
-          id: props.autopilotId,
-          title: title.trim(),
-          description: description.trim() || null,
-          project_id: projectId,
-          assignee_type: assigneeType,
-          assignee_id: assigneeId,
-          execution_mode: executionMode,
-          subscribers: subscriberUserIds.map((user_id) => ({
+        const opened = openedRef.current;
+        const changes: UpdateAutopilotRequest = {};
+        if (title !== opened.title) changes.title = title.trim();
+        if (description !== opened.description) changes.description = description.trim() || null;
+        if (projectId !== opened.project_id) changes.project_id = projectId;
+        if (assigneeType !== opened.assignee_type || assigneeId !== opened.assignee_id) {
+          changes.assignee_type = assigneeType;
+          changes.assignee_id = assigneeId;
+        }
+        if (executionMode !== opened.execution_mode) changes.execution_mode = executionMode;
+        if (subscriberUserIds.join() !== (opened.subscriber_user_ids ?? []).join()) {
+          changes.subscribers = subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
             user_id,
-          })),
-        });
+          }));
+        }
+        await updateAutopilot.mutateAsync({ id: props.autopilotId, ...changes });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
         // Skip the schedule sync when the autopilot's first trigger is a
@@ -418,12 +429,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const contentKey = isCreate ? "create" : props.autopilotId;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={props.onOpenChangeComplete}
+    >
       <DialogContent
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
-          "!transition-all !duration-300 !ease-out !-translate-y-1/2",
+          "[transition-property:width,max-width,height] [transition-duration:200ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] motion-reduce:[transition-duration:0ms] !-translate-y-1/2",
           "!w-[calc(100%-2rem)]",
           isExpanded
             ? "!max-w-6xl !h-[calc(100%-4rem)]"

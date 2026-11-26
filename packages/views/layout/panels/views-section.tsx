@@ -21,7 +21,6 @@ import type { IssueTableFacetsRequest } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueTableFacetsOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
-import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
@@ -55,10 +54,11 @@ import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
+import { ViewVisibilityMenuItems } from "../../issue-views/view-visibility-menu-items";
 import { BUILTIN_VIEW_ICON, useBuiltinViewLabel, useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelDisclosure, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { SECTION_SETTINGS_REVEAL_CLASS, ViewsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
@@ -355,24 +355,16 @@ function BuiltinViewRow({
     enabled: builtin === "working",
     select: workingIssueIds,
   });
-  // Snoozed lists, and counts, the issues the viewer snoozed in the Inbox.
-  const snoozed = useQuery({
-    ...snoozedInboxOptions(wsId),
-    enabled: builtin === "snoozed",
-    select: snoozedIssueIds,
-  });
-  const ids = builtin === "working" ? working : builtin === "snoozed" ? snoozed : null;
   const dependency = filterDependencyState(true, [
     statusCatalogSource(statusCatalog),
-    ...(ids ? [ids] : []),
+    ...(builtin === "working" ? [working] : []),
   ]);
   const request = dependency.unresolved
     ? undefined
-    : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, ids?.data);
+    : builtinSidebarRequest(builtin, issueSettings, statusCatalog.statuses, working.data);
   const prefetch = usePrefetch(wsId, source, request);
-  // Working and Snoozed count their own id sets; the rest count what they list.
-  const listedCount = useListedCount(wsId, request, showCount && !ids);
-  const count = !showCount ? 0 : ids ? (ids.data?.length ?? 0) : listedCount;
+  const listedCount = useListedCount(wsId, request, showCount && builtin !== "working");
+  const count = !showCount ? 0 : builtin === "working" ? (working.data?.length ?? 0) : listedCount;
 
   return (
     <>
@@ -415,7 +407,7 @@ function BuiltinViewRow({
           </span>
         }
       />
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -429,13 +421,9 @@ function BuiltinViewRow({
             linkRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </>
   );
-}
-
-function snoozedIssueIds(entries: readonly { issue_id: string }[]): string[] {
-  return entries.map((entry) => entry.issue_id).sort();
 }
 
 function workingIssueIds(agents: readonly { issue_ids: readonly string[] }[]): string[] {
@@ -552,6 +540,7 @@ function SavedViewRow({
                 <Link2 className="size-3.5" />
                 {t(($) => $.panels.work.view_copy_link)}
               </DropdownMenuItem>
+              <ViewVisibilityMenuItems view={view} actions={actions} />
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => actions.sidebar.unstar(item.id)}>
                 <EyeOff className="size-3.5" />
@@ -570,7 +559,7 @@ function SavedViewRow({
           </span>
         }
       />
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -584,7 +573,7 @@ function SavedViewRow({
             linkRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </>
   );
 }

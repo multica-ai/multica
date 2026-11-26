@@ -32,7 +32,11 @@ export function useInboxSnooze() {
   const { mutateAsync: unsnoozeAsync } = useUnsnoozeInbox();
 
   const returnRow = useCallback(
-    (key: string) => useInboxSelectionStore.getState().returnRow(wsId, key),
+    (key: string) => {
+      const store = useInboxSelectionStore.getState();
+      store.returnRow(wsId, key);
+      store.clearLastCleared(wsId, key);
+    },
     [wsId],
   );
 

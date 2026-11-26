@@ -283,6 +283,30 @@ describe("ThreadMinimap", () => {
     }
   });
 
+  it("keeps the card centered while its enter animation drives translate", () => {
+    const keyframes: Keyframe[][] = [];
+    const animate = vi.fn((frames: Keyframe[]) => {
+      keyframes.push(frames);
+      return { cancel: vi.fn() } as unknown as Animation;
+    });
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      renderWithI18n(
+        <ThreadMinimap description={description} threads={threads} scrollContainerEl={null} onJump={vi.fn()} />,
+      );
+      act(() => screen.getByRole("button", { name: "First thread opener" }).focus());
+
+      expect(keyframes[0]?.some((frame) => "translate" in frame)).toBe(true);
+      // A translate utility would be overridden by those keyframes, dropping
+      // the card by half its height until the animation ends.
+      const card = screen.getByRole("list").parentElement!;
+      expect(card.className).not.toMatch(/(?:^|\s)-?translate-/);
+      expect(card).toHaveClass("inset-y-0", "my-auto", "h-fit");
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    }
+  });
+
   it("marks resolved threads in the complete outline", () => {
     vi.useFakeTimers({
       toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],

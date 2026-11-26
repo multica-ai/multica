@@ -454,4 +454,28 @@ describe("reply annotations", () => {
     setCurrentWorkspace(null, null);
   });
 
+  it("persists an in-progress pending annotation across rehydration and clears it on dismiss or clearDraft", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setPendingAnnotation(key, { annotation, existing: false });
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+    expect(store.getPendingAnnotation(key)).toEqual({ annotation, existing: false });
+
+    const before = useCommentDraftStore.getState().drafts[key];
+    store.setPendingAnnotation(key, { annotation: { ...annotation }, existing: false });
+    expect(useCommentDraftStore.getState().drafts[key]).toBe(before);
+
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)).toEqual({ annotation, existing: false });
+
+    useCommentDraftStore.getState().clearPendingAnnotation(key);
+    expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined();
+
+    useCommentDraftStore.getState().setPendingAnnotation(key, { annotation, existing: false });
+    useCommentDraftStore.getState().clearDraft(key);
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)).toBeUndefined();
+  });
+
 });

@@ -52,14 +52,17 @@ DEV_TMPDIR="${MULTICA_DEV_TMPDIR:-$HOME/.multica/dev-tmp}"
 # silently outranks server_url in a saved profile config. Every long-lived child
 # is launched without them, so a local daemon cannot authenticate its local
 # token against the production API — which fails as a bare 401 and reads like a
-# product bug. PATH is never stripped: the daemon resolves agent CLI paths by
-# forking the login shell.
+# product bug. MULTICA_TASK_ENV_FILE goes too: a warm pooled session exports it,
+# and the CLI reloads MULTICA_TOKEN / MULTICA_TASK_ID from that file on every
+# start, replacing the local token with the task's production one. PATH is
+# never stripped: the daemon resolves agent CLI paths by forking the login
+# shell.
 CLEAN_ENV=(env
   -u MULTICA_SERVER_URL -u MULTICA_TOKEN -u MULTICA_WORKSPACE_ID
   -u MULTICA_DAEMON_PORT -u MULTICA_AGENT_ID -u MULTICA_AGENT_NAME
   -u MULTICA_TASK_ID -u MULTICA_TASK_SLOT
   -u MULTICA_TASK_CONFIG_ROOT -u MULTICA_TASK_WORKSPACES_ROOT
-  -u MULTICA_WORKSPACES_ROOT)
+  -u MULTICA_WORKSPACES_ROOT -u MULTICA_TASK_ENV_FILE)
 
 # ---------------------------------------------------------------- output ----
 
@@ -534,6 +537,26 @@ database_url_name() {
     const url = new URL(process.argv[1]);
     process.stdout.write(decodeURIComponent(url.pathname.replace(/^\//, "")));
   ' "$1" 2>/dev/null || true
+}
+
+# Prints the user of a DATABASE_URL the shared compose container can serve, or
+# nothing: the container only ever publishes localhost:5432.
+container_database_user() {
+  node -e '
+    const url = new URL(process.argv[1]);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) process.exit(0);
+    if ((url.port || "5432") !== "5432") process.exit(0);
+    process.stdout.write(decodeURIComponent(url.username) || "multica");
+  ' "$1" 2>/dev/null || true
+}
+
+# The path ensure_database takes without psql, so a database `up` created
+# through the container can be dropped on a machine that never had psql.
+container_psql() {
+  local user=$1
+  shift
+  command -v docker >/dev/null 2>&1 || return 1
+  docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres psql -U "$user" -d postgres "$@"
 }
 
 # Diagnoses the failure mode this whole script exists to make impossible:
@@ -1767,7 +1790,13 @@ cmd_up() {
 
   # No resident cleanup service is required: every future environment start is
   # a safe opportunity to collect expired or directory-less environments.
-  cmd_gc --auto
+  # An explicit lifecycle change applies to this checkout's existing
+  # environment, including an expired one. Keep it for the renewal below.
+  local gc_args=(--auto)
+  if [ "$lifecycle_requested" = 1 ]; then
+    gc_args+=(--keep-current-checkout)
+  fi
+  cmd_gc "${gc_args[@]}"
 
   step "Prerequisites"
   local missing=() tool needed="node go curl"
@@ -1962,7 +1991,7 @@ cmd_down() {
 }
 
 cmd_destroy() {
-  local name="" assume_yes=0 reply admin_url failures=0
+  local name="" assume_yes=0 reply admin_url db_user failures=0
   local expected_workspaces expected_desktop_data desktop_profile_dir
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2006,8 +2035,18 @@ cmd_destroy() {
       failures=$((failures + 1))
     fi
   else
-    warn "psql not found; $DB_NAME was left in place."
-    failures=$((failures + 1))
+    db_user="$(container_database_user "$DATABASE_URL")"
+    if [ -n "$db_user" ] && container_psql "$db_user" -tAc 'SELECT 1' >/dev/null 2>&1; then
+      if container_psql "$db_user" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" >/dev/null; then
+        ok "dropped database $DB_NAME through the shared PostgreSQL container"
+      else
+        warn "failed to drop database $DB_NAME; keeping its manifest"
+        failures=$((failures + 1))
+      fi
+    else
+      warn "psql not found and the shared PostgreSQL container is not reachable; $DB_NAME was left in place."
+      failures=$((failures + 1))
+    fi
   fi
 
   if rm -rf "$PROFILE_DIR"; then
@@ -2129,11 +2168,12 @@ EOF
 # in psql: an environment whose directory is gone, or whose TTL has passed, has
 # no owner left to stop it.
 cmd_gc() {
-  local dry_run=0 automatic=0 name age_hours created_epoch expiry_epoch reason
+  local dry_run=0 automatic=0 keep_current_checkout=0 name age_hours created_epoch expiry_epoch reason
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=1 ;;
       --auto) automatic=1 ;;
+      --keep-current-checkout) keep_current_checkout=1 ;;
       *) die "Unknown flag for gc: $1" ;;
     esac
     shift
@@ -2143,6 +2183,9 @@ cmd_gc() {
     [ -n "$name" ] || continue
     (
       load_manifest "$name"
+      if [ "$keep_current_checkout" = 1 ] && [ "$DIR" = "$REPO_ROOT" ]; then
+        exit 0
+      fi
       reason=""
       [ -d "$DIR" ] || reason="its checkout directory is gone"
       if [ -z "$reason" ] && [ "${TTL_HOURS:-0}" != 0 ]; then

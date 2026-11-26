@@ -16,6 +16,21 @@ function canHighlight() {
   return typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
 }
 
+/** Whether the range is fully inside the visible part of its scroll container. */
+function inView(range: Range, from: HTMLElement): boolean {
+  if (typeof range.getBoundingClientRect !== "function") return false;
+  const box = range.getBoundingClientRect();
+  let port = { top: 0, bottom: window.innerHeight };
+  for (let el: HTMLElement | null = from.parentElement; el; el = el.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) {
+      const r = el.getBoundingClientRect();
+      port = { top: Math.max(port.top, r.top), bottom: Math.min(port.bottom, r.bottom) };
+      break;
+    }
+  }
+  return box.top >= port.top && box.bottom <= port.bottom;
+}
+
 /**
  * Paints each open discussion's quoted text in the doc and keeps the ranges
  * current while the doc is edited. Returns which discussions could not be
@@ -43,11 +58,15 @@ export function useDocCommentHighlights(
       if (!root) return;
       const ranges = new Map<string, Range>();
       const gone = new Set<string>();
-      const index = indexCommentText(root, true);
-      for (const thread of threadsRef.current) {
-        const range = docAnchorRange(root, thread, index);
-        if (range) ranges.set(thread.id, range);
-        else gone.add(thread.id);
+      // A doc without discussions has nothing to find: skip the walk over its
+      // text, which otherwise runs on every batch of edits.
+      if (threadsRef.current.length > 0) {
+        const index = indexCommentText(root, true);
+        for (const thread of threadsRef.current) {
+          const range = docAnchorRange(root, thread, index);
+          if (range) ranges.set(thread.id, range);
+          else gone.add(thread.id);
+        }
       }
       rangesRef.current = ranges;
       setMissing((prev) =>
@@ -82,11 +101,13 @@ export function useDocCommentHighlights(
     return null;
   };
 
-  /** Scrolls the discussion's quoted text into view. */
+  /** Scrolls the discussion's quoted text into view, unless it is in view. */
   const reveal = (id: string) => {
     const range = rangesRef.current.get(id);
     const target = range?.startContainer.parentElement;
-    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!range || !target) return;
+    if (inView(range, target)) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
   };
 
   return { missing, threadAt, reveal };

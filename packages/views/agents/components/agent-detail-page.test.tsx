@@ -11,6 +11,8 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../locales";
@@ -68,6 +70,13 @@ vi.mock("./agent-instructions-section", () => ({
 vi.mock("./agent-channels-section", () => ({
   AgentChannelLinks: () => <div>channel-links</div>,
   AgentChannelsSection: () => <div id="messaging-channels">channels-section</div>,
+}));
+vi.mock("./agent-apps-section", () => ({
+  AgentAppsSection: ({ onManage }: { onManage: () => void }) => (
+    <button type="button" onClick={onManage}>
+      manage apps
+    </button>
+  ),
 }));
 vi.mock("./agent-skills-section", () => ({
   AgentSkillsSection: ({ onManage }: { onManage: () => void }) => (
@@ -326,6 +335,7 @@ beforeEach(() => {
   mockArchiveAgent.mockResolvedValue(undefined);
   mockCancelAgentTasks.mockResolvedValue({ cancelled: 2 });
   mockCopyText.mockResolvedValue(true);
+  configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
 });
 
 describe("AgentDetailPage direct-detail fallback", () => {
@@ -562,6 +572,31 @@ describe("AgentDetailPage layout", () => {
     expect(screen.getByText("instructions-section")).toBeInTheDocument();
   });
 
+  it("shows Apps between Instructions and Skills only while Connected Apps is on", async () => {
+    const { unmount } = renderPage();
+    await screen.findByRole("button", { name: "manage skills" });
+    expect(screen.queryByRole("button", { name: "manage apps" })).not.toBeInTheDocument();
+    unmount();
+
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    renderPage();
+    const apps = await screen.findByRole("button", { name: "manage apps" });
+    const instructions = screen.getByText("instructions-section");
+    const skills = screen.getByRole("button", { name: "manage skills" });
+    expect(instructions.compareDocumentPosition(apps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(apps.compareDocumentPosition(skills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides Apps on a Qoder Cloud Agents runtime", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    runtimesRef.current = [{ id: "runtime-1", provider: "qoder_cloud" }];
+    renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "manage apps" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("assigns work through the quick-create modal", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Assign work" }));
@@ -628,6 +663,16 @@ describe("AgentDetailPage deep links", () => {
     fireEvent.click(screen.getByRole("button", { name: "close advanced" }));
     expect(screen.queryByTestId("advanced-settings")).not.toBeInTheDocument();
     expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1");
+  });
+
+  it("opens the Apps settings from the Apps section", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const { replace } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "manage apps" }));
+    expect(screen.getByTestId("advanced-settings")).toHaveTextContent(
+      "advanced:composio_mcp",
+    );
+    expect(replace).toHaveBeenLastCalledWith("/acme/agents/agent-1?view=composio_mcp");
   });
 
   it("opens Access settings from the properties panel", async () => {
@@ -738,10 +783,24 @@ describe("AgentDetailPage DM button", () => {
 });
 
 describe("AgentDetailPage more actions", () => {
-  it("keeps Settings and copy actions but no Archive for a system agent", async () => {
+  it("offers Archive for Mika and says the Mika prompt stops", async () => {
+    agentsRef.current = [{ ...baseAgent, system_key: "mika" }];
+    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    fireEvent.click(
+      within(openMoreActions()).getByRole("menuitem", { name: "Archive agent" }),
+    );
+    expect(
+      await screen.findByText(/"Start with Mika" prompt won't appear again/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Settings and copy actions but no Archive for other system agents", async () => {
     // An admin passes `canEditAgent`, so only the system key keeps Archive
     // out of the menu.
-    agentsRef.current = [{ ...baseAgent, system_key: "mika" }];
+    agentsRef.current = [{ ...baseAgent, system_key: "agent_builder:abc" }];
     membersRef.current = [{ user_id: "user-1", role: "admin" }];
     renderPage();
 

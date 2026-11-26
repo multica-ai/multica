@@ -158,6 +158,56 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 	return items, nil
 }
 
+const listDepartedMemberAssetHolders = `-- name: ListDepartedMemberAssetHolders :many
+SELECT DISTINCT refs.workspace_id::uuid AS workspace_id, refs.user_id::uuid AS user_id
+FROM (
+    SELECT workspace_id, owner_id AS user_id FROM agent
+    WHERE archived_at IS NULL AND kind = 'user' AND owner_id IS NOT NULL
+    UNION
+    SELECT workspace_id, created_by_id FROM autopilot
+    WHERE status = 'active' AND created_by_type = 'member' AND created_by_id IS NOT NULL
+    UNION
+    SELECT workspace_id, created_by FROM issue_wakeup
+    WHERE disabled_at IS NULL AND system_rule IS NULL AND created_by IS NOT NULL
+    UNION
+    SELECT workspace_id, requester_id FROM chat_wakeup
+    WHERE status = 'active'
+) refs
+WHERE NOT EXISTS (
+    SELECT 1 FROM member m
+    WHERE m.workspace_id = refs.workspace_id AND m.user_id = refs.user_id
+)
+ORDER BY 1, 2
+`
+
+type ListDepartedMemberAssetHoldersRow struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// (workspace, user) pairs where a user who is no longer a member still owns a
+// live agent, an active autopilot or an enabled wakeup: members removed
+// before the removal flow retired these assets. A guest is still a member.
+func (q *Queries) ListDepartedMemberAssetHolders(ctx context.Context) ([]ListDepartedMemberAssetHoldersRow, error) {
+	rows, err := q.db.Query(ctx, listDepartedMemberAssetHolders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDepartedMemberAssetHoldersRow{}
+	for rows.Next() {
+		var i ListDepartedMemberAssetHoldersRow
+		if err := rows.Scan(&i.WorkspaceID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE workspace_id = $1
@@ -259,6 +309,36 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockWorkspaceOwners = `-- name: LockWorkspaceOwners :many
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE
+`
+
+// Locks a workspace's owner rows in id order, so changes that could take away
+// its last owner apply one after the other and each counts the owners the
+// previous one left.
+func (q *Queries) LockWorkspaceOwners(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockWorkspaceOwners, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

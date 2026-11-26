@@ -1,33 +1,36 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, ChevronDown } from "@multica/ui/icons";
-import { Button } from "@multica/ui/components/ui/button";
+import { AlarmClock, Archive } from "@multica/ui/icons";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useModalStore } from "@multica/core/modals";
-import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import {
+  useMarkInboxRead,
+  useMarkInboxUnread,
+  type InboxUnsubscribeScope,
+} from "@multica/core/inbox/mutations";
+import {
+  useInboxSelectionStore,
+  type LastInboxCleared,
+} from "@multica/core/inbox/selection-store";
 import type { InboxItem } from "@multica/core/types";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
+import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
+import { InboxMoreMenu, InboxSettledMoreMenu } from "../../inbox/components/inbox-more-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
+import { useInboxShortcut } from "../../inbox/components/use-inbox-shortcut";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
-import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
-import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
-import { useMoveOnAfterAutoArchive } from "../../inbox/components/use-move-on-after-auto-archive";
+import { useAutoArchiveCause } from "../../inbox/components/use-auto-archive-cause";
 import {
+  clearedLabelForItem,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
   useRestoreInbox,
@@ -35,35 +38,57 @@ import {
 import { useLocale, useT } from "../../i18n";
 
 /**
- * The Inbox bar of an issue opened from the Work panel's Inbox section, while
- * the section still lists it: why it is here, `issueActions` (its status,
- * assignee and quick actions), then the notification's own. Snoozing,
- * archiving or unsubscribing opens the next notification the section lists,
- * so the Inbox can be worked through without leaving the page.
+ * The Inbox page's floating group over an open issue notification:
+ * `issueActions` (its status, assignee and quick actions), then the
+ * notification's own. Snoozing, archiving or unsubscribing opens the next
+ * notification the Work panel's Inbox section lists, so the Inbox can be
+ * worked through without leaving the page.
  *
  * Once the notification leaves the Inbox on its own (the issue reached Done,
- * another window archived it, an action from this bar archived it), the
- * section keeps the row in place and the bar says so instead, with the
+ * another window archived it, an action from this group archived it), the
+ * section keeps the row in place and the group changes to match, with the
  * issue's actions still there, an undo and the way on to the next one.
  *
- * A snoozed issue's bar says when it comes back instead, wherever it is
- * opened, with the way to bring it back now or change the time.
+ * A snoozed issue's group shows when it comes back instead, with the way to
+ * bring it back now or change the time. In every state `…` comes last.
+ *
+ * `movingOn`: the page is still handing off to another notification, so a
+ * group this issue showed stays up rather than blinking out and back in.
  */
-export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issueActions?: ReactNode }) {
+export function IssueInboxBar({
+  issueId,
+  issueActions,
+  movingOn = false,
+  isSnoozedView = false,
+}: {
+  issueId: string;
+  issueActions?: ReactNode;
+  movingOn?: boolean;
+  /** Opened from the Snoozed tab: show only its snooze bar without touching the live Inbox list. */
+  isSnoozedView?: boolean;
+}) {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
-  const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
-  const { rows, kept } = useFilteredInboxRows(wsId, issueId, fromInbox);
-  const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
+  const p = useWorkspacePaths();
+  const { rows, kept } = useFilteredInboxRows(wsId, isSnoozedView ? null : issueId, !isSnoozedView);
+  const index = rows.findIndex((row) => row.issue_id === issueId);
   const row = index >= 0 ? rows[index]! : null;
   // A row kept after it left the Inbox on its own is no longer there to act on.
   const settled = kept && kept.reason !== "filtered" ? kept : null;
   const item = settled ? null : row;
   const next = row ? nextInboxRow(rows, issueId) : null;
+  // Remember that this issue showed a group, so while the page is still
+  // handing off to the next notification (`movingOn`) it stays up instead of
+  // blinking out until the next issue's group mounts.
+  const hadBarForIssueRef = useRef<string | null>(null);
+  if (item || settled) hadBarForIssueRef.current = issueId;
+  else if (!movingOn && hadBarForIssueRef.current === issueId) hadBarForIssueRef.current = null;
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxWithUndo();
   const restore = useRestoreInbox();
   const unsubscribeArchive = useUnsubscribeArchive();
+  const markRead = useMarkInboxRead();
+  const markUnread = useMarkInboxUnread();
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
@@ -73,58 +98,84 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
   const archiveItem = () => {
     if (!item) return;
     archiveWithUndo(item.id, issueId);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "archived",
+      itemId: item.id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      clearedAt: Date.now(),
+    });
   };
 
   const unsubscribeItem = (scope: InboxUnsubscribeScope) => {
     if (!item?.issue_id) return;
     unsubscribeArchive({ id: item.id, issueId: item.issue_id }, scope);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "unsubscribed",
+      itemId: item.id,
+      issueId: item.issue_id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      undoable: scope === "issue",
+      clearedAt: Date.now(),
+    });
   };
 
   const snoozeItem = (until: Date) => {
     if (!item) return;
     snooze(item, until);
-    leave(issueId, next);
+    leave(issueId, next, {
+      kind: "snoozed",
+      itemId: item.id,
+      key: issueId,
+      label: clearedLabelForItem(item),
+      href: inboxRowHref(p, item),
+      until: until.toISOString(),
+      wasRead: item.read === true,
+      clearedAt: Date.now(),
+    });
   };
 
-  const moveOn = () => leave(issueId, next);
-  const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
+  const moveOn = () => {
+    const cleared: LastInboxCleared | undefined = settled
+      ? settled.reason === "snoozed" && settled.item.snoozed_until
+        ? {
+            kind: "snoozed",
+            itemId: settled.item.id,
+            key: issueId,
+            label: clearedLabelForItem(settled.item),
+            href: inboxRowHref(p, settled.item),
+            until: settled.item.snoozed_until,
+            wasRead: settled.item.read === true,
+            clearedAt: Date.now(),
+          }
+        : {
+            kind: "archived",
+            itemId: settled.item.id,
+            key: issueId,
+            label: clearedLabelForItem(settled.item),
+            href: inboxRowHref(p, settled.item),
+            clearedAt: Date.now(),
+          }
+      : undefined;
+    leave(issueId, next, cleared);
+  };
+  const { cause, reason: archiveReason } = useAutoArchiveCause(settled);
 
-  const archiveRef = useRef<(() => void) | null>(null);
-  const snoozeRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    // Archived already, E moves on as archiving would have.
-    archiveRef.current = item ? archiveItem : settled && next ? moveOn : null;
-    snoozeRef.current = item
-      ? () => setSnoozeOpen(true)
-      : snoozed
-        ? () => unsnooze(snoozed.item_id, issueId)
-        : null;
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-      if (isEditableShortcutTarget(event.target)) return;
-      if (isPortalLayerShortcutTarget(event.target)) return;
-      if (useModalStore.getState().modal) return;
-      const run = shortcutMatchesEvent(getShortcut("archiveInboxItem"), event)
-        ? archiveRef.current
-        : shortcutMatchesEvent(getShortcut("snoozeInboxItem"), event)
-          ? snoozeRef.current
-          : null;
-      if (!run) return;
-      event.preventDefault();
-      run();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  // Archived already, E moves on (to the next notification or Inbox Zero).
+  useInboxShortcut("archiveInboxItem", item ? archiveItem : settled ? moveOn : null);
+  useInboxShortcut(
+    "snoozeInboxItem",
+    item ? () => setSnoozeOpen(true) : snoozed ? () => unsnooze(snoozed.item_id, issueId) : null,
+  );
 
   if (!item) {
     if (snoozed) {
       return (
         <SnoozedBar
+          issueId={issueId}
           until={new Date(snoozed.snoozed_until)}
           open={snoozeOpen}
           onOpenChange={setSnoozeOpen}
@@ -135,34 +186,87 @@ export function IssueInboxBar({ issueId, issueActions }: { issueId: string; issu
         />
       );
     }
-    if (!settled) return null;
+    if (!settled) {
+      if (movingOn && hadBarForIssueRef.current === issueId) {
+        return (
+          <InboxBar settled>
+            <InboxBarStatus icon={<Archive />} label={t(($) => $.kept.archived)} />
+          </InboxBar>
+        );
+      }
+      return null;
+    }
+    // An agent at work says so in the header (`IssueAgentHeaderChip`), not here.
+    const status = keptText.status(settled, cause, archiveReason === "agent_triggered");
     return (
       <InboxKeptActions
-        label={keptText.notice(settled, cause)}
+        label={status.label}
+        hint={status.hint}
+        undoLabel={status.undo}
         issueActions={settled.reason === "archived" ? issueActions : undefined}
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
+        more={<InboxSettledMoreMenu issueId={issueId} />}
       />
     );
   }
 
+  const toggleReadItem = () => {
+    if (!item) return;
+    const store = useInboxSelectionStore.getState();
+    if (item.read === true) {
+      store.markManualUnread(wsId, item.id);
+      markUnread.mutate(item.id, {
+        onError: (err) => {
+          store.clearManualUnread(wsId, item.id);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.mark_unread_failed),
+          );
+        },
+      });
+    } else {
+      store.clearManualUnread(wsId, item.id);
+      markRead.mutate(item.id, {
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.mark_read_failed),
+          ),
+      });
+    }
+  };
+
   return (
-    <InboxOpenBar item={item} issueActions={issueActions}>
-      <UnsubscribeArchiveButton issueId={issueId} userId={item.recipient_id} onConfirm={unsubscribeItem} />
+    <InboxOpenBar issueActions={issueActions}>
       <InboxSnoozeMenu
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}
         onSnooze={snoozeItem}
+        side="top"
         trigger={<InboxBarButton icon={<AlarmClock />} label={t(($) => $.snooze.action)} shortcut="snoozeInboxItem" />}
       />
       <InboxArchiveButton onClick={archiveItem} />
+      <InboxMoreMenu
+        issueId={issueId}
+        userId={item.recipient_id}
+        read={item.read === true}
+        onToggleRead={toggleReadItem}
+        onUnsubscribe={unsubscribeItem}
+      />
     </InboxOpenBar>
   );
 }
 
-/** When a snoozed issue comes back, with the way to bring it back now or later. */
+/**
+ * A snoozed issue's group: when it comes back, which opens the way to bring it
+ * back now or change the time, then the way on and `…`.
+ */
 function SnoozedBar({
+  issueId,
   until,
   open,
   onOpenChange,
@@ -171,6 +275,7 @@ function SnoozedBar({
   next,
   onNext,
 }: {
+  issueId: string;
   until: Date;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -185,21 +290,17 @@ function SnoozedBar({
   const label = t(($) => $.snooze.back_at, { time: formatSnoozeTime(until, new Date(), locale) });
   return (
     <InboxBar settled>
-      <InboxBarStatus icon={<AlarmClock />} label={label} />
       <InboxSnoozeMenu
         open={open}
         onOpenChange={onOpenChange}
         snoozed
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
-        trigger={
-          <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground">
-            {t(($) => $.snooze.change_time)}
-            <ChevronDown className="size-3" />
-          </Button>
-        }
+        side="top"
+        trigger={<InboxBarButton icon={<AlarmClock />} label={label} />}
       />
       {next && <InboxNextButton next={next} onNext={onNext} />}
+      <InboxSettledMoreMenu issueId={issueId} />
     </InboxBar>
   );
 }

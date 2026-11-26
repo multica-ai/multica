@@ -3,6 +3,30 @@ SELECT * FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListDepartedMemberAssetHolders :many
+-- (workspace, user) pairs where a user who is no longer a member still owns a
+-- live agent, an active autopilot or an enabled wakeup: members removed
+-- before the removal flow retired these assets. A guest is still a member.
+SELECT DISTINCT refs.workspace_id::uuid AS workspace_id, refs.user_id::uuid AS user_id
+FROM (
+    SELECT workspace_id, owner_id AS user_id FROM agent
+    WHERE archived_at IS NULL AND kind = 'user' AND owner_id IS NOT NULL
+    UNION
+    SELECT workspace_id, created_by_id FROM autopilot
+    WHERE status = 'active' AND created_by_type = 'member' AND created_by_id IS NOT NULL
+    UNION
+    SELECT workspace_id, created_by FROM issue_wakeup
+    WHERE disabled_at IS NULL AND system_rule IS NULL AND created_by IS NOT NULL
+    UNION
+    SELECT workspace_id, requester_id FROM chat_wakeup
+    WHERE status = 'active'
+) refs
+WHERE NOT EXISTS (
+    SELECT 1 FROM member m
+    WHERE m.workspace_id = refs.workspace_id AND m.user_id = refs.user_id
+)
+ORDER BY 1, 2;
+
 -- name: ListWorkspaceManagerUserIDs :many
 SELECT user_id FROM member
 WHERE workspace_id = $1 AND role IN ('owner', 'admin')
@@ -48,6 +72,15 @@ RETURNING *;
 -- Locks a member row for a role change, so concurrent changes to the same
 -- member apply one after the other and each re-checks the role it starts from.
 SELECT * FROM member WHERE id = $1 FOR UPDATE;
+
+-- name: LockWorkspaceOwners :many
+-- Locks a workspace's owner rows in id order, so changes that could take away
+-- its last owner apply one after the other and each counts the owners the
+-- previous one left.
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE;
 
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;

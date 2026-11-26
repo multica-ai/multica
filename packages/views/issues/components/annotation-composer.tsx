@@ -76,12 +76,20 @@ export function AnnotationComposer({
   const save = () => {
     if (busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (note.trim()) onSave(note, true);
+    if (!note.trim()) return;
+    // Cancel any armed 100ms debounce so a late onUpdate cannot write a stale
+    // pendingAnnotation after confirmNote clears it.
+    editorRef.current?.flushPendingUpdate?.();
+    onSave(note, true);
   };
   const send = async () => {
     if (!controls || controls.targetMissing || busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
     if (!note.trim()) return;
+    // Cancel any armed 100ms debounce before confirmNote + submit snapshot,
+    // matching ReplyInput/CommentInput so a late onUpdate cannot mutate the
+    // draft entry mid-flight and defeat the post-submit cleanup guard.
+    editorRef.current?.flushPendingUpdate?.();
     inFlight.current = true;
     onBusyChange(true);
     setSending(true);
@@ -110,6 +118,7 @@ export function AnnotationComposer({
           placeholder={t(($) => $.reply.annotations.note_placeholder)}
           className="min-h-8 max-h-32 overflow-y-auto px-2 py-1.5"
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
+          flushPendingOnUnmount
           onUpdate={onChange} onEnter={save} onSubmit={send} />
       </div>
       <VoiceHud voice={voice} />

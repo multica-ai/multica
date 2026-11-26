@@ -1,6 +1,7 @@
 import type { TimelineEntry } from "@multica/core/types";
 import type { CommentRun } from "../components/comment-runs";
 import { timelineRowContent, type TimelineFolds, type TimelineRowItem } from "./timeline-row-content";
+import { rendersAsPlainText } from "../../rich-content/markdown-limit";
 
 /**
  * Estimated rendered height of each timeline row, for Virtuoso's
@@ -40,6 +41,8 @@ const COLLAPSED_THREAD = 70;
 const THREAD_FRAME = 30;
 const THREAD_ROW = 75;
 const RUN_BLOCK = 70;
+/** A body too long to format: its notice line plus the plain-text box, capped at 60vh (~900px viewport). */
+const PLAIN_TEXT_BODY = 560;
 
 /** Characters per rendered line for a timeline in a scroll container `width` px wide. */
 export function timelineCharsPerLine(width: number): number {
@@ -51,6 +54,7 @@ const MAX_CACHED = 4_000;
 
 /** Rendered height of a Markdown body, from its lines. Cached per content and width. */
 export function estimateMarkdownHeight(markdown: string, charsPerLine: number): number {
+  if (rendersAsPlainText(markdown)) return PLAIN_TEXT_BODY;
   const key = `${charsPerLine}:${markdown}`;
   const cached = cache.get(key);
   if (cached !== undefined) return cached;

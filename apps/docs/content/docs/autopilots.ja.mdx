@@ -16,7 +16,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 ## オートパイロットを作成する
 
-サイドバーから**オートパイロット**を開き、テンプレートを選ぶか、空の状態から作成して次を設定します。
+アプリナビゲーションから**自動化**を開き、テンプレートを選ぶか、空の状態から作成して次を設定します。
 
 - **名前**: このオートパイロットが担当する作業
 - **Runbook**: エージェントが実行ごとに読む目標、背景、制約、手順
@@ -28,7 +28,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 保存すると、オートパイロットはデフォルトで有効になります。**今すぐ実行**を使えば、スケジュールを待たずにいつでも一連の処理を手動で 1 回実行できます。
 
-下は出力モードが「タスクを作成」のオートパイロットです。**今すぐ実行**をクリックするか、次回の実行時刻まで早送りすると、タスクの作成、エージェントへの割り当て、実行の完了までを確認できます。
+下のクリップでは、出力モードが「タスクを作成」のオートパイロット（**Weekly dead-code audit**）を開き、**Run now** で実行して実行履歴に作成されたタスクが紐づく様子を確認できます。
 
 <AutopilotDemo />
 
@@ -189,6 +189,7 @@ Multica は最近の実行が継続的に失敗していないか定期的に確
 multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
+multica autopilot deliveries <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 

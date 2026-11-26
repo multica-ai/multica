@@ -1,12 +1,12 @@
 ---
-title: 飛書 Bot
-description: 把 AI 代理接入飛書，在私聊或群聊中直接交代工作。
+title: 飛書 Bot：在飛書裡 @ AI 代理接任務
+description: Multica 內建的飛書整合：在飛書群裡 @ AI 代理或私聊它，就能直接交代工作，也可以用 /issue 建立任務。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-把一個 Multica AI 代理連線成飛書 Bot 後，團隊成員可以在飛書裡私聊它、在群裡 @ 它，也可以用 `/issue` 建立任務。對話和執行記錄都儲存在 Multica 工作區。
+飛書整合是 Multica 內建的功能，掃碼就能連線，不需要自己寫機器人程式碼。把一個 Multica AI 代理連線成飛書 Bot 後，團隊成員可以在飛書裡私聊它、在群裡 @ 它，也可以用 `/issue` 建立任務。對話和執行記錄都儲存在 Multica 工作區。
 
 每個 Bot 只對應一個 AI 代理。需要在飛書中使用多個 AI 代理時，分別為它們連線 Bot。
 
@@ -59,9 +59,9 @@ Multica 靠這次繫結確認訊息來自哪位工作區成員。非成員無法
 
 直接給 Bot 發訊息即可。連續訊息保留在同一段 Multica 對話中，AI 代理的回覆也發回當前對話。
 
-### 群聊
+### 在飛書群裡 @ AI 代理接任務
 
-先把 Bot 加入群聊，再 `@Bot` 並寫下要求。Bot 只響應明確 @ 它的訊息，執行時會帶上群裡最近的幾條訊息作為上下文。
+先把 Bot 加入群聊，再 `@Bot` 並寫下要求。Bot 只響應明確 @ 它的訊息，執行時會帶上群裡最近的幾條訊息作為上下文。AI 代理在它的[執行時](/daemon-runtimes)上執行，結果回覆到原來的群聊或話題裡；需要放到看板上追蹤的工作，用下面的 `/issue` 建立任務。
 
 無論私聊還是群聊，每次執行的提示詞還會列出所回覆訊息的飛書 ID：`chat_id`、`chat_type`、`message_id`、訊息在話題中時的話題 `thread_id`，以及 `sender_open_id`（傳送者的 `open_id`）。這些是飛書的 ID，不是 Multica 的 ID；AI 代理如果有自己的飛書存取權限，可以用它們查到原訊息或對話。`open_id` 只在目前連線的 Bot 所屬應用內有效。Multica 沒有記錄到的 ID 不會出現。
 

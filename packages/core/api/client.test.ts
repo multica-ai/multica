@@ -3601,16 +3601,6 @@ describe("created-by filter compatibility", () => {
 });
 
 
-describe("grouped created-by compatibility", () => {
-  it("retries a legacy server with literal creator_id", async () => {
-    const fetchMock = vi.fn(async (_url: string) => Response.json({ groups: [] }));
-    vi.stubGlobal("fetch", fetchMock);
-    await new ApiClient("https://api.example.test").listGroupedIssues({ group_by: "assignee", created_by_user_id: "me" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(new URL(fetchMock.mock.calls[1]![0]).searchParams.get("creator_id")).toBe("me");
-  });
-});
-
 describe("ApiClient request observer", () => {
   afterEach(() => setApiRequestObserver(null));
 

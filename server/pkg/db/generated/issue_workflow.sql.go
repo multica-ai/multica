@@ -499,7 +499,7 @@ WHERE i.workspace_id = $2::uuid
   AND i.project_id = ANY($3::uuid[])
   AND i.status = $4::text
   AND i.status <> $1::text
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.requester_user_id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id, i.requester_user_id, i.description_revision
 `
 
 type RemapProjectIssueStatusParams struct {
@@ -561,6 +561,7 @@ func (q *Queries) RemapProjectIssueStatus(ctx context.Context, arg RemapProjectI
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
 			&i.RequesterUserID,
+			&i.DescriptionRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -638,6 +639,38 @@ func (q *Queries) SetProjectWorkflow(ctx context.Context, arg SetProjectWorkflow
 		&i.FolderID,
 	)
 	return i, err
+}
+
+const transferSquadWorkflowStepsToLeader = `-- name: TransferSquadWorkflowStepsToLeader :execrows
+UPDATE issue_workflow SET
+    steps = (
+        SELECT jsonb_agg(
+            CASE WHEN step->'handler' @> jsonb_build_object('type', 'squad', 'id', $1::text)
+                THEN jsonb_set(step, '{handler}', jsonb_build_object('type', 'agent', 'id', $2::text))
+                ELSE step
+            END ORDER BY ord)
+        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
+    ),
+    updated_at = now()
+WHERE workspace_id = $3::uuid
+  AND steps @> jsonb_build_array(jsonb_build_object('handler', jsonb_build_object('type', 'squad', 'id', $1::text)))
+`
+
+type TransferSquadWorkflowStepsToLeaderParams struct {
+	SquadID     string      `json:"squad_id"`
+	LeaderID    string      `json:"leader_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Mirrors TransferSquadAssignees for workflow steps: an archived squad cannot
+// be assigned, so a step still handing off to it would refuse every issue
+// that enters it. The leader agent takes the step over.
+func (q *Queries) TransferSquadWorkflowStepsToLeader(ctx context.Context, arg TransferSquadWorkflowStepsToLeaderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferSquadWorkflowStepsToLeader, arg.SquadID, arg.LeaderID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateIssueWorkflow = `-- name: UpdateIssueWorkflow :one

@@ -819,20 +819,59 @@ func TestCodexRawErrorNotificationRetryingIgnored(t *testing.T) {
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	var activities []string
+	var activities, reconnects []string
 	c.onSemanticActivity = func(activity string) {
 		activities = append(activities, activity)
+	}
+	c.onReconnect = func(reason string) {
+		reconnects = append(reconnects, reason)
 	}
 	c.onTurnDone = func(aborted bool) {
 		t.Fatal("retrying error should not finish the turn")
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"reconnecting"},"willRetry":true}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Reconnecting... 2/5"},"willRetry":true}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Reconnecting... waiting for network","additionalDetails":"Connection failed: error sending request"},"willRetry":true}}`)
 
 	if got := c.getTurnError(); got != "" {
 		t.Fatalf("retrying error should not be captured, got %q", got)
 	}
-	if got, want := strings.Join(activities, ","), "error:retry"; got != want {
+	// A reconnect is not semantic activity: it must not feed either watchdog
+	// (GH #11618).
+	if len(activities) != 0 {
+		t.Fatalf("retrying error must not report semantic activity, got %q", activities)
+	}
+	want := []string{
+		"Reconnecting... 2/5",
+		"Reconnecting... waiting for network; Connection failed: error sending request",
+	}
+	if got := strings.Join(reconnects, "|"); got != strings.Join(want, "|") {
+		t.Fatalf("reconnect reasons = %q, want %q", reconnects, want)
+	}
+}
+
+// TestCodexUserMessageItemsAreNotProgress pins the input-echo half of GH
+// #11618 (and #5901): app-server echoes the submitted prompt as userMessage
+// items before it reaches the model service, so those items must not report
+// semantic activity, while every other item still does.
+func TestCodexUserMessageItemsAreNotProgress(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	var activities []string
+	c.onSemanticActivity = func(activity string) {
+		activities = append(activities, activity)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"userMessage","id":"user-1"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"userMessage","id":"user-1"}}}`)
+	if len(activities) != 0 {
+		t.Fatalf("userMessage echo must not report semantic activity, got %q", activities)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"reasoning","id":"rs-1"}}}`)
+	if got, want := strings.Join(activities, ","), "item/started:reasoning:rs-1"; got != want {
 		t.Fatalf("semantic activity = %q, want %q", got, want)
 	}
 }
@@ -846,7 +885,6 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 	}{
 		{activity: "", want: false},
 		{activity: "status:running", want: false},
-		{activity: "error:retry", want: false},
 		{activity: "error", want: true},
 		{activity: "text", want: true},
 		{activity: "tool-use:exec_command", want: true},
@@ -1858,9 +1896,12 @@ func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
 // run shipped its intermediate narration to Slack and Lark along with the answer
 // (GH #6006). Later, an empty final_answer after a `commentary` message promoted
 // that commentary to Result.Output, which the server then posted as the run's
-// result comment. The wiring mirrors executeOnce: onAgentMessage
-// and onFinalAnswer feed a codexOutputSelection and codexDeliverableOutput picks
-// from it.
+// result comment. The remaining hole was the phase-less protocol: a run whose
+// last event was a tool call left its closing narration — "Let me verify the
+// permission facts for the tcpdump output path." — as the only candidate, and
+// the server synthesized a comment from it. The wiring mirrors executeOnce:
+// onAgentMessage, onFinalAnswer and the tool-event branch of onMessage feed a
+// codexOutputSelection and codexDeliverableOutput picks from it.
 func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	t.Parallel()
 
@@ -1872,6 +1913,31 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 		rawBlankFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":" \n\t ","phase":"final_answer"}}}`
 		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
 		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		rawToolUse     = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"commandExecution","id":"c1","command":"tcpdump -i any -c 5"}}}`
+		rawToolResult  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","id":"c1","status":"completed","aggregatedOutput":"5 packets captured"}}}`
+		legacyToolUse  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_begin","call_id":"c1","command":"tcpdump -i any -c 5"}}}`
+		rawAnswer      = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`
+		rawSearchStart = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"webSearch","id":"ws1","query":"codex release notes"}}}`
+		rawSearchEnd   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"webSearch","id":"ws1","query":"codex release notes"}}}`
+		legacyToolEnd  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"c1","output":"5 packets captured"}}}`
+		legacyFinal    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause.","phase":"final_answer"}}}`
+		legacyMCPBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_begin","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
+		legacyMCPEnd   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_end","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
+		legacyWebBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"web_search_begin","call_id":"ws1"}}}`
+		legacyTurnB    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started","turn_id":"turn-b"}}}`
+		legacyEndTurnA = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"bg-a","turn_id":"turn-a","output":"done"}}}`
+		legacyEndTurnB = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"bg-b","turn_id":"turn-b","output":"done"}}}`
+		rawPlanUpdate  = `{"jsonrpc":"2.0","method":"turn/plan/updated","params":{"turnId":"t1","plan":[{"step":"Check logs","status":"in_progress"}]}}`
+		legacyPlan     = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"plan_update","plan":[{"step":"Check logs","status":"in_progress"}]}}}`
+		rawSleepStart  = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"sleep","id":"sl1","durationMs":1000}}}`
+		rawSleepEnd    = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"sleep","id":"sl1","durationMs":1000}}}`
+		rawPermsReq    = `{"jsonrpc":"2.0","id":7,"method":"item/permissions/requestApproval","params":{"itemId":"p1","permissions":{}}}`
+		legacyAskUser  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"request_user_input","call_id":"q1","turn_id":"turn-b","questions":[]}}}`
+		legacyAskPerms = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"request_permissions","call_id":"p1","turn_id":"turn-b"}}}`
+		rawUserShell   = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"commandExecution","id":"u1","command":"ls","source":"userShell"}}}`
+		rawUserShellE  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","id":"u1","command":"ls","source":"userShell","aggregatedOutput":"a"}}}`
+		legacyUserSh   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_begin","call_id":"u1","command":"ls","source":"user_shell"}}}`
+		legacyUserShE  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"u1","source":"user_shell","output":"a"}}}`
 		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
@@ -1953,6 +2019,174 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			want:         wantDeliverabl,
 			wantStreamed: []string{narration, wantDeliverabl, wantDeliverabl},
 		},
+		{
+			// The reported shape: phase-less narration, then the last event of
+			// the run is a tool call. The narration must not become the run's
+			// result.
+			name:         "phase-less narration followed by a tool call yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawToolUse, rawToolResult},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a tool call yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// A real answer after the tool call is still the deliverable: the
+			// clearing only discards text the turn has since moved past.
+			name:         "a message after the tool call is still the deliverable",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse, legacySecond},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			// Codex reports a background command's end when the process exits,
+			// which can be after the answer the model wrote while it ran. The
+			// end of a call whose start was seen must not retract that answer.
+			name:         "a started command ending after the answer keeps the answer",
+			protocol:     "raw",
+			lines:        []string{rawToolUse, rawAnswer, rawToolResult},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "a legacy started command ending after the answer keeps the answer",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse, legacySecond, legacyToolEnd},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			// An end without an observed start is the only sign that a tool
+			// ran after the text, so it still clears.
+			name:         "a tool end without its start still clears narration",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawToolResult},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// Codex copies the phase onto the legacy event.
+			name:         "a legacy labelled final answer survives later tool use",
+			protocol:     "legacy",
+			lines:        []string{legacyFinal, legacyToolUse, legacyToolEnd},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			// Web search never reaches the transcript, but it is still a tool
+			// call after the narration.
+			name:         "phase-less narration followed by a web search yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawSearchStart, rawSearchEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by an MCP call yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyMCPBegin, legacyMCPEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a web search yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyWebBegin},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// A background command from an earlier turn of the same session
+			// exits during this one. Its end names the earlier turn, so it is
+			// not tool activity here and must not retract this turn's answer.
+			name:         "an earlier turn's command end keeps this turn's answer",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacySecond, legacyEndTurnA},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "this turn's unpaired command end still clears narration",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyEndTurnB},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// update_plan reports only through turn/plan/updated.
+			name:         "phase-less narration followed by a plan update yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawPlanUpdate},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a plan update yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyPlan},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "phase-less narration followed by a sleep yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawSleepStart, rawSleepEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "phase-less narration followed by a permission request yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawPermsReq},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a user-input request yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyAskUser},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a permission request yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyAskPerms},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// A command the user ran is not the model calling a tool.
+			name:         "a user shell command after the answer keeps the answer",
+			protocol:     "raw",
+			lines:        []string{rawAnswer, rawUserShell, rawUserShellE},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "a legacy user shell command after the answer keeps the answer",
+			protocol:     "legacy",
+			lines:        []string{legacySecond, legacyUserSh, legacyUserShE},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			// An explicitly labelled final answer survives later tool use: the
+			// app-server said this is the deliverable, and a post-answer tool
+			// call (e.g. posting the comment itself) does not retract that.
+			name:         "a labelled final answer survives later tool use",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawFinal, rawToolUse, rawToolResult},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
 	}
 
 	for _, tc := range cases {
@@ -1971,6 +2205,7 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			}
 			c.onAgentMessage = output.observeAgentMessage
 			c.onFinalAnswer = output.observeFinalAnswer
+			c.onToolActivity = output.observeToolActivity
 
 			for _, line := range tc.lines {
 				c.handleLine(line)
@@ -2602,6 +2837,46 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 		slog.Default(),
 	); err != nil {
 		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+// assertProjectDocMaxBytes checks that thread setup lifts Codex's 32 KiB
+// AGENTS.md cap, which would otherwise drop the end of a long runtime brief
+// (GitHub #11480). Codex does not persist the override, so resume needs it too.
+func assertProjectDocMaxBytes(t *testing.T, params map[string]any) {
+	t.Helper()
+	config, ok := params["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config = %#v, want an object carrying project_doc_max_bytes", params["config"])
+	}
+	if got := config["project_doc_max_bytes"]; got != float64(codexProjectDocMaxBytes) {
+		t.Errorf("project_doc_max_bytes = %v, want %d", got, codexProjectDocMaxBytes)
+	}
+}
+
+func TestCodexThreadSetupLiftsProjectDocCap(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		method string
+		opts   ExecOptions
+	}{
+		{method: "thread/start", opts: ExecOptions{Cwd: "/work"}},
+		{method: "thread/resume", opts: ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			t.Parallel()
+			c, fs, _ := newTestCodexClient(t)
+			wait := drainRPCScript(t, c, fs, []rpcResponse{{
+				method:   tc.method,
+				result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+				assertFn: assertProjectDocMaxBytes,
+			}})
+			defer wait()
+			if _, _, err := c.startOrResumeThread(context.Background(), tc.opts, slog.Default()); err != nil {
+				t.Fatalf("startOrResumeThread: %v", err)
+			}
+		})
 	}
 }
 
@@ -3371,7 +3646,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 
 // TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
 // timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
-// first status:running arms the semantic-inactivity timer and the first-turn
+// accepted turn/start arms the semantic-inactivity timer and the first-turn
 // timer together, so a first-turn override ABOVE the semantic timeout cannot
 // extend the first-item wait — the semantic timer fires first. That also
 // reclassifies the failure as semantic inactivity, so the model-catalog startup
@@ -4302,8 +4577,11 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Output, "still working") {
-		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	// The message precedes a commandExecution, so it is narration and must not
+	// become the deliverable; the run still counts as progressed (which is what
+	// this test is about).
+	if result.Output != "" {
+		t.Fatalf("narration before a tool call became the output: %q", result.Output)
 	}
 }
 
@@ -4440,6 +4718,92 @@ func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T)
 	}
 	if result.Output != "Hello" {
 		t.Fatalf("phase-less Result.Output = %q, want authoritative Hello", result.Output)
+	}
+}
+
+// TestCodexExecuteTrailingToolCallYieldsNoOutput replays the reported run end to
+// end: the gateway emits agent text with no phase label, the model's last action
+// is a tool call, and the turn then ends without any further message. The run
+// must complete with empty Result.Output so the server synthesizes no comment,
+// while the narration still reaches the transcript.
+func TestCodexExecuteTrailingToolCallYieldsNoOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const narration = "Let me verify the permission facts for the tcpdump output path."
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-trailing-tool"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-trailing-tool","turn":{"id":"turn-trailing-tool"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"agentMessage","id":"msg-1","text":"`+narration+`"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"commandExecution","id":"cmd-1","command":"tcpdump -i any -c 5"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"commandExecution","id":"cmd-1","status":"completed","aggregatedOutput":"5 packets captured"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-trailing-tool","turn":{"id":"turn-trailing-tool","status":"completed"}}}'`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "" {
+		t.Fatalf("Result.Output = %q, want empty: text before a tool call is not a deliverable", result.Output)
+	}
+	var transcript []string
+	for _, msg := range messages {
+		if msg.Type == MessageText {
+			transcript = append(transcript, msg.Content)
+		}
+	}
+	if strings.Join(transcript, "") != narration {
+		t.Fatalf("transcript text = %q, want the narration preserved", transcript)
+	}
+}
+
+// TestCodexExecuteBackgroundCommandEndKeepsAnswer replays a background
+// command: Codex reports its end when the process exits, after the phase-less
+// answer the model wrote while it ran. The end of a call whose start was seen
+// is not a new tool call, so the answer stays the run's result.
+func TestCodexExecuteBackgroundCommandEndKeepsAnswer(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const answer = "The capture finished; port 8080 is the only listener."
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-bg"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-bg","turn":{"id":"turn-bg"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"commandExecution","id":"cmd-bg","command":"tcpdump -i any -c 5"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"agentMessage","id":"msg-1","text":"`+answer+`"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"commandExecution","id":"cmd-bg","status":"completed","aggregatedOutput":"5 packets captured"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-bg","turn":{"id":"turn-bg","status":"completed"}}}'`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != answer {
+		t.Fatalf("Result.Output = %q, want the answer written before the background command ended", result.Output)
 	}
 }
 
@@ -4786,6 +5150,246 @@ func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *test
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
 	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// codexReconnectLoopFixture emits the reconnect notification Codex sends while
+// it cannot reach the model service (GH #11618), every 100ms for ~3s.
+func codexReconnectLoopFixture(threadID string) string {
+	return `i=0` + "\n" +
+		`while [ $i -lt 30 ]; do` + "\n" +
+		`  echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"` + threadID + `","error":{"message":"Reconnecting... waiting for network","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}},"additionalDetails":"Connection failed: error sending request"},"willRetry":true}}'` + "\n" +
+		`  sleep 0.1` + "\n" +
+		`  i=$((i+1))` + "\n" +
+		`done` + "\n"
+}
+
+// TestCodexExecuteFirstTurnFailsWhileOnlyReconnecting replays GH #11618: Codex
+// accepts the turn, echoes the input, then only reconnects to an unreachable
+// model service. Neither the echo nor the reconnects are model progress, so the
+// first-turn watchdog must fail the attempt and name the reconnect reason,
+// instead of the reconnects holding the run open until the execution timeout.
+func TestCodexExecuteFirstTurnFailsWhileOnlyReconnecting(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-offline"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-offline","turn":{"id":"turn-offline"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-offline","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-offline","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		codexReconnectLoopFixture("thr-offline"))
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  2 * time.Second,
+		FirstTurnNoProgressTimeout: 400 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexFirstTurnNoProgressMarker,
+		"Codex kept reconnecting to the model service",
+		"last reconnect: Reconnecting... waiting for network; Connection failed: error sending request",
+		"turn-offline",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+	// No model catalog signal: the existing retry gate stays closed.
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteFirstTurnWatchdogRunsWithoutTurnStarted covers an
+// app-server that accepts turn/start but never reports turn/started: the
+// first-turn watchdog is armed by the accepted request, so the attempt fails
+// fast instead of waiting out the semantic-inactivity backstop.
+func TestCodexExecuteFirstTurnWatchdogRunsWithoutTurnStarted(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unstarted"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`sleep 3`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  2 * time.Second,
+		FirstTurnNoProgressTimeout: 300 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("expected the first-turn watchdog to fire, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "kept reconnecting") {
+		t.Fatalf("no reconnect happened, error must not claim one: %q", result.Error)
+	}
+}
+
+// TestCodexExecuteSemanticInactivityFiresWhileReconnectingAfterProgress covers
+// a turn that made progress and then lost the model service: reconnects must
+// not keep resetting the semantic-inactivity timer, and its timeout names the
+// reconnect reason.
+func TestCodexExecuteSemanticInactivityFiresWhileReconnectingAfterProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-dropped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-dropped","turn":{"id":"turn-dropped"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-dropped","item":{"type":"agentMessage","id":"msg-1","text":"Working on it"}}}'`+"\n"+
+		codexReconnectLoopFixture("thr-dropped"))
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  400 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 300 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexSemanticInactivityMarker,
+		"Codex kept reconnecting to the model service",
+		"last reconnect: Reconnecting... waiting for network",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+}
+
+// TestCodexExecuteRecoveredReconnectIsNotReported checks that progress after a
+// reconnect clears it: a later timeout must not blame a reconnect that already
+// recovered.
+func TestCodexExecuteRecoveredReconnectIsNotReported(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-blip"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-blip","turn":{"id":"turn-blip"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-blip","error":{"message":"Reconnecting... 1/5"},"willRetry":true}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-blip","item":{"type":"agentMessage","id":"msg-1","text":"Back online"}}}'`+"\n"+
+		`sleep 3`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  300 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 200 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("expected semantic inactivity, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "kept reconnecting") {
+		t.Fatalf("a recovered reconnect must not be reported, got %q", result.Error)
+	}
+}
+
+// TestCodexExecuteCatalogRefreshRetryAfterUserMessageEcho replays GH #5901:
+// app-server echoes the input, reconnects, and fails to refresh the model
+// catalog. The echo must not count as progress, so the first-turn watchdog
+// fires and the existing fresh-process catalog retry recovers the run.
+func TestCodexExecuteCatalogRefreshRetryAfterUserMessageEcho(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-stuck"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-stuck","turn":{"id":"turn-echo-stuck"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-echo-stuck","error":{"message":"Reconnecting... 2/5"},"willRetry":true}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-recovered"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-recovered","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered after echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("user-message echo must not suppress the catalog retry: status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered after echo" {
+		t.Fatalf("expected output from the recovered attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-echo-recovered" {
+		t.Fatalf("expected the recovered thread id, got %q", result.SessionID)
+	}
+	assertCodexAttemptCount(t, fakePath, "2")
 }
 
 func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {

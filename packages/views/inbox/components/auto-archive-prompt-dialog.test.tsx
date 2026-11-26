@@ -36,6 +36,7 @@ function renderDialog({ prompt, active = true }: { prompt: boolean; active?: boo
 
 const off = {
   auto_archive_completed: "muted",
+  auto_archive_on_agent_trigger: "muted",
   auto_archive_on_comment: "muted",
   auto_archive_on_status: "muted",
   auto_archive_on_assignee: "muted",
@@ -59,7 +60,10 @@ describe("AutoArchivePromptDialog", () => {
     expect(screen.getByRole("dialog", { name: "Archive notifications once you've handled them" })).toBeInTheDocument();
     const choices = screen.getAllByRole("radio").map((radio) => [radio.textContent, radio.getAttribute("aria-checked")]);
     expect(choices).toEqual([
-      ["After you reply, move it forward or reassignRecommendedIssues you've dealt with leave your Inbox", "true"],
+      [
+        "When you complete it or trigger an agentRecommendedCompleting an issue or starting an agent archives it; organizing or commenting without waking an agent leaves it in place",
+        "true",
+      ],
       ["When you complete itOnly completing or cancelling an issue archives it", "false"],
       ["NeverYou archive notifications yourself", "false"],
     ]);
@@ -68,7 +72,7 @@ describe("AutoArchivePromptDialog", () => {
   it("saves the choice for every pending workspace and closes", async () => {
     const user = userEvent.setup();
     renderDialog({ prompt: true });
-    await user.click(screen.getByRole("radio", { name: /When you complete it/ }));
+    await user.click(screen.getByRole("radio", { name: /Only completing or cancelling an issue/ }));
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(resolve).toHaveBeenCalledWith({ ...off, auto_archive_completed: "all" }, expect.anything());
     expect(screen.queryByRole("dialog")).toBeNull();

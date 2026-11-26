@@ -14,5 +14,8 @@ export function useIssueDeletion(wsId: string) {
   });
   return {
     canDelete: (issue: Issue) => canDeleteIssue(issue, userId, role, agents),
+    // A guest can delete no issue at all, so menus leave the entry out
+    // instead of showing it disabled.
+    offersDelete: role !== "guest",
   };
 }

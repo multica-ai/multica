@@ -3,16 +3,19 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -27,6 +30,7 @@ type SquadResponse struct {
 	Name          string                       `json:"name"`
 	Description   string                       `json:"description"`
 	Instructions  string                       `json:"instructions"`
+	HandoffMode   string                       `json:"handoff_mode"`
 	AvatarURL     *string                      `json:"avatar_url"`
 	LeaderID      string                       `json:"leader_id"`
 	CreatorID     string                       `json:"creator_id"`
@@ -67,6 +71,7 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		Name:          s.Name,
 		Description:   s.Description,
 		Instructions:  s.Instructions,
+		HandoffMode:   s.HandoffMode,
 		AvatarURL:     h.resolveAvatarURLPtr(textToPtr(s.AvatarUrl)),
 		LeaderID:      uuidToString(s.LeaderID),
 		CreatorID:     uuidToString(s.CreatorID),
@@ -387,11 +392,16 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		Name         *string `json:"name"`
 		Description  *string `json:"description"`
 		Instructions *string `json:"instructions"`
+		HandoffMode  *string `json:"handoff_mode"`
 		LeaderID     *string `json:"leader_id"`
 		AvatarURL    *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -404,6 +414,13 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
+	}
+	if req.HandoffMode != nil {
+		if !service.IsValidSquadHandoffMode(*req.HandoffMode) {
+			writeError(w, http.StatusBadRequest, "handoff_mode must be 'leader' or 'direct'")
+			return
+		}
+		params.HandoffMode = pgtype.Text{String: *req.HandoffMode, Valid: true}
 	}
 	if req.AvatarURL != nil {
 		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, squad.AvatarUrl.String)
@@ -549,6 +566,16 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("transfer squad autopilots failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}
 
+	// Workflow steps that hand off to this squad follow it to the leader too.
+	movedWorkflows, err := h.Queries.TransferSquadWorkflowStepsToLeader(r.Context(), db.TransferSquadWorkflowStepsToLeaderParams{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     uuidToString(squad.ID),
+		LeaderID:    uuidToString(squad.LeaderID),
+	})
+	if err != nil {
+		slog.Warn("transfer squad workflow steps failed", "squad_id", uuidToString(squad.ID), "error", err)
+	}
+
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
@@ -564,6 +591,9 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),
 	})
+	if movedWorkflows > 0 {
+		h.publishIssueWorkflowChanged(workspaceID, member, "updated")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -852,12 +882,19 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the member belongs to this workspace.
+	params := db.AddSquadMemberParams{
+		SquadID:    squad.ID,
+		MemberType: req.MemberType,
+		MemberID:   memberUUID,
+		Role:       req.Role,
+	}
+	var sm db.SquadMember
+	var err error
 	if req.MemberType == "agent" {
-		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, lookupErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 			ID: memberUUID, WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if lookupErr != nil {
 			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
 			return
 		}
@@ -868,22 +905,16 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "you can only add an agent you have access to")
 			return
 		}
+		sm, err = h.Queries.AddSquadMember(r.Context(), params)
 	} else {
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-			UserID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		sm, err = h.addHumanSquadMember(r.Context(), wsUUID, params)
+	}
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "member not found in this workspace")
 			return
 		}
-	}
-
-	sm, err := h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
-		SquadID:    squad.ID,
-		MemberType: req.MemberType,
-		MemberID:   memberUUID,
-		Role:       req.Role,
-	})
-	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "member already in squad")
 			return
@@ -896,6 +927,40 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
+}
+
+func (h *Handler) addHumanSquadMember(ctx context.Context, workspaceID pgtype.UUID, params db.AddSquadMemberParams) (db.SquadMember, error) {
+	var empty db.SquadMember
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return empty, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	// Revocation prunes the roster under this lock. Take it before checking
+	// workspace membership so the insert cannot land after the prune.
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+	if _, err := qtx.LockActiveMember(ctx, db.LockActiveMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+
+	sm, err := qtx.AddSquadMember(ctx, params)
+	if err != nil {
+		return empty, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return empty, err
+	}
+	return sm, nil
 }
 
 func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
@@ -1293,4 +1358,63 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 		return issueEnqueueFailure(issue, squad.LeaderID, err)
 	}
 	return DispatchQueued, ReasonQueued
+}
+
+type SquadBriefResponse struct {
+	MemberType string `json:"member_type"`
+	MemberID   string `json:"member_id"`
+	IsLeader   bool   `json:"is_leader"`
+	Brief      string `json:"brief"`
+}
+
+type SquadBriefsResponse struct {
+	HandoffMode string               `json:"handoff_mode"`
+	Briefs      []SquadBriefResponse `json:"briefs"`
+}
+
+// ListSquadBriefs previews the squad context each agent of the squad receives
+// on an issue assigned to the squad: the leader briefing for the leader, the
+// member brief for every other non-archived agent member. Limited to the
+// people who can edit the squad — it is a configuration aid, and the roster it
+// renders names agents a regular member may not otherwise see.
+func (h *Handler) ListSquadBriefs(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if !canManageSquad(member, squad) {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+	members, err := h.Queries.ListSquadMembers(r.Context(), squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad members")
+		return
+	}
+	resp := SquadBriefsResponse{HandoffMode: squad.HandoffMode, Briefs: []SquadBriefResponse{{
+		MemberType: "agent",
+		MemberID:   uuidToString(squad.LeaderID),
+		IsLeader:   true,
+		Brief:      buildSquadLeaderBriefing(r.Context(), h.Queries, squad, true, leaderNoWorkflow, true),
+	}}}
+	for _, m := range members {
+		if m.MemberType != "agent" || m.MemberID == squad.LeaderID {
+			continue
+		}
+		agent, err := h.Queries.GetAgent(r.Context(), m.MemberID)
+		if err != nil || agent.ArchivedAt.Valid {
+			continue
+		}
+		resp.Briefs = append(resp.Briefs, SquadBriefResponse{
+			MemberType: "agent",
+			MemberID:   uuidToString(m.MemberID),
+			Brief:      buildSquadMemberBriefing(r.Context(), h.Queries, squad, agent),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

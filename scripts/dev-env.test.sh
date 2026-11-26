@@ -603,12 +603,16 @@ require_contains "$out" "make down C=daemon"
 # Commands launched through env-exec must not inherit the daemon-task identity
 # hints that make human/profile CLI commands reject --profile.
 write_manifest "clean-env-903" "$root_dir" 903
+# MULTICA_TASK_ENV_FILE counts as identity: the CLI reloads the task's
+# production token from it, replacing the local one.
 MULTICA_TASK_CONFIG_ROOT=/task/config \
 MULTICA_TASK_WORKSPACES_ROOT=/task/workspaces \
 MULTICA_WORKSPACES_ROOT=/owner/workspaces \
+MULTICA_TASK_ENV_FILE=/task/task-env.json \
   dev_env exec clean-env-903 -- sh -c '
     test -z "${MULTICA_TASK_CONFIG_ROOT:-}" &&
     test -z "${MULTICA_TASK_WORKSPACES_ROOT:-}" &&
+    test -z "${MULTICA_TASK_ENV_FILE:-}" &&
     test "$MULTICA_WORKSPACES_ROOT" = "$1" &&
     test "$MULTICA_DEV_ENV" = clean-env-903
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \
@@ -1017,6 +1021,46 @@ oneline_up "$oneline_checkout" GO_ENV_LOG="$oneline_env_log" > "$out" 2>&1 || st
   grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log" || fail "destroy did not drop the slot database"
 )
 
+# An explicit TTL renewal must reuse this checkout even after its previous
+# expiry. The automatic collection of another checkout still takes place.
+renewal_checkout="$tmp_dir/renewal-checkout"
+status=0
+oneline_up "$renewal_checkout" > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+require_contains "$out" "Migrations failed"
+(
+  export MULTICA_DEV_HOME="$tmp_dir/dev-renewal-checkout"
+  export PATH="$oneline_bin:$PATH"
+  manifests=("$MULTICA_DEV_HOME"/envs/*/manifest.env)
+  manifest="${manifests[0]}"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  expired=2000-01-01T00:00:00Z
+  printf 'EXPIRES_AT=%s\n' "$expired" >> "$manifest"
+  neighbor="expired-neighbor-$((OFFSET + 1))"
+  neighbor_checkout="$tmp_dir/expired-neighbor"
+  mkdir -p "$neighbor_checkout"
+  write_manifest "$neighbor" "$neighbor_checkout" "$((OFFSET + 1))"
+  printf 'TTL_HOURS=24\nEXPIRES_AT=%s\n' "$expired" >> "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env"
+
+  cd "$renewal_checkout"
+  psql_log="$tmp_dir/psql-renewal.log"
+  status=0
+  PSQL_LOG="$psql_log" bash scripts/dev-env.sh up --components api --ttl 48 > "$out" 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+  require_contains "$out" "Migrations failed"
+  require_contains "$out" "Reusing environment $NAME"
+  if grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log"; then
+    fail "renewing an expired environment dropped its database"
+  fi
+  [ ! -f "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env" ] \
+    || fail "renewal prevented collecting another expired environment"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  [ "$TTL_HOURS" = 48 ] && [ "$EXPIRES_AT" != "$expired" ] \
+    || fail "renewal did not update the recorded expiration"
+)
+
 # A setting the rewrite does not own can still win when the file is loaded
 # back; `up` must refuse rather than register the shared port.
 status=0
@@ -1147,6 +1191,70 @@ FAIL_DROP=1 dev_env destroy drop-fails-904 --yes > "$out" 2>&1 || status=$?
   || fail "destroy discarded the manifest after DROP DATABASE failed"
 require_contains "$out" "manifest and slot were kept"
 dev_env destroy drop-fails-904 --yes > "$out" 2>&1 || fail "retrying destroy after database recovery failed"
+
+# ---------------------------------------------------------------------------
+# Without psql, `up` creates the database through the shared compose container,
+# so destroy has to drop it there too, or every destroy on such a machine leaks
+# its slot database.
+# ---------------------------------------------------------------------------
+no_psql_path=""
+IFS=: read -ra path_dirs <<< "$PATH"
+for dir in "${path_dirs[@]}"; do
+  [ "$dir" != "$fake_bin" ] || continue
+  if [ -e "$dir/psql" ]; then
+    shadow="$tmp_dir/no-psql/$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+    mkdir -p "$shadow"
+    for exe in "$dir"/*; do [ "${exe##*/}" = psql ] || ln -sf "$exe" "$shadow/"; done
+    dir=$shadow
+  fi
+  no_psql_path="${no_psql_path:+$no_psql_path:}$dir"
+done
+docker_bin="$tmp_dir/docker-bin"
+mkdir -p "$docker_bin"
+cat > "$docker_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${DOCKER_LOG:-}" ] || printf '%s\n' "$*" >> "$DOCKER_LOG"
+[ "${DOCKER_POSTGRES_UP:-1}" = 1 ] || { echo 'service "postgres" is not running' >&2; exit 1; }
+case " $* " in
+  *" exec -T postgres psql "*"DROP DATABASE "*) exit 0 ;;
+  *" exec -T postgres psql "*) printf '1\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$docker_bin/docker"
+no_psql_dev_env() {
+  PATH="$docker_bin:$no_psql_path" bash "$root_dir/scripts/dev-env.sh" "$@"
+}
+PATH="$docker_bin:$no_psql_path" command -v psql >/dev/null 2>&1 \
+  && fail "the no-psql PATH still resolves psql"
+
+docker_log="$tmp_dir/docker-no-psql.log"
+write_manifest "no-psql-908" "$root_dir" 908
+status=0
+DOCKER_POSTGRES_UP=0 DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded with neither psql nor the PostgreSQL container"
+require_contains "$out" "psql not found and the shared PostgreSQL container is not reachable"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-908/manifest.env" ] \
+  || fail "destroy discarded the manifest while the database was left in place"
+! grep -Fq "DROP DATABASE" "$docker_log" || fail "destroy tried to drop through a container that is not running"
+
+: > "$docker_log"
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "destroy without psql did not drop the database through the container"; }
+grep -Fq "exec -T postgres psql -U multica -d postgres -v ON_ERROR_STOP=1 -c DROP DATABASE IF EXISTS \"multica_dev_env_test_908\" WITH (FORCE)" "$docker_log" \
+  || fail "destroy without psql did not drop the slot database in the container: $(cat "$docker_log")"
+[ ! -d "$MULTICA_DEV_HOME/envs/no-psql-908" ] || fail "destroy without psql kept the manifest after dropping the database"
+
+# The container only serves localhost:5432; a database elsewhere is not its to drop.
+write_manifest "no-psql-remote-909" "$root_dir" 909
+sed -i.bak 's#@localhost:5432/#@db.example.com:5432/#' "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env"
+: > "$docker_log"
+status=0
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-remote-909 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy without psql reported success for a remote database"
+[ ! -s "$docker_log" ] || fail "destroy dropped a remote environment's database through the local container: $(cat "$docker_log")"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env" ] || fail "destroy discarded the remote environment's manifest"
+rm -rf "$MULTICA_DEV_HOME/envs/no-psql-remote-909"
 
 # ---------------------------------------------------------------------------
 # destroy consumes the manifest: the slot is free afterwards, which is what

@@ -221,6 +221,25 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderTimelineTruncated, kinds)
 	}
 
+	// Reading this issue does not mean reading every issue its activity names:
+	// a duplicate mark points at an issue that may sit in a private project.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
+		return
+	}
+	actions := make([]string, len(activities))
+	details := make([][]byte, len(activities))
+	for i, a := range activities {
+		actions[i], details[i] = a.Action, a.Details
+	}
+	if err := h.redactHiddenActivityRefs(r, hidden, actions, details); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list activities")
+		return
+	}
+	for i := range activities {
+		activities[i].Details = details[i]
+	}
+
 	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
 	// The current-member directory deliberately excludes departed members, but
 	// timeline attribution must remain readable after they leave. Hydrate only
@@ -404,73 +423,17 @@ type AssigneeFrequencyEntry struct {
 	Frequency    int64  `json:"frequency"`
 }
 
-// GetAssigneeFrequency returns assignee usage frequency for the current user,
-// combining data from assignee change activities and initial issue assignments.
+// GetAssigneeFrequency always returns an empty list (MUL-9724).
+//
+// Current clients rank the assignee picker from a local FIFO history and no
+// longer call this endpoint. Only clients from before that change still do;
+// they parse an empty list fine and fall back to their default ordering. The
+// route, auth and response shape stay so those clients keep working, but the
+// handler no longer runs the per-user frequency queries, which were expensive
+// on activity_log. Drop the route once no old client calls it.
 func (h *Handler) GetAssigneeFrequency(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
+	if _, ok := requireUserID(w, r); !ok {
 		return
 	}
-	workspaceID := h.resolveWorkspaceID(r)
-
-	// Aggregate frequency from both data sources.
-	freq := map[string]int64{} // key: "type:id"
-
-	// Source 1: assignee_changed activities by this user.
-	activityCounts, err := h.Queries.CountAssigneeChangesByActor(r.Context(), db.CountAssigneeChangesByActorParams{
-		WorkspaceID: parseUUID(workspaceID),
-		ActorID:     parseUUID(userID),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get assignee frequency")
-		return
-	}
-	for _, row := range activityCounts {
-		aType, _ := row.AssigneeType.(string)
-		aID, _ := row.AssigneeID.(string)
-		if aType != "" && aID != "" {
-			freq[aType+":"+aID] += row.Frequency
-		}
-	}
-
-	// Source 2: issues created by this user with an assignee.
-	issueCounts, err := h.Queries.CountCreatedIssueAssignees(r.Context(), db.CountCreatedIssueAssigneesParams{
-		WorkspaceID: parseUUID(workspaceID),
-		CreatorID:   parseUUID(userID),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get assignee frequency")
-		return
-	}
-	for _, row := range issueCounts {
-		if !row.AssigneeType.Valid || !row.AssigneeID.Valid {
-			continue
-		}
-		key := row.AssigneeType.String + ":" + uuidToString(row.AssigneeID)
-		freq[key] += row.Frequency
-	}
-
-	// Build sorted response.
-	result := make([]AssigneeFrequencyEntry, 0, len(freq))
-	for key, count := range freq {
-		// Split "type:id" — type is always "member" or "agent" (no colons).
-		var aType, aID string
-		for i := 0; i < len(key); i++ {
-			if key[i] == ':' {
-				aType = key[:i]
-				aID = key[i+1:]
-				break
-			}
-		}
-		result = append(result, AssigneeFrequencyEntry{
-			AssigneeType: aType,
-			AssigneeID:   aID,
-			Frequency:    count,
-		})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Frequency > result[j].Frequency
-	})
-
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, []AssigneeFrequencyEntry{})
 }

@@ -134,6 +134,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { CURSOR_ROW_CLASS, useIssueCursorId } from "../surface/issue-cursor";
 import {
   PEEK_TARGET_ATTR,
   useIssuePeekClick,
@@ -166,6 +167,7 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { issuePullRequestSummariesOptions } from "@multica/core/github";
@@ -741,11 +743,12 @@ export function InlineTitle({
               }}
               onAuxClick={stopRowNavigation}
             >
-              {row.collapsed ? (
-                <ChevronRight className="size-3.5" />
-              ) : (
-                <ChevronDown className="size-3.5" />
-              )}
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                  !row.collapsed && "rotate-90",
+                )}
+              />
             </button>
           }
         />
@@ -784,6 +787,7 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
+          <IssueBlockedMarker issue={row.issue} />
           <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
@@ -925,11 +929,12 @@ export function IssueTableGroupRow({
           type="button"
           className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              !group.collapsed && "rotate-90",
+            )}
+          />
           {group.label}
           <span className="font-normal tabular-nums text-muted-foreground">
             {group.count}
@@ -2162,6 +2167,7 @@ export function TableView({
   // Side peek steps through the loaded rows top to bottom.
   const peek = useIssuePeekActions();
   const peekedId = useIssuePeekId();
+  const cursorId = useIssueCursorId();
   const handlePeekClick = useIssuePeekClick();
   useEffect(() => {
     peek?.publishColumns([visibleIssueIds]);
@@ -2580,8 +2586,12 @@ export function TableView({
               row.original.kind === "issue"
                 ? {
                     [PEEK_TARGET_ATTR]: row.original.issue.id,
-                    className:
-                      row.original.issue.id === peekedId ? PEEKED_TABLE_ROW_CLASS : undefined,
+                    "data-cursor": row.original.issue.id === cursorId ? "" : undefined,
+                    className: cn(
+                      row.original.issue.id === peekedId && PEEKED_TABLE_ROW_CLASS,
+                      CURSOR_ROW_CLASS,
+                      "data-[cursor]:[&>td]:bg-issue-row-hover",
+                    ),
                   }
                 : undefined
             }

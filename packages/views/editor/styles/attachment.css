@@ -91,6 +91,13 @@
   50% { opacity: 0.3; }
 }
 
+/* The pulse stops; the dimmed image still reads as uploading. */
+@media (prefers-reduced-motion: reduce) {
+  .image-uploading {
+    animation: none;
+  }
+}
+
 .image-toolbar {
   /* Keep the resting controls near their image so tabbing to them scrolls it into view. */
   position: absolute;

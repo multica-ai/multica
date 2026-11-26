@@ -97,6 +97,24 @@ func TestNextOccurrencesUTCExclusiveAfter(t *testing.T) {
 	}
 }
 
+// TestNextOccurrencesUTCNeverFiringCron covers expressions that parse but
+// have no occurrence (Feb 30, Apr 31). robfig reports that as the zero time,
+// which must end the enumeration instead of being emitted as a due plan.
+func TestNextOccurrencesUTCNeverFiringCron(t *testing.T) {
+	after := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
+	until := after.Add(30 * 24 * time.Hour)
+	for _, cron := range []string{"0 0 30 2 *", "0 0 31 4 *"} {
+		got, err := NextOccurrencesUTC(cron, "UTC", after, until)
+		if err != nil {
+			t.Fatalf("NextOccurrencesUTC(%q): %v", cron, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("NextOccurrencesUTC(%q) returned %d occurrences (first %s), want none",
+				cron, len(got), got[0].Format(time.RFC3339))
+		}
+	}
+}
+
 // TestNextOccurrencesUTCInvalidInputs surfaces parse errors loudly so
 // a bad cron expression cannot silently disable a trigger.
 func TestNextOccurrencesUTCInvalidInputs(t *testing.T) {

@@ -1,6 +1,9 @@
 "use client";
 
-import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import {
   Activity,
   BotOff,
@@ -16,6 +19,7 @@ import {
   Columns3,
   Eye,
   Filter,
+  Flag,
   FolderKanban,
   FolderMinus,
   List,
@@ -94,9 +98,9 @@ import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
 import { sortDirectionLabelKey } from "../utils/sort-direction";
+import { SORT_LABEL_KEY } from "../utils/sort-label";
 import { LabelChip } from "../../labels/label-chip";
 import {
-  SORT_OPTIONS,
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
@@ -962,6 +966,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, typeof User> = {
   created: UserPen,
   my_agents: Bot,
   subscribed: BellRing,
+  blocked: Flag,
 };
 
 /** Read-only sentence form of the active filters, shown on hover so a closed
@@ -1987,16 +1992,6 @@ export function IssueDisplayControls({
   );
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
-    position: "sort_manual",
-    status: "sort_status",
-    priority: "sort_priority",
-    start_date: "sort_start_date",
-    due_date: "sort_due_date",
-    created_at: "sort_created",
-    updated_at: "sort_updated",
-    title: "sort_title",
-  };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
     status: "group_status",
     assignee: "group_assignee",
@@ -2050,6 +2045,9 @@ export function IssueDisplayControls({
         : effectiveTableGrouping === "project"
           ? t(($) => $.table.columns.project)
           : t(($) => $.table.group_none);
+  const viewToggleIndicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const viewToggleTransition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
   // A Gantt layout persisted on a surface without Gantt renders as List.
   const layout: ViewMode = viewMode === "gantt" && !allowGantt ? "list" : viewMode;
   const layouts = LAYOUTS.filter(({ mode }) => mode !== "gantt" || allowGantt);
@@ -2139,18 +2137,30 @@ export function IssueDisplayControls({
                   layouts.length === 5 ? "grid-cols-5" : "grid-cols-4",
                 )}
               >
-                {layouts.map(({ mode, Icon }) => (
-                  <Toggle
-                    key={mode}
-                    pressed={layout === mode}
-                    onPressedChange={() => act.setViewMode(mode)}
-                    title={t(($) => $.view[mode])}
-                    className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
-                  >
-                    <Icon className="size-4" />
-                    <span className="max-w-full truncate">{t(($) => $.view[mode])}</span>
-                  </Toggle>
-                ))}
+                {layouts.map(({ mode, Icon }) => {
+                  const active = layout === mode;
+                  return (
+                    <Toggle
+                      key={mode}
+                      pressed={active}
+                      onPressedChange={() => act.setViewMode(mode)}
+                      title={t(($) => $.view[mode])}
+                      className="relative h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-transparent aria-pressed:text-foreground aria-pressed:hover:bg-transparent"
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId={viewToggleIndicatorId}
+                          transition={viewToggleTransition}
+                          aria-hidden="true"
+                          data-slot="view-toggle-indicator"
+                          className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+                        />
+                      )}
+                      <Icon className="relative z-10 size-4" />
+                      <span className="relative z-10 max-w-full truncate">{t(($) => $.view[mode])}</span>
+                    </Toggle>
+                  );
+                })}
               </div>
             )}
             <div className="space-y-3">

@@ -97,6 +97,9 @@ func TestAutoArchivePromptAsksOnlyMembersWhoArchived(t *testing.T) {
 	if _, err := conn.Exec(ctx, readMigrationFile(t, "718_auto_archive_prompt.up.sql")); err != nil {
 		t.Fatalf("apply 718 up: %v", err)
 	}
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "722_auto_archive_agent_trigger_prompt.up.sql")); err != nil {
+		t.Fatalf("apply 722 up: %v", err)
+	}
 
 	stored := func() map[string]map[string]string {
 		t.Helper()
@@ -124,18 +127,20 @@ func TestAutoArchivePromptAsksOnlyMembersWhoArchived(t *testing.T) {
 	got := stored()
 	want := map[string]map[string]string{
 		ws + "/" + archiver: {
-			"auto_archive_on_comment":  "muted",
-			"auto_archive_on_status":   "muted",
-			"auto_archive_on_assignee": "muted",
-			"auto_archive_prompt":      "pending",
+			"auto_archive_on_agent_trigger": "muted",
+			"auto_archive_on_comment":       "muted",
+			"auto_archive_on_status":        "muted",
+			"auto_archive_on_assignee":      "muted",
+			"auto_archive_prompt":           "pending",
 		},
 		ws + "/" + chooser: {
-			"auto_archive_completed":   "muted",
-			"auto_archive_on_comment":  "all",
-			"auto_archive_on_status":   "muted",
-			"auto_archive_on_assignee": "muted",
-			"auto_archive_prompt":      "pending",
-			"updates":                  "muted",
+			"auto_archive_completed":        "muted",
+			"auto_archive_on_agent_trigger": "muted",
+			"auto_archive_on_comment":       "all",
+			"auto_archive_on_status":        "muted",
+			"auto_archive_on_assignee":      "muted",
+			"auto_archive_prompt":           "pending",
+			"updates":                       "muted",
 		},
 	}
 	if len(got) != len(want) {
@@ -149,6 +154,15 @@ func TestAutoArchivePromptAsksOnlyMembersWhoArchived(t *testing.T) {
 		}
 		if len(got[key]) != len(prefs) {
 			t.Errorf("%s = %v, want %v", key, got[key], prefs)
+		}
+	}
+
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "722_auto_archive_agent_trigger_prompt.down.sql")); err != nil {
+		t.Fatalf("apply 722 down: %v", err)
+	}
+	for key, prefs := range stored() {
+		if _, ok := prefs["auto_archive_on_agent_trigger"]; ok {
+			t.Errorf("%s still has auto_archive_on_agent_trigger after 722 down: %v", key, prefs)
 		}
 	}
 

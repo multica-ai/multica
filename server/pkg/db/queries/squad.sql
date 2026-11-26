@@ -79,6 +79,7 @@ UPDATE squad SET
     leader_id = COALESCE(sqlc.narg('leader_id'), leader_id),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    handoff_mode = COALESCE(sqlc.narg('handoff_mode'), handoff_mode),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -96,6 +97,17 @@ RETURNING *;
 -- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3;
+
+-- name: DeleteSquadMembersByMember :exec
+-- Squad membership carries no FK to member, so member removal must prune it in
+-- the same application transaction: a re-invited user must not rejoin squads
+-- silently. Scoped to the workspace so the user's squads elsewhere survive.
+DELETE FROM squad_member AS sm
+USING squad AS s
+WHERE sm.squad_id = s.id
+  AND s.workspace_id = sqlc.arg(workspace_id)
+  AND sm.member_type = 'member'
+  AND sm.member_id = sqlc.arg(user_id);
 
 -- name: ListSquadMembers :many
 SELECT * FROM squad_member WHERE squad_id = $1 ORDER BY created_at ASC;

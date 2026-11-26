@@ -59,7 +59,8 @@
     "title": "歷史",
     "current": "目前",
     "restore": "還原此版本",
-    "loading": "載入中..."
+    "loading": "載入中...",
+    "from_discussion": "來自評論：{{quote}}"
   },
   "not_found": {
     "title": "未找到該文件",
@@ -80,6 +81,7 @@
     "resolved": "已解決 {{count}}",
     "close": "關閉評論",
     "quote_missing": "原文已修改，找不到劃線位置",
+    "quote_changed": "原文已修改",
     "reply_placeholder": "回覆，或 @ 某人…",
     "new_placeholder": "新增評論，或 @ 提及某人...",
     "submit": "評論",
@@ -96,6 +98,7 @@
       "save": "評論送出失敗",
       "delete": "評論刪除失敗",
       "resolve": "無法更新評論"
-    }
+    },
+    "run_waiting_retry": "等待重試"
   }
 }

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { AnimatePresence, usePresence } from "motion/react";
 import { CheckCircle2, ChevronRight } from "@multica/ui/icons";
 import type { TimelineEntry } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -25,6 +27,83 @@ import { ProgressRing } from "./progress-ring";
  * thread. Past this, ticks compressed to their minimum pitch stop being
  * individually targetable; the outline still lists every reply.
  */
+function MinimapOutlineCard({
+  cardRef,
+  reducedMotion,
+  onPointerEnter,
+  onPointerLeave,
+  onFocusCapture,
+  onBlurCapture,
+  children,
+}: {
+  cardRef: RefObject<HTMLDivElement | null>;
+  reducedMotion: boolean;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+  onFocusCapture: () => void;
+  onBlurCapture: () => void;
+  children: ReactNode;
+}) {
+  const [isPresent, safeToRemove] = usePresence();
+
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el || reducedMotion || typeof el.animate !== "function") return;
+    const anim = el.animate(
+      [
+        { opacity: 0, translate: "6px 0", scale: "0.97" },
+        { opacity: 1, translate: "0 0", scale: "1" },
+      ],
+      { duration: UI_MOTION_DURATION.fast * 1000, easing: UI_EASE_OUT_CSS },
+    );
+    return () => { anim.cancel(); };
+  }, [cardRef, reducedMotion]);
+
+  useEffect(() => {
+    if (isPresent) return;
+    const el = cardRef.current;
+    if (el && !reducedMotion && typeof el.animate === "function") {
+      const anim = el.animate(
+        [
+          { opacity: 1, translate: "0 0", scale: "1" },
+          { opacity: 0, translate: "4px 0", scale: "0.97" },
+        ],
+        { duration: UI_MOTION_DURATION.micro * 1000, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" },
+      );
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        safeToRemove();
+      };
+      anim.onfinish = finish;
+      anim.oncancel = finish;
+      return () => { anim.cancel(); };
+    }
+    safeToRemove();
+    return undefined;
+  }, [cardRef, isPresent, reducedMotion, safeToRemove]);
+
+  return (
+    <div
+      ref={cardRef}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onFocusCapture={onFocusCapture}
+      onBlurCapture={onBlurCapture}
+      // Centered with auto margins, never a translate utility: the enter/exit
+      // animation writes `translate`, which would drop the card by half its
+      // height mid-animation and overflow the panel into a second scrollbar.
+      className={cn(
+        "absolute inset-y-0 right-8 my-auto h-fit max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] origin-right overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10",
+        isPresent ? "pointer-events-auto" : "pointer-events-none",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 export const MAX_RAIL_TICKS = 80;
 
 /** Intent delay before the card first appears; gliding afterwards is instant. */
@@ -688,15 +767,17 @@ export function ThreadMinimap({
         })}
       </nav>
 
-      {previewIndex !== undefined && (
-        <div
-          ref={cardRef}
-          onPointerEnter={cancelClose}
-          onPointerLeave={scheduleClose}
-          onFocusCapture={cancelClose}
-          onBlurCapture={scheduleClose}
-          className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
-        >
+      <AnimatePresence initial={false}>
+        {previewIndex !== undefined && (
+          <MinimapOutlineCard
+            key="minimap-outline"
+            cardRef={cardRef}
+            reducedMotion={reducedMotion}
+            onPointerEnter={cancelClose}
+            onPointerLeave={scheduleClose}
+            onFocusCapture={cancelClose}
+            onBlurCapture={scheduleClose}
+          >
           {/* One <li> per item, sections and replies included, so row index === item index. */}
           <ul>
             {items.map((item, index) => {
@@ -851,8 +932,9 @@ export function ThreadMinimap({
               );
             })}
           </ul>
-        </div>
-      )}
+          </MinimapOutlineCard>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

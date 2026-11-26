@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import type { Agent, DeclaredEnvironment, IssueEnvironmentConfig } from "@multica/core/types";
 import { Bot, Plus, Server } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { useReopenOnReveal } from "./use-sidebar-reveal-motion";
 
 export type DeclaredState = "available" | "running" | "starting";
 
@@ -42,6 +43,8 @@ export function EnvironmentStartMenu({
   agentChoices,
   preparing,
   onAskAgent,
+  defaultOpen,
+  onOpenChange,
 }: {
   configs: IssueEnvironmentConfig[];
   machineFor: (runtimeId: string) => StartMenuMachine;
@@ -53,6 +56,8 @@ export function EnvironmentStartMenu({
   agentChoices: Agent[];
   preparing: boolean;
   onAskAgent: (agent: Agent) => void;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const declaring = configs.filter((config) => config.environments.length > 0);
@@ -60,9 +65,17 @@ export function EnvironmentStartMenu({
     ? t(($) => $.environments.start_menu.ask_agent, { name: agent.name })
     : t(($) => $.environments.start_menu.ask_any_agent);
   const askSide = preparing ? t(($) => $.environments.start_menu.preparing) : t(($) => $.environments.start_menu.new_run);
+  const [open, setOpen] = useState(!!defaultOpen);
+  useReopenOnReveal(!!defaultOpen, () => setOpen(true));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        onOpenChange?.(next);
+      }}
+    >
       <DropdownMenuTrigger
         render={
           <IconButton variant="ghost" size="icon-xs" label={t(($) => $.environments.start_menu.trigger)}>

@@ -73,6 +73,7 @@ import {
 } from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
+import { stripMentionMarkdown } from "../../issues/utils/strip-mention-markdown";
 
 // Types
 
@@ -665,7 +666,7 @@ function MentionRow({
           <span className="block truncate font-medium text-foreground">{item.label}</span>
           {item.description && (
             <span className="block truncate text-muted-foreground">
-              {item.description}
+              {stripMentionMarkdown(item.description)}
             </span>
           )}
         </span>
@@ -838,6 +839,8 @@ interface MentionSuggestionOptions {
   getContextItems?: () => MentionItem[];
   /** Leave guests out of the member list, where the mention leads somewhere they cannot open. */
   hideGuests?: boolean;
+  /** Leave squads out, where a squad cannot be asked (doc discussions). */
+  hideSquads?: boolean;
 }
 
 export function createMentionSuggestion(
@@ -919,6 +922,7 @@ export function createMentionSuggestion(
       .filter(
         (s) =>
           !guest &&
+          !options.hideSquads &&
           !s.archived_at &&
           (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)),
       )

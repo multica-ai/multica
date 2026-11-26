@@ -13,9 +13,12 @@ async function openProjectStatusMenu(page: Page) {
 }
 
 async function visibleIssueTitles(page: Page, titles: string[]) {
+  // Match only issue cards/rows so project names in the Work sidebar
+  // (which sits inside <main>) do not match when they share the issue title.
+  const issues = page.locator('[data-mc="board-card"], [data-mc="issue-row"]');
   const present: string[] = [];
   for (const title of titles) {
-    if (await page.getByText(title, { exact: true }).first().isVisible()) {
+    if (await issues.getByText(title, { exact: true }).first().isVisible()) {
       present.push(title);
     }
   }
@@ -71,10 +74,13 @@ test.describe("Issue filter: project status", () => {
     // issue is out too: with no project there is no status to match.
     await expect.poll(() => visibleIssueTitles(page, all)).toEqual([activeIssue]);
 
-    // The chip reports the dimension, and removing it restores the list.
-    const chipsBar = page.getByRole("main");
-    await expect(chipsBar.getByText("Project status")).toBeVisible();
-    await chipsBar.getByRole("button", { name: /Remove .*filter/ }).first().click();
+    // The filter trigger reports the active filter and its summary tooltip names
+    // the dimension; Reset clears it and restores the list.
+    const filterTrigger = page.getByRole("button", { name: "1 filter" });
+    await expect(filterTrigger).toBeVisible();
+    await filterTrigger.hover();
+    await expect(page.getByText("Project status")).toBeVisible();
+    await page.getByRole("button", { name: "Reset", exact: true }).click();
     await expect
       .poll(() => visibleIssueTitles(page, all))
       .toEqual([...all].sort());

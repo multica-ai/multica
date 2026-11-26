@@ -8,6 +8,7 @@ import {
   within,
   type RenderResult,
 } from "@testing-library/react";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
@@ -242,7 +243,7 @@ describe("TabBar hover action buttons", () => {
       ...getAllByLabelText("Pin tab"),
       ...getAllByLabelText("Close tab"),
     ]) {
-      expect(button).toHaveClass("hidden", "group-hover:flex", "group-active:flex");
+      expect(button).toHaveClass("opacity-0", "group-hover:opacity-100", "group-active:opacity-100");
     }
   });
 
@@ -355,6 +356,25 @@ describe("TabBar background open of an open tab", () => {
     await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(3), {
       timeout: 3000,
     });
+  });
+
+  it("shows a static highlight without fading under reduced motion and clears after a short hold", async () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      state.tabAttention = { tabId: "tB", sequence: 4 };
+      const { container } = render(<TabBar />);
+
+      const attention = container.querySelector<HTMLElement>("[data-tab-attention]");
+      expect(attention).not.toBeNull();
+      // Static span: no inline animated opacity style.
+      expect(attention?.style.opacity).toBe("");
+
+      await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(4), {
+        timeout: 1500,
+      });
+    } finally {
+      useAppearanceStore.setState({ ...DEFAULT_APPEARANCE });
+    }
   });
 });
 
@@ -586,6 +606,45 @@ describe("TabBar overflow", () => {
       container.querySelector('[data-new-tab-edge-feedback="true"]'),
     ).toBeInTheDocument();
     rectSpy.mockRestore();
+  });
+});
+
+describe("TabBar reordering", () => {
+  it("lets a tab cross its neighbor and drop in the new position", async () => {
+    const { container, getByLabelText } = render(<TabBar />);
+    const tabStrip = container.querySelector("[data-tab-scroll-container]")!;
+    // jsdom has no layout. Give the strip and each tab's subtree the
+    // geometry of two adjacent tabs so dnd-kit's real collision logic runs.
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this === tabStrip) return new DOMRect(0, 0, 300, 40);
+        const tab = this.closest("[data-tab-id]");
+        if (tab) {
+          const left = tab.getAttribute("data-tab-id") === "tA" ? 0 : 146;
+          return new DOMRect(left, 0, 140, 40);
+        }
+        return new DOMRect();
+      });
+
+    try {
+      fireEvent.pointerDown(getByLabelText("Issues"), {
+        button: 0,
+        pointerType: "mouse",
+        isPrimary: true,
+        clientX: 45,
+        clientY: 20,
+      });
+      fireEvent.pointerMove(document, { clientX: 55, clientY: 20 });
+      fireEvent.pointerMove(document, { clientX: 191, clientY: 20 });
+      fireEvent.pointerUp(document, { clientX: 191, clientY: 20 });
+
+      expect(state.moveTab).toHaveBeenCalledWith(0, 1);
+    } finally {
+      rectSpy.mockRestore();
+      // dnd-kit keeps its document-level click blocker for 50ms after a drop.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   });
 });
 

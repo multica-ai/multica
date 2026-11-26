@@ -40,6 +40,7 @@ import type {
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
@@ -69,7 +70,6 @@ import type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
-  GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
   IssueEnvironmentsResponse,
@@ -80,6 +80,8 @@ import type {
   IssueUnread,
   Label,
   Project,
+  ProjectProgressDetail,
+  ProjectActivityPage,
   ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
@@ -1000,10 +1002,6 @@ export const EMPTY_LIST_QUICK_ACTIONS_RESPONSE: ListQuickActionsResponse = {
   quick_actions: [],
 };
 
-export const QuickActionRenderSchema = z.object({
-  content: z.string().default(""),
-}).loose();
-
 export const ListPropertiesResponseSchema = z.object({
   properties: z.array(IssuePropertySchema).default([]),
   total: z.number().default(0),
@@ -1700,7 +1698,16 @@ export const CommentSubIssueTaskResponseSchema = z.object({
   task_id: z.string().min(1),
 }).loose();
 
+const IssueBlockerSchema = z.object({
+  id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
+  via: z.string(), closed: z.boolean(),
+});
+
 export const IssueSchema = z.object({
+  blocked_count: z.number().int().nonnegative().optional().catch(undefined),
+  blocked_by: z.array(IssueBlockerSchema).optional().catch(undefined),
+  // Detail reads only: the issues waiting on this one.
+  blocking: z.array(IssueBlockerSchema).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),
@@ -1756,6 +1763,7 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
+  description_revision: z.number().int().nonnegative().optional(),
   // Optional for compatibility with older self-hosted backends; a current
   // backend emits null until its historical backfill reaches the issue.
   last_activity_at: z.string().nullable().optional(),
@@ -1809,6 +1817,16 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
+const ProjectProgressSchema = z.object({
+  unit: z.literal("issues").catch("issues"),
+  scope: z.number().default(0),
+  completed: z.number().default(0),
+  started: z.number().default(0),
+  unstarted: z.number().default(0),
+  cancelled: z.number().default(0),
+  percent: z.number().default(0),
+}).loose();
+
 export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1832,6 +1850,8 @@ export const ProjectSchema = z.object({
   last_activity_at: z.string().optional().catch(undefined),
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
+  // Older servers omit it; consumers fall back to issue_count / done_count.
+  progress: ProjectProgressSchema.optional().catch(undefined),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
   archived_at: z.string().nullable().default(null).catch(null),
@@ -1854,6 +1874,60 @@ export const ListProjectsResponseSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   total: z.number().default(0),
 }).loose();
+
+export const ProjectProgressDetailSchema = z.object({
+  progress: ProjectProgressSchema,
+  by_assignee: z.array(z.object({
+    assignee_type: z.enum(["member", "agent", "squad"]).nullable().catch(null),
+    assignee_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]),
+  // Older servers omit it; the label breakdown then has nothing to show.
+  by_label: z.array(z.object({
+    label_id: z.string().nullable().default(null),
+    scope: z.number().default(0),
+    completed: z.number().default(0),
+    started: z.number().default(0),
+  }).loose()).default([]).catch([]),
+  history: z.array(z.object({
+    date: z.string(),
+    scope: z.number().default(0),
+    started: z.number().default(0),
+    completed: z.number().default(0),
+  }).loose()).default([]),
+  forecast: z.object({
+    completion_date: z.string(),
+    weekly_velocity: z.number(),
+  }).loose().nullable().default(null).catch(null),
+}).loose();
+
+export const EMPTY_PROJECT_PROGRESS_DETAIL: ProjectProgressDetail = {
+  progress: { unit: "issues", scope: 0, completed: 0, started: 0, unstarted: 0, cancelled: 0, percent: 0 },
+  by_assignee: [],
+  by_label: [],
+  history: [],
+  forecast: null,
+};
+
+export const ProjectActivityPageSchema = z.object({
+  entries: z.array(z.object({
+    id: z.string(),
+    issue_id: z.string(),
+    issue_identifier: z.string().default(""),
+    issue_title: z.string().default(""),
+    issue_status: z.string().default(""),
+    actor_type: z.string().default(""),
+    actor_id: z.string().default(""),
+    action: z.string(),
+    details: z.record(z.string(), z.unknown()).default({}).catch({}),
+    created_at: z.string(),
+  }).loose()).default([]),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_PROJECT_ACTIVITY_PAGE: ProjectActivityPage = { entries: [], next_cursor: null };
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
@@ -1962,22 +2036,6 @@ export const SearchIndexChangesSchema = z.object({
   cursor: z.string().min(1),
   has_more: z.boolean(),
 }).loose();
-
-const IssueAssigneeGroupSchema = z.object({
-  id: z.string(),
-  assignee_type: z.string().nullable(),
-  assignee_id: z.string().nullable(),
-  issues: z.array(IssueSchema).default([]),
-  total: z.number().default(0),
-}).loose();
-
-export const GroupedIssuesResponseSchema = z.object({
-  groups: z.array(IssueAssigneeGroupSchema).default([]),
-}).loose();
-
-export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
-  groups: [],
-};
 
 const IssueTableActorRefSchema = z.object({
   // Server-driven enums stay open so installed desktop clients survive a
@@ -2221,6 +2279,12 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+const DashboardUsageBySquadSchema = DashboardUsageByAgentSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardUsageBySquadListSchema = z.array(DashboardUsageBySquadSchema);
+
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
 // cancelled segment, which is exactly what that backend measured.
@@ -2234,6 +2298,12 @@ const DashboardAgentRunTimeSchema = z.object({
 }).loose();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
+
+const DashboardSquadRunTimeSchema = DashboardAgentRunTimeSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardSquadRunTimeListSchema = z.array(DashboardSquadRunTimeSchema);
 
 const DashboardRunTimeDailySchema = z.object({
   date: z.string().default(""),
@@ -2271,6 +2341,14 @@ export const DashboardFailureByAgentListSchema = z.array(
   DashboardFailureByAgentSchema,
 );
 
+const DashboardFailureBySquadSchema = DashboardFailureByAgentSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardFailureBySquadListSchema = z.array(
+  DashboardFailureBySquadSchema,
+);
+
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes
@@ -2289,13 +2367,6 @@ const RuntimeUsageSchema = z.object({
 }).loose();
 
 export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
-
-const RuntimeHourlyActivitySchema = z.object({
-  hour: z.number().default(0),
-  count: z.number().default(0),
-}).loose();
-
-export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
 
 const RuntimeUsageByAgentSchema = z.object({
   agent_id: z.string().default(""),
@@ -2465,12 +2536,18 @@ export const AgentTaskSchema = z.object({
   dispatched_at: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
+  transcript_purged_at: z.string().nullable().optional().catch(undefined),
+  transcript_purged_by: z.string().optional().catch(undefined),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
   autopilot_run_id: z.string().optional(),
+  squad_id: z.string().optional().catch(undefined),
+  is_leader_task: z.boolean().optional().catch(undefined),
+  doc_id: z.string().optional().catch(undefined),
+  doc_thread_id: z.string().optional().catch(undefined),
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
@@ -2587,6 +2664,20 @@ export const TaskContextReceiptResponseSchema = z.object({
   receipt: ContextReceiptSchema.nullable().catch(null),
   recorded_at: z.string().optional(),
 }).loose();
+
+// `DELETE /api/tasks/:id/messages` only answers 200 once the log is gone, so a
+// malformed body must still read as cleared; the caller fills the gaps.
+export const TaskTranscriptPurgeSchema = z.object({
+  transcript_purged_at: z.string().nullable().catch(null),
+  transcript_purged_by: z.string().catch(""),
+  messages_deleted: z.number().catch(0),
+}).loose();
+
+export const EMPTY_TASK_TRANSCRIPT_PURGE = {
+  transcript_purged_at: null,
+  transcript_purged_by: "",
+  messages_deleted: 0,
+};
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
@@ -2910,6 +3001,8 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  // Older backends predate handoff modes; they always routed through the leader.
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2929,6 +3022,7 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+  handoff_mode: "leader",
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status
@@ -2955,6 +3049,18 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+export const SquadBriefsResponseSchema = z.object({
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
+  briefs: z.array(z.object({
+    member_type: z.string(),
+    member_id: z.string(),
+    is_leader: z.boolean().default(false),
+    brief: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_SQUAD_BRIEFS = { handoff_mode: "leader" as const, briefs: [] };
 
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //
@@ -3383,6 +3489,9 @@ export const SnoozedInboxListSchema = z.array(
       issue_id: z.string(),
       // Older servers omit it; the row then links by issue_id.
       issue_identifier: z.string().min(1).nullish().catch(null),
+      // Older servers omit them; the row then fetches the issue.
+      issue_title: z.string().nullish().catch(null),
+      issue_status: z.string().min(1).nullish().catch(null),
       item_id: z.string(),
       snoozed_until: z.string(),
       snoozed_at: z.string(),
@@ -3651,6 +3760,9 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
         // Newer than autopilot_runs: an older Cloud omits it, and a malformed
         // one only hides its own row.
         dashboard_history_days: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
+        // Newer still: an older Cloud omits it, and a malformed one only
+        // hides its own row.
+        app_tool_calls: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3668,6 +3780,7 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
         autopilotRuns: value.limits.autopilot_runs,
         storageBytes: value.limits.storage_bytes ?? null,
         dashboardHistoryDays: value.limits.dashboard_history_days,
+        appToolCalls: value.limits.app_tool_calls,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -4092,6 +4205,42 @@ export const StorageUsageSchema = z
             limitBytes: value.limit_bytes,
             reached:
               value.action === "enforce" && value.used_bytes !== null ? (value.reached ?? false) : null,
+          },
+  );
+
+// App call usage that cannot be read, or an action from a newer server, reads
+// as off: the gateway still checks every call. A malformed breakdown only
+// drops the breakdown.
+export const AppCallUsageSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    used: z.number().int().nonnegative().nullable().catch(null).default(null),
+    limit: z.number().int().nonnegative().nullable().catch(null).default(null),
+    reached: z.boolean().nullable().catch(null).default(null),
+    reset_at: z.string().nullable().catch(null).default(null),
+    members: z
+      .array(
+        z.object({
+          user_id: z.string().nullable().catch(null).default(null),
+          calls: z.number().int().nonnegative(),
+        }),
+      )
+      .nullable()
+      .catch(null)
+      .default(null),
+  })
+  .loose()
+  .transform(
+    (value): AppCallUsage =>
+      value.action === "off" || value.limit === null || value.used === null
+        ? { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] }
+        : {
+            action: value.action,
+            used: value.used,
+            limit: value.limit,
+            reached: value.action === "enforce" ? (value.reached ?? value.used >= value.limit) : null,
+            resetAt: value.reset_at,
+            members: (value.members ?? []).map((m) => ({ userId: m.user_id, calls: m.calls })),
           },
   );
 
@@ -4985,6 +5134,23 @@ export const AppsOverviewSchema = z.object({
   team: z.array(AppConnectionSchema).default([]),
   personal: z.array(AppConnectionSchema).default([]),
   agent_apps: z.array(AgentAppSchema).default([]),
+  team_requests: z.array(z.object({
+    toolkit_slug: z.string(),
+    requested_by: z.array(z.string()).default([]).catch([]),
+    asked_by: z.array(z.string()).optional().catch(undefined),
+    agent_ids: z.array(z.string()).default([]).catch([]),
+    last_requested_at: z.string().default(""),
+  }).loose()).default([]).catch([]),
+}).loose();
+
+export const PersonalAppImpactSchema = z.object({
+  agents: z.array(z.object({
+    id: z.string(),
+    name: z.string().default(""),
+    workspace_id: z.string().default(""),
+    workspace_name: z.string().default(""),
+    running: z.boolean().default(false).catch(false),
+  }).loose()).default([]),
 }).loose();
 
 const AppCatalogEntrySchema = z.object({
@@ -4992,9 +5158,11 @@ const AppCatalogEntrySchema = z.object({
   name: z.string().default(""),
   logo: z.string().optional().catch(undefined),
   category: z.string().optional().catch(undefined),
+  category_id: z.string().optional().catch(undefined),
   curated: z.boolean().default(false).catch(false),
   recommended_scope: AppAccountScopeSchema.optional(),
   allowed: z.boolean().optional().catch(undefined),
+  connect_method: z.enum(["oauth", "key"]).optional().catch(undefined),
 }).loose();
 
 export const AppCatalogResponseSchema = z.object({
@@ -5062,6 +5230,8 @@ export const AppRequestSchema = z.object({
   reason: appNullableString,
   // Withhold the details unless the server said otherwise.
   redacted: z.boolean().default(true).catch(true),
+  adds_app: z.boolean().default(false).catch(false),
+  can_decide: z.boolean().optional().catch(undefined),
   expires_at: z.string(),
   decided_by: appNullableString,
   decided_at: appNullableString,
@@ -5071,17 +5241,6 @@ export const AppRequestSchema = z.object({
 export const AppRequestListSchema = z.object({
   requests: z.array(AppRequestSchema).default([]),
   next_before: appNullableString,
-}).loose();
-
-export const AppToolsResponseSchema = z.object({
-  tools: z.array(z.object({
-    slug: z.string(),
-    name: z.string().default(""),
-    description: z.string().default(""),
-    auto_class: AppActionClassSchema,
-    class: AppActionClassSchema,
-    overridden: z.boolean().default(false).catch(false),
-  }).loose()).default([]),
 }).loose();
 
 export const IssueAppCallsResponseSchema = z.object({
@@ -5110,6 +5269,7 @@ export const EMPTY_APPS_OVERVIEW: AppsOverview = {
   team: [],
   personal: [],
   agent_apps: [],
+  team_requests: [],
 };
 
 export const EMPTY_APP_CATALOG: AppCatalogResponse = { catalog_mode: "curated", apps: [] };

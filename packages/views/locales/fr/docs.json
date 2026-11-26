@@ -59,7 +59,8 @@
     "title": "Historique",
     "current": "Actuelle",
     "restore": "Restaurer cette version",
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "from_discussion": "Depuis le commentaire : {{quote}}"
   },
   "not_found": {
     "title": "Document introuvable",
@@ -80,6 +81,7 @@
     "resolved": "Résolus {{count}}",
     "close": "Fermer les commentaires",
     "quote_missing": "Le texte commenté a été modifié",
+    "quote_changed": "Texte modifié",
     "reply_placeholder": "Répondre, ou mentionner avec @…",
     "new_placeholder": "Ajouter un commentaire, ou @ pour mentionner quelqu'un...",
     "submit": "Commenter",
@@ -97,6 +99,7 @@
       "save": "Impossible de publier le commentaire",
       "delete": "Impossible de supprimer le commentaire",
       "resolve": "Impossible de mettre à jour le commentaire"
-    }
+    },
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
   }
 }

@@ -343,6 +343,9 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /** Set once an admin has cleared this run's log; absent otherwise. */
+  transcript_purged_at?: string | null;
+  transcript_purged_by?: string;
   result: unknown;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
@@ -364,6 +367,14 @@ export interface AgentTask {
   chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
+  /** Non-empty when this task belongs to a squad execution chain (leader or delegated member). */
+  squad_id?: string;
+  /** True when this task runs the agent as a squad leader. */
+  is_leader_task?: boolean;
+  /** Non-empty when an agent was asked for in a doc discussion. */
+  doc_id?: string;
+  /** The doc discussion (its first comment's id) the run answers. */
+  doc_thread_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */
   parent_task_id?: string;
   /** 1-based attempt counter; >1 means this is a retry. */
@@ -405,7 +416,7 @@ export interface AgentTask {
    * remains quick_create after its result issue is linked, so consumers can
    * distinguish creation work from later direct runs on that issue.
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "doc_comment" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -538,6 +549,13 @@ export interface ContextReceipt {
   fresh_retry?: boolean;
   mcp_servers: string[];
   sources: ContextReceiptSource[];
+}
+
+/** What clearing a run's log leaves on the run. */
+export interface TaskTranscriptPurge {
+  transcript_purged_at: string | null;
+  transcript_purged_by: string;
+  messages_deleted: number;
 }
 
 export interface TaskContextReceiptResponse {
@@ -1066,11 +1084,6 @@ export interface RuntimeUsage {
   uncosted_cache_write_tokens?: number;
 }
 
-export interface RuntimeHourlyActivity {
-  hour: number;
-  count: number;
-}
-
 // Subscription rate limits of the account a runtime's agent CLI runs under
 // (`GET /api/runtimes/:id/rate-limits`, MUL-9427), as the CLI last reported
 // them during a task. Window kinds and statuses fall back to "other" / ""
@@ -1183,6 +1196,27 @@ export interface DashboardUsageByAgent {
   uncosted_output_tokens?: number;
   uncosted_cache_read_tokens?: number;
   uncosted_cache_write_tokens?: number;
+  task_count: number;
+}
+
+// Per-(squad, agent, model) token totals for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardUsageBySquad extends DashboardUsageByAgent {
+  squad_id: string;
+}
+
+// Per-(squad, agent) terminal-task run-time + counts for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardSquadRunTime extends DashboardAgentRunTime {
+  squad_id: string;
+}
+
+// Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardFailureBySquad {
+  squad_id: string;
+  agent_id: string;
+  failure_reason: string;
   task_count: number;
 }
 

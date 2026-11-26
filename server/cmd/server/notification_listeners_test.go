@@ -1662,21 +1662,25 @@ func publishLabelsChangedBy(bus *events.Bus, issueID, actorID string) {
 }
 
 // TestNotification_HandlingArchivesIssueInbox verifies that commenting on an
-// issue, changing its status or reassigning it archives the actor's own
-// notifications on it by default, that tidying edits do once turned on, and
-// that other recipients keep theirs.
+// issue, advancing its status, reassigning it, or tidying it archives the
+// actor's own notifications once enabled in preferences, and that other
+// recipients keep theirs.
 func TestNotification_HandlingArchivesIssueInbox(t *testing.T) {
 	queries := db.New(testPool)
 
-	defaultEmail := "notif-handled-archive-default@multica.ai"
-	defaultID := createNotificationMember(t, defaultEmail)
-	t.Cleanup(func() { cleanupTestUser(t, defaultEmail) })
-
-	tidyEmail := "notif-handled-archive-tidy@multica.ai"
-	tidyID := createNotificationMember(t, tidyEmail)
-	t.Cleanup(func() { cleanupTestUser(t, tidyEmail) })
-	for _, key := range []string{"auto_archive_on_priority", "auto_archive_on_project", "auto_archive_on_dates", "auto_archive_on_labels"} {
-		setNotificationPref(t, tidyID, key, "all")
+	customEmail := "notif-handled-archive-custom@multica.ai"
+	customID := createNotificationMember(t, customEmail)
+	t.Cleanup(func() { cleanupTestUser(t, customEmail) })
+	for _, key := range []string{
+		"auto_archive_on_comment",
+		"auto_archive_on_status",
+		"auto_archive_on_assignee",
+		"auto_archive_on_priority",
+		"auto_archive_on_project",
+		"auto_archive_on_dates",
+		"auto_archive_on_labels",
+	} {
+		setNotificationPref(t, customID, key, "all")
 	}
 
 	for _, tc := range []struct {
@@ -1684,23 +1688,23 @@ func TestNotification_HandlingArchivesIssueInbox(t *testing.T) {
 		actor string
 		act   func(bus *events.Bus, issueID, actorID string)
 	}{
-		{"comment", defaultID, func(bus *events.Bus, issueID, actorID string) { publishCommentBy(bus, issueID, "member", actorID) }},
-		{"status", defaultID, func(bus *events.Bus, issueID, actorID string) {
+		{"comment", customID, func(bus *events.Bus, issueID, actorID string) { publishCommentBy(bus, issueID, "member", actorID) }},
+		{"status", customID, func(bus *events.Bus, issueID, actorID string) {
 			publishIssueFieldsBy(bus, issueID, actorID, "status_changed")
 		}},
-		{"assignee", defaultID, func(bus *events.Bus, issueID, actorID string) {
+		{"assignee", customID, func(bus *events.Bus, issueID, actorID string) {
 			publishIssueFieldsBy(bus, issueID, actorID, "assignee_changed")
 		}},
-		{"priority", tidyID, func(bus *events.Bus, issueID, actorID string) {
+		{"priority", customID, func(bus *events.Bus, issueID, actorID string) {
 			publishIssueFieldsBy(bus, issueID, actorID, "priority_changed")
 		}},
-		{"project", tidyID, func(bus *events.Bus, issueID, actorID string) {
+		{"project", customID, func(bus *events.Bus, issueID, actorID string) {
 			publishIssueFieldsBy(bus, issueID, actorID, "project_changed")
 		}},
-		{"due date", tidyID, func(bus *events.Bus, issueID, actorID string) {
+		{"due date", customID, func(bus *events.Bus, issueID, actorID string) {
 			publishIssueFieldsBy(bus, issueID, actorID, "due_date_changed")
 		}},
-		{"labels", tidyID, publishLabelsChangedBy},
+		{"labels", customID, publishLabelsChangedBy},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := newNotificationBus(t, queries)
@@ -1735,11 +1739,10 @@ func TestNotification_HandlingArchivesIssueInbox(t *testing.T) {
 	}
 }
 
-// TestNotification_HandlingKeepsInbox verifies that the inbox stays for
-// tidying edits by default, for an action the member turned off, and for an
-// agent actor. Completing stays off when muted even though status changes are
-// on: each action is its own choice. Moving to an unstarted status is triage,
-// not handling.
+// TestNotification_HandlingKeepsInbox verifies that the inbox stays by default
+// for field edits and plain comments that do not trigger an agent, for an
+// action the member turned off, and for an agent actor. Moving to an unstarted
+// status never archives even when status-advance auto-archive is turned on.
 func TestNotification_HandlingKeepsInbox(t *testing.T) {
 	queries := db.New(testPool)
 
@@ -1747,10 +1750,15 @@ func TestNotification_HandlingKeepsInbox(t *testing.T) {
 	defaultID := createNotificationMember(t, defaultEmail)
 	t.Cleanup(func() { cleanupTestUser(t, defaultEmail) })
 
+	statusOnEmail := "notif-handled-keep-status-on@multica.ai"
+	statusOnID := createNotificationMember(t, statusOnEmail)
+	t.Cleanup(func() { cleanupTestUser(t, statusOnEmail) })
+	setNotificationPref(t, statusOnID, "auto_archive_on_status", "all")
+
 	mutedEmail := "notif-handled-keep-muted@multica.ai"
 	mutedID := createNotificationMember(t, mutedEmail)
 	t.Cleanup(func() { cleanupTestUser(t, mutedEmail) })
-	for _, key := range []string{"auto_archive_completed", "auto_archive_on_comment", "auto_archive_on_assignee"} {
+	for _, key := range []string{"auto_archive_completed", "auto_archive_on_agent_trigger", "auto_archive_on_comment", "auto_archive_on_assignee"} {
 		setNotificationPref(t, mutedID, key, "muted")
 	}
 
@@ -1759,6 +1767,15 @@ func TestNotification_HandlingKeepsInbox(t *testing.T) {
 		recipient string
 		act       func(bus *events.Bus, issueID string)
 	}{
+		{"comment without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishCommentBy(bus, issueID, "member", defaultID)
+		}},
+		{"status advance without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, defaultID, "status_changed")
+		}},
+		{"assignee change without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, defaultID, "assignee_changed")
+		}},
 		{"tidying edits by default", defaultID, func(bus *events.Bus, issueID string) {
 			publishIssueFieldsBy(bus, issueID, defaultID,
 				"title_changed", "priority_changed", "project_changed", "start_date_changed", "due_date_changed")
@@ -1774,11 +1791,11 @@ func TestNotification_HandlingKeepsInbox(t *testing.T) {
 		{"completing turned off", mutedID, func(bus *events.Bus, issueID string) {
 			publishStatusChangeBy(bus, issueID, "done", "in_review", "member", mutedID)
 		}},
-		{"triage from backlog to todo", defaultID, func(bus *events.Bus, issueID string) {
-			publishStatusChangeBy(bus, issueID, "todo", "backlog", "member", defaultID)
+		{"triage from backlog to todo even with status enabled", statusOnID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "backlog", "member", statusOnID)
 		}},
-		{"reopening to todo", defaultID, func(bus *events.Bus, issueID string) {
-			publishStatusChangeBy(bus, issueID, "todo", "done", "member", defaultID)
+		{"reopening to todo even with status enabled", statusOnID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "done", "member", statusOnID)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

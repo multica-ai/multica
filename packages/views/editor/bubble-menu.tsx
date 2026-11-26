@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   computePosition,
   offset,
@@ -571,6 +572,7 @@ function EditorBubbleMenu({
       }).then(({ x, y, middlewareData }) => {
         if (!el.isConnected) return;
         const hidden = middlewareData.hide?.referenceHidden;
+        el.dataset.state = hidden ? "closed" : "open";
         el.style.visibility = hidden ? "hidden" : "visible";
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
@@ -609,11 +611,19 @@ function EditorBubbleMenu({
     [editor],
   );
 
+  const reduceMotion = useReducedMotion();
+  const prevModeRef = useRef(mode);
+  const modeChanged = prevModeRef.current !== mode;
+  useEffect(() => {
+    prevModeRef.current = mode;
+  }, [mode]);
+
   return (
     <div
       ref={floatingRef}
       data-mc="editor-toolbar"
       data-mode={mode === "link-edit" ? "link" : "format"}
+      data-state={visible ? "open" : "closed"}
       style={{
         position: "fixed",
         zIndex: 50,
@@ -622,6 +632,14 @@ function EditorBubbleMenu({
       }}
       onMouseDown={(e) => e.preventDefault()}
     >
+      <div
+        key={mode}
+        className={
+          modeChanged && !reduceMotion
+            ? "animate-in fade-in duration-[120ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none"
+            : undefined
+        }
+      >
       {mode === "link-edit" ? (
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
@@ -713,6 +731,7 @@ function EditorBubbleMenu({
           </div>
         </TooltipProvider>
       )}
+      </div>
     </div>
   );
 }

@@ -297,6 +297,7 @@ func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, 
 // GetSearchIndexManifest returns the snapshot a new local copy starts from and
 // the size of the text it would hold.
 func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
 		return
@@ -342,6 +343,7 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 // GetSearchIndexSnapshot returns one page of issues ordered by number, every
 // live comment on those issues, and (on the first page) every project.
 func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
@@ -454,6 +456,7 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 // cursor has not seen, or when the copy predates the current access rules and
 // the caller cannot see every project; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
@@ -686,10 +689,12 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hid
 	}
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, is.ID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals, blockerPageIDs...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)

@@ -60,7 +60,7 @@ Un `admin` peut faire passer un membre de `admin` à `member` et inversement, et
 Un membre retiré perd immédiatement l'accès à l'espace de travail. Les tâches, commentaires et autres traces de collaboration qu'il a créés restent dans l'espace de travail.
 
 <Callout type="warning">
-Retirer un membre désactive aussi les runtimes dont il est propriétaire, archive les agents qui y sont liés et annule les exécutions non terminées. Les autorisations que le membre avait reçues dans les périmètres d'accès des agents sont également supprimées, et ne sont pas rétablies automatiquement s'il rejoint de nouveau l'espace de travail.
+Retirer un membre désactive aussi les runtimes dont il est propriétaire, archive les agents qui y sont liés et annule les exécutions non terminées. Les agents qu'il possède sur les runtimes d'autres membres sont aussi archivés, les exécutions qu'il a lancées sur n'importe quel agent sont annulées, ses autopilots sont mis en pause et ses réveils sont arrêtés. Les agents intégrés qu'il possède, comme Mika, sont transférés à un administrateur de l'espace de travail. Les autorisations que le membre avait reçues dans les périmètres d'accès des agents sont également supprimées, et ne sont pas rétablies automatiquement s'il rejoint de nouveau l'espace de travail.
 </Callout>
 
 ## Étapes suivantes
@@ -68,3 +68,4 @@ Retirer un membre désactive aussi les runtimes dont il est propriétaire, archi
 - [Tâches](/issues) — le travail que membres et agents traitent ensemble.
 - [Agents](/agents) — en quoi les rôles de l'espace de travail diffèrent de l'accès aux agents.
 - [Daemon et runtimes](/daemon-runtimes) — à qui appartiennent les runtimes et où ils tournent.
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) — rôles et accès aux agents ensemble, avec l'exemple d'une équipe de 10 personnes.

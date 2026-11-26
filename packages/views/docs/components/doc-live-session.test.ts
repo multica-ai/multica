@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
 const { apiMock, providers, sockets } = vi.hoisted(() => ({
-  apiMock: { createDocCollabTicket: vi.fn() },
+  apiMock: { createDocCollabTicket: vi.fn(), createIssueCollabTicket: vi.fn() },
   providers: [] as Array<{
     config: {
       name: string;
@@ -11,7 +11,9 @@ const { apiMock, providers, sockets } = vi.hoisted(() => ({
       onClose: (e: { event: { reason: string } }) => void;
     };
     destroyed: boolean;
-    awareness: { local: unknown };
+    tokensSent: number;
+    syncs: number;
+    awareness: { local: unknown; states: Map<number, unknown>; emit: () => void };
   }>,
   sockets: [] as Array<{ destroyed: boolean }>,
 }));
@@ -32,9 +34,20 @@ vi.mock("@hocuspocus/provider", () => {
     destroyed = false;
     awareness = {
       local: {} as unknown,
-      on() {},
-      off() {},
-      getStates: () => new Map(),
+      states: new Map<number, unknown>(),
+      listeners: new Set<() => void>(),
+      on(_event: string, listener: () => void) {
+        this.listeners.add(listener);
+      },
+      off(_event: string, listener: () => void) {
+        this.listeners.delete(listener);
+      },
+      emit() {
+        for (const listener of this.listeners) listener();
+      },
+      getStates() {
+        return this.states;
+      },
       getLocalState() {
         return this.local;
       },
@@ -45,7 +58,15 @@ vi.mock("@hocuspocus/provider", () => {
     constructor(public config: (typeof providers)[number]["config"]) {
       providers.push(this);
     }
+    tokensSent = 0;
+    syncs = 0;
     attach() {}
+    async sendToken() {
+      this.tokensSent++;
+    }
+    startSync() {
+      this.syncs++;
+    }
     destroy() {
       this.destroyed = true;
     }
@@ -61,6 +82,7 @@ import {
   acquireDocSession,
   findDocSession,
   liveEditingOff,
+  liveOffKey,
   peekDocLive,
   prefetchDocLive,
   releaseDocSession,
@@ -88,6 +110,7 @@ const ticket = (docId: string, extra: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   apiMock.createDocCollabTicket.mockReset();
+  apiMock.createIssueCollabTicket.mockReset();
   providers.length = 0;
   sockets.length = 0;
 });
@@ -127,6 +150,34 @@ describe("prefetchDocLive", () => {
 
     void prefetchDocLive(url, `${docId}-next`, "u1");
     expect(sockets).toHaveLength(2);
+  });
+
+  it("asks for an issue description's ticket apart from a doc with the same id", async () => {
+    const { url, docId: id } = ids();
+    apiMock.createDocCollabTicket.mockResolvedValue(ticket(id));
+    apiMock.createIssueCollabTicket.mockResolvedValue({ ...ticket(id), document: `issue:${id}` });
+    await prefetchDocLive(url, id, "u1", "issue");
+    expect(apiMock.createIssueCollabTicket).toHaveBeenCalledWith(id, { state: true });
+    expect(apiMock.createDocCollabTicket).not.toHaveBeenCalled();
+    expect(peekDocLive(url, id, "u1")).toBeUndefined();
+    expect(peekDocLive(url, id, "u1", "issue")).toMatchObject({ document: `issue:${id}` });
+
+    const session = acquireDocSession(url, id, "u1", `issue:${id}`, "issue");
+    expect(findDocSession(url, id, "u1")).toBeUndefined();
+    expect(findDocSession(url, id, "u1", "issue")).toBe(session);
+    // The seeded ticket is used once; the next join asks the issue endpoint.
+    await providers.at(-1)!.config.token();
+    await providers.at(-1)!.config.token();
+    expect(apiMock.createIssueCollabTicket).toHaveBeenLastCalledWith(id, undefined);
+    releaseDocSession(session, { discard: true });
+  });
+
+  it("remembers live issue descriptions being off without turning docs solo", async () => {
+    const { url, docId: id } = ids();
+    apiMock.createIssueCollabTicket.mockResolvedValue({ enabled: false });
+    await prefetchDocLive(url, id, "u1", "issue");
+    expect(liveEditingOff.has(liveOffKey(url, "issue"))).toBe(true);
+    expect(liveEditingOff.has(url)).toBe(false);
   });
 
   it("keeps answers per user: a ticket is personal", async () => {
@@ -223,6 +274,34 @@ describe("doc sessions", () => {
     releaseDocSession(session, { discard: true });
   });
 
+  it("tells people editing from people who only have the doc open", () => {
+    const { url, docId } = ids();
+    const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
+    const awareness = providers.at(-1)!.awareness;
+    const caret = { anchor: {}, head: {} };
+    const moves = vi.fn();
+    const stop = session.watchAwareness(moves);
+    awareness.states = new Map<number, unknown>([
+      [101, { user: { id: "a", name: "Ann", kind: "member" } }],
+      // Bo in two tabs, typing in the second.
+      [102, { user: { id: "b", name: "Bo", kind: "member" } }],
+      [103, { user: { id: "b", name: "Bo", kind: "member" }, cursor: caret }],
+    ]);
+    awareness.emit();
+    const people = () => session.getState().collaborators.map((c) => [c.name, c.editing, c.key]);
+    expect(people()).toEqual([["Ann", false, 101], ["Bo", true, 103]]);
+    expect(moves).toHaveBeenCalledTimes(1);
+
+    awareness.states.set(103, { user: { id: "b", name: "Bo", kind: "member" }, cursor: null });
+    awareness.emit();
+    expect(people()).toEqual([["Ann", false, 101], ["Bo", false, 102]]);
+
+    stop();
+    awareness.emit();
+    expect(moves).toHaveBeenCalledTimes(2);
+    releaseDocSession(session, { discard: true });
+  });
+
   it("shares one socket between docs on the same server", () => {
     const { url, docId } = ids();
     const a = acquireDocSession(url, docId, "u1", `doc:${docId}`);
@@ -230,6 +309,31 @@ describe("doc sessions", () => {
     expect(sockets).toHaveLength(1);
     releaseDocSession(a, { discard: true });
     releaseDocSession(b, { discard: true });
+  });
+
+  it("joins again with a fresh ticket when the server asks it to reauthenticate", async () => {
+    vi.useFakeTimers();
+    const { url, docId } = ids();
+    const session = acquireDocSession(url, docId, "u1", `doc:${docId}`);
+    const provider = providers.at(-1)!;
+    provider.config.onSynced({ state: true });
+
+    apiMock.createDocCollabTicket.mockRejectedValueOnce(new Error("offline"));
+    provider.config.onClose({ event: { reason: "reauthenticate" } });
+    // Unsynced until it is back in, so a page waiting too long goes solo.
+    expect(session.getState().synced).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(provider.tokensSent).toBe(0);
+
+    // The next try, later, gets a ticket and joins with it, keeping the doc.
+    apiMock.createDocCollabTicket.mockResolvedValueOnce(ticket(docId, { token: "fresh" }));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect([provider.tokensSent, provider.syncs]).toEqual([1, 1]);
+    expect(JSON.parse(await provider.config.token()).ticket).toBe("fresh");
+    expect(providers).toHaveLength(1);
+    provider.config.onSynced({ state: true });
+    expect(session.getState().synced).toBe(true);
+    releaseDocSession(session, { discard: true });
   });
 
   it("ends a reset session once its page lets go, and starts the next one fresh", () => {

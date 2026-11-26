@@ -60,6 +60,28 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 レビューに回します。意図、実行、判断、差分はすべて同じタスクに紐付いたままなので、
 誰もコンテキストを組み立て直す必要はありません。そして、人が承認するまで、何もマージされません。
 
+### Multica が向いているケース
+
+次のような場合に向いています。
+
+- **複数の人が同じエージェントを共有し**、誰がどのエージェントを実行できるかを管理し、それぞれが何に取り組んでいるかを把握し、
+  成果物をレビューしたい。[チームでエージェントプールを共有する](https://multica.ai/docs/ja/team-agent-pool)をご覧ください。
+- **チームで複数のエージェント CLI を併用している**。Claude Code を使う人もいれば Codex や Cursor を使う人もいて、
+  ベンダーごとにアプリを分けずに 1 つのボードにまとめたい。
+- **エージェントを自分たちが管理するマシンで動かしたい**。ノートパソコン、ビルドサーバー、VM で、すでに契約しているツールの
+  アカウントを使い、プラットフォーム自体もセルフホストできます。
+- **繰り返し発生する作業がある**。トリアージ、監査、依存関係の更新などを、スケジュールや webhook で実行したい。
+
+次のような場合は、おそらく別のツールが合っています。
+
+- 1 人の開発者として数個のエージェントを並べて動かし、タスクごとに差分ビューアーとターミナルが欲しい場合は、ローカルの worktree 管理ツールが向いています。
+- ベンダーのクラウドサンドボックスで動くエージェントを使い、自分のマシンを常時オンラインにしておきたくない場合。
+- 計画が業務の中心である場合。Multica にはプロジェクト、ワークフロー、ガントビューはありますが、スプリント、サイクル、ロードマップはありません。
+
+ほかのツールとの比較：[Linear と Jira](https://multica.ai/docs/ja/compare/linear-jira) ·
+[OpenHands、Devin、Factory](https://multica.ai/docs/ja/compare/openhands-devin-factory) ·
+[Conductor、Claude Squad、Orca、Beads](https://multica.ai/docs/ja/compare/worktree-managers)
+
 ---
 
 ## チームを作る。
@@ -70,7 +92,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
   <img src="docs/assets/readme/team.webp" alt="Multica のエージェントページ。Builder はオンラインでタスクに取り組んでおり、その横に最近の実行、ランタイム、成功率が表示されています" width="100%">
 </p>
 
-- **[使い慣れたエージェント CLI](#ランタイム) →** Claude Code、Codex、Cursor、Copilot、Kimi、OpenCode など。
+- **[使い慣れたエージェント CLI](#対応するエージェント-cli) →** Claude Code、Codex、Cursor、Copilot、Kimi、OpenCode など。
 - **[チームメイトとしてのエージェント](https://multica.ai/docs/ja/agents) →** それぞれに名前、プロバイダー、ランタイムを与えると、ほかのメンバーと同じようにボードに現れます。
 - **[スクワッド](https://multica.ai/docs/ja/squads) →** エージェントと人を 1 つのチームにまとめ、リーダーが仕事を振り分けます。
 - **[スキル](https://multica.ai/docs/ja/skills) →** 解決した問題を、すべてのエージェントが再利用できるプレイブックにします。
@@ -98,7 +120,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 </p>
 
 - **[実行ログ](https://multica.ai/docs/ja/tasks) →** すべてのツール呼び出し、コマンド、エラーをタイムスタンプ付きで再生できます。
-- **実行中のエージェントに指示を出す →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi に対応しています。
+- **[実行中のエージェントに指示を出す](https://multica.ai/docs/ja/providers#割り込みへの対応) →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Hermes、Kiro、Pi、Antigravity に対応しています。
 - **利用状況の分析 →** 各実行にかかったコストを、エージェント別・タスク別に確認できます。
 - **[レビューゲート](https://multica.ai/docs/ja/issues) →** 作業は main に直接入らず、まずレビューに回ります。何をリリースするかはあなたが決めます。
 - **[インボックス](https://multica.ai/docs/ja/inbox) →** 細かなステップごとではなく、エージェントが判断を求めてきたときだけ通知が届きます。
@@ -113,7 +135,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - **[ワークスペース](https://multica.ai/docs/ja/workspaces) →** エージェント、タスク、設定をチームごとに分けられます。
 - **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** ゲストに特定のプロジェクトを共有し、ワークスペースのロールや各エージェントを実行できる人を設定できます。
 - **[セキュリティモデル](https://multica.ai/docs/ja/security-model) →** エージェントが何にアクセスでき、何にアクセスできないか。
-- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
+- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram、WeChat は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
 - **Web、[デスクトップ](https://multica.ai/docs/ja/desktop-app)、[モバイル](https://multica.ai/docs/ja/mobile-app) →** macOS、Windows、Linux、iPhone、iPad で同じワークスペースを使えます。iOS アプリは現在ソースからビルドする形で、まだ App Store では提供していません。
 - **[CLI と API](https://multica.ai/docs/ja/cli) →** すべての機能をスクリプトから操作できます。エージェントも、あなたと同じ CLI で Multica を操作します。
 
@@ -126,8 +148,18 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
   実行しているコンピューターが、自動的にランタイムとして接続されます。
 - **セルフホスト** — スタック全体を自前のインフラで動かします。手順は下記をご覧ください。
 
+| | クラウド | デスクトップ | セルフホスト |
+| --- | --- | --- | --- |
+| 概要 | multica.ai でホストされるワークスペースをブラウザで使う | デーモンを内蔵した macOS、Windows、Linux 向けアプリ | サーバー、Web アプリ、データベースを自前のインフラで動かす |
+| ワークスペースのデータの保存先 | Multica クラウド | デスクトップの接続先サーバー。既定はクラウドで、[セルフホストのインスタンス](https://multica.ai/docs/ja/desktop-app#セルフホストインスタンスへの接続)にも接続できます | 自社のサーバー |
+| エージェントが動く場所 | CLI で接続したコンピューター | デスクトップを動かしているコンピューターと、接続したほかのコンピューター | 自社のサーバーに接続したコンピューター |
+| サーバーの運用者 | Multica | 接続先サーバーの運用者 | 自社（アップグレードとバックアップを含む） |
+| 選ぶ場面 | 何もホストせずにすぐ始めたい | ターミナルを使わずに自分のコンピューターでエージェントを動かしたい | ワークスペースのデータを自社のインフラに置く必要がある |
+
+組織内で利用するためのセルフホストは無料です。詳しくは[ライセンス](#ライセンス)をご覧ください。
+
 前提条件は 1 つだけです。エージェントを動かすマシンに、Claude Code、Codex、Cursor などの
-[対応するエージェント CLI](#ランタイム) を 1 つ以上インストールし、サインインしておいてください。
+[対応するエージェント CLI](#対応するエージェント-cli) を 1 つ以上インストールし、サインインしておいてください。
 Multica はそれらを呼び出して動かしますが、CLI 自体は同梱していません。
 
 <details>
@@ -172,10 +204,11 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 
 ---
 
-## ランタイム
+## 対応するエージェント CLI
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-現在のソースコードは 31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+デーモンはマシン上の対応 CLI をすべて検出し、同じワークスペース内でもエージェントごとに別の CLI を使えます。
 
 | プロバイダー | CLI | プロバイダー | CLI |
 | --- | --- | --- | --- |
@@ -196,8 +229,10 @@ Multica はモデルを同梱していません。インストールと認証を
 | Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
-インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·
-[プロバイダー](https://multica.ai/docs/ja/providers)
+Gemini CLI には対応していません。組み込みツールから削除されました。
+
+モデル、MCP、セッションの再開、割り込み、スキルなどの違いは[プロバイダー](https://multica.ai/docs/ja/providers)をご覧ください。
+インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime)。
 
 ---
 
@@ -207,6 +242,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | --- | --- |
 | 今日からエージェントに何かをさせたい | [クイックスタート](https://multica.ai/docs/ja/cloud-quickstart) · [チュートリアル](https://multica.ai/docs/ja/tutorial) |
 | 各部分がどう組み合わさっているかを理解したい | [コアコンセプト](https://multica.ai/docs/ja/concepts) · [Multica の仕組み](https://multica.ai/docs/ja/how-multica-works) |
+| チームでエージェントを共有したい | [エージェントプールの共有](https://multica.ai/docs/ja/team-agent-pool) · [メンバーとロール](https://multica.ai/docs/ja/members-roles) · [スクワッド](https://multica.ai/docs/ja/squads) |
 | エージェントを作成して設定したい | [エージェント](https://multica.ai/docs/ja/agents) · [エージェントの作成](https://multica.ai/docs/ja/agents-create) · [スキル](https://multica.ai/docs/ja/skills) |
 | エージェントに仕事を渡したい | [エージェントに仕事を任せる](https://multica.ai/docs/ja/triggering-agents) · [タスクの割り当て](https://multica.ai/docs/ja/assigning-issues) · [メンション](https://multica.ai/docs/ja/mentioning-agents) |
 | 自分のマシンを接続したい | [デーモンとランタイム](https://multica.ai/docs/ja/daemon-runtimes) · [AI コーディングツールのインストール](https://multica.ai/docs/ja/install-agent-runtime) |
@@ -214,6 +250,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | 自分のインフラストラクチャで動かしたい | [セルフホスト](SELF_HOSTING.md) · [セキュリティモデル](https://multica.ai/docs/ja/security-model) · [環境変数](https://multica.ai/docs/ja/environment-variables) |
 | スクリプトから操作したい | [CLI リファレンス](https://multica.ai/docs/ja/cli) · [CLI とデーモンのガイド](CLI_AND_DAEMON.md) · [認証トークン](https://multica.ai/docs/ja/auth-tokens) |
 | Codex、Claude Code、Cursor から Multica を操作したい | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
+| ほかのツールと比較したい | [Linear と Jira](https://multica.ai/docs/ja/compare/linear-jira) · [OpenHands、Devin、Factory](https://multica.ai/docs/ja/compare/openhands-devin-factory) · [worktree 管理ツール](https://multica.ai/docs/ja/compare/worktree-managers) |
 | エージェントが止まっている理由を突き止めたい | [実行](https://multica.ai/docs/ja/tasks) · [トラブルシューティング](https://multica.ai/docs/ja/troubleshooting) |
 
 ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、[繁體中文](https://multica.ai/docs/zh-Hant)、
@@ -253,7 +290,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | モバイル | Expo / React Native（iPhone と iPad） |
 | バックエンド | Go（Chi router、sqlc、gorilla/websocket） |
 | データベース | PostgreSQL 17（`pgcrypto` + `pg_trgm`） |
-| エージェントランタイム | [対応する任意のエージェント CLI](#ランタイム) を実行するローカルデーモン |
+| エージェントランタイム | [対応する任意のエージェント CLI](#対応するエージェント-cli) を実行するローカルデーモン |
 
 ---
 

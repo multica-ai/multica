@@ -157,6 +157,7 @@ POSTHOG_HOST                         Cloud product analytics (PostHog)
 FF_BILLING_WORKSPACE_SUBSCRIPTIONS   needs multica-cloud billing, which self-host does not run
 CLOUDFRONT_PRIVATE_KEY_SECRET        Cloud reads the key from AWS Secrets Manager; it outranks CLOUDFRONT_PRIVATE_KEY and .env.example ships a default name, so passing it would break the key self-host does pass
 MULTICA_FEATURE_FLAGS_FILE           a path inside the container: set it in a compose override together with the mount; FF_ variables cover single flags
+MULTICA_APPS_SECRET_KEY              remote MCP apps run inside Connected Apps, which needs Composio; self-host does not configure Composio yet
 LOCAL_UPLOAD_DIR                     uploads must stay on the backend_uploads volume mounted at /app/data/uploads
 MULTICA_SERVER_URL                   the server only writes this name into agent setup commands; the daemon sets it
 MULTICA_WORKSPACE_ID                 the server only writes this name into agent setup commands; the daemon sets it

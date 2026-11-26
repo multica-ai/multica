@@ -1,7 +1,33 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import {
+  buildAiVisitRecord,
+  prefersMarkdown,
+  reportAiVisit,
+  type AiVisitFormat,
+} from "@multica/core/ai-traffic";
 import { i18n } from "@/lib/i18n";
 
 const BASE_PATH = "/docs";
+const MARKDOWN_SUFFIX = /\.mdx?$/;
+const MARKDOWN_FILES = new Set(["llms.txt", "llms-full.txt"]);
+
+/**
+ * The Markdown route for a page requested as Markdown, either by URL
+ * (`/agents.md`, `/zh/agents.md`, `/index.md`) or by an `Accept` header that
+ * prefers Markdown. Returns null for every other request, including files
+ * such as `llms.txt`.
+ */
+export function markdownRewritePath(pathname: string, acceptsMarkdown: boolean): string | null {
+  const bySuffix = MARKDOWN_SUFFIX.test(pathname);
+  if (!bySuffix && (!acceptsMarkdown || pathname.split("/").at(-1)?.includes("."))) return null;
+
+  const segments = pathname.replace(MARKDOWN_SUFFIX, "").split("/").filter(Boolean);
+  const lang = (i18n.languages as readonly string[]).includes(segments[0] ?? "")
+    ? segments.shift()!
+    : i18n.defaultLanguage;
+  if (bySuffix && segments.at(-1) === "index") segments.pop();
+  return `${BASE_PATH}/${lang}/llms.mdx${segments.map((segment) => `/${segment}`).join("")}`;
+}
 
 // Self-contained i18n proxy. We don't use fumadocs-core's built-in
 // middleware because it isn't basePath-aware — both its rewrite targets
@@ -10,7 +36,7 @@ const BASE_PATH = "/docs";
 // inside a basePath-mounted app. Logic mirrors fumadocs's default-locale
 // flavor: hide `/en` prefix for the default language, keep `/zh` prefix
 // for other languages.
-export function proxy(request: NextRequest) {
+function routeLocale(request: NextRequest): NextResponse {
   const pathname = request.nextUrl.pathname;
   const pathLocale = i18n.languages.find(
     (loc) => pathname === `/${loc}` || pathname.startsWith(`/${loc}/`),
@@ -43,13 +69,36 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+export function proxy(request: NextRequest, event?: NextFetchEvent) {
+  const pathname = request.nextUrl.pathname;
+  const markdownPath = markdownRewritePath(pathname, prefersMarkdown(request.headers.get("accept")));
+  const response = markdownPath
+    ? NextResponse.rewrite(new URL(markdownPath, request.url))
+    : routeLocale(request);
+
+  const format: AiVisitFormat =
+    markdownPath || MARKDOWN_FILES.has(pathname.split("/").at(-1) ?? "") ? "markdown" : "html";
+  reportAiVisit(
+    buildAiVisitRecord({
+      app: "docs",
+      method: request.method,
+      pathname: `${BASE_PATH}${pathname === "/" ? "" : pathname}`,
+      headers: request.headers,
+      format,
+      status: response.headers.has("location") ? response.status : null,
+    }),
+    { env: process.env, waitUntil: event && ((promise) => event.waitUntil(promise)) },
+  );
+  return response;
+}
+
 export const config = {
   // Run on every path except static/api and root metadata routes. Includes
   // the bare `/` root so `/docs/` lands on the English home. Metadata routes
   // such as `icon.svg` are not under `[lang]/` and must bypass locale routing
   // so browsers and crawlers can fetch the original resources.
   matcher: [
-    "/((?!api|_next/static|_next/image|images|favicon.ico|icon\\.svg$|sitemap.xml|robots.txt).*)",
+    "/((?!api|_next/static|_next/image|images|videos|favicon.ico|icon\\.svg$|sitemap.xml|robots.txt).*)",
     "/",
   ],
 };

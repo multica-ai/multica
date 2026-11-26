@@ -257,9 +257,11 @@ services:
       MULTICA_TELEGRAM_TOOL_PROGRESS: ${MULTICA_TELEGRAM_TOOL_PROGRESS:-}
       # Feature flags, documented in .env.example. Each is passed only when
       # set: an empty FF_ value would pin the flag off instead of leaving the
-      # default. Workspace Docs is off until FF_DOCS_V1=true; the other two are
+      # default. Workspace Docs is off until FF_DOCS_V1=true and live issue
+      # descriptions until FF_ISSUE_DESCRIPTION_LIVE=true; the other two are
       # kill switches for features that are on by default.
       FF_DOCS_V1:
+      FF_ISSUE_DESCRIPTION_LIVE:
       FF_LOCAL_SEARCH_INDEX:
       FF_DASHBOARD_HISTORY_365D:
       # Live co-editing for Workspace Docs, served by the optional collab

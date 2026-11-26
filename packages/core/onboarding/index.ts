@@ -27,6 +27,7 @@ export {
 } from "./use-bootstrap-mika";
 export {
   MIKA_SYSTEM_KEY,
+  isArchivableAgent,
   isMikaAgent,
   memberNeedsMikaSetup,
   workspaceNeedsMika,

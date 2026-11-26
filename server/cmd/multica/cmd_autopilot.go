@@ -70,6 +70,13 @@ var autopilotRunsCmd = &cobra.Command{
 	RunE:  runAutopilotRuns,
 }
 
+var autopilotDeliveriesCmd = &cobra.Command{
+	Use:   "deliveries <id>",
+	Short: "List webhook deliveries for an autopilot, including ones that created no run",
+	Args:  exactArgs(1),
+	RunE:  runAutopilotDeliveries,
+}
+
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
 	Short: "Add a schedule or webhook trigger to an autopilot",
@@ -113,6 +120,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerCmd)
 	autopilotCmd.AddCommand(autopilotRunsCmd)
+	autopilotCmd.AddCommand(autopilotDeliveriesCmd)
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
 	autopilotCmd.AddCommand(autopilotTriggerListCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
@@ -131,7 +139,7 @@ func init() {
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as the run prompt)")
-	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID)")
+	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID); one of --agent, --squad, --squad-id is required")
 	autopilotCreateCmd.Flags().String("squad", "", "Assignee squad (name or ID)")
 	autopilotCreateCmd.Flags().String("squad-id", "", "Assignee squad ID (canonical UUID)")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
@@ -165,12 +173,17 @@ func init() {
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// deliveries
+	autopilotDeliveriesCmd.Flags().Int("limit", 20, "Max number of deliveries to return (server caps at 100)")
+	autopilotDeliveriesCmd.Flags().Int("offset", 0, "Pagination offset")
+	autopilotDeliveriesCmd.Flags().String("output", "table", "Output format: table or json")
+
 	// trigger-add — supports schedule and webhook
 	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
-	autopilotTriggerAddCmd.Flags().String("event-filters-file", "", "Read webhook event/action filters from a JSON array file (webhook only)")
+	autopilotTriggerAddCmd.Flags().String("event-filters-file", "", "Read webhook event/action filters, each with optional payload conditions, from a JSON array file (webhook only)")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// trigger-list
@@ -186,7 +199,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
-	autopilotTriggerUpdateCmd.Flags().String("event-filters-file", "", "Replace webhook event/action filters from a JSON array file (webhook only)")
+	autopilotTriggerUpdateCmd.Flags().String("event-filters-file", "", "Replace webhook event/action filters, each with optional payload conditions, from a JSON array file (webhook only)")
 	autopilotTriggerUpdateCmd.Flags().Bool("clear-event-filters", false, "Remove webhook filters and accept all events (webhook only)")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
@@ -728,6 +741,64 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runAutopilotDeliveries(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+
+	params := url.Values{}
+	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
+		params.Set("limit", fmt.Sprintf("%d", v))
+	}
+	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
+		params.Set("offset", fmt.Sprintf("%d", v))
+	}
+	path := "/api/autopilots/" + autopilotRef.ID + "/deliveries"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
+	var resp struct {
+		Deliveries []map[string]any `json:"deliveries"`
+		Total      int              `json:"total"`
+	}
+	if err := client.GetJSON(ctx, path, &resp); err != nil {
+		return fmt.Errorf("list deliveries: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+
+	// An ignored delivery has no run, so REASON / ERROR are the only place
+	// the table says why. payload_condition_failure is JSON-only.
+	headers := []string{"ID", "EVENT", "STATUS", "REASON", "ERROR", "RUN", "RECEIVED_AT"}
+	rows := make([][]string, 0, len(resp.Deliveries))
+	for _, d := range resp.Deliveries {
+		rows = append(rows, []string{
+			strVal(d, "id"),
+			strVal(d, "event"),
+			strVal(d, "status"),
+			strVal(d, "reason_code"),
+			strVal(d, "error"),
+			strVal(d, "autopilot_run_id"),
+			strVal(d, "received_at"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
 func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -765,13 +836,23 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, map[string]any{"triggers": triggers, "total": len(triggers)})
 	}
 
+	// The scheduler only fires enabled triggers of an active autopilot; the
+	// others keep a stale next_run_at, so leave NEXT_RUN blank for them.
+	autopilot, _ := resp["autopilot"].(map[string]any)
+	autopilotActive := strVal(autopilot, "status") == "active"
+
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "LABEL"}
 	rows := make([][]string, 0, len(triggers))
 	for _, t := range triggers {
 		enabled := "no"
-		if b, ok := t["enabled"].(bool); ok && b {
+		triggerEnabled, _ := t["enabled"].(bool)
+		if triggerEnabled {
 			enabled = "yes"
+		}
+		nextRun := ""
+		if triggerEnabled && autopilotActive {
+			nextRun = strVal(t, "next_run_at")
 		}
 		schedule := strVal(t, "cron_expression")
 		if tz := strVal(t, "timezone"); schedule != "" && tz != "" {
@@ -782,7 +863,7 @@ func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
 			strVal(t, "kind"),
 			enabled,
 			schedule,
-			relativeTimestamp(strVal(t, "next_run_at")),
+			relativeTimestamp(nextRun),
 			strVal(t, "label"),
 		})
 	}

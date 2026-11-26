@@ -59,7 +59,8 @@
     "title": "기록",
     "current": "현재",
     "restore": "이 버전 복원",
-    "loading": "불러오는 중..."
+    "loading": "불러오는 중...",
+    "from_discussion": "댓글에서: {{quote}}"
   },
   "not_found": {
     "title": "문서를 찾을 수 없습니다",
@@ -80,6 +81,7 @@
     "resolved": "해결됨 {{count}}",
     "close": "댓글 닫기",
     "quote_missing": "댓글을 단 텍스트가 변경되었습니다",
+    "quote_changed": "원문 변경됨",
     "reply_placeholder": "답글 또는 @ 멘션…",
     "new_placeholder": "댓글을 추가하거나 @로 멘션하세요...",
     "submit": "댓글",
@@ -96,6 +98,7 @@
       "save": "댓글을 게시하지 못했습니다",
       "delete": "댓글을 삭제하지 못했습니다",
       "resolve": "댓글을 업데이트할 수 없습니다"
-    }
+    },
+    "run_waiting_retry": "재시도 대기 중"
   }
 }

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
-import { NextRequest } from "next/server";
+import { NextRequest, type NextFetchEvent } from "next/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
 import { config, proxy } from "./proxy";
 
@@ -356,4 +356,78 @@ describe("upload route bypasses the buffering proxy", () => {
     "keeps the existing proxy behavior for %s",
     (url) => expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true),
   );
+});
+
+describe("proxy AI visit log", () => {
+  const CLAUDE_BOT = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)";
+  const visit = (path: string, headers: Record<string, string>, host = "www.multica.ai") =>
+    proxy(new NextRequest(`https://${host}${path}`, { headers }));
+  const loggedLines = (info: { mock: { calls: unknown[][] } }) =>
+    info.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each(["/llms.txt", "/robots.txt"])("observes %s without changing the response", (url) => {
+    expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const res = visit(url, { "user-agent": CLAUDE_BOT });
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it("logs AI crawlers on marketing pages and root crawler files", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    visit("/download", { "user-agent": CLAUDE_BOT, cookie: "multica_logged_in=1" });
+    visit("/zh/about", { "user-agent": "ChatGPT-User/1.0" });
+    visit("/llms.txt", { "user-agent": "curl/8.7.1" });
+
+    expect(loggedLines(info)).toEqual([
+      expect.objectContaining({ app: "web", path: "/download", agent: "ClaudeBot", format: "html", status: null }),
+      expect.objectContaining({ path: "/zh/about", agent: "ChatGPT-User" }),
+      expect.objectContaining({ path: "/llms.txt", signal: "markdown-request", format: "markdown" }),
+    ]);
+    expect(JSON.stringify(info.mock.calls)).not.toContain("multica_logged_in");
+  });
+
+  it("trusts the Host header over the address the server is bound to", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    visit("/llms.txt", { "user-agent": CLAUDE_BOT, host: "multica.ai" }, "localhost:3000");
+    visit("/llms.txt", { "user-agent": CLAUDE_BOT, host: "localhost:3000" }, "localhost:3000");
+    expect(loggedLines(info)).toEqual([expect.objectContaining({ path: "/llms.txt", agent: "ClaudeBot" })]);
+  });
+
+  it("retains visits in PostHog after the response when a key is configured", () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("POSTHOG_API_KEY", "phc_test");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const waitUntil = vi.fn();
+    try {
+      const req = new NextRequest("https://www.multica.ai/llms.txt", { headers: { "user-agent": CLAUDE_BOT } });
+      proxy(req, { waitUntil } as unknown as NextFetchEvent);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(fetchMock).toHaveBeenCalledWith("https://us.i.posthog.com/batch/", expect.anything());
+  });
+
+  it("records the redirect status the proxy answers with", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    visit("/about", { "user-agent": "GPTBot/1.1", cookie: "multica-locale=ko" });
+    expect(loggedLines(info)).toEqual([expect.objectContaining({ path: "/about", status: 307 })]);
+  });
+
+  it("skips browsers, app routes, docs, and other hosts", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    visit("/", {
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+      "sec-fetch-mode": "navigate",
+    });
+    visit("/acme/issues", { "user-agent": CLAUDE_BOT });
+    visit("/docs/agents", { "user-agent": CLAUDE_BOT });
+    visit("/download", { "user-agent": CLAUDE_BOT }, "app.multica.test");
+    expect(info).not.toHaveBeenCalled();
+  });
 });

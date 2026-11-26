@@ -1,0 +1,1 @@
+ALTER TABLE issue_description_revision ADD CONSTRAINT issue_description_revision_pkey PRIMARY KEY USING INDEX issue_description_revision_pkey_idx;

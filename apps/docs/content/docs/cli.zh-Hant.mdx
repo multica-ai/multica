@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+如果 `issue comment add` 逾時或連線中斷，留言可能已經儲存。在智慧體執行中，直接重新執行同一條指令是安全的：CLI 會根據執行、任務、父留言、內容和附件產生冪等鍵，伺服器會回傳已儲存的留言，不會再發一則。在其他情境下，每次嘗試都傳同一個 `--idempotency-key <key>` 即可獲得同樣的保護。舊版伺服器會忽略這個鍵。
+
 同一專案、同一父任務下已有標題相同（不區分大小寫，忽略多餘空格）且未關閉的任務時，`issue create` 會拒絕建立並給出那個任務。確實要再建一個，加 `--allow-duplicate`；要把一個任務標為另一個的重複，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
 一個任務要依次提交多個 PR 時，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，讓這個任務在 PR 合併後保持原狀態。用 `--pr-auto-complete on` 恢復工作區規則，從下一次 PR 事件起生效。`issue pull-requests <id>` 會顯示任務開關、工作區開關、目標狀態和判斷結果，沒有關聯 PR 時也會顯示。支援該欄位的伺服器會在建立交易內儲存開關；舊伺服器會補呼叫一次 PUT，失敗時 CLI 會提供已建立的任務 ID 和重試用的 update 命令，請勿重複建立。
@@ -280,7 +282,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
+- `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。`agent env get` 和 `agent env set` 輸出的值都顯示為 `****`，要看原值（例如複製到另一個 AI 代理）請加 `--show-values`。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
 - 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
@@ -405,6 +407,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
 | `issue-status` | 管理工作區狀態目錄：狀態及其顏色和圖示 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
+| `quick-action` | 管理並執行工作區快捷操作 |
 | `view` | 讀取儲存的檢視，列出檢視裡的任務 |
 | `agent`、`skill`、`squad` | 管理 AI 代理、skill 和小隊 |
 | `autopilot` | 管理自動化、觸發器和執行歷史 |
@@ -472,10 +475,11 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 
 | 命令 | 子命令 | 用途 | 關鍵 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 列出任務 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重複）、`--property`（可重複，`"名稱=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 這樣的比較；`__none__` 匹配未設定）、`--limit`、`--offset`、`--sort`（支援 `property:<名稱或 id>`）、`--full-id`、`--fields`（僅 JSON；逗號分隔，只輸出這些欄位）、`--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
+| `issue` | `list` | 列出任務 | `--status`、`--priority`、`--assignee`、`--project`、`--blocked`（僅列出等待未結束前置任務或前置階段的任務）、`--updated-since` / `--updated-until`（配套的 RFC3339 時間範圍）、`--metadata`（可重複）、`--property`（可重複，`"名稱=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 這樣的比較；`__none__` 匹配未設定）、`--limit`、`--offset`、`--sort`（支援 `property:<名稱或 id>`）、`--full-id`、`--fields`（僅 JSON；逗號分隔，只輸出這些欄位）、`--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
 | | `get <id>` | 檢視單個任務 | `--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
-| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
-| | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--position`、`--no-start`、`--duplicate-of` |
+| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--blocked-by`（可重複；開始前需等待的任務編號或 UUID）、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
+| | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--remove-blocked-by`（可重複；移除手動阻塞）、`--description-base-revision`（取自 `issue get`，描述已變更時拒絕覆寫）、`--position`、`--no-start`、`--duplicate-of` |
+| | `edit-description <id>` | 精確替換任務描述中的局部文字，無需整篇重寫 | `--old` / `--old-file`（必填）、`--new` / `--new-file`（必填）、`--replace-all` |
 | | `batch update <id>...` | 對多條任務套用相同修改 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 永久刪除一條或多條任務 | `--yes` 跳過確認；接受任務編號或完整 UUID; `--dry-run` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名稱模糊匹配成員、AI 代理或小隊）、`--to-id`、`--unassign`、`--no-start` |
@@ -500,6 +504,9 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `cancel-task <task-id>` | 取消進行中或排隊中的執行 | `--issue` |
 | `project` | `get/create/update/delete` | 管理專案 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重複）、`--visibility`（`workspace` 或 `private`）、`--member`（可重複，搭配 `--visibility private`）；`update`：`--visibility`、`--member`（專案正在改為私有或已經是私有時都會加入名單） |
 | | `list` | 列出和篩選專案 | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
+| | `overview <id>` | 一次讀取專案詳情、進度、資源、執行中 AI 代理和近期活動 | `--output`（預設 `json`，可選 `table`） |
+| | `progress <id>` | 檢視專案進度、每週趨勢、完成預測與分組分佈 | `--history`、`--by`（`assignee` 或 `label`）、`--output`（`table` 或 `json`） |
+| | `activity <id>` | 按時間倒序列出專案內任務的近期變更 | `--limit`、`--before`（JSON 輸出的 `next_cursor`）、`--output`（`table` 或 `json`） |
 | | `status <id> <status>` | 修改專案狀態 | |
 | | `archive/restore <id>` | 歸檔或恢復專案。已歸檔的專案不出現在 `list` 中、不再接受新任務，向它建立任務的自動化會被暫停 | `list --archived` 只列出已歸檔的專案 |
 | | `resource list/add/update/remove` | 管理專案附加資源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目錄的 `in_place` / `worktree`） |
@@ -510,12 +517,13 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `issue-status` | `list/get/create/update/archive` | 管理工作區狀態目錄，即所有工作流共用的狀態。修改任務目前狀態請用 `issue status` | `create`：`--name`、`--category`、`--color`、`--key`、`--icon`；`update`：`--name`、`--description`、`--color`、`--icon`（空值恢復為分類預設圖示）、`--position`；`list`：`--include-archived`。變更需要工作區擁有者或管理員權限 |
 | `label` | `list/get/create/update/delete` | 管理工作區標籤 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作區自定義屬性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重複，僅 select 型別）；`list`：`--include-archived`；型別建立後不可修改 |
+| `quick-action` | `list/get/create/update/archive/restore/delete/run` | 管理並執行[快捷操作](/quick-actions)。接受 UUID、UUID 字首或完整名稱；建立/修改/歸檔/刪除需由成員執行（`public` 需擁有者或管理員權限） | `list`：`--include-archived`、`--full-id`；`create` / `update`：`--name`、`--description`、`--prompt` / `--prompt-file` / `--prompt-stdin`、`--agent` / `--squad`（`update` 支援 `--clear-target`）、`--visibility`（`private` 或 `public`，`create` 預設 `private`）、`--status`（`update`）；`run <action> <issue>`：`--dry-run` 僅預覽不傳送 |
 | `view` | `list/get/issues/create/update/duplicate/delete` | 讀取你能開啟的檢視（自己的和工作區共享的）；`issues` 按檢視儲存的排序列出檢視裡的任務，檢視儲存的全部篩選條件都由服務端執行。`create`、`update`、`duplicate`、`delete` 按應用儲存檢視的同一格式寫入，檢視會出現在側邊欄並可繼續在應用裡編輯；`update` 只改傳入的參數，檢視在讀取後被他人改過時拒絕覆寫。只有擁有者（共享檢視還包括工作區擁有者和管理員）能修改或刪除檢視。在 AI 代理執行中，看到的檢視和其中「我的」條件都屬於執行時的所有者 | `<view>` 接受 ID、ID 字首或完整名稱；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一頁的 `next_cursor`）、`--today`（相對到期日篩選按哪一天計算，預設今天）、`--fields`（僅 JSON）、`--full-id`；`create`：`--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` 篩選：`--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` 等；顯示：`--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` 等；`--definition-file`、`--clear-filters`、`--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | 管理 AI 代理 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（僅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（舊寫法）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 複製為新 AI 代理，原 AI 代理不受影響 | `--name`（預設為原名加 ` (copy)`）、`--runtime-id`（複製到其他執行時時必須同時指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等機密配置不會複製，需用與 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 檢視 AI 代理的執行 | |
 | | `avatar <id>` | 上傳頭像 | |
-| | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值 |
+| | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值。輸出的值顯示為 `****`，加 `--show-values` 顯示原值 |
 | | `skills list/set/add <agent-id>` | 管理繫結的 skill | `--skill-ids`（`set` 全量替換，`add` 增量新增） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 給該 agent 分配工作區 MCP 服務 | server id 從 `workspace mcp list` 獲取。庫裡的條目在這裡新增之前不會生效；`disable` 只停止下發，保留分配 |
 | `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--mode`（均必填）、`--agent` / `--squad` / `--squad-id`（三選一，必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
@@ -526,12 +534,13 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `mcp list/add/update/remove` | 管理工作區的 MCP 服務庫 | 寫操作需要 owner/admin。這裡新增的服務不會分配給任何 agent——用 `multica agent mcp add` 分配給某個 agent。`list` 只列出名稱與 transport；儲存的條目是只寫的，任何角色都讀不回。`--server-config-file` / `--server-config-stdin` 避免 token 進入 shell 歷史 |
 | | `member list/invite <email>` | 檢視成員、發出邀請 | `invite`：`--role`（member 或 admin，預設 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作區倉庫並檢出到本機 | `--url`（可重複）；`checkout`：`--ref` |
-| `skill` | `list/get/create/update/delete` | 管理 skill | |
+| `skill` | `list/get/create/update/delete` | 管理 skill | `get`：`--with-content`（預設只回傳後設資料和 `revision`）；`update`：`--base-revision`（取自 `skill get`，內容已變更時回傳 HTTP 409 拒絕覆寫） |
 | | `import` | 從 URL 或本地檔案匯入 skill | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`，預設 `fail`） |
 | | `search <query>` | 搜尋 skill | |
-| | `files list/upsert/delete <skill-id>` | 管理 skill 內的檔案 | |
+| | `files list/upsert/delete <skill-id>` | 管理 skill 內的檔案 | `list`：`--with-content`；`upsert` / `delete`：`--base-revision`（內容已變更時回傳 HTTP 409 拒絕覆寫） |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的標籤 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短字首 |
-| `squad` | `list/get/create/update/delete` | 管理小隊（`delete` 為歸檔） | |
+| `squad` | `list/get/create/update/delete` | 管理小隊（`delete` 為歸檔） | `update`：`--name`、`--description`、`--instructions`、`--leader`、`--avatar-url`、`--handoff-mode`（`leader` 或 `direct`，見[協作方式](/squads#協作方式)） |
+| | `briefs <squad>` | 查看每個 AI 代理成員實際收到的小隊內容；需要有管理該小隊的權限 | `--agent`（名稱或 ID） |
 | | `member list/add/set-role/remove` | 管理小隊成員 | |
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |

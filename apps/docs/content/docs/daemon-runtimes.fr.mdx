@@ -148,7 +148,7 @@ Dès qu'un agent a une configuration MCP (même vide), Multica génère une conf
 | Claude Code | `mcpServers` dans `~/.claude.json`, plus les serveurs MCP des plugins activés |
 | Codex | `mcp_servers` dans `$CODEX_HOME/config.toml` (par défaut `~/.codex/config.toml`) |
 | Cursor Agent | `mcpServers` dans `~/.cursor/mcp.json` |
-| OpenCode | `mcp` dans `$XDG_CONFIG_HOME/opencode/opencode.json` (par défaut `~/.config/opencode/opencode.json`) |
+| OpenCode | `mcp` dans `$XDG_CONFIG_HOME/opencode/opencode.json` et dans `opencode.jsonc` du même dossier (par défaut `~/.config/opencode/`). Le fichier JSONC est prioritaire. |
 | OpenClaw | `mcp.servers` dans `$CLAWDBOT_CONFIG_PATH`, ou dans `$OPENCLAW_STATE_DIR/openclaw.json` (par défaut `~/.openclaw/openclaw.json`) |
 | CodeArts | `mcp` dans `~/.codeartsdoer/codearts_cli.json` ou `codearts_cli.jsonc` |
 
@@ -241,7 +241,7 @@ Un runtime local est **privé** par défaut : seul le propriétaire du runtime p
 
 Seul le propriétaire peut le rendre **public**. Les administrateurs de l'espace de travail peuvent renommer ou supprimer un runtime, mais le partager relève de la décision du propriétaire. Une fois le runtime public, les autres membres peuvent le sélectionner et acheminer les exécutions de leurs agents vers cet ordinateur ; les identifiants de connexion de l'outil de codage IA sous-jacent ne sont pas partagés.
 
-Pour le partager seulement avec certaines personnes, ouvrez la page de détail du runtime, choisissez **Membres**, sélectionnez un ou plusieurs membres de l'espace de travail, puis cliquez sur **Enregistrer**. Ces membres peuvent sélectionner le runtime et y créer des agents. Seul le propriétaire peut modifier la liste, et y figurer ne donne pas le droit de renommer, supprimer ou administrer le runtime.
+Chaque ligne de la liste **Runtimes** affiche sa visibilité actuelle. Le propriétaire peut basculer entre **Privé**, **Public** et **Membres spécifiques** directement depuis le contrôle de visibilité de la ligne, ou depuis la page de détail du runtime. Pour le partager seulement avec certaines personnes, choisissez **Membres spécifiques…** dans la liste (ou **Membres** sur la page de détail), sélectionnez un ou plusieurs membres de l'espace de travail, puis cliquez sur **Enregistrer**. Ces membres peuvent sélectionner le runtime et y créer des agents. Seul le propriétaire peut modifier la liste, et y figurer ne donne pas le droit de renommer, supprimer ou administrer le runtime.
 
 Lorsque le propriétaire retire des membres, restreint un runtime public à des membres spécifiques ou le rend à nouveau **privé**, Multica affiche d'abord les agents et les exécutions actives concernés, y compris les conversations de création d'agents avec Agent Builder. La confirmation dissocie les agents de ces autres membres, annule leurs exécutions en file d'attente, distribuées, en cours, en attente d'un répertoire local ou différées avec le motif `runtime_access_revoked`, et met en pause les automatisations actives assignées aux agents dissociés. Les agents et exécutions du propriétaire et des membres qui gardent l'accès ne sont pas affectés. Si le plan change, une nouvelle confirmation est nécessaire ; des modifications simultanées de la discussion peuvent nécessiter de réessayer. Pour reprendre le travail, associez l'agent à un runtime accessible, puis reprenez explicitement ses automatisations en pause.
 
@@ -280,9 +280,24 @@ Le tableau liste les variables que les runtimes personnalisés peuvent utiliser 
 
 Le serveur détermine l'auteur des requêtes effectuées avec `MULTICA_TOKEN` ; les écritures telles que les commentaires de tâche sont attribuées à l'agent assigné et à l'exécution en cours. Pour tout savoir sur le rattachement du jeton, ses permissions, l'attribution, sa durée de vie maximale de 24 heures et son nettoyage, consultez [Jetons temporaires pour les exécutions d'agents](/auth-tokens#jetons-temporaires-pour-les-exécutions-dagents).
 
-<Callout type="warning">
-Ces valeurs se trouvent dans l'environnement réel du processus du runtime. Tout processus enfant lancé par le runtime hérite par défaut de toutes ces valeurs, y compris `MULTICA_TOKEN`. Si un processus enfant ne doit pas détenir cet identifiant, retirez-le explicitement ; ne comptez pas sur une isolation des processus qui n'existe pas. L'exception va dans l'autre sens : les outils qui filtrent l'environnement de leurs propres sous-processus peuvent exiger une règle d'autorisation explicite. Par exemple, l'outil shell de Codex écarte les noms contenant `TOKEN`, `KEY` ou `SECRET` ; le daemon installe donc une politique shell gérée qui autorise les variables d'exécution requises. Conservez le jeton uniquement dans les environnements de processus — jamais dans un prompt, un journal, un fichier du dépôt ou une configuration persistante. Un processus enfant partage l'identité et les permissions de l'exécution parente ; il ne reçoit pas de nouvelle identité à la portée indépendante.
+<Callout type="info">
+Les runtimes intégrés **Codex** et **Claude Code** réutilisent par défaut des processus chauds entre les tours suivants d'une même conversation. Lors des exécutions en pool chaud, les variables propres à chaque tâche (`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`) sont transmises au CLI `multica` du daemon via un fichier de surcharge privé par tour plutôt que figées dans l'environnement statique du processus persistant ; elles ne sont donc pas garanties dans l'environnement du processus fournisseur ni dans les scripts enfants arbitraires. Les exécutions dans un répertoire local en mode worktree et les commandes de profil de runtime personnalisé démarrent un nouveau processus qui reçoit toutes les variables de la tâche directement dans son environnement. Définissez `MULTICA_WARM_POOL=0` sur le daemon si un workflow Codex ou Claude Code intégré nécessite l'ancien comportement direct par variables d'environnement.
 </Callout>
+
+<Callout type="warning">
+Lorsqu'elles sont injectées directement dans l'environnement du processus (y compris pour les profils de runtime personnalisés et les exécutions avec `MULTICA_WARM_POOL=0`), ces valeurs se trouvent dans l'environnement réel du processus du runtime. Tout processus enfant lancé par le runtime hérite par défaut de toutes ces valeurs, y compris `MULTICA_TOKEN`. Si un processus enfant ne doit pas détenir cet identifiant, retirez-le explicitement ; ne comptez pas sur une isolation des processus qui n'existe pas. L'exception va dans l'autre sens : les outils qui filtrent l'environnement de leurs propres sous-processus peuvent exiger une règle d'autorisation explicite. Par exemple, l'outil shell de Codex écarte les noms contenant `TOKEN`, `KEY` ou `SECRET` ; le daemon installe donc une politique shell gérée qui autorise les variables d'exécution requises. Conservez le jeton uniquement dans les environnements de processus — jamais dans un prompt, un journal, un fichier du dépôt ou une configuration persistante. Un processus enfant partage l'identité et les permissions de l'exécution parente ; il ne reçoit pas de nouvelle identité à la portée indépendante.
+</Callout>
+
+### Lancement via un gestionnaire de secrets [#secrets-managers]
+
+Certaines équipes démarrent l'agent via un gestionnaire de secrets, avec une commande comme `doppler run -- claude`. Le gestionnaire de secrets démarre après le daemon et reconstruit l'environnement de l'agent à partir de votre projet de secrets. Si ce projet contient aussi un `MULTICA_TOKEN`, souvent un jeton personnel `mul_` conservé pour des scripts, il remplace le jeton de l'exécution, et chaque appel au CLI Multica dans l'exécution échoue avec `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`. Quand le CLI voit un jeton `mul_` à côté de `MULTICA_TASK_ID`, l'erreur renvoie à cette section.
+
+Donnez la priorité aux valeurs du daemon :
+
+- **Doppler** : ajoutez `--preserve-env=MULTICA_TOKEN` avant `--`, par exemple `doppler run --preserve-env=MULTICA_TOKEN -- claude`. Si le projet définit d'autres variables `MULTICA_`, listez-les séparées par des virgules : `--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`. Doppler n'accepte que la forme avec `=` ; `--preserve-env MULTICA_TOKEN` avec une espace ne fonctionne pas. L'option est sans effet avec `--mount`.
+- **Autres outils** : utilisez l'option de l'outil qui donne la priorité aux variables d'environnement existantes, ou retirez les variables `MULTICA_` du projet de secrets utilisé pour les exécutions d'agents.
+
+Un profil shell comme `~/.zshrc` qui exporte `MULTICA_TOKEN` remplace le jeton de l'exécution de la même façon lorsque le shell de l'agent le charge. Supprimez cet export, ou ne le définissez que lorsque `MULTICA_TASK_ID` est vide.
 
 ### Créer un profil
 
@@ -328,7 +343,10 @@ Supprimer le remplacement de chemin :
 multica runtime profile unset-path <profile-id>
 ```
 
-Modifier un profil n'affecte que les exécutions prises en charge par la suite. Avant de supprimer un profil, occupez-vous des agents actifs encore liés à ses runtimes. Supprimer uniquement l'instance de runtime sur un ordinateur ne supprime pas le profil — un daemon en cours d'exécution le réenregistrera.
+Modifier un profil n’affecte que les exécutions prises en charge par la suite.
+
+- **Retirer une seule machine.** Vous ne pouvez pas supprimer directement une instance de runtime tant que son profil personnalisé existe. Arrêtez le daemon de la machine retirée pour éviter qu’il ne réenregistre l’instance. Une instance hors ligne peut être nettoyée automatiquement après 7 jours si aucun agent actif ni aucune tâche inachevée n’y est associé. Si un ancien profil conserve une instance sur la machine de la personne qui l’a créé, modifiez le profil et sélectionnez la machine qui doit la conserver.
+- **Retirer le profil.** La suppression du profil retire ses runtimes de toutes les machines où ils sont enregistrés. Déplacez d’abord les agents actifs vers des runtimes hors de ce profil, ou archivez ceux que vous retirez. Si vous ne pouvez pas gérer un agent qui bloque la suppression, demandez à son propriétaire de le déplacer ou de l’archiver.
 
 ## Runtime distant Qoder Cloud Agents
 

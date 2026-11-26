@@ -59,7 +59,8 @@
     "title": "History",
     "current": "Current",
     "restore": "Restore this version",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "from_discussion": "From comment: {{quote}}"
   },
   "not_found": {
     "title": "Doc not found",
@@ -80,6 +81,7 @@
     "resolved": "Resolved {{count}}",
     "close": "Close comments",
     "quote_missing": "The commented text was changed",
+    "quote_changed": "Text changed",
     "reply_placeholder": "Reply, or @ someone...",
     "new_placeholder": "Add a comment, or @ someone...",
     "submit": "Comment",
@@ -97,6 +99,7 @@
       "save": "Could not post the comment",
       "delete": "Could not delete the comment",
       "resolve": "Could not update the comment"
-    }
+    },
+    "run_waiting_retry": "Waiting to retry"
   }
 }

@@ -1,12 +1,5 @@
 import { toast } from "sonner";
-import { useModalStore } from "@multica/core/modals";
-import {
-  getShortcut,
-  isEditableShortcutTarget,
-  isPortalLayerShortcutTarget,
-  shortcutMatchesEvent,
-} from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
+import { isInboxShortcut } from "./inbox-shortcut";
 
 /** Long enough to read the toast and reach for its undo. */
 export const INBOX_UNDO_TOAST_DURATION = 10_000;
@@ -20,11 +13,7 @@ const clear = (id: string | number) => {
 };
 
 function onKeyDown(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
-  if (isEditableShortcutTarget(event.target)) return;
-  if (isPortalLayerShortcutTarget(event.target)) return;
-  if (useModalStore.getState().modal) return;
-  if (!shortcutMatchesEvent(getShortcut("undoInboxAction"), event)) return;
+  if (!isInboxShortcut(event, "undoInboxAction")) return;
   const undo = takeInboxUndo();
   if (!undo) return;
   event.preventDefault();
