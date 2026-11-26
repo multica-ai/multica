@@ -127,14 +127,17 @@ func parseMessageRef(ref string) int64 {
 
 // chunkMessage splits text into <=maxUnits UTF-16 code-unit pieces on rune
 // boundaries, preferring newline breaks so code blocks and paragraphs split
-// cleanly.
+// cleanly. Each chunk is rendered on its own, so a code fence still open at a
+// split is reopened at the start of the next chunk.
 func chunkMessage(text string, maxUnits int) []string {
 	runes := []rune(text)
 	if maxUnits <= 0 || utf16Units(text) <= maxUnits {
 		return []string{text}
 	}
 	var chunks []string
+	reopen := ""
 	for len(runes) > 0 {
+		budget := maxUnits - utf16Units(reopen)
 		n := 0
 		end := 0
 		for i, r := range runes {
@@ -142,7 +145,7 @@ func chunkMessage(text string, maxUnits int) []string {
 			if r > 0xFFFF {
 				units = 2
 			}
-			if n+units > maxUnits {
+			if n+units > budget {
 				break
 			}
 			n += units
@@ -153,13 +156,51 @@ func chunkMessage(text string, maxUnits int) []string {
 		}
 		// Prefer the last newline in the window, but only when it leaves a
 		// substantial first chunk rather than producing tiny fragments.
-		if i := lastIndexRune(runes[:end], '\n'); i >= 0 && utf16Units(string(runes[:i])) > maxUnits/2 {
+		if i := lastIndexRune(runes[:end], '\n'); i >= 0 && utf16Units(string(runes[:i])) > budget/2 {
 			end = i + 1
 		}
-		chunks = append(chunks, strings.TrimRight(string(runes[:end]), "\n"))
+		chunk := reopen + strings.TrimRight(string(runes[:end]), "\n")
+		chunks = append(chunks, chunk)
 		runes = runes[end:]
+
+		reopen = ""
+		fence, fenceChar, fenceLen := openFenceAtEnd(chunk)
+		if fence == "" {
+			continue
+		}
+		firstLine, rest, _ := strings.Cut(string(runes), "\n")
+		if isFenceClose(strings.TrimSpace(firstLine), fenceChar, fenceLen) {
+			// The fence closes right at the split: drop the closing line
+			// instead of reopening an empty block.
+			runes = []rune(strings.TrimLeft(rest, "\n"))
+			continue
+		}
+		if utf16Units(fence) < maxUnits/4 {
+			reopen = fence + "\n"
+		}
 	}
 	return chunks
+}
+
+// openFenceAtEnd returns the opening line of the code fence still open at the
+// end of text, using the same fence rules as formatHTML.
+func openFenceAtEnd(text string) (string, byte, int) {
+	open := ""
+	var fenceChar byte
+	var fenceLen int
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if open != "" {
+			if isFenceClose(trimmed, fenceChar, fenceLen) {
+				open = ""
+			}
+			continue
+		}
+		if ch, n, _, ok := parseFenceOpen(trimmed); ok {
+			open, fenceChar, fenceLen = trimmed, ch, n
+		}
+	}
+	return open, fenceChar, fenceLen
 }
 
 func utf16Units(s string) int {
