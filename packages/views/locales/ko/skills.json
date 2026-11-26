@@ -39,6 +39,7 @@
     "name": "이름",
     "created_by": "추가한 사람",
     "used_by": "사용 중",
+    "labels": "라벨",
     "source": "출처",
     "updated": "수정일",
     "created": "생성일",
