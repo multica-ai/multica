@@ -17,7 +17,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -1063,10 +1062,7 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 				"workspace_id", uuidToString(workspaceID), "error", jsonErr)
 		} else if len(repos) > 0 {
 			out.Repos = repos
-			// Claims are daemon requests, so target the resolved task workspace.
-			eval := featureflag.EvalContextFrom(ctx)
-			eval.WorkspaceID = uuidToString(workspaceID)
-			out.WorkspaceReposOnDemand = featureflags.WorkspaceReposOnDemandEnabled(featureflag.WithEvalContext(ctx, eval), h.FeatureFlags)
+			out.WorkspaceReposOnDemand = featureflags.WorkspaceReposOnDemandEnabled(ctx, h.FeatureFlags)
 		}
 	}
 	return out, nil
