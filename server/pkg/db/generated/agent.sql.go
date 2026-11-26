@@ -235,6 +235,76 @@ func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDs
 	return items, nil
 }
 
+const archiveAgentsByOwner = `-- name: ArchiveAgentsByOwner :many
+UPDATE agent
+SET archived_at = now(), archived_by = $1, updated_at = now()
+WHERE workspace_id = $2 AND owner_id = $3 AND archived_at IS NULL
+  AND (system_key IS NULL OR system_key = '')
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
+`
+
+type ArchiveAgentsByOwnerParams struct {
+	ArchivedBy  pgtype.UUID `json:"archived_by"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// Archives every active user agent a departing member owns in the workspace,
+// wherever it runs. ArchiveAgentsByRuntime only reaches the member's own
+// runtimes, so an agent they own on a colleague's public runtime would keep
+// running their instructions and configuration after they are gone. System
+// agents are exempt for the same reason as there; their ownership is handed
+// over instead (TransferProductAgentsOwner).
+func (q *Queries) ArchiveAgentsByOwner(ctx context.Context, arg ArchiveAgentsByOwnerParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, archiveAgentsByOwner, arg.ArchivedBy, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
@@ -9284,6 +9354,75 @@ func (q *Queries) TaskPassedWorkOn(ctx context.Context, arg TaskPassedWorkOnPara
 	var passed_on bool
 	err := row.Scan(&passed_on)
 	return passed_on, err
+}
+
+const transferProductAgentsOwner = `-- name: TransferProductAgentsOwner :many
+UPDATE agent
+SET owner_id = $1, updated_at = now()
+WHERE workspace_id = $2 AND owner_id = $3
+  AND kind = 'user' AND system_key IS NOT NULL AND system_key <> ''
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
+`
+
+type TransferProductAgentsOwnerParams struct {
+	NewOwnerID  pgtype.UUID `json:"new_owner_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// Hands the product-defined agents (Mika: kind='user' with a system_key) a
+// departing member owns to another member. They belong to the workspace and
+// are never archived, but their owner decides who may manage them and whose
+// connected apps they use, so a departed owner must not keep them. Builder
+// carriers (kind='system') are personal and are left alone.
+func (q *Queries) TransferProductAgentsOwner(ctx context.Context, arg TransferProductAgentsOwnerParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, transferProductAgentsOwner, arg.NewOwnerID, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAgent = `-- name: UpdateAgent :one

@@ -60,6 +60,10 @@ type RuntimeLease struct {
 	status          string
 	lastSeenAt      time.Time
 	lastSeenAtValid bool
+
+	// membershipVerifiedAt is when the connection's principal was last
+	// confirmed a member of workspaceID: at connect, then on heartbeats.
+	membershipVerifiedAt time.Time
 }
 
 // RuntimeLeaseState is an atomic snapshot used by the heartbeat handler.
@@ -72,11 +76,33 @@ type RuntimeLeaseState struct {
 
 func NewRuntimeLease(workspaceID, status string, lastSeenAt time.Time, lastSeenAtValid bool) *RuntimeLease {
 	return &RuntimeLease{
-		workspaceID:     workspaceID,
-		status:          status,
-		lastSeenAt:      lastSeenAt,
-		lastSeenAtValid: lastSeenAtValid,
+		workspaceID:          workspaceID,
+		status:               status,
+		lastSeenAt:           lastSeenAt,
+		lastSeenAtValid:      lastSeenAtValid,
+		membershipVerifiedAt: time.Now(),
 	}
+}
+
+// MembershipVerifiedWithin reports whether membership was confirmed less than
+// ttl before now.
+func (l *RuntimeLease) MembershipVerifiedWithin(now time.Time, ttl time.Duration) bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return now.Sub(l.membershipVerifiedAt) < ttl
+}
+
+// MarkMembershipVerified records a successful membership check at at.
+func (l *RuntimeLease) MarkMembershipVerified(at time.Time) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.membershipVerifiedAt = at
+	l.mu.Unlock()
 }
 
 func (l *RuntimeLease) Snapshot() RuntimeLeaseState {
