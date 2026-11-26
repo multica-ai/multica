@@ -386,6 +386,7 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	args = append(args, codexPlanToolArgs...)
 	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
 	if opts.ServiceTier == codexFastServiceTier {
 		launchArgs = enforceCodexFastMode(launchArgs, logger)
@@ -398,7 +399,8 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 // protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
 // overrides dropped. buildCodexArgs prepends the fixed
-// `app-server --listen stdio://` transport flags and may append an
+// `app-server --listen stdio://` transport flags plus the default
+// `-c tools.update_plan.enabled=true` (codexPlanToolArgs) and may append an
 // agent-owned runtime override (currently `--enable fast_mode`) after this
 // result.
 //
@@ -2443,6 +2445,9 @@ type codexClient struct {
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnCompleted        bool
+	// planUpdates numbers turn/plan/updated snapshots for synthetic call IDs.
+	// Only the stdout reader goroutine touches it.
+	planUpdates int
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
@@ -2516,7 +2521,7 @@ func (g *codexTurnNotificationGate) accept(method string, params map[string]any)
 		}
 		turnID := extractNestedString(params, "turn", "id")
 		return g.turnID == "" || turnID == "" || turnID == g.turnID
-	case method == "thread/status/changed" || strings.HasPrefix(method, "item/"):
+	case method == "thread/status/changed" || method == "turn/plan/updated" || strings.HasPrefix(method, "item/"):
 		if !g.started {
 			return true
 		}
@@ -3613,6 +3618,9 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				c.setTurnError(errMsg)
 			}
 		}
+
+	case "turn/plan/updated":
+		c.handlePlanUpdated(params)
 
 	case "thread/status/changed":
 		// Status changes are informational. Only turn/completed carries the

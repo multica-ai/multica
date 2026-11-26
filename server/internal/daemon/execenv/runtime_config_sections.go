@@ -612,6 +612,32 @@ const SessionContinuityNoticeChatTranscript = "## Session Continuity Notice\n\n"
 const SessionContinuityNoticeUnrecoverable = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. That history is not readable from anywhere now: there is no command that fetches it, and only the context already in this message survives. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n"
 
+// Task Plan asks multi-step runs to keep a live checklist, which the run
+// transcript shows as progress. Only Claude and Codex have such a tool wired
+// up. Claude's checklist tools are deferred, so naming them is what makes the
+// runtime load them; pkg/agent enables them with CLAUDE_CODE_ENABLE_TODO_TOOLS.
+// Codex publishes its plan through update_plan, which pkg/agent enables and
+// records from turn/plan/updated. The text is fixed so it does not disturb
+// prompt-cache prefix stability.
+const taskPlanTextClaude = "For work with several steps, list the steps with TaskCreate before starting, then mark each one with TaskUpdate as you begin and finish it, adding, removing or renaming steps when the plan changes. Load these tools with ToolSearch if they are not available yet. When this session is a continuation, call TaskList first so the existing list carries over instead of being created again. Skip the list for a quick one-step reply. The list is shown as this run's progress; it does not replace the final result you deliver."
+
+const taskPlanTextCodex = "For work with several steps, publish the steps with update_plan before starting, then update it as each step begins and finishes and whenever the plan changes. Skip the plan for a quick one-step reply. The plan is shown as this run's progress; it does not replace the final result you deliver."
+
+// writeTaskPlan emits the `## Task Plan` section for providers with a
+// checklist tool the transcript can read.
+func writeTaskPlan(b *strings.Builder, provider string) {
+	var text string
+	switch provider {
+	case "claude":
+		text = taskPlanTextClaude
+	case "codex":
+		text = taskPlanTextCodex
+	default:
+		return
+	}
+	b.WriteString("## Task Plan\n\n" + text + "\n\n")
+}
+
 // writeWorkflowHeader emits the unconditional `### Workflow` heading.
 func writeWorkflowHeader(b *strings.Builder) {
 	b.WriteString("### Workflow\n\n")
@@ -1086,6 +1112,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 // Requesting User, Workspace Context, Connected Apps,
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
 // unconditionally (or gated by their own data preconditions).
+// Task Plan is gated by provider (claude and codex only), not by kind.
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -1136,6 +1163,8 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	case kindIssue:
 		writeWorkflowIssue(&b, ctx)
 	}
+
+	writeTaskPlan(&b, provider)
 
 	if kind.hasIssueContext() && ctx.IssueID != "" {
 		writeSubIssueCreation(&b, ctx)

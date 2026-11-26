@@ -28,6 +28,9 @@ import {
   Info,
   Coins,
   GitBranch,
+  ListChecks,
+  Circle,
+  CircleDot,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -82,6 +85,7 @@ import {
   type TraceStep,
 } from "./build-steps";
 import { buildRunOutcome } from "./run-outcome";
+import { buildRunPlan, type RunPlan } from "./task-plan";
 import { RunTimeline } from "./run-timeline";
 import { ContextReceiptButton } from "./context-receipt";
 import {
@@ -566,6 +570,7 @@ export function AgentTranscriptDialog({
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
   const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
+  const plan = useMemo(() => buildRunPlan(items), [items]);
 
   const selectedStep = useMemo(() => {
     if (selectedSeq === null) return null;
@@ -1143,6 +1148,9 @@ export function AgentTranscriptDialog({
         {/* ── What was asked ─────────────────────────────────────────── */}
         <RunTriggerRow task={task} />
 
+        {/* ── How far the agent's own plan has got ───────────────────── */}
+        {plan && <RunPlanRow plan={plan} isLive={isLive} />}
+
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
 
@@ -1448,6 +1456,70 @@ function RunTriggerRow({ task }: { task: AgentTask }) {
       </span>
       <p className="min-w-0 whitespace-pre-wrap break-words text-caption text-foreground">{text}</p>
     </div>
+  );
+}
+
+/**
+ * The agent's own checklist (Claude TaskCreate/TaskUpdate, Codex update_plan)
+ * as one progress line: completed/total and the current step. Clicking it
+ * lists every step. The current step only spins while the run is live: a
+ * finished run can end with a step never marked done.
+ */
+function RunPlanRow({ plan, isLive }: { plan: RunPlan; isLive: boolean }) {
+  const { t } = useT("agents");
+  const percent = plan.total > 0 ? Math.round((plan.completed / plan.total) * 100) : 0;
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="flex w-full shrink-0 items-center gap-2 overflow-hidden border-b bg-muted/40 px-4 py-1.5 text-left transition-colors hover:bg-accent/60"
+            aria-label={t(($) => $.transcript.plan_open_steps)}
+          />
+        }
+      >
+        <ListChecks aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-micro text-faint-foreground">{t(($) => $.transcript.plan_label)}</span>
+        <span
+          className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={plan.total}
+          aria-valuenow={plan.completed}
+        >
+          <span className="block h-full rounded-full bg-success transition-[width]" style={{ width: `${percent}%` }} />
+        </span>
+        <span className="shrink-0 text-caption font-medium tabular-nums">
+          {plan.completed}/{plan.total}
+        </span>
+        {plan.current && (
+          <span className="min-w-0 truncate text-caption text-muted-foreground">· {plan.current.text}</span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-2">
+        <ol className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+          {plan.steps.map((step, index) => (
+            <li key={step.id ?? index} className="flex items-start gap-2 text-caption">
+              {step.status === "completed" ? (
+                <CheckCircle2 aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+              ) : step.status === "in_progress" ? (
+                isLive ? (
+                  <Loader2 aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-info" />
+                ) : (
+                  <CircleDot aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
+                )
+              ) : (
+                <Circle aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint-foreground" />
+              )}
+              <span className={cn("min-w-0 break-words", step.status === "completed" && "text-muted-foreground line-through")}>
+                {step.text}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </PopoverContent>
+    </Popover>
   );
 }
 

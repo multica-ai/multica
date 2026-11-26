@@ -931,6 +931,8 @@
     "lane_model": "模型",
     "lane_tool": "工具",
     "outcome_label": "产出",
+    "plan_label": "进度",
+    "plan_open_steps": "查看全部步骤",
     "outcome_files_other": "{{count}} 个文件",
     "outcome_commands_other": "{{count}} 条命令",
     "search_placeholder": "搜索这次运行...",

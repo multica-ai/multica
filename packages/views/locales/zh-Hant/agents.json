@@ -931,6 +931,8 @@
     "lane_model": "模型",
     "lane_tool": "工具",
     "outcome_label": "產出",
+    "plan_label": "進度",
+    "plan_open_steps": "查看全部步驟",
     "outcome_files_other": "{{count}} 個檔案",
     "outcome_commands_other": "{{count}} 條命令",
     "search_placeholder": "搜尋這次執行…",

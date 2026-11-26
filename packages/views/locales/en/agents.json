@@ -956,6 +956,8 @@
     "lane_model": "Model",
     "lane_tool": "Tools",
     "outcome_label": "Produced",
+    "plan_label": "Progress",
+    "plan_open_steps": "Show all plan steps",
     "outcome_files_one": "{{count}} file",
     "outcome_files_other": "{{count}} files",
     "outcome_commands_one": "{{count}} command",
