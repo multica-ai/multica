@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "Someone saved a newer version. Your edits are still open here.",
+    "new": "New board",
+    "title": "Handoff board",
+    "insert_handoff": "Insert handoff",
+    "prepare": "Prepare brief",
+    "review": "Review brief",
+    "link_issue": "Link issue",
+    "pick_issue": "Choose an issue in this workspace",
+    "save": "Save board",
+    "invalid": "This board could not be opened."
+  },
   "untitled": "Untitled",
   "version_number": "v{{number}}",
   "kb": "Docs",

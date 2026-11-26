@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { resolve } from "path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
@@ -24,7 +25,21 @@ export default defineConfig({
       port: Number(process.env.DESKTOP_RENDERER_PORT) || 5173,
       strictPort: true,
     },
-    plugins: [react(), tailwindcss()],
+    publicDir: resolve("src/renderer/public"),
+    build: { copyPublicDir: true },
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: "excalidraw-fonts",
+        configResolved({ publicDir }) {
+          execFileSync(process.execPath, [
+            resolve("../../packages/views/excalidraw/prepare-assets.mjs"),
+            publicDir,
+          ]);
+        },
+      },
+    ],
     resolve: {
       alias: {
         "@": resolve("src/renderer/src"),

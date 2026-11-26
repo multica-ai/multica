@@ -7,6 +7,7 @@ import { docKeys, useDocDraftStore } from "@multica/core/docs";
 import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import type { Doc } from "@multica/core/types";
 import { DocPage } from "./doc-page";
+import { EMPTY_HANDOFF_BOARD } from "./handoff-board-model";
 import enDocs from "../../locales/en/docs.json";
 import enEditor from "../../locales/en/editor.json";
 import enIssues from "../../locales/en/issues.json";
@@ -32,7 +33,7 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(vi.fn(), { getState: () => ({ user: { id: "reviewer" } }) }),
 }));
 vi.mock("@multica/core/paths", async (original) => ({
-  ...await original<object>(), useWorkspacePaths: () => ({
+  ...await original<object>(), useRequiredWorkspaceSlug: () => "review", useWorkspacePaths: () => ({
     docs: () => "/review/docs", docDetail: (id: string) => `/review/docs/${id}`,
     docFolder: (id: string) => `/review/docs/folders/${id}`,
     docHistory: (id: string) => `/review/docs/${id}/history`,
@@ -53,6 +54,11 @@ vi.mock("../../editor", () => ({
   ),
   ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
   useEditorUpload: () => ({ uploadWithToast: vi.fn() }),
+}));
+vi.mock("./handoff-board", () => ({
+  HandoffBoard: ({ onSave }: { onSave: (content: string) => Promise<void> }) => (
+    <button onClick={() => void onSave("edited scene")}>Save board</button>
+  ),
 }));
 // The editor's session takes the prefetched answer; the page then edits solo
 // (as after a connect timeout), which renders the plain body.
@@ -129,4 +135,18 @@ it("keeps the editor when a save updates the doc", async () => {
   await waitFor(() => expect(apiMock.updateDoc).toHaveBeenCalled(), { timeout: 4000 });
   await waitFor(() => expect(qc.getQueryData<Doc>(docKeys.detail("review-ws", "runbook"))?.revision).toBe(2));
   expect(screen.getByLabelText("Body")).toBe(body);
+});
+
+it("saves a board against the revision its canvas opened, even after another writer updates it", async () => {
+  const board = { ...doc, content: EMPTY_HANDOFF_BOARD };
+  apiMock.getDoc.mockResolvedValue(board);
+  apiMock.updateDoc.mockResolvedValue({ ...board, revision: 3 });
+  mount();
+  const save = await screen.findByRole("button", { name: "Save board" });
+  apiMock.getDoc.mockResolvedValue({ ...board, revision: 2 });
+  await act(async () => { await qc.invalidateQueries({ queryKey: docKeys.all("review-ws") }); });
+  fireEvent.click(save);
+  await waitFor(() => expect(apiMock.updateDoc).toHaveBeenCalledWith("runbook", {
+    baseRevision: 1, content: "edited scene",
+  }));
 });

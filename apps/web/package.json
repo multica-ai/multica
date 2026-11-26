@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
-    "build": "next build",
+    "dev": "node ../../packages/views/excalidraw/prepare-assets.mjs public && sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
+    "build": "node ../../packages/views/excalidraw/prepare-assets.mjs public && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "typegen": "next typegen",

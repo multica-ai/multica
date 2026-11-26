@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "Une version plus récente a été enregistrée. Vos modifications sont toujours ouvertes ici.",
+    "new": "Nouveau tableau",
+    "title": "Tableau de passation",
+    "insert_handoff": "Insérer une passation",
+    "prepare": "Préparer le brief",
+    "review": "Relire le brief",
+    "link_issue": "Lier un ticket",
+    "pick_issue": "Choisir un ticket dans cet espace de travail",
+    "save": "Enregistrer le tableau",
+    "invalid": "Impossible d’ouvrir ce tableau."
+  },
   "untitled": "Sans titre",
   "version_number": "v{{number}}",
   "kb": "Documents",
