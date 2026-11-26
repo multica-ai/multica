@@ -129,7 +129,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// below erases what the client asked for. Silently
 				// swapping the target let a request for workspace B run
 				// against A (GitHub #9403).
-				if checkTaskTokenWorkspaceTarget(w, r, queries, boundWorkspaceID) {
+				if checkBoundWorkspaceTarget(w, r, queries, boundTaskToken, boundWorkspaceID) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -203,6 +203,31 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Workspace token: "mwt_" prefix. A personal access token confined
+			// to one workspace. It authenticates as its owner, like a mul_
+			// token, but only for that workspace: a conflicting selector is
+			// refused here, the workspace is pinned for every resolver
+			// downstream, and account-level routes turn it away
+			// (RefuseWorkspaceToken).
+			if strings.HasPrefix(tokenString, auth.WorkspaceTokenPrefix) {
+				identity, err := resolveWorkspaceToken(r.Context(), queries, patCache, tokenString)
+				if err != nil {
+					slog.Warn("auth: invalid workspace token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				if rejectTemporarilyDisabledUser(w, r, identity.UserID, "", "workspace_token") {
+					return
+				}
+				if checkBoundWorkspaceTarget(w, r, queries, boundWorkspaceToken, identity.WorkspaceID) {
+					return
+				}
+				r.Header.Set("X-User-ID", identity.UserID)
+				r.Header.Set("X-Workspace-ID", identity.WorkspaceID)
+				next.ServeHTTP(w, r.WithContext(WithWorkspaceToken(r.Context(), identity.WorkspaceID)))
 				return
 			}
 

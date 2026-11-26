@@ -1031,7 +1031,27 @@ func countOwners(members []db.Member) int {
 	return owners
 }
 
+// workspaceTokenForbids reports whether the request was authenticated by a
+// workspace token that is bound to a workspace other than workspaceID.
+func workspaceTokenForbids(ctx context.Context, workspaceID string) bool {
+	bound, ok := middleware.WorkspaceTokenWorkspaceID(ctx)
+	return ok && bound != workspaceID
+}
+
+// membershipCached is the membership cache read for a request. A workspace
+// token has no membership outside its workspace, cached or not.
+func (h *Handler) membershipCached(ctx context.Context, userID, workspaceID string) bool {
+	return !workspaceTokenForbids(ctx, workspaceID) && h.MembershipCache.Get(ctx, userID, workspaceID)
+}
+
+// getWorkspaceMember loads a membership for the current request. Under a
+// workspace token only the bound workspace has members: a handler that takes
+// the workspace from an entity or from the request body, rather than from the
+// workspace middleware, is held to the token's workspace here.
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
+	if workspaceTokenForbids(ctx, workspaceID) {
+		return db.Member{}, pgx.ErrNoRows
+	}
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
 		return db.Member{}, err

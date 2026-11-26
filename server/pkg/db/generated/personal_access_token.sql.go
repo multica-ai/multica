@@ -14,7 +14,7 @@ import (
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
 INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id
 `
 
 type CreatePersonalAccessTokenParams struct {
@@ -44,8 +44,89 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
+}
+
+const createWorkspaceToken = `-- name: CreateWorkspaceToken :one
+INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at, workspace_id)
+SELECT m.user_id, $1, $2, $3, $4, m.workspace_id
+FROM member m
+WHERE m.user_id = $5
+  AND m.workspace_id = $6
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id
+`
+
+type CreateWorkspaceTokenParams struct {
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+}
+
+// A workspace token is a personal access token confined to one workspace.
+// The membership check is part of the insert: no row comes back when the
+// user is not a member of the workspace, or the workspace is gone.
+func (q *Queries) CreateWorkspaceToken(ctx context.Context, arg CreateWorkspaceTokenParams) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, createWorkspaceToken,
+		arg.Name,
+		arg.TokenHash,
+		arg.TokenPrefix,
+		arg.ExpiresAt,
+		arg.UserID,
+		arg.WorkspaceID,
+	)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
+
+const deleteWorkspaceTokensByMember = `-- name: DeleteWorkspaceTokensByMember :many
+DELETE FROM personal_access_token
+WHERE user_id = $1
+  AND workspace_id = $2
+RETURNING token_hash
+`
+
+type DeleteWorkspaceTokensByMemberParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A member who leaves a workspace takes their tokens for it with them, so a
+// later return to the workspace does not bring an old token back to life.
+func (q *Queries) DeleteWorkspaceTokensByMember(ctx context.Context, arg DeleteWorkspaceTokensByMemberParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteWorkspaceTokensByMember, arg.UserID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var token_hash string
+		if err := rows.Scan(&token_hash); err != nil {
+			return nil, err
+		}
+		items = append(items, token_hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const extendPersonalAccessTokenExpiry = `-- name: ExtendPersonalAccessTokenExpiry :one
@@ -84,12 +165,16 @@ func (q *Queries) ExtendPersonalAccessTokenExpiry(ctx context.Context, arg Exten
 }
 
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
 WHERE token_hash = $1
+  AND workspace_id IS NULL
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
 `
 
+// Account-wide tokens only. A workspace token is resolved by
+// GetWorkspaceTokenByHash, so no caller of this query can treat one as an
+// account-wide token.
 func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash string) (PersonalAccessToken, error) {
 	row := q.db.QueryRow(ctx, getPersonalAccessTokenByHash, tokenHash)
 	var i PersonalAccessToken
@@ -103,12 +188,39 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
+
+const getWorkspaceTokenByHash = `-- name: GetWorkspaceTokenByHash :one
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
+WHERE token_hash = $1
+  AND workspace_id IS NOT NULL
+  AND revoked = FALSE
+  AND (expires_at IS NULL OR expires_at > now())
+`
+
+func (q *Queries) GetWorkspaceTokenByHash(ctx context.Context, tokenHash string) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceTokenByHash, tokenHash)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
 WHERE user_id = $1
   AND revoked = FALSE
 ORDER BY created_at DESC
@@ -133,6 +245,7 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 			&i.LastUsedAt,
 			&i.Revoked,
 			&i.CreatedAt,
+			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -96,13 +97,66 @@ func TTLForExpiry(now, expiresAt time.Time) time.Duration {
 	return AuthCacheTTL
 }
 
-// Invalidate removes the entry for hash. Called on PAT revocation so the
-// revoke takes effect immediately rather than waiting for the TTL.
+// workspaceTokenCachePrefix keeps workspace tokens (mwt_) in their own key
+// space, so an entry is only ever read back together with its workspace.
+const workspaceTokenCachePrefix = "mul:auth:wst:"
+
+func workspaceTokenCacheKey(hash string) string { return workspaceTokenCachePrefix + hash }
+
+// WorkspaceTokenIdentity is what a workspace token resolves to: its owner and
+// the one workspace it is confined to.
+type WorkspaceTokenIdentity struct {
+	UserID      string `json:"u"`
+	WorkspaceID string `json:"w"`
+}
+
+// GetWorkspaceToken returns the cached identity for a workspace token hash.
+// ok=false on a miss, a Redis error, or an entry missing either half: the
+// caller falls back to the database rather than authenticate a token without
+// its workspace.
+func (c *PATCache) GetWorkspaceToken(ctx context.Context, hash string) (WorkspaceTokenIdentity, bool) {
+	if c == nil {
+		return WorkspaceTokenIdentity{}, false
+	}
+	raw, err := c.rdb.Get(ctx, workspaceTokenCacheKey(hash)).Bytes()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			slog.Warn("pat_cache: workspace token get failed; falling back to DB", "error", err)
+		}
+		return WorkspaceTokenIdentity{}, false
+	}
+	var id WorkspaceTokenIdentity
+	if err := json.Unmarshal(raw, &id); err != nil || id.UserID == "" || id.WorkspaceID == "" {
+		slog.Warn("pat_cache: malformed workspace token entry; falling back to DB", "error", err)
+		return WorkspaceTokenIdentity{}, false
+	}
+	return id, true
+}
+
+// SetWorkspaceToken caches a workspace token's identity. The TTL contract is
+// the same as Set's.
+func (c *PATCache) SetWorkspaceToken(ctx context.Context, hash string, id WorkspaceTokenIdentity, ttl time.Duration) {
+	if c == nil || ttl <= 0 || id.UserID == "" || id.WorkspaceID == "" {
+		return
+	}
+	raw, err := json.Marshal(id)
+	if err != nil {
+		slog.Warn("pat_cache: workspace token marshal failed", "error", err)
+		return
+	}
+	if err := c.rdb.Set(ctx, workspaceTokenCacheKey(hash), raw, ttl).Err(); err != nil {
+		slog.Warn("pat_cache: workspace token set failed", "error", err)
+	}
+}
+
+// Invalidate removes the entry for hash, whichever kind of token it belongs
+// to. Called on PAT revocation so the revoke takes effect immediately rather
+// than waiting for the TTL.
 func (c *PATCache) Invalidate(ctx context.Context, hash string) {
 	if c == nil {
 		return
 	}
-	if err := c.rdb.Del(ctx, patCacheKey(hash)).Err(); err != nil {
+	if err := c.rdb.Del(ctx, patCacheKey(hash), workspaceTokenCacheKey(hash)).Err(); err != nil {
 		slog.Warn("pat_cache: invalidate failed; entry will expire on TTL", "error", err)
 	}
 }

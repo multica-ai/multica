@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -202,17 +203,14 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A task token is bound to one workspace, and Auth stamps that workspace
-	// into X-Workspace-ID. List only that one, so an agent the owner started
-	// in one workspace never sees the owner's other workspaces.
-	boundWorkspaceID := ""
-	if r.Header.Get("X-Actor-Source") == "task_token" {
-		boundWorkspaceID = r.Header.Get("X-Workspace-ID")
-	}
+	// A task token or a workspace token is bound to one workspace. List only
+	// that one, so an agent the owner started in one workspace, or a token
+	// the owner issued for one, never sees the owner's other workspaces.
+	boundWorkspaceID, bound := middleware.BoundWorkspace(r)
 
 	resp := make([]WorkspaceResponse, 0, len(workspaces))
 	for _, ws := range workspaces {
-		if boundWorkspaceID != "" && uuidToString(ws.ID) != boundWorkspaceID {
+		if bound && uuidToString(ws.ID) != boundWorkspaceID {
 			continue
 		}
 		item := h.workspaceResponseFor(db.Workspace{

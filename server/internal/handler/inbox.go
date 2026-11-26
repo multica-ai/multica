@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -588,7 +589,8 @@ type InboxWorkspaceUnreadResponse struct {
 // A task credential is bound to one workspace. Its access is verified there,
 // and the response is limited to that workspace's row, so an agent the owner
 // triggered in one workspace never learns the owner's other workspace IDs or
-// their unread counts.
+// their unread counts. A workspace token is limited to its workspace's row
+// the same way.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	r, cancel := h.inboxReadRequest(r)
 	defer cancel()
@@ -600,6 +602,14 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Actor-Source") != "" {
 		wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
 		if !ok || !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
+			return
+		}
+		boundWorkspace = wsUUID
+	} else if bound, ok := middleware.WorkspaceTokenWorkspaceID(r.Context()); ok {
+		// A workspace token is its owner's own credential, so it needs no
+		// owner trigger, but it sees its one workspace's row and no other.
+		wsUUID, ok := parseUUIDOrBadRequest(w, bound, "workspace id")
+		if !ok {
 			return
 		}
 		boundWorkspace = wsUUID

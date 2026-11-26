@@ -168,3 +168,78 @@ func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 		t.Fatal("negative-TTL Set must not cache")
 	}
 }
+
+func TestPATCache_WorkspaceTokenNilSafe(t *testing.T) {
+	var c *PATCache // nil
+	ctx := context.Background()
+
+	if id, ok := c.GetWorkspaceToken(ctx, "any-hash"); ok || id != (WorkspaceTokenIdentity{}) {
+		t.Fatalf("nil cache must miss; got (%+v, %v)", id, ok)
+	}
+	c.SetWorkspaceToken(ctx, "any-hash", WorkspaceTokenIdentity{UserID: "u", WorkspaceID: "w"}, AuthCacheTTL) // no panic
+}
+
+func TestPATCache_WorkspaceTokenSetGetInvalidate(t *testing.T) {
+	c := NewPATCache(newRedisTestClient(t))
+	ctx := context.Background()
+	identity := WorkspaceTokenIdentity{UserID: "user-A", WorkspaceID: "workspace-A"}
+
+	if _, ok := c.GetWorkspaceToken(ctx, "hash-A"); ok {
+		t.Fatal("expected miss before set")
+	}
+	c.SetWorkspaceToken(ctx, "hash-A", identity, AuthCacheTTL)
+	if got, ok := c.GetWorkspaceToken(ctx, "hash-A"); !ok || got != identity {
+		t.Fatalf("expected hit %+v, got (%+v, %v)", identity, got, ok)
+	}
+
+	// One Invalidate call clears a hash whichever kind of token it belongs
+	// to, so revocation does not need to know the kind.
+	c.Invalidate(ctx, "hash-A")
+	if got, ok := c.GetWorkspaceToken(ctx, "hash-A"); ok {
+		t.Fatalf("expected miss after invalidate, got (%+v, %v)", got, ok)
+	}
+}
+
+// The two kinds of token never read each other's entries: an account-wide
+// entry must not authenticate a workspace token without its workspace, and a
+// workspace token's entry must not read as an account-wide user id.
+func TestPATCache_WorkspaceTokenKeySpaceIsSeparate(t *testing.T) {
+	c := NewPATCache(newRedisTestClient(t))
+	ctx := context.Background()
+
+	c.Set(ctx, "hash-A", "user-A", AuthCacheTTL)
+	if got, ok := c.GetWorkspaceToken(ctx, "hash-A"); ok {
+		t.Fatalf("account-wide entry read as a workspace token: %+v", got)
+	}
+
+	c.SetWorkspaceToken(ctx, "hash-B", WorkspaceTokenIdentity{UserID: "user-B", WorkspaceID: "workspace-B"}, AuthCacheTTL)
+	if got, ok := c.Get(ctx, "hash-B"); ok {
+		t.Fatalf("workspace token entry read as an account-wide token: %q", got)
+	}
+}
+
+// An entry missing either half is a miss, so the caller goes back to the
+// database instead of authenticating a token without its workspace.
+func TestPATCache_WorkspaceTokenIncompleteEntryIsMiss(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	c := NewPATCache(rdb)
+	ctx := context.Background()
+
+	c.SetWorkspaceToken(ctx, "hash-A", WorkspaceTokenIdentity{UserID: "user-A"}, AuthCacheTTL)
+	if _, ok := c.GetWorkspaceToken(ctx, "hash-A"); ok {
+		t.Fatal("an identity without a workspace must not be cached")
+	}
+
+	for name, raw := range map[string]string{
+		"no workspace": `{"u":"user-A"}`,
+		"no user":      `{"w":"workspace-A"}`,
+		"not json":     `user-A`,
+	} {
+		if err := rdb.Set(ctx, workspaceTokenCacheKey("hash-"+name), raw, AuthCacheTTL).Err(); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+		if got, ok := c.GetWorkspaceToken(ctx, "hash-"+name); ok {
+			t.Errorf("%s: read as a hit: %+v", name, got)
+		}
+	}
+}
