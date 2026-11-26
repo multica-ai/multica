@@ -12,7 +12,7 @@ import (
 )
 
 const SystemRuleBlockersDone = "blockers_done"
-const BlockersDoneInstruction = "All tasks this issue was waiting for have ended or were removed from its dependencies. The trigger facts list their statuses. Check cancelled or deleted work before continuing. Start the current assignee's work, using the current project workflow step when present. The platform has not changed this issue's status; if it is blocked, check whether any external wait still applies."
+const BlockersDoneInstruction = "All issues this issue was waiting for have ended or were removed from its dependencies. The trigger facts list their statuses. Check cancelled or deleted work before continuing. Start the current assignee's work, using the current project workflow step when present. The platform has not changed this issue's status; if it is blocked, check whether any external wait still applies."
 
 // Ordinary admission consumes the release in the task's insert transaction.
 // Its completion before the scheduler's next pass must not create another run.
@@ -127,7 +127,7 @@ func systemInboxType(w db.IssueWakeup) string {
 }
 func systemTriggerSummary(w db.IssueWakeup) string {
 	if w.SystemRule.String == SystemRuleBlockersDone {
-		return "Wakeup: waiting tasks ended"
+		return "Wakeup: blockers ended"
 	}
 	return "Wakeup: sub-issues closed"
 }

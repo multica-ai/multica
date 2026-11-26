@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "取消全部运行",
     "archive_dialog_title": "归档\"{{name}}\"？",
     "archive_dialog_description": "归档后这个智能体将无法被分配或提及，进行中的运行会被取消。所有历史会被保留，可以稍后恢复。",
+    "archive_dialog_mika_note": "恢复 Mika 之前，不会再出现\"和 Mika 开始\"的提示。",
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "归档",
     "set_access_applies_to_other": "将应用于 {{count}} 个智能体。"
@@ -936,6 +937,14 @@
     "search_placeholder": "搜索这次运行...",
     "no_matches": "没有匹配的步骤。",
     "more_actions": "更多",
+    "purge_log": "清除运行日志",
+    "purge_confirm_title": "清除这次运行的日志？",
+    "purge_confirm_body": "所有步骤、工具输入与输出，以及智能体的最终输出都会被删除，任何人都无法再查看。运行的状态、耗时和用量会保留。此操作无法撤销。",
+    "purge_confirm_action": "清除日志",
+    "purge_cancel": "取消",
+    "purge_done": "运行日志已清除",
+    "purge_failed": "无法清除运行日志",
+    "purged_by": "运行日志已由 {{name}} 清除 · {{time}}",
     "kind_text": "智能体",
     "kind_tool": "工具",
     "kind_thinking": "思考",
@@ -1107,5 +1116,9 @@
     "new_app": "此智能体的新应用",
     "adds_app_note": "回应后，{{agent}} 之后的运行都可以使用 {{app}}。",
     "add_to_agent": "将 {{app}} 添加给 {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "危险操作",
+    "restore_label": "恢复智能体"
   }
 }

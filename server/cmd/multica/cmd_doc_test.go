@@ -70,9 +70,7 @@ func TestDocMergeConflictErrorForbidsResendingTheBody(t *testing.T) {
 	}
 }
 
-// renderHelp renders cmd's --help the way the CLI prints it. Group commands
-// use subHelpTemplate, which prints only Short, so rules agents need must
-// live on the leaf commands the brief points at.
+// renderHelp renders cmd's --help the way the CLI prints it.
 func renderHelp(t *testing.T, cmd *cobra.Command) string {
 	t.Helper()
 	var out strings.Builder

@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Annuler toutes les exécutions",
     "archive_dialog_title": "Archiver « {{name}} » ?",
     "archive_dialog_description": "L'agent ne pourra plus être assigné ni mentionné, et ses exécutions actives seront annulées. Tout l'historique sera conservé et vous pourrez le restaurer plus tard.",
+    "archive_dialog_mika_note": " L'invite « Commencer avec Mika » ne réapparaîtra pas tant que Mika n'est pas restaurée.",
     "archive_dialog_cancel": "Annuler",
     "archive_dialog_confirm": "Archiver",
     "set_access_applies_to_one": "S'applique à {{count}} agent.",
@@ -963,6 +964,14 @@
     "search_placeholder": "Rechercher dans cette exécution…",
     "no_matches": "Aucune étape ne correspond à cette recherche.",
     "more_actions": "Plus",
+    "purge_log": "Effacer le journal de l'exécution",
+    "purge_confirm_title": "Effacer le journal de cette exécution ?",
+    "purge_confirm_body": "Chaque étape, les entrées et sorties des outils et la sortie finale de l'agent sont supprimées pour tout le monde. Le statut, la durée et la consommation de l'exécution sont conservés. Cette action est irréversible.",
+    "purge_confirm_action": "Effacer le journal",
+    "purge_cancel": "Annuler",
+    "purge_done": "Journal de l'exécution effacé",
+    "purge_failed": "Impossible d'effacer le journal de l'exécution",
+    "purged_by": "Journal effacé par {{name}} · {{time}}",
     "kind_text": "Agent",
     "kind_tool": "Outil",
     "kind_thinking": "Réflexion",
@@ -1139,5 +1148,9 @@
     "new_app": "Nouvelle app pour cet agent",
     "adds_app_note": "Répondre ajoute {{app}} à {{agent}} pour les prochaines exécutions.",
     "add_to_agent": "Ajouter {{app}} à {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Zone de danger",
+    "restore_label": "Restaurer l'agent"
   }
 }

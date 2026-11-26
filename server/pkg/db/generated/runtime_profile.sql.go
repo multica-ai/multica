@@ -293,7 +293,7 @@ type ListActiveAgentsByProfileRow struct {
 //
 // system_key rides along because it, not kind, decides what the user can
 // actually do about a blocker. Mika is kind='user' with system_key='mika' and
-// can be moved but not archived.
+// gets its own remedy clause.
 //
 // Bounded on purpose. The caller only needs to know that blockers exist, name a
 // few, and report how many there are — it never needs every row. This runs

@@ -1164,3 +1164,52 @@ func TestSetSigningSecretParams_NullableWrite(t *testing.T) {
 		t.Fatalf("sqlc NULL write: %v", err)
 	}
 }
+
+// total counts every row for the autopilot, not just the returned page, so a
+// paging client can tell when it has seen everything.
+func TestListAutopilotDeliveriesAndRuns_TotalCountsAllRows(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "DeliveryTotal Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	for _, key := range []string{"total-1", "total-2"} {
+		w := postWebhook(t, *trig.WebhookToken, map[string]any{"key": key}, map[string]string{"Idempotency-Key": key})
+		if w.Code != http.StatusOK {
+			t.Fatalf("post webhook %s: %d body=%s", key, w.Code, w.Body.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		list func(http.ResponseWriter, *http.Request)
+		key  string
+	}{
+		{"deliveries", testHandler.ListAutopilotDeliveries, "deliveries"},
+		{"runs", testHandler.ListAutopilotRuns, "runs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("GET", "/api/autopilots/"+apID+"/"+tc.name+"?limit=1", nil)
+			req = withURLParam(req, "id", apID)
+			tc.list(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("list %s: %d body=%s", tc.name, w.Code, w.Body.String())
+			}
+			var resp map[string]json.RawMessage
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			var rows []map[string]any
+			var total int
+			if err := json.Unmarshal(resp[tc.key], &rows); err != nil {
+				t.Fatalf("decode rows: %v", err)
+			}
+			if err := json.Unmarshal(resp["total"], &total); err != nil {
+				t.Fatalf("decode total: %v", err)
+			}
+			if len(rows) != 1 || total != 2 {
+				t.Fatalf("got %d rows, total %d; want 1 row, total 2", len(rows), total)
+			}
+		})
+	}
+}

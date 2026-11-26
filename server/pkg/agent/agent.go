@@ -49,8 +49,8 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
-	// no-progress ceiling — the window a turn may stay completely silent after
-	// the app-server reports turn/started before the watchdog fails it. Zero
+	// no-progress ceiling — the window a turn may go without model progress
+	// after the app-server accepts turn/start before the watchdog fails it. Zero
 	// keeps the provider default and the existing behaviour where
 	// SemanticInactivityTimeout can only shrink that ceiling; a positive value
 	// sets it explicitly, upward included. This answers a different question than

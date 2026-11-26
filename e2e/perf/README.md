@@ -162,6 +162,51 @@ These are observed local measurements, not latency thresholds. Stop other
 run-owned builds/tests before measuring; the report also records system load.
 Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
 
+## One huge comment
+
+`huge-comment.spec.ts` covers what the history scenarios above do not: one
+comment body that is large on its own (#11547). Their datasets grow the number
+of comments, and none of their bodies passes ~2,000 characters. Here each
+dataset is an ordinary issue whose first comment is the large one, followed by
+six short replies:
+
+| Dataset | First comment |
+| --- | --- |
+| `control` | a short comment |
+| `prose-30k`, `prose-100k` | a design note: headings, lists, code, tables, links |
+| `log-300k` | a pasted server log, one entry per line |
+| `json-100k`, `json-2mb` | a pasted JSON export on a single line |
+
+The prose and log datasets measure plain size. The JSON ones also exercise a
+superlinear parse: in one long paragraph that opens with an unclosed `[`, GFM's
+autolink-literal extension walks back to that bracket at every word
+(micromark/micromark-extension-gfm-autolink-literal#13), so the cost grows with
+the square of the paragraph's length.
+
+Each sample opens the issue by URL (`direct`) or from its Inbox notification
+(`inbox`) and ends when the large comment is on screen. It reports the time
+until then, long tasks, DOM nodes, heap and the comment's rendered height. A
+page that does not show the comment within `PERF_READY_TIMEOUT_MS` (default
+60 s) and also stops answering is recorded as `frozen`, and the dataset's
+remaining samples for that entry are skipped. A page that still answers fails
+the test instead, because then the scenario, not the page, is broken. The
+deadline is kept outside the page, since Playwright's own timeouts run inside
+it and never fire while its main thread is blocked.
+
+Setup is the same as the issue-history scenario (isolated API, production
+build served with `REMOTE_API_URL`). Then:
+
+```bash
+PERF_SCENARIO=huge-comment PERF_REPEATS=3 \
+  PLAYWRIGHT_BASE_URL=http://localhost:<production-web-port> \
+  PERF_REPORT_PATH=<absolute-report-path> \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts huge-comment.spec.ts"
+```
+
+`PERF_DATASET` (comma-separated names) and `PERF_ENTRY=direct|inbox` narrow
+the run. A full run takes about four minutes, two of which are the frozen
+`json-2mb` samples waiting out their deadline.
+
 ## Core paths: big issues and Inbox switching
 
 `core-paths.spec.ts` is the benchmark the performance work (MUL-9539) is

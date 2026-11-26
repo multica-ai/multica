@@ -57,9 +57,9 @@ with it. Moves and folder commands do not take it.
 
 Reviewers leave feedback as comment threads anchored to doc text. Before
 revising a doc someone reviewed, run `multica doc comment list <doc-id>`.
-Resolved threads are hidden unless you pass `--include-resolved`; each root
-comment's `anchor_quote` is the text it was left on, and `--output json` has
-the full comment text.
+Resolved threads are hidden unless you pass `--include-resolved` or
+`--thread`; each root comment's `anchor_quote` is the text it was left on,
+and `--output json` has the full comment text.
 
 You can reply in an existing thread:
 

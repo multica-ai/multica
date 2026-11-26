@@ -28,6 +28,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { toast } from "sonner";
@@ -196,13 +197,13 @@ export function CreateSquadModal({
                   <Label className="text-caption text-muted-foreground">
                     {t(($) => $.create_squad.description_label)}
                   </Label>
-                  <Input
-                    type="text"
+                  <Textarea
+                    rows={3}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={t(($) => $.create_squad.description_placeholder)}
                     maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
-                    className="mt-1"
+                    className="mt-1 field-sizing-fixed resize-y"
                   />
                   <div className="mt-1">
                     <CharCounter

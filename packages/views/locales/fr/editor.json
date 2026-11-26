@@ -259,5 +259,9 @@
     "turn_into": "Transformer en",
     "duplicate": "Dupliquer",
     "delete": "Supprimer"
+  },
+  "plain_text": {
+    "notice": "Trop long pour être mis en forme, affiché en texte brut.",
+    "download": "Télécharger en .txt"
   }
 }

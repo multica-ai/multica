@@ -1,28 +1,31 @@
--- Validate the check migration 756 left behind.
+-- Validate the check migration 757 left behind.
 --
 -- When 667/668, or a retired widen (681_issue_origin_sharecrm_chat,
 -- 683_issue_origin_sharecrm_chat, 685_issue_origin_sharecrm_chat,
 -- 695_issue_origin_sharecrm_chat, 697_issue_origin_sharecrm_chat,
 -- 703_issue_origin_sharecrm_chat, 711_issue_origin_sharecrm_chat,
 -- 732_issue_origin_sharecrm_chat, 735_issue_origin_sharecrm_chat,
--- 743_issue_origin_sharecrm_chat, or
--- 754_issue_origin_sharecrm_chat)
+-- 743_issue_origin_sharecrm_chat,
+-- 754_issue_origin_sharecrm_chat, or
+-- 756_issue_origin_sharecrm_chat)
 -- followed by its validate file (including
 -- 733_issue_origin_sharecrm_chat_validate,
 -- 736_issue_origin_sharecrm_chat_validate,
--- 744_issue_origin_sharecrm_chat_validate, or
--- 755_issue_origin_sharecrm_chat_validate), already validated a check that
--- includes sharecrm_chat, 756 did not invalidate it and this statement
+-- 744_issue_origin_sharecrm_chat_validate,
+-- 755_issue_origin_sharecrm_chat_validate, or
+-- 757_issue_origin_sharecrm_chat_validate), already validated a check that
+-- includes sharecrm_chat, 757 did not invalidate it and this statement
 -- returns without scanning issue.
--- A database that reaches 756 still NOT VALID (upstream 667/668 never
+-- A database that reaches 757 still NOT VALID (upstream 667/668 never
 -- allowed sharecrm_chat, or a retired widen left the check NOT VALID)
--- scans here under SHARE UPDATE EXCLUSIVE, separate from 756's
+-- scans here under SHARE UPDATE EXCLUSIVE, separate from 757's
 -- ACCESS EXCLUSIVE catalog swap.
 -- 732_comment_idempotency_receipt / 733_comment_idempotency_receipt_key /
 -- 734_comment_idempotency_receipt_created, 735_task_usage_hourly_squad_col
 -- through 742_task_usage_hourly_squad_rollback_merge, 743_issue_blocker
 -- through 753_agent_task_queue_doc_idx, 754_issue_stage_blockers_skip_top_level,
--- and 755_task_usage_hourly_rollup_hour_key are unrelated upstream files.
+-- 755_task_usage_hourly_rollup_hour_key, and 756_task_transcript_purge are
+-- unrelated upstream files.
 -- They are not this pair, and they must not be replaced by the retired
 -- ShareCRM filenames.
 ALTER TABLE issue VALIDATE CONSTRAINT issue_origin_type_check;

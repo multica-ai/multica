@@ -28,7 +28,25 @@ import {
   Info,
   Coins,
   GitBranch,
+  Trash2,
 } from "@multica/ui/icons";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import { canPurgeRunLog, useCurrentMember } from "@multica/core/permissions";
+import { useActorName } from "@multica/core/workspace/hooks";
+import { chatKeys } from "@multica/core/chat/queries";
+import { issueKeys } from "@multica/core/issues/queries";
+import { agentTasksKeys } from "@multica/core/agents/queries";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -142,7 +160,13 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  /** Called after an admin clears this run's log, so a caller holding its own
+   * copy of the timeline can drop it. */
+  onTranscriptPurged?: () => void;
 }
+
+const NO_ITEMS: TimelineItem[] = [];
+const PURGEABLE_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -169,6 +193,9 @@ function formatStepDuration(ms: number): string {
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
+
+/** Characters in the narrowest offset, "+00:00". */
+const MIN_OFFSET_CHARS = 6;
 
 /** Offset from the run's start, which is what a step's position means. */
 function formatOffset(ms: number): string {
@@ -323,17 +350,33 @@ export function AgentTranscriptDialog({
   open,
   onOpenChange,
   task,
-  items,
+  items: itemsProp,
   agentName,
   isLive = false,
   finalFocus = false,
   headerSlot,
   contentState,
+  onTranscriptPurged,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const formatSpend = useFormatSpend();
   const locale = useLocale();
-  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
+  const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
+  const { userId, role } = useCurrentMember(wsId);
+  const { getActorName } = useActorName();
+  const [localPurge, setLocalPurge] = useState<{ taskId: string; at: string; by: string } | null>(null);
+  const purge = task.transcript_purged_at
+    ? { at: task.transcript_purged_at, by: task.transcript_purged_by ?? "" }
+    : localPurge?.taskId === task.id
+      ? localPurge
+      : null;
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const canPurge =
+    !purge && !isLive && PURGEABLE_STATUSES.has(task.status) && canPurgeRunLog({ userId, role }).allowed;
+  const items = purge ? NO_ITEMS : itemsProp;
+  const formatText = useTraceIssueLabels(wsId, task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -550,6 +593,15 @@ export function AgentTranscriptDialog({
     return undefined;
   }, [steps]);
   const runEnd = task.completed_at ?? lastStamp;
+  // Offsets only grow, so the widest label the list shows is the run's last
+  // one. Sizing the column to it in `ch` keeps every rail in one line at any
+  // run length or font size. Take the later end: a step stamped past
+  // completed_at (clock skew) still shows its own offset.
+  const offsetChars = useMemo(() => {
+    const ends = [task.completed_at, lastStamp].flatMap((iso) => timeMs(iso ?? undefined) ?? []);
+    if (runStartMs === undefined || ends.length === 0) return MIN_OFFSET_CHARS;
+    return formatOffset(Math.max(...ends) - runStartMs).length;
+  }, [task.completed_at, lastStamp, runStartMs]);
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
@@ -739,6 +791,29 @@ export function AgentTranscriptDialog({
       showCopied();
     });
   }, [displayRows, showCopied]);
+
+  const handlePurge = useCallback(() => {
+    setPurging(true);
+    api
+      .purgeTaskTranscript(task.id)
+      .then(
+        (res) => {
+          setLocalPurge({
+            taskId: task.id,
+            at: res.transcript_purged_at ?? new Date().toISOString(),
+            by: res.transcript_purged_by || (userId ?? ""),
+          });
+          setConfirmPurge(false);
+          queryClient.setQueryData(chatKeys.taskMessages(task.id), []);
+          void queryClient.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+          void queryClient.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+          onTranscriptPurged?.();
+          toast.success(t(($) => $.transcript.purge_done));
+        },
+        () => toast.error(t(($) => $.transcript.purge_failed)),
+      )
+      .finally(() => setPurging(false));
+  }, [task.id, userId, queryClient, wsId, onTranscriptPurged, t]);
 
   const handleToggleGroup = useCallback((seq: number) => {
     setExpandedGroups((prev) => {
@@ -1255,6 +1330,15 @@ export function AgentTranscriptDialog({
                 <CopyCheckIcon copied={copied} />
                 {copyTranscriptLabel}
               </DropdownMenuItem>
+              {canPurge && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => setConfirmPurge(true)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {t(($) => $.transcript.purge_log)}
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1268,6 +1352,14 @@ export function AgentTranscriptDialog({
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t(($) => $.transcript.waiting_events)}
+                  </div>
+                ) : purge ? (
+                  <div className="flex items-center gap-2">
+                    <Trash2 aria-hidden className="h-4 w-4" />
+                    {t(($) => $.transcript.purged_by, {
+                      name: getActorName("member", purge.by),
+                      time: formatRunTime(purge.at, locale),
+                    })}
                   </div>
                 ) : steps.length === 0 ? (
                   t(($) => $.transcript.no_data)
@@ -1306,6 +1398,7 @@ export function AgentTranscriptDialog({
                     row={row}
                     formatText={formatText}
                     runStartMs={runStartMs}
+                    offsetChars={offsetChars}
                     isLive={isLive}
                     entering={isLive && enteringSeqs.has(row.seq)}
                     selectedSeq={selectedSeq}
@@ -1333,6 +1426,21 @@ export function AgentTranscriptDialog({
             )}
           </AnimatePresence>
         </div>
+        <AlertDialog open={confirmPurge} onOpenChange={(next) => !purging && setConfirmPurge(next)}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.transcript.purge_confirm_title)}</AlertDialogTitle>
+              <AlertDialogDescription>{t(($) => $.transcript.purge_confirm_body)}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={purging}>{t(($) => $.transcript.purge_cancel)}</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={purging} aria-busy={purging} onClick={handlePurge}>
+                {purging && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t(($) => $.transcript.purge_confirm_action)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );
@@ -1492,6 +1600,7 @@ interface TranscriptRowProps {
   formatText: (text: string) => string;
   row: TraceRow;
   runStartMs?: number;
+  offsetChars: number;
   isLive: boolean;
   entering?: boolean;
   selectedSeq: number | null;
@@ -1524,14 +1633,29 @@ function TranscriptRow(props: TranscriptRowProps) {
   return entering ? <div ref={rowRef}>{content}</div> : content;
 }
 
-/** The offset column: where in the run this happened. */
-function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+/**
+ * The offset column: where in the run this happened. Every row gets the same
+ * `chars` so the rails beside it line up; without `startedAt` it is a blank
+ * spacer of the same width.
+ */
+function OffsetCell({
+  startedAt,
+  runStartMs,
+  chars,
+}: {
+  startedAt?: string;
+  runStartMs?: number;
+  chars: number;
+}) {
   const locale = useLocale();
   const at = timeMs(startedAt);
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
-      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      // `ch` is this cell's own monospace glyph, so the width follows the font
+      // size; min-w-11 keeps the minutes-only column as it always was.
+      className="min-w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      style={{ width: `${chars}ch` }}
       title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
@@ -1596,10 +1720,10 @@ function StepDuration({
  * identity — the glyph says "the agent's own words", which is what the facet
  * selects, and it says it in 12px without a repeated string.
  */
-function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageStep }) {
+function ProseRow({ row, runStartMs, offsetChars }: TranscriptRowProps & { row: TraceMessageStep }) {
   return (
     <div className="group flex items-start gap-2 px-4 py-2.5">
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
       <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 pr-2">
@@ -1619,6 +1743,7 @@ function StepRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   isLive,
   selectedSeq,
   onSelect,
@@ -1656,7 +1781,7 @@ function StepRow({
         row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span
         aria-hidden
         className={cn(
@@ -1699,6 +1824,7 @@ function GroupRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   selectedSeq,
   expanded,
   onToggleGroup,
@@ -1722,7 +1848,7 @@ function GroupRow({
         aria-expanded={expanded}
         className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
       >
-        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
         <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
         <ChevronRight
           aria-hidden
@@ -1745,31 +1871,36 @@ function GroupRow({
         <DurationCell ms={row.durationMs} />
       </button>
       {expanded && (
-        <div className="ml-[4.4rem] border-l pl-3">
-          {row.steps.map((step) => (
-            <button
-              key={step.seq}
-              type="button"
-              onClick={() => onSelect(step.seq)}
-              className={cn(
-                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
-                selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
-              )}
-            >
-              <span className="truncate font-mono text-muted-foreground">
-                {callSummary(step, summaryLabels) || step.tool}
-              </span>
-              {step.durationMs === undefined ? (
-                <span className="ml-auto shrink-0" />
-              ) : (
-                <StepDuration
-                  ms={step.durationMs}
-                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
-                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
-                />
-              )}
-            </button>
-          ))}
+        // Laid out like a row, with a blank offset cell, so the border lands
+        // on the rail at whatever width the column has.
+        <div className="flex gap-2 pl-4">
+          <OffsetCell chars={offsetChars} />
+          <div className="min-w-0 flex-1 border-l pl-3">
+            {row.steps.map((step) => (
+              <button
+                key={step.seq}
+                type="button"
+                onClick={() => onSelect(step.seq)}
+                className={cn(
+                  "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
+                  selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
+                )}
+              >
+                <span className="truncate font-mono text-muted-foreground">
+                  {callSummary(step, summaryLabels) || step.tool}
+                </span>
+                {step.durationMs === undefined ? (
+                  <span className="ml-auto shrink-0" />
+                ) : (
+                  <StepDuration
+                    ms={step.durationMs}
+                    unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                    className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

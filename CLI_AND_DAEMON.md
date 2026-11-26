@@ -1226,6 +1226,19 @@ multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
 ```
 
+### Webhook Deliveries
+
+```bash
+multica autopilot deliveries <id>
+multica autopilot deliveries <id> --limit 50 --output json
+```
+
+Every webhook request the autopilot received, newest first — including
+`ignored` ones that created no run and so never appear in `runs`. The table
+shows `REASON` (`reason_code`) and `ERROR`; `--output json` also carries
+`payload_condition_failure`, the condition that rejected a `payload_filtered`
+delivery and the payload value it saw.
+
 ### Schedule Triggers
 
 ```bash
@@ -1317,13 +1330,13 @@ multica squad briefs <squad-id> --agent <agent-name-or-id>
 # Record a leader evaluation on an issue
 multica squad activity <issue-id> action --reason "Delegated implementation to Frontend Agent"
 
-# Archive a squad (transfers active issues/autopilots to the former leader)
+# Archive a squad (transfers active issues, autopilots, and workflow steps to the former leader)
 multica squad delete <squad-id>
 ```
 
 Member type flags default to `agent`; pass `--type member` to `squad member add` / `remove`, or `--member-type member` to `squad member set-role`, for a human member.
 
-`--handoff-mode` accepts `leader` (default: every member reply returns to the leader) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
+`--handoff-mode` accepts `leader` (default: a member reply returns to the leader unless it `@`-mentions an agent or squad, which then runs instead) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
 
 ## Quick Actions
 
