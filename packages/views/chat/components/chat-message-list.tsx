@@ -47,7 +47,11 @@ import type {
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
-import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
+import {
+  readCommandInput,
+  traceEventSummary,
+  traceToolArgSummary,
+} from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -58,6 +62,7 @@ import { formatElapsedMs, formatMessageTime } from "../lib/format";
 import {
   canonicalAnswerText,
   extractCopyText,
+  liftLatestNarration,
   splitTimeline,
 } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -1279,6 +1284,15 @@ function TimelineView({
   }
 
   const { preface, middle, final } = splitTimeline(items);
+  // While a tool is still running there is no trailing answer yet, so the
+  // agent's latest narration is lifted out of the fold and rendered below it
+  // as prose — that is the line the user needs to act on. Earlier narration
+  // stays inside the single fold as history, and once trailing text starts
+  // streaming it is already `final` and shows as the answer.
+  const { fold, narration } =
+    isStreaming && final.length === 0
+      ? liftLatestNarration(middle)
+      : { fold: middle, narration: [] as ChatTimelineItem[] };
 
   return (
     <>
@@ -1292,13 +1306,23 @@ function TimelineView({
           className="leading-relaxed"
         />
       )}
-      {middle.length > 0 && (
+      {fold.length > 0 && (
         <OuterProcessFold
           key="process"
-          items={middle}
+          items={fold}
           isStreaming={!!isStreaming}
           attachments={attachments}
           phase={phase}
+        />
+      )}
+      {narration.length > 0 && (
+        <RichContent
+          key={`narration:${narration[0]!.seq}`}
+          content={narration.map((t) => t.content ?? "").join("")}
+          attachments={attachments}
+          density="compact"
+          phase={phase}
+          className="leading-relaxed"
         />
       )}
       {final.length > 0 && (
@@ -1331,12 +1355,15 @@ function OuterProcessFold({
   stepCount?: number;
 }) {
   const { t } = useT("chat");
-  // Open while the task streams (so the user watches progress), collapsed once
-  // it settles. This used to fall out of a remount: the live TimelineView was
-  // torn down and the persisted one mounted closed. The row is now stable
-  // across that handoff (MUL-4922) — which is the point, it keeps Mermaid and
-  // HTML blocks alive — so the collapse has to be expressed directly.
-  const [open, setOpen] = useState(!!isStreaming);
+  const { t: tAgents } = useT("agents");
+  // Collapsed by default — while streaming the header already carries the
+  // latest step summary. The user can still open the fold to watch the steps,
+  // and the effect below closes it again once the task settles. The settle
+  // collapse used to fall out of a remount: the live TimelineView was torn
+  // down and the persisted one mounted closed. The row is now stable across
+  // that handoff (MUL-4922) — which is the point, it keeps Mermaid and HTML
+  // blocks alive — so the collapse has to be expressed directly.
+  const [open, setOpen] = useState(false);
   const wasStreaming = useRef(!!isStreaming);
   useEffect(() => {
     if (wasStreaming.current && !isStreaming) setOpen(false);
@@ -1344,17 +1371,55 @@ function OuterProcessFold({
   }, [isStreaming]);
   const displayedStepCount = stepCount ?? items.length;
 
+  // Streaming header: the latest step's one-line summary. Tool results are
+  // skipped (an unnamed empty one would otherwise blank the label or flush
+  // the tool's arg summary) and so is text (history or blank narration must
+  // not replace the tool summary either).
+  let latestItem: ChatTimelineItem | undefined;
+  if (isStreaming) {
+    for (let index = items.length - 1; index >= 0; index--) {
+      const item = items[index]!;
+      if (item.type !== "tool_result" && item.type !== "text") {
+        latestItem = item;
+        break;
+      }
+    }
+  }
+  const latestLabel = latestItem?.type === "tool_use" ? latestItem.tool ?? "" : "";
+  const latestSummary = latestItem
+    ? traceEventSummary(latestItem, {
+        morePaths: (path, extraCount) =>
+          tAgents(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
+      })
+    : "";
+  const tooltip = [latestLabel, latestSummary].filter(Boolean).join(" · ");
+
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-        <ChevronRight
-          className={cn(
-            "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
-            open && "rotate-90",
+      <TruncatedTooltip content={tooltip}>
+        <CollapsibleTrigger className="flex max-w-full min-w-0 items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
+          <ChevronRight
+            className={cn(
+              "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              open && "rotate-90",
+            )}
+          />
+          <span className="shrink-0">
+            {t(($) => $.message_list.process_steps, { count: displayedStepCount })}
+          </span>
+          {(latestLabel || latestSummary) && (
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
           )}
-        />
-        <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
-      </CollapsibleTrigger>
+          {latestLabel && (
+            <span className="max-w-[60%] shrink-0 truncate">{latestLabel}</span>
+          )}
+          {latestSummary && (
+            <span className="min-w-0 truncate">{latestSummary}</span>
+          )}
+        </CollapsibleTrigger>
+      </TruncatedTooltip>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
