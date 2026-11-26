@@ -197,6 +197,7 @@ import type {
   Invitation,
   ShareLink,
   ShareLinkInfo,
+  MemberBlock,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -639,6 +640,7 @@ import {
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
   ShareLinkListResponseSchema,
+  MemberBlockListResponseSchema,
   ShareLinkInfoSchema,
   JoinShareLinkResponseSchema,
   EMPTY_SHARE_LINK,
@@ -4190,8 +4192,22 @@ export class ApiClient {
     });
   }
 
-  async deleteMember(workspaceId: string, memberId: string): Promise<void> {
+  async deleteMember(workspaceId: string, memberId: string, options?: { blockRejoin?: boolean }): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+      method: "DELETE",
+      ...(options?.blockRejoin ? { body: JSON.stringify({ block_rejoin: true }) } : {}),
+    });
+  }
+
+  async listMemberBlocks(workspaceId: string): Promise<MemberBlock[]> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/member-blocks`);
+    return parseWithFallback(raw, MemberBlockListResponseSchema, [], {
+      endpoint: "GET /api/workspaces/{id}/member-blocks",
+    });
+  }
+
+  async deleteMemberBlock(workspaceId: string, blockId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/member-blocks/${blockId}`, {
       method: "DELETE",
     });
   }

@@ -4903,6 +4903,15 @@ export const EMPTY_SHARE_LINK: ShareLink = {
 
 export const ShareLinkListResponseSchema = z.array(ShareLinkSchema).default([]);
 
+export const MemberBlockSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  blocked_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+}).loose();
+
+export const MemberBlockListResponseSchema = z.array(MemberBlockSchema).default([]);
+
 export const ShareLinkInfoSchema = z.object({
   workspace_name: z.string().optional().default(""),
   workspace_slug: z.string().optional().default(""),

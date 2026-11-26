@@ -63,6 +63,8 @@ A removed member loses workspace access immediately. Issues, comments, and other
 Removing a member also deactivates the runtimes they own, archives the agents bound to them, and cancels runs that have not finished. Agents they own on other members' runtimes are archived too, runs they started on any agent are cancelled, their autopilots are paused, and their wakeups stop. Built-in agents they own, such as Mika, are handed to a workspace admin. Grants the member received in agent Access scopes are cleared as well and are not restored automatically if they rejoin.
 </Callout>
 
+To keep someone from coming back, tick **Block from rejoining** when you remove them. Invitations and share links can no longer bring that email into the workspace. Blocked emails are listed under **Blocked** in the members settings, where an `owner` or `admin` can unblock them.
+
 ## Next steps
 
 - [Issues](/issues) — the work members and agents handle together.

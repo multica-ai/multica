@@ -899,6 +899,31 @@ describe("ApiClient label response schemas", () => {
   });
 });
 
+describe("ApiClient member blocks", () => {
+  it("falls back to an empty list for a malformed response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ blocks: "nope" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listMemberBlocks("ws-1")).resolves.toEqual([]);
+  });
+
+  it("asks to block rejoining only when requested", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 204 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.deleteMember("ws-1", "m-1", { blockRejoin: true });
+    await client.deleteMember("ws-1", "m-2");
+
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ block_rejoin: true }));
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+  });
+});
+
 describe("ApiClient agent builder runtime switch", () => {
   it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
     const fetchMock = vi.fn().mockResolvedValue(

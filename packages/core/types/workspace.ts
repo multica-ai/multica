@@ -145,6 +145,14 @@ export interface ShareLink {
   creator_email?: string;
 }
 
+/** An email removed from a workspace and blocked from joining it again. */
+export interface MemberBlock {
+  id: string;
+  email: string;
+  blocked_by: string | null;
+  created_at: string;
+}
+
 export interface ShareLinkInfo {
   workspace_name: string;
   workspace_slug: string;

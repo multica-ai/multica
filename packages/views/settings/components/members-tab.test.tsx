@@ -8,6 +8,8 @@ import { renderWithI18n } from "../../test/i18n";
 
 const mockCreateMember = vi.hoisted(() => vi.fn());
 const mockRevokeInvitation = vi.hoisted(() => vi.fn());
+const mockDeleteMember = vi.hoisted(() => vi.fn());
+const mockDeleteMemberBlock = vi.hoisted(() => vi.fn());
 // The URL the settings router holds; `setSearch` stands in for navigation.
 const url = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -28,6 +30,7 @@ const data = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
   invitations: [] as Array<Record<string, unknown>>,
   shareLinks: [] as Array<Record<string, unknown>>,
+  memberBlocks: [] as Array<Record<string, unknown>>,
   summary: null as Record<string, unknown> | null,
   memberLimit: null as Record<string, unknown> | null,
   invitationsLoaded: true,
@@ -45,6 +48,7 @@ vi.mock("@tanstack/react-query", () => ({
         : { data: undefined, isSuccess: false };
     }
     if (key.includes("share-links")) return { data: data.shareLinks };
+    if (key.includes("member-blocks")) return { data: data.memberBlocks };
     if (key.includes("members")) return { data: data.members, isSuccess: true };
     if (key.includes("projects")) return { data: [] };
     return { data: data.summary };
@@ -68,7 +72,12 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
-  api: { createMember: mockCreateMember, revokeInvitation: mockRevokeInvitation },
+  api: {
+    createMember: mockCreateMember,
+    revokeInvitation: mockRevokeInvitation,
+    deleteMember: mockDeleteMember,
+    deleteMemberBlock: mockDeleteMemberBlock,
+  },
 }));
 vi.mock("@multica/core/auth", () => {
   const state = { user: { id: "user-1" } };
@@ -141,6 +150,7 @@ beforeEach(() => {
     },
   ];
   data.shareLinks = [];
+  data.memberBlocks = [];
   data.summary = null;
   data.memberLimit = null;
   data.invitationsLoaded = true;
@@ -469,6 +479,51 @@ describe("MembersTab", () => {
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: LIMIT_KEY });
       expect(screen.getByRole("dialog", { name: "Invite member" })).toBeInTheDocument();
     });
+  });
+
+  it("removes a member and blocks them from rejoining when that is ticked", async () => {
+    mockDeleteMember.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderWithI18n(<MembersTab />);
+
+    await user.click(screen.getByRole("button", { name: "Actions for Alan Turing" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove from workspace" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Block from rejoining" }));
+    await user.click(screen.getByRole("button", { name: "Remove member" }));
+
+    await waitFor(() =>
+      expect(mockDeleteMember).toHaveBeenCalledWith("ws-1", "m-user-3", { blockRejoin: true }),
+    );
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspaces", "ws-1", "member-blocks"] });
+  });
+
+  it("removes without blocking by default", async () => {
+    mockDeleteMember.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderWithI18n(<MembersTab />);
+
+    await user.click(screen.getByRole("button", { name: "Actions for Alan Turing" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove from workspace" }));
+    await user.click(await screen.findByRole("button", { name: "Remove member" }));
+
+    await waitFor(() =>
+      expect(mockDeleteMember).toHaveBeenCalledWith("ws-1", "m-user-3", { blockRejoin: false }),
+    );
+  });
+
+  it("lists blocked emails and unblocks one", async () => {
+    mockDeleteMemberBlock.mockResolvedValue(undefined);
+    data.memberBlocks = [
+      { id: "block-1", email: "mallory@acme.dev", blocked_by: "user-1", created_at: "2025-03-02T00:00:00Z" },
+    ];
+    url.set("tab=members&section=blocked");
+    const user = userEvent.setup();
+    renderWithI18n(<MembersTab />);
+
+    await user.click(screen.getByRole("button", { name: "Unblock mallory@acme.dev" }));
+    await user.click(await screen.findByRole("button", { name: "Unblock" }));
+
+    await waitFor(() => expect(mockDeleteMemberBlock).toHaveBeenCalledWith("ws-1", "block-1"));
   });
 
   it("gives members a read-only view without invite or share-link controls", () => {

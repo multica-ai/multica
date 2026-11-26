@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Ban,
   Check,
   Copy,
   Crown,
@@ -25,6 +26,7 @@ import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
   Invitation,
   MemberRole,
+  MemberBlock,
   MemberWithUser,
   PurchaseWorkspaceSeatsRequest,
   ShareLink,
@@ -35,6 +37,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -99,6 +102,7 @@ import {
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   invitationListOptions,
+  memberBlockListOptions,
   memberListOptions,
   shareLinkListOptions,
   workspaceKeys,
@@ -137,7 +141,7 @@ const HELD_INVITE_RETRY_MS = 6_000;
 const INVITE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // "members" lists everyone; with guests on, "seated" and "guests" split it.
-type MembersView = "members" | "seated" | "guests" | "invitations" | "links";
+type MembersView = "members" | "seated" | "guests" | "invitations" | "links" | "blocked";
 
 // A seat bought to invite someone, or to turn a guest into a member.
 type InviteSeatPurchase = {
@@ -414,6 +418,48 @@ function InvitationRow({
   );
 }
 
+function BlockedRow({
+  block,
+  onUnblock,
+  busy,
+}: {
+  block: MemberBlock;
+  onUnblock: () => void;
+  busy: boolean;
+}) {
+  const { t } = useT("settings");
+  const locale = useLocale();
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+        <Ban className="size-4 text-muted-foreground" aria-hidden="true" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-body font-medium">{block.email}</div>
+        {block.created_at ? (
+          <div className="truncate text-caption text-muted-foreground">
+            {t(($) => $.members.blocked_meta, {
+              date: new Date(block.created_at).toLocaleDateString(locale),
+            })}
+          </div>
+        ) : null}
+      </div>
+      <span className="flex size-7 shrink-0 items-center justify-center">
+        <IconButton
+          variant="ghost"
+          size="icon-sm"
+          disabled={busy}
+          onClick={onUnblock}
+          label={t(($) => $.members.unblock_aria, { email: block.email })}
+        >
+          <X className="size-4 text-muted-foreground" />
+        </IconButton>
+      </span>
+    </div>
+  );
+}
+
 function ShareLinkRow({
   link,
   onRevoke,
@@ -498,6 +544,7 @@ export function MembersTab() {
   const urlView: MembersView =
     requestedView === "invitations" ||
     requestedView === "links" ||
+    requestedView === "blocked" ||
     requestedView === "seated" ||
     requestedView === "guests"
       ? requestedView
@@ -541,8 +588,12 @@ export function MembersTab() {
     description: string;
     variant?: "destructive";
     actionLabel?: string;
-    onConfirm: () => Promise<void>;
+    // An option the person can tick before confirming; onConfirm gets it.
+    optionLabel?: string;
+    onConfirm: (optionChecked: boolean) => Promise<void>;
   } | null>(null);
+  const [confirmOptionChecked, setConfirmOptionChecked] = useState(false);
+  const [blockActionId, setBlockActionId] = useState<string | null>(null);
   const previewSeatPurchase = usePreviewWorkspaceSeatPurchase();
   const purchaseSeats = usePurchaseWorkspaceSeats(wsId);
   const seatPurchaseSummary = useQuery({
@@ -591,6 +642,7 @@ export function MembersTab() {
   // Only owners/admins may list share links; skip the request for plain
   // members (the server would 403) once the current member's role is known.
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
+  const { data: memberBlocks = [] } = useQuery(memberBlockListOptions(wsId, canManageWorkspace));
   const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
   const subscriptionSummary = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
@@ -1046,6 +1098,27 @@ export function MembersTab() {
     });
   };
 
+  const handleUnblock = (block: MemberBlock) => {
+    if (!workspace) return;
+    setConfirmAction({
+      title: t(($) => $.members.unblock_title, { email: block.email }),
+      description: t(($) => $.members.unblock_description),
+      actionLabel: t(($) => $.members.unblock_confirm),
+      onConfirm: async () => {
+        setBlockActionId(block.id);
+        try {
+          await api.deleteMemberBlock(workspace.id, block.id);
+          qc.invalidateQueries({ queryKey: workspaceKeys.memberBlocks(wsId) });
+          toast.success(t(($) => $.members.toast_unblocked));
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_unblock_failed));
+        } finally {
+          setBlockActionId(null);
+        }
+      },
+    });
+  };
+
   const applyRoleChange = async (member: MemberWithUser, role: MemberRole) => {
     setMemberActionId(member.id);
     try {
@@ -1113,16 +1186,19 @@ export function MembersTab() {
 
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
+    setConfirmOptionChecked(false);
     setConfirmAction({
       title: t(($) => $.members.remove_member_title, { name: member.name }),
       description: t(($) => $.members.remove_member_description, { name: member.name, workspace: workspace.name }),
       variant: "destructive",
       actionLabel: t(($) => $.members.remove_member_confirm),
-      onConfirm: async () => {
+      optionLabel: t(($) => $.members.block_rejoin_label),
+      onConfirm: async (blockRejoin) => {
         setMemberActionId(member.id);
         try {
-          await api.deleteMember(workspace.id, member.id);
+          await api.deleteMember(workspace.id, member.id, { blockRejoin });
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          if (blockRejoin) qc.invalidateQueries({ queryKey: workspaceKeys.memberBlocks(wsId) });
           toast.success(t(($) => $.members.toast_member_removed));
         } catch (e) {
           toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_member_remove_failed));
@@ -1219,6 +1295,9 @@ export function MembersTab() {
     { value: "invitations", label: t(($) => $.members.pending_label), count: invitations.length },
     ...(canManageWorkspace
       ? [{ value: "links" as const, label: t(($) => $.members.share_links_label), count: shareLinks.length }]
+      : []),
+    ...(canManageWorkspace && memberBlocks.length > 0
+      ? [{ value: "blocked" as const, label: t(($) => $.members.blocked_label), count: memberBlocks.length }]
       : []),
   ];
   const activeView = views.some((item) => item.value === view) ? view : "members";
@@ -1354,6 +1433,18 @@ export function MembersTab() {
           ) : (
             <ObjectSectionEmpty icon={Mail} description={t(($) => $.members.no_invitations)} />
           )
+        ) : activeView === "blocked" ? (
+          <SettingsCard>
+            {memberBlocks.map((block) => (
+              <div key={block.id}>
+                <BlockedRow
+                  block={block}
+                  onUnblock={() => handleUnblock(block)}
+                  busy={blockActionId === block.id}
+                />
+              </div>
+            ))}
+          </SettingsCard>
         ) : shareLinks.length > 0 ? (
           <SettingsCard>
             {shareLinks.map((link) => (
@@ -1768,12 +1859,21 @@ export function MembersTab() {
             <AlertDialogTitle>{confirmAction?.title}</AlertDialogTitle>
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
+          {confirmAction?.optionLabel ? (
+            <label className="flex cursor-pointer items-center gap-2 text-body">
+              <Checkbox
+                checked={confirmOptionChecked}
+                onCheckedChange={(checked) => setConfirmOptionChecked(checked === true)}
+              />
+              {confirmAction.optionLabel}
+            </label>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>{t(($) => $.members.confirm_cancel)}</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
-                await confirmAction?.onConfirm();
+                await confirmAction?.onConfirm(confirmOptionChecked);
                 setConfirmAction(null);
               }}
             >
