@@ -1226,6 +1226,19 @@ multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
 ```
 
+### Webhook Deliveries
+
+```bash
+multica autopilot deliveries <id>
+multica autopilot deliveries <id> --limit 50 --output json
+```
+
+Every webhook request the autopilot received, newest first — including
+`ignored` ones that created no run and so never appear in `runs`. The table
+shows `REASON` (`reason_code`) and `ERROR`; `--output json` also carries
+`payload_condition_failure`, the condition that rejected a `payload_filtered`
+delivery and the payload value it saw.
+
 ### Schedule Triggers
 
 ```bash
