@@ -47,6 +47,9 @@ survives a lost database, a fresh checkout, and a second machine, and needs no
 mapping table. Both directions are read, so a marker that survived on only one
 side still re-links the pair.
 
+A counterpart created by `--create-missing` carries its marker from the create
+call itself, so the next run links it instead of creating a second copy of it.
+
 ## Scheduling
 
 The command is safe to run repeatedly: a second run over unchanged data decides
