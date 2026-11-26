@@ -15,3 +15,4 @@ by [LICENSE](./LICENSE), not by the Multica License. The server half lives in
 | Feature |
 | --- |
 | `project-folders` (MUL-9390) |
+| `secret-scanning` (MUL-10283) |

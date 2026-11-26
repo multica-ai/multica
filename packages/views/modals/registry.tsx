@@ -14,7 +14,7 @@ import { AddBlockerIssueModal } from "./add-blocker-issue";
 import { AddProjectIssueModal } from "./add-project-issue";
 import { RenameIssueModal } from "./rename-issue";
 import { RenameProjectModal } from "./rename-project";
-import { getProjectFoldersExtension } from "../extensions";
+import { getProjectFoldersExtension, getSecretScanningExtension } from "../extensions";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
@@ -268,12 +268,14 @@ export function ModalRegistry() {
   }
 
   const FoldersHost = getProjectFoldersExtension()?.Host;
+  const SecretScanningHost = getSecretScanningExtension()?.Host;
 
   return (
     <>
       {activeModal}
       <LimitRecoveryDialog />
       {FoldersHost && <FoldersHost />}
+      {SecretScanningHost && <SecretScanningHost />}
     </>
   );
 }

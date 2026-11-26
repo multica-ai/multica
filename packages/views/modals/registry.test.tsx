@@ -44,6 +44,7 @@ vi.mock("./limit-recovery-dialog", () => ({
 
 vi.mock("../extensions", () => ({
   getProjectFoldersExtension: () => null,
+  getSecretScanningExtension: () => null,
 }));
 
 import { ModalRegistry } from "./registry";

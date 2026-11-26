@@ -70,6 +70,7 @@ import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
 import { ListColumn } from "../../layout/list-column";
 import { useT } from "../../i18n";
+import { getSecretScanningExtension, useSecretScanningSettingsLabel } from "../../extensions";
 
 export interface ExtraSettingsTab {
   value: string;
@@ -141,6 +142,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     false,
   );
   const voiceInputAvailable = localVoiceAPI() !== undefined;
+  const secretScanning = getSecretScanningExtension()?.settings;
+  const secretScanningLabel = useSecretScanningSettingsLabel();
   const entry = (
     value: string,
     label: string,
@@ -204,6 +207,17 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("members", t(($) => $.page.tabs.members), Users, <MembersTab />, {
               adminOnly: true,
             }),
+            ...(secretScanning
+              ? [
+                  entry(
+                    secretScanning.value,
+                    secretScanningLabel,
+                    secretScanning.icon,
+                    <secretScanning.Content />,
+                    { adminOnly: true },
+                  ),
+                ]
+              : []),
             ...(billingEnabled
               ? [
                   entry(

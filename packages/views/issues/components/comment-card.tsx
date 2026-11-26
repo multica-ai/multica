@@ -70,6 +70,17 @@ import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 import { WakeupSourceChip } from "./wakeup-source-chip";
+import { getSecretScanningExtension } from "../../extensions";
+
+function SecretNotice({ issueId, commentId, className }: { issueId: string; commentId: string; className: string }) {
+  const Notice = getSecretScanningExtension()?.CommentNotice;
+  if (!Notice) return null;
+  return (
+    <div className={className}>
+      <Notice issueId={issueId} commentId={commentId} />
+    </div>
+  );
+}
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -1028,6 +1039,7 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
+          <SecretNotice issueId={issueId} commentId={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
             {entry.actor_type === "agent" && entry.source_task_id && (
@@ -1675,6 +1687,7 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
+                <SecretNotice issueId={issueId} commentId={entry.id} className="pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                   {entry.actor_type === "agent" && entry.source_task_id && (
