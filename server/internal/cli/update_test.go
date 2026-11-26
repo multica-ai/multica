@@ -3,6 +3,11 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -300,5 +305,77 @@ func TestUpdateDownloadTimeoutOrDefault(t *testing.T) {
 				t.Fatalf("timeout = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWrapUnwritableUpdateDir(t *testing.T) {
+	dir := "/usr/local/bin"
+	err := wrapUnwritableUpdateDir(dir, os.ErrPermission, "create temp file")
+	if err == nil {
+		t.Fatal("expected a wrapped permission error")
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("wrapped error should unwrap to os.ErrPermission, got %v", err)
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"create temp file",
+		dir,
+		"not writable by the current user",
+		"~/.local/bin",
+		"multica daemon autostart enable",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+
+	other := wrapUnwritableUpdateDir(dir, io.ErrUnexpectedEOF, "create temp file")
+	if other == nil {
+		t.Fatal("expected a wrapped error")
+	}
+	if !errors.Is(other, io.ErrUnexpectedEOF) {
+		t.Fatalf("non-permission error should unwrap unchanged, got %v", other)
+	}
+	if strings.Contains(other.Error(), "~/.local/bin") {
+		t.Fatalf("non-permission error should not include the move hint: %v", other)
+	}
+}
+
+func TestCheckUpdateDirWritable(t *testing.T) {
+	writable := t.TempDir()
+	if err := checkUpdateDirWritable(writable); err != nil {
+		t.Fatalf("writable dir should pass: %v", err)
+	}
+	entries, err := os.ReadDir(writable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("probe file should be removed, found %v", entries)
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("unix directory permission bits are not enforced the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("permission probe is not meaningful as root")
+	}
+	blocked := filepath.Join(writable, "blocked")
+	if err := os.Mkdir(blocked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(blocked, 0o755)
+	})
+	err = checkUpdateDirWritable(blocked)
+	if err == nil {
+		t.Fatal("expected a permission error for an unwritable directory")
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected os.ErrPermission, got %v", err)
+	}
+	if !strings.Contains(err.Error(), blocked) || !strings.Contains(err.Error(), "~/.local/bin") {
+		t.Fatalf("unwritable dir error should include the path and hint, got %v", err)
 	}
 }
