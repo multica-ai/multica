@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 // The daemon holds this lock through task cleanup and runtime deregistration,
@@ -22,7 +24,7 @@ func daemonStopComplete(profile string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return true, nil
 	}
-	lock, acquired, err := tryLockDaemonProfile(path)
+	lock, acquired, err := filelock.Try(path)
 	if lock != nil {
 		if closeErr := lock.Close(); err == nil {
 			err = closeErr

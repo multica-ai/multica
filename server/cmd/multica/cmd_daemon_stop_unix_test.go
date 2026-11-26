@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 func TestDaemonStopWithTaskProcess(t *testing.T) {
@@ -26,7 +28,7 @@ func TestDaemonStopWithTaskProcess(t *testing.T) {
 		time.Sleep(20 * time.Second)
 		return
 	case "daemon":
-		lock, acquired, err := tryLockDaemonProfile(os.Getenv("MULTICA_TEST_STOP_LOCK"))
+		lock, acquired, err := filelock.Try(os.Getenv("MULTICA_TEST_STOP_LOCK"))
 		if err != nil || !acquired {
 			t.Fatalf("acquire profile lock: %v", err)
 		}

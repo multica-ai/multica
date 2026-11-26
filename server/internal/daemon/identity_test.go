@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -62,6 +63,33 @@ func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
 	profileFile := filepath.Join(home, ".multica", "profiles", "staging", "daemon.id")
 	if _, err := os.Stat(profileFile); !os.IsNotExist(err) {
 		t.Fatalf("profile-scoped daemon.id should not be created, stat err: %v", err)
+	}
+}
+
+func TestEnsureDaemonID_ConcurrentFirstStart(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+
+	profiles := []string{"", "second", "third", "fourth"}
+	ids := make([]string, len(profiles))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, profile := range profiles {
+		wg.Go(func() {
+			<-start
+			id, err := EnsureDaemonID(profile)
+			if err != nil {
+				t.Errorf("EnsureDaemonID(%q): %v", profile, err)
+			}
+			ids[i] = id
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	for i, id := range ids {
+		if id == "" || id != ids[0] {
+			t.Errorf("profile %q got ID %q, want shared ID %q", profiles[i], id, ids[0])
+		}
 	}
 }
 

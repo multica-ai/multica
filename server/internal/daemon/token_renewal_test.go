@@ -176,12 +176,12 @@ func TestTryRenewToken_TransientErrorIsDebugNotWarn(t *testing.T) {
 	}
 }
 
-// TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken locks in the
+// TestPreflightAuth_RenewsBeforeAccountLookupOnExpiredToken locks in the
 // must-fix from MUL-2744 review: when the daemon starts with an already-
 // revoked or expired PAT, the renewal call has to happen BEFORE the first
-// workspace sync, because the workspace sync's 401 would short-circuit Run
+// account lookup, because its 401 would short-circuit Run
 // and the operator would never see a "run multica login" hint.
-func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
+func TestPreflightAuth_RenewsBeforeAccountLookupOnExpiredToken(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,9 +199,9 @@ func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 	d := &Daemon{client: NewClient(srv.URL), logger: captureLogger(&buf)}
 	d.client.SetToken("mul_already_revoked")
 
-	err := d.preflightAuth(context.Background())
+	_, err := d.preflightAuth(context.Background())
 	if err == nil {
-		t.Fatal("expected workspace sync to fail with 401")
+		t.Fatal("expected account lookup to fail with 401")
 	}
 
 	mu.Lock()
@@ -210,10 +210,10 @@ func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 		t.Fatalf("expected both endpoints to be called; got %v", seen)
 	}
 	if seen[0] != "/api/tokens/current/renew" {
-		t.Fatalf("renew must be the first API call so the WARN fires before the sync 401s; got order %v", seen)
+		t.Fatalf("renew must be the first API call so the WARN fires before the account lookup returns 401; got order %v", seen)
 	}
-	if seen[1] != "/api/daemon/workspaces" {
-		t.Fatalf("workspace sync should follow renew; got order %v", seen)
+	if seen[1] != "/api/me" {
+		t.Fatalf("account lookup should follow renew; got order %v", seen)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "level=WARN") {
@@ -229,6 +229,7 @@ func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 // and preflightAuth must still go on to do the workspace sync. The
 // renewal is best-effort and must not gate startup.
 func TestPreflightAuth_SyncProceedsWhenRenewIsNoOp(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
 	var syncCalled atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -238,6 +239,8 @@ func TestPreflightAuth_SyncProceedsWhenRenewIsNoOp(t *testing.T) {
 				"expires_at": "2099-01-02T03:04:05Z",
 				"renewed":    false,
 			})
+		case "/api/me":
+			_, _ = w.Write([]byte(`{"id":"owner"}`))
 		case "/api/daemon/workspaces":
 			syncCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
@@ -252,9 +255,11 @@ func TestPreflightAuth_SyncProceedsWhenRenewIsNoOp(t *testing.T) {
 	d := &Daemon{client: NewClient(srv.URL), logger: captureLogger(&buf)}
 	d.client.SetToken("mul_healthy")
 
-	if err := d.preflightAuth(context.Background()); err != nil {
+	lock, err := d.preflightAuth(context.Background())
+	if err != nil {
 		t.Fatalf("preflightAuth returned error on healthy startup: %v", err)
 	}
+	defer lock.Close()
 	if !syncCalled.Load() {
 		t.Fatal("preflightAuth must run the workspace sync after a no-op renewal")
 	}
@@ -265,12 +270,15 @@ func TestPreflightAuth_SyncProceedsWhenRenewIsNoOp(t *testing.T) {
 // kill the daemon — the workspace sync still happens, and the daemon is
 // up and serving. The background renewal loop will retry later.
 func TestPreflightAuth_TransientRenewFailureDoesNotBlockStartup(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
 	var syncCalled atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/tokens/current/renew":
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"db down"}`))
+		case "/api/me":
+			_, _ = w.Write([]byte(`{"id":"owner"}`))
 		case "/api/daemon/workspaces":
 			syncCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
@@ -285,9 +293,11 @@ func TestPreflightAuth_TransientRenewFailureDoesNotBlockStartup(t *testing.T) {
 	d := &Daemon{client: NewClient(srv.URL), logger: captureLogger(&buf)}
 	d.client.SetToken("mul_healthy")
 
-	if err := d.preflightAuth(context.Background()); err != nil {
+	lock, err := d.preflightAuth(context.Background())
+	if err != nil {
 		t.Fatalf("preflightAuth must not surface transient renew failures: %v", err)
 	}
+	defer lock.Close()
 	if !syncCalled.Load() {
 		t.Fatal("transient renew failure must not skip the workspace sync")
 	}

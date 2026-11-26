@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 // Model a daemon that releases its profile lock without cleaning up an
@@ -21,7 +23,7 @@ func TestDaemonStopUnconfirmedExitHelper(t *testing.T) {
 	if os.Getenv("MULTICA_TEST_UNCONFIRMED_EXIT") != "1" {
 		t.Skip("subprocess only")
 	}
-	lock, acquired, err := tryLockDaemonProfile(os.Getenv("MULTICA_TEST_UNCONFIRMED_LOCK"))
+	lock, acquired, err := filelock.Try(os.Getenv("MULTICA_TEST_UNCONFIRMED_LOCK"))
 	if err != nil || !acquired {
 		t.Fatalf("lock: %v, acquired=%v", err, acquired)
 	}

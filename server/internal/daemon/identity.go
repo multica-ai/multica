@@ -1,14 +1,17 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 // daemonIDFileName is the file that stores this machine's stable daemon
@@ -43,18 +46,24 @@ func EnsureDaemonID(profile string) (string, error) {
 	}
 	path := filepath.Join(dir, daemonIDFileName)
 
-	if data, err := os.ReadFile(path); err == nil {
-		if id := strings.TrimSpace(string(data)); id != "" {
-			if _, perr := uuid.Parse(id); perr == nil {
-				return id, nil
-			}
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("read daemon id file: %w", err)
+	if id, err := readDaemonID(path); id != "" || err != nil {
+		return id, err
 	}
-
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create profile directory: %w", err)
+	}
+
+	// Different profiles can reach first startup together. Use the same UUID
+	// before either process derives its runtime ownership lock from it.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := filelock.Acquire(ctx, path+".lock")
+	if err != nil {
+		return "", fmt.Errorf("lock daemon identity: %w", err)
+	}
+	defer lock.Close()
+	if id, err := readDaemonID(path); id != "" || err != nil {
+		return id, err
 	}
 
 	// One-time promotion from pre-change per-profile layout.
@@ -71,6 +80,21 @@ func EnsureDaemonID(profile string) (string, error) {
 		return "", err
 	}
 	return id.String(), nil
+}
+
+func readDaemonID(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read daemon id file: %w", err)
+	}
+	id := strings.TrimSpace(string(data))
+	if _, err := uuid.Parse(id); err != nil {
+		return "", nil
+	}
+	return id, nil
 }
 
 // promoteProfileDaemonID copies a pre-change per-profile daemon.id into the

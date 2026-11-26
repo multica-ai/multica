@@ -2203,14 +2203,12 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// already run, so a missing token still fails fast before we begin serving.
 	go d.serveHealth(ctx, healthLn, time.Now())
 
-	// Renew the PAT before the first API call, then do the initial
-	// workspace sync. Both steps live in preflightAuth so the ordering
-	// invariant (renew first) is enforced at one site instead of
-	// scattered into Run, and tests can exercise the failure paths
-	// without the full Run setup.
-	if err := d.preflightAuth(ctx); err != nil {
+	ownership, err := d.preflightAuth(ctx)
+	if err != nil {
 		return err
 	}
+	// Keep the runtime lock through shutdown, including deregistration.
+	defer ownership.Close()
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
@@ -4182,32 +4180,27 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 // not push the token out of the renewal window.
 const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 
-// preflightAuth runs the two auth-sensitive startup steps in their
-// required order: a synchronous PAT renewal first, then the initial
-// workspace sync. The order matters — running tryRenewToken before any
-// other API call is what surfaces a user-actionable "run multica login"
-// WARN when the PAT is already revoked or expired. If we let the
-// workspace sync go first, its 401 would short-circuit Run before the
-// renewal loop's first tick ever fires, and the operator would see only
-// a generic auth failure in the workspace-sync log with no hint that
-// re-login is the fix.
-//
-// The renewal is best-effort: tryRenewToken logs and returns, never
-// propagating errors. preflightAuth's exit status is driven entirely by
-// the workspace sync — so a transient renewal failure (network blip,
-// 500) does not by itself block startup. A successful sync with zero
-// workspaces is fine: a newly-signed-up user may start the daemon
-// before creating their first workspace, and workspaceSyncLoop will
-// register runtimes once one appears.
-func (d *Daemon) preflightAuth(ctx context.Context) error {
+// preflightAuth renews the PAT before checking the account and registering
+// runtimes. Renewal is best-effort and still logs an actionable re-login hint
+// before an expired token stops startup. An account with no workspaces can
+// start and register runtimes later when the workspace sync discovers one.
+func (d *Daemon) preflightAuth(ctx context.Context) (*os.File, error) {
 	d.tryRenewToken(ctx)
-	err := d.syncWorkspacesFromAPI(ctx, false)
+	ownership, err := d.acquireRuntimeOwnership(ctx)
+	if err != nil {
+		return nil, err
+	}
+	err = d.syncWorkspacesFromAPI(ctx, false)
 	if d.startupMayProceedWithoutRuntimes(err) {
 		d.logger.Warn("starting with no runtimes registered: an automatic DSH runtime profile install is still running; " +
 			"the runtime registers when it finishes")
-		return nil
+		return ownership, nil
 	}
-	return err
+	if err != nil {
+		ownership.Close()
+		return nil, err
+	}
+	return ownership, nil
 }
 
 // startupMayProceedWithoutRuntimes reports whether a startup that registered

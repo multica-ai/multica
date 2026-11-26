@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package filelock
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func tryLockDaemonProfile(path string) (*os.File, bool, error) {
+func Try(path string) (*os.File, bool, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, false, err

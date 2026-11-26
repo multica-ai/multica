@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package filelock
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func tryLockDaemonProfile(path string) (*os.File, bool, error) {
+func Try(path string) (*os.File, bool, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, false, err
