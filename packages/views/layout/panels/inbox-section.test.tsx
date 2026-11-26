@@ -349,6 +349,19 @@ describe("InboxSection", () => {
     expect(rows()[0]!.querySelector("[data-mc='unread-dot']")).not.toBeNull();
   });
 
+  it("puts a read row's agents at a tree row's right edge, with nothing after them", () => {
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: true } });
+    renderSection(
+      [item({ id: "n1", issue_id: "issue-a", title: "Working one", read: true })],
+      null,
+      "/acme/issues",
+      [{ id: "t1", issue_id: "issue-a", agent_id: "a1", status: "running" }],
+    );
+    const link = screen.getByRole("link", { name: /^Working one/ });
+    expect(link.lastElementChild).toContainElement(within(link).getByTestId("agents"));
+    expect(rows()[0]!.querySelector("[data-mc='nav-item']")).toHaveClass("pr-2");
+  });
+
   it("shows the whole notification on hover, with its actions", async () => {
     renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })]);
     fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
