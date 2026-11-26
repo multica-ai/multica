@@ -173,7 +173,7 @@ func isSixDigitCode(code string) bool {
 }
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
-	if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
+	if userSuspended(user) {
 		return "", auth.ErrTemporarilyDisabledUser
 	}
 	// `sid` identifies this login for as long as it lasts: sliding renewal
@@ -192,8 +192,17 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 		"sid":   sid,
 		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
 		"iat":   time.Now().Unix(),
+		// The session generation this login belongs to; ending the
+		// account's sessions bumps it (MUL-10296).
+		auth.TokenVersionClaim: user.TokenVersion,
 	})
 	return token.SignedString(auth.JWTSecret())
+}
+
+// userSuspended reports whether the account may not sign in: suspended
+// (MUL-10296), or an address still on the emergency email denylist.
+func userSuspended(user db.User) bool {
+	return user.SuspendedAt.Valid || auth.IsTemporarilyDisabledUserEmail(user.Email)
 }
 
 // findOrCreateUser returns the existing user for an email, or creates one if
@@ -210,7 +219,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	if err != nil && !isNew {
 		return db.User{}, false, err
 	}
-	if !isNew && auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
+	if !isNew && userSuspended(user) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
@@ -356,7 +365,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// User already exists → always allowed to login
-		if auth.IsTemporarilyDisabledUser(uuidToString(existingUser.ID), existingUser.Email) {
+		if userSuspended(existingUser) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 			return
 		}

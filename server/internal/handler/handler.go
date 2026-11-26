@@ -293,6 +293,7 @@ type Handler struct {
 	PATCache                     *auth.PATCache
 	DaemonTokenCache             *auth.DaemonTokenCache
 	MembershipCache              *auth.MembershipCache
+	AccountStates                *auth.AccountStates
 	QoderRateLimiter             WebhookRateLimiter
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
@@ -570,6 +571,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LLM: llmClient,
 		cfg: cfg,
 	}
+	// Uncached until the router swaps in the Redis-backed one.
+	h.AccountStates = auth.NewAccountStates(nil, AccountStateLoader(queries))
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.

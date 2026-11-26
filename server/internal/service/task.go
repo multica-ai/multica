@@ -705,6 +705,10 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 	}); err != nil {
 		return pgtype.UUID{}
 	}
+	// A suspended account (MUL-10296) keeps its member rows; its triggers stop.
+	if state, err := q.GetUserAccountState(ctx, trig.CreatedByID); err != nil || state.Suspended {
+		return pgtype.UUID{}
+	}
 	return trig.CreatedByID
 }
 

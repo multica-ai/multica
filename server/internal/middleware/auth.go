@@ -17,17 +17,34 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
-func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
-	if !auth.IsTemporarilyDisabledUser(userID, email) {
-		return false
+// rejectUnusableAccount refuses a credential whose account is suspended, and a
+// session token whose session was ended (MUL-10296). sessionVersion is the
+// token's session generation, nil for credentials that are not sessions. An
+// account state that cannot be read refuses the request: guessing "allowed"
+// would let a suspended account through whenever the lookup fails.
+func rejectUnusableAccount(w http.ResponseWriter, r *http.Request, accounts *auth.AccountStates, userID string, sessionVersion *int32, authPath string) bool {
+	state, err := accounts.Get(r.Context(), userID)
+	if err != nil {
+		slog.Warn("auth: account state unavailable", "path", r.URL.Path, "user_id", userID, "auth_path", authPath, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "account state unavailable")
+		return true
 	}
-	slog.Warn(
-		"auth: temporarily disabled user rejected",
-		"path", r.URL.Path,
-		"user_id", userID,
-		"auth_path", authPath,
-	)
-	writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+	reject := error(nil)
+	if sessionVersion != nil {
+		reject = state.CheckSession(*sessionVersion)
+	} else if state.Suspended {
+		reject = auth.ErrTemporarilyDisabledUser
+	}
+	switch {
+	case reject == nil:
+		return false
+	case errors.Is(reject, auth.ErrSessionRevoked):
+		slog.Info("auth: ended session rejected", "path", r.URL.Path, "user_id", userID, "auth_path", authPath)
+		writeError(w, http.StatusUnauthorized, auth.ErrSessionRevoked.Error())
+	default:
+		slog.Warn("auth: suspended account rejected", "path", r.URL.Path, "user_id", userID, "auth_path", authPath)
+		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+	}
 	return true
 }
 
@@ -57,6 +74,13 @@ func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userI
 // prefix branch — we don't fall through to the mul_ / JWT paths, since
 // an mcn_ string is by construction not a valid mul_ PAT or JWT.
 func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
+	return AuthWithAccounts(nil, queries, patCache, cloudPAT, cfSigner)
+}
+
+// AuthWithAccounts is Auth that also refuses suspended accounts and ended
+// sessions, on every credential type. Production routes use it; a nil
+// accounts allows every account, which is what Auth passes.
+func AuthWithAccounts(accounts *auth.AccountStates, queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -120,7 +144,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				userID := uuidToString(tt.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", "task_token") {
+				if rejectUnusableAccount(w, r, accounts, userID, nil, "task_token") {
 					return
 				}
 				boundWorkspaceID := uuidToString(tt.WorkspaceID)
@@ -186,7 +210,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
 					return
 				}
-				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", "cloud_pat") {
+				if rejectUnusableAccount(w, r, accounts, identity.OwnerID, nil, "cloud_pat") {
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
@@ -215,7 +239,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// entry since. Skip the DB SELECT and the last_used_at
 				// UPDATE — last_used_at is bumped once per TTL window.
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", "pat_cache") {
+					if rejectUnusableAccount(w, r, accounts, userID, nil, "pat_cache") {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
@@ -235,7 +259,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
+				if rejectUnusableAccount(w, r, accounts, userID, nil, "pat") {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -285,7 +309,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				return
 			}
 			email, _ := claims["email"].(string)
-			if rejectTemporarilyDisabledUser(w, r, sub, email, "jwt") {
+			sessionVersion := auth.SessionTokenVersion(claims)
+			if rejectUnusableAccount(w, r, accounts, sub, &sessionVersion, "jwt") {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)

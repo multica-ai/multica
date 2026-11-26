@@ -41,6 +41,11 @@ const (
 	// not invalidate CSRF tokens other tabs are already holding.
 	sessionIDClaim = "sid"
 
+	// TokenVersionClaim carries the account's session generation
+	// (user.token_version) at login, copied forward on renewal. An incident
+	// response bumps the generation, which ends every older session.
+	TokenVersionClaim = "tv"
+
 	// sessionRenewCheckDivisor derives the client-side re-check cadence
 	// from the configured TTL: a client that checks every TTL/10 gets
 	// roughly five attempts inside the renewal window, so several
@@ -217,13 +222,6 @@ func RenewSessionToken(claims jwt.MapClaims) (string, time.Time, error) {
 	}
 	email, _ := claims["email"].(string)
 
-	// A user disabled since their token was signed must not have that token
-	// extended — renewal is the one place a live session's lifetime is
-	// decided after login, so the check belongs here as much as at issuance.
-	if IsTemporarilyDisabledUser(sub, email) {
-		return "", time.Time{}, ErrTemporarilyDisabledUser
-	}
-
 	sid, _ := claims[sessionIDClaim].(string)
 	if sid == "" {
 		var err error
@@ -239,6 +237,12 @@ func RenewSessionToken(claims jwt.MapClaims) (string, time.Time, error) {
 		"exp":          expiresAt.Unix(),
 		"iat":          now.Unix(),
 		sessionIDClaim: sid,
+	}
+	// Renewal keeps the generation the session was minted with, so an ended
+	// session cannot be renewed into a current one. Callers renew only after
+	// auth has checked the account (see middleware.rejectUnusableAccount).
+	if tv := SessionTokenVersion(claims); tv != 0 {
+		next[TokenVersionClaim] = tv
 	}
 	if email != "" {
 		next["email"] = email

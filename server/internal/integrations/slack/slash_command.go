@@ -67,6 +67,7 @@ type slashQueries interface {
 	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
 	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
 	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+	GetUserAccountState(ctx context.Context, id pgtype.UUID) (db.GetUserAccountStateRow, error)
 }
 
 // quickCreateEnqueuer is the narrow slice of *service.TaskService the slash
@@ -342,6 +343,15 @@ func (p *SlashCommandProcessor) resolveUser(ctx context.Context, inst engine.Res
 			return pgtype.UUID{}, engine.ErrSenderNotMember
 		}
 		return pgtype.UUID{}, err
+	}
+	// This path enqueues without the agent invocation policy, which is where
+	// the router refuses a suspended account (MUL-10296).
+	state, err := p.q.GetUserAccountState(ctx, binding.MulticaUserID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if state.Suspended {
+		return pgtype.UUID{}, engine.ErrSenderNotMember
 	}
 	return binding.MulticaUserID, nil
 }

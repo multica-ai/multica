@@ -116,6 +116,13 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //
 // Cache misses fall back to the original DB-backed behavior.
 func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+	return DaemonAuthWithAccounts(nil, queries, patCache, daemonCache, cloudPAT)
+}
+
+// DaemonAuthWithAccounts is DaemonAuth that also refuses suspended accounts
+// and ended sessions (see AuthWithAccounts). A daemon token is refused when
+// the user it was issued for is suspended.
+func DaemonAuthWithAccounts(accounts *auth.AccountStates, queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — strip any
@@ -161,6 +168,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				hash := auth.HashToken(tokenString)
 
 				if id, ok := daemonCache.Get(r.Context(), hash); ok {
+					if rejectUnusableAccount(w, r, accounts, id.OwnerID, nil, DaemonAuthPathDaemonToken) {
+						return
+					}
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
@@ -211,6 +221,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				if cacheable {
 					daemonCache.Set(r.Context(), hash, identity, auth.TTLForExpiry(time.Now(), expiresAt))
 				}
+				if rejectUnusableAccount(w, r, accounts, identity.OwnerID, nil, DaemonAuthPathDaemonToken) {
+					return
+				}
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
@@ -246,7 +259,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					writeError(w, http.StatusServiceUnavailable, "cloud pat verifier unavailable")
 					return
 				}
-				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", DaemonAuthPathCloudPAT) {
+				if rejectUnusableAccount(w, r, accounts, identity.OwnerID, nil, DaemonAuthPathCloudPAT) {
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
@@ -270,7 +283,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				hash := auth.HashToken(tokenString)
 
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+					if rejectUnusableAccount(w, r, accounts, userID, nil, DaemonAuthPathPAT) {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
@@ -295,7 +308,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+				if rejectUnusableAccount(w, r, accounts, userID, nil, DaemonAuthPathPAT) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -338,8 +351,8 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				writeError(w, http.StatusUnauthorized, "invalid claims")
 				return
 			}
-			email, _ := claims["email"].(string)
-			if rejectTemporarilyDisabledUser(w, r, sub, email, DaemonAuthPathJWT) {
+			sessionVersion := auth.SessionTokenVersion(claims)
+			if rejectUnusableAccount(w, r, accounts, sub, &sessionVersion, DaemonAuthPathJWT) {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)

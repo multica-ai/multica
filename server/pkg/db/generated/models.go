@@ -2182,6 +2182,10 @@ type User struct {
 	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
 	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
 	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
+	SuspendedAt           pgtype.Timestamptz `json:"suspended_at"`
+	SuspendedReason       pgtype.Text        `json:"suspended_reason"`
+	SuspendedBy           pgtype.Text        `json:"suspended_by"`
+	TokenVersion          int32              `json:"token_version"`
 }
 
 type UserComposioConnection struct {
@@ -2197,6 +2201,18 @@ type UserComposioConnection struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+}
+
+type UserSuspensionEvent struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Action      string             `json:"action"`
+	Actor       string             `json:"actor"`
+	Reason      string             `json:"reason"`
+	Status      string             `json:"status"`
+	Report      []byte             `json:"report"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
 }
 
 type VcsCommitStatus struct {

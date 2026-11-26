@@ -81,6 +81,14 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 		effectiveUser = originatorUserID
 	}
 
+	// A suspended account (MUL-10296) keeps its member rows and its agents;
+	// a run it started cannot reach further agents.
+	if effectiveUser != "" {
+		if state, err := h.AccountStates.Get(ctx, effectiveUser); err != nil || state.Suspended {
+			return false
+		}
+	}
+
 	isWorkspaceMember := false
 	if effectiveUser != "" {
 		if m, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {

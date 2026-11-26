@@ -45,3 +45,10 @@ WHERE tt.workspace_id = @workspace_id
   AND r.workspace_id = @workspace_id
   AND r.daemon_id = @daemon_id::text
 LIMIT 2;
+
+-- name: DeleteDaemonTokensByOwner :many
+-- Account incident response (MUL-10296): every daemon token issued for this
+-- user, in every workspace. Returns token_hash for auth.DaemonTokenCache.
+DELETE FROM daemon_token
+WHERE owner_id = $1
+RETURNING token_hash;

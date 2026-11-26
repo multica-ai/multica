@@ -230,6 +230,11 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 		if !refusePluginGuest(w, r, member) {
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
+		// A suspended account (MUL-10296) keeps its member row.
+		if state, err := h.AccountStates.Get(r.Context(), uuidToString(memberUserID)); err != nil || state.Suspended {
+			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "actor_membership_revoked", "the user this callback acts for is no longer a member")
+			return service.PluginActionCaller{}, pluginActor{}, false
+		}
 		actor = pluginActor{Type: "member", Member: member}
 	}
 	return caller, actor, true

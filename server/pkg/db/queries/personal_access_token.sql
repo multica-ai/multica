@@ -46,3 +46,10 @@ WHERE id = sqlc.arg(id)
   AND expires_at > now()
   AND expires_at <= sqlc.arg(renew_threshold_at)
 RETURNING expires_at;
+
+-- name: RevokePersonalAccessTokensByUser :many
+-- Account incident response (MUL-10296). Returns token_hash so the caller can
+-- invalidate auth.PATCache.
+UPDATE personal_access_token SET revoked = TRUE
+WHERE user_id = $1 AND revoked = FALSE
+RETURNING token_hash;

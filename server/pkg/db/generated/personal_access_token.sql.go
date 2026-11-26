@@ -163,6 +163,34 @@ func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePerso
 	return token_hash, err
 }
 
+const revokePersonalAccessTokensByUser = `-- name: RevokePersonalAccessTokensByUser :many
+UPDATE personal_access_token SET revoked = TRUE
+WHERE user_id = $1 AND revoked = FALSE
+RETURNING token_hash
+`
+
+// Account incident response (MUL-10296). Returns token_hash so the caller can
+// invalidate auth.PATCache.
+func (q *Queries) RevokePersonalAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, revokePersonalAccessTokensByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var token_hash string
+		if err := rows.Scan(&token_hash); err != nil {
+			return nil, err
+		}
+		items = append(items, token_hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLastUsed :exec
 UPDATE personal_access_token
 SET last_used_at = now()

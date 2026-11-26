@@ -289,6 +289,9 @@ type SubscriptionCallback func(scopeType, scopeID string)
 
 // Hub manages WebSocket connections organized into scope-based rooms.
 type Hub struct {
+	// accounts refuses suspended accounts at connect (MUL-10296). Set once
+	// before serving; nil allows every account.
+	accounts             *auth.AccountStates
 	rooms                map[scopeKey]map[*Client]bool
 	clients              map[*Client]bool // every connected client (used by global Broadcast and snapshots)
 	broadcast            chan []byte
@@ -311,6 +314,12 @@ type Hub struct {
 }
 
 // NewHub creates a new Hub instance.
+// SetAccountStates makes the hub refuse suspended accounts and ended sessions
+// at connect. Call it before serving.
+func (h *Hub) SetAccountStates(accounts *auth.AccountStates) {
+	h.accounts = accounts
+}
+
 func NewHub() *Hub {
 	return &Hub{
 		rooms:           make(map[scopeKey]map[*Client]bool),
@@ -699,7 +708,9 @@ func (h *Hub) Snapshot() map[string]any {
 }
 
 // authenticateToken validates a JWT or PAT string and returns the user ID.
-func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (string, string) {
+// accounts refuses suspended accounts and ended sessions (MUL-10296); nil
+// allows every account.
+func authenticateToken(tokenStr string, pr PATResolver, accounts *auth.AccountStates, ctx context.Context) (string, string) {
 	if strings.HasPrefix(tokenStr, "mul_") {
 		if pr == nil {
 			return "", `{"error":"invalid token"}`
@@ -708,8 +719,8 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 		if !ok {
 			return "", `{"error":"invalid token"}`
 		}
-		if auth.IsTemporarilyDisabledUserID(uid) {
-			return "", `{"error":"account disabled"}`
+		if errMsg := accountErrMsg(ctx, accounts, uid, nil); errMsg != "" {
+			return "", errMsg
 		}
 		return uid, ""
 	}
@@ -733,11 +744,29 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	if !ok || strings.TrimSpace(uid) == "" {
 		return "", `{"error":"invalid claims"}`
 	}
-	email, _ := claims["email"].(string)
-	if auth.IsTemporarilyDisabledUser(uid, email) {
-		return "", `{"error":"account disabled"}`
+	sessionVersion := auth.SessionTokenVersion(claims)
+	if errMsg := accountErrMsg(ctx, accounts, uid, &sessionVersion); errMsg != "" {
+		return "", errMsg
 	}
 	return uid, ""
+}
+
+// accountErrMsg is the error body for an account that may not connect, or ""
+// when it may. A lookup failure refuses the connection.
+func accountErrMsg(ctx context.Context, accounts *auth.AccountStates, uid string, sessionVersion *int32) string {
+	state, err := accounts.Get(ctx, uid)
+	if err != nil {
+		return `{"error":"account state unavailable"}`
+	}
+	if sessionVersion != nil {
+		if err := state.CheckSession(*sessionVersion); errors.Is(err, auth.ErrSessionRevoked) {
+			return `{"error":"session revoked"}`
+		}
+	}
+	if state.Suspended {
+		return `{"error":"account disabled"}`
+	}
+	return ""
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
@@ -814,11 +843,14 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 
 	var userID string
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
-		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
+		uid, errMsg := authenticateToken(cookie.Value, pr, hub.accounts, r.Context())
 		if errMsg != "" {
 			status := http.StatusUnauthorized
-			if errMsg == `{"error":"account disabled"}` {
+			switch errMsg {
+			case `{"error":"account disabled"}`:
 				status = http.StatusForbidden
+			case `{"error":"account state unavailable"}`:
+				status = http.StatusServiceUnavailable
 			}
 			http.Error(w, errMsg, status)
 			return
@@ -855,7 +887,7 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return
 		}
-		uid, errMsg := authenticateToken(tokenStr, pr, r.Context())
+		uid, errMsg := authenticateToken(tokenStr, pr, hub.accounts, r.Context())
 		if errMsg != "" {
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return

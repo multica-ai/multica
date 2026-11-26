@@ -1717,6 +1717,13 @@ func (h *Handler) daemonConnectionPrincipalIsMember(ctx context.Context, identit
 	if principal == "" {
 		return true, nil
 	}
+	// A suspended principal (MUL-10296) keeps its member rows, so the
+	// membership answer below would still say yes.
+	if state, err := h.AccountStates.Get(ctx, principal); err != nil {
+		return false, err
+	} else if state.Suspended {
+		return false, nil
+	}
 	if h.MembershipCache.Get(ctx, principal, workspaceID) {
 		return true, nil
 	}
@@ -2654,11 +2661,16 @@ func (h *Handler) finalizeClaimDelivery(
 			}
 		}
 		if owner, oerr := qtx.GetUser(ctx, locked.OwnerID); oerr != nil {
-			slog.Debug("failed to load locked runtime owner for brief injection",
-				"runtime_id", runtimeID,
-				"owner_id", uuidToString(locked.OwnerID),
-				"error", oerr,
-			)
+			// The owner's suspension (MUL-10296) is decided here; deliver
+			// nothing without it.
+			return fmt.Errorf("load runtime owner for delivery authorization: %w", oerr)
+		} else if owner.SuspendedAt.Valid {
+			// A daemon connected before its owner was suspended (MUL-10296)
+			// still claims over its open socket; nothing reaches it.
+			return &service.ClaimDeliveryAuthzError{
+				Reason: "error_runtime_owner_suspended",
+				Detail: "runtime owner is suspended",
+			}
 		} else if response != nil {
 			response.RequestingUserName = owner.Name
 			response.RequestingUserProfileDescription = owner.ProfileDescription
@@ -2693,6 +2705,8 @@ func (h *Handler) finalizeClaimDelivery(
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if authzErr.Reason == "error_runtime_owner_missing" {
 			userMessage = "This runtime cannot run the assigned agent because the runtime has no owner."
+		} else if authzErr.Reason == "error_runtime_owner_suspended" {
+			userMessage = "This runtime cannot run the assigned agent because the runtime owner's account is suspended."
 		} else if !agentOwnerID.Valid {
 			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
 		}

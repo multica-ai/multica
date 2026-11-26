@@ -48,6 +48,34 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 	return i, err
 }
 
+const deleteDaemonTokensByOwner = `-- name: DeleteDaemonTokensByOwner :many
+DELETE FROM daemon_token
+WHERE owner_id = $1
+RETURNING token_hash
+`
+
+// Account incident response (MUL-10296): every daemon token issued for this
+// user, in every workspace. Returns token_hash for auth.DaemonTokenCache.
+func (q *Queries) DeleteDaemonTokensByOwner(ctx context.Context, ownerID pgtype.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteDaemonTokensByOwner, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var token_hash string
+		if err := rows.Scan(&token_hash); err != nil {
+			return nil, err
+		}
+		items = append(items, token_hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteDaemonTokensByWorkspaceAndDaemons = `-- name: DeleteDaemonTokensByWorkspaceAndDaemons :many
 DELETE FROM daemon_token
 WHERE workspace_id = $1

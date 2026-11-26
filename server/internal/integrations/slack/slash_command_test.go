@@ -23,6 +23,7 @@ type fakeSlashQueries struct {
 	binding   db.ChannelUserBinding
 	bindErr   error
 	memberErr error
+	suspended bool
 	gotAppID  string
 }
 
@@ -37,6 +38,10 @@ func (f *fakeSlashQueries) GetChannelUserBindingByUserID(_ context.Context, _ db
 
 func (f *fakeSlashQueries) GetMemberByUserAndWorkspace(_ context.Context, _ db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
 	return db.Member{}, f.memberErr
+}
+
+func (f *fakeSlashQueries) GetUserAccountState(_ context.Context, _ pgtype.UUID) (db.GetUserAccountStateRow, error) {
+	return db.GetUserAccountStateRow{Suspended: f.suspended}, nil
 }
 
 // fakeQuickCreate records the last EnqueueQuickCreateTask call so tests can
@@ -246,6 +251,25 @@ func TestSlashHandle_NonMemberDropped(t *testing.T) {
 
 	if tasks.calls != 0 {
 		t.Fatalf("non-member must not enqueue a task")
+	}
+	if *captured != slashNotMemberText {
+		t.Fatalf("expected not-member reply, got %q", *captured)
+	}
+}
+
+func TestSlashHandle_SuspendedMemberDropped(t *testing.T) {
+	q := &fakeSlashQueries{
+		inst:      activeSlashInstallation(),
+		binding:   db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
+		suspended: true,
+	}
+	tasks := &fakeQuickCreate{}
+	p, captured, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
+
+	p.Handle(context.Background(), issueSlashCmd())
+
+	if tasks.calls != 0 {
+		t.Fatalf("suspended account must not enqueue a task")
 	}
 	if *captured != slashNotMemberText {
 		t.Fatalf("expected not-member reply, got %q", *captured)

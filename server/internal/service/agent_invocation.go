@@ -39,6 +39,17 @@ func memberMayInvokeAgent(ctx context.Context, queries *db.Queries, agent db.Age
 	if userID == "" {
 		return false, nil
 	}
+	// A suspended account (MUL-10296) keeps its member rows and its agents,
+	// so neither the membership nor the owner check below would refuse it.
+	switch state, err := queries.GetUserAccountState(ctx, memberUserID); {
+	case err == nil:
+		if state.Suspended {
+			return false, nil
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
+		return false, fmt.Errorf("load account state: %w", err)
+	}
 	isWorkspaceMember := false
 	switch member, err := queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      memberUserID,

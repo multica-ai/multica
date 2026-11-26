@@ -123,6 +123,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
 	"personal_access_token":              workspaceDeleteKeep,
+	"user_suspension_event":              workspaceDeleteKeep, // Account-level suspension history; workspace ids appear only inside the report.
 	"pinned_item":                        workspaceDelete,
 	"plugin_installation":                workspaceDelete,
 	"plugin_hook_schedule":               workspaceDelete,

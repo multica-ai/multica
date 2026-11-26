@@ -122,6 +122,7 @@ JOIN (
            unnest($2::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+JOIN "user" u ON u.id = m.user_id AND u.suspended_at IS NULL
 WHERE m.role IN ('owner', 'admin', 'member')
 `
 
@@ -135,6 +136,7 @@ type GetRealtimeMembershipsRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// A suspended account (MUL-10296) keeps its member rows but loses its sockets.
 // Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
 // to their projects, so a socket that becomes a guest's is closed. Neither
 // does a role this build does not know (see GetMemberByUserAndWorkspace).
@@ -283,6 +285,32 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceIDsByUser = `-- name: ListWorkspaceIDsByUser :many
+SELECT workspace_id FROM member
+WHERE user_id = $1
+ORDER BY workspace_id
+`
+
+func (q *Queries) ListWorkspaceIDsByUser(ctx context.Context, userID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceIDsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var workspace_id pgtype.UUID
+		if err := rows.Scan(&workspace_id); err != nil {
+			return nil, err
+		}
+		items = append(items, workspace_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

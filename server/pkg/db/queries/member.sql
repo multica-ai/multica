@@ -53,6 +53,8 @@ JOIN (
            unnest(sqlc.arg(workspace_ids)::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+-- A suspended account (MUL-10296) keeps its member rows but loses its sockets.
+JOIN "user" u ON u.id = m.user_id AND u.suspended_at IS NULL
 -- Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
 -- to their projects, so a socket that becomes a guest's is closed. Neither
 -- does a role this build does not know (see GetMemberByUserAndWorkspace).
@@ -92,3 +94,8 @@ FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: ListWorkspaceIDsByUser :many
+SELECT workspace_id FROM member
+WHERE user_id = $1
+ORDER BY workspace_id;

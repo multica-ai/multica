@@ -67,10 +67,17 @@ func (s staticPATResolver) ResolveToken(_ context.Context, token string) (string
 	return userID, ok
 }
 
-func TestAuthenticateTokenRejectsTemporarilyDisabledJWTUser(t *testing.T) {
-	token := makeTestTokenForUser(t, "514492f7-b30f-4147-bd33-c0e8ce5d6d4f", "")
+func staticAccounts(states map[string]auth.AccountState) *auth.AccountStates {
+	return auth.NewAccountStates(nil, func(_ context.Context, userID string) (auth.AccountState, error) {
+		return states[userID], nil
+	})
+}
 
-	uid, errMsg := authenticateToken(token, nil, context.Background())
+func TestAuthenticateTokenRejectsSuspendedJWTUser(t *testing.T) {
+	token := makeTestTokenForUser(t, "suspended-user", "")
+	accounts := staticAccounts(map[string]auth.AccountState{"suspended-user": {Suspended: true}})
+
+	uid, errMsg := authenticateToken(token, nil, accounts, context.Background())
 	if uid != "" {
 		t.Fatalf("expected no user ID, got %q", uid)
 	}
@@ -79,10 +86,21 @@ func TestAuthenticateTokenRejectsTemporarilyDisabledJWTUser(t *testing.T) {
 	}
 }
 
-func TestAuthenticateTokenRejectsTemporarilyDisabledPATUser(t *testing.T) {
+func TestAuthenticateTokenRejectsEndedSession(t *testing.T) {
+	token := makeTestTokenForUser(t, "user-1", "")
+	accounts := staticAccounts(map[string]auth.AccountState{"user-1": {TokenVersion: 1}})
+
+	uid, errMsg := authenticateToken(token, nil, accounts, context.Background())
+	if uid != "" || !strings.Contains(errMsg, "session revoked") {
+		t.Fatalf("expected session revoked, got uid=%q err=%q", uid, errMsg)
+	}
+}
+
+func TestAuthenticateTokenRejectsSuspendedPATUser(t *testing.T) {
+	accounts := staticAccounts(map[string]auth.AccountState{"suspended-user": {Suspended: true}})
 	uid, errMsg := authenticateToken("mul_disabled", staticPATResolver{
-		"mul_disabled": "1d542296-17c6-484a-9914-dcee589be116",
-	}, context.Background())
+		"mul_disabled": "suspended-user",
+	}, accounts, context.Background())
 	if uid != "" {
 		t.Fatalf("expected no user ID, got %q", uid)
 	}

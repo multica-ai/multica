@@ -244,22 +244,22 @@ func TestRenewSessionToken_MintsSessionIDForLegacyToken(t *testing.T) {
 	}
 }
 
-// Renewal is the one place a live session's lifetime is decided after login,
-// so the disabled-user check has to live there too — otherwise disabling an
-// abusive account leaves their session renewing itself forever.
-func TestRenewSessionToken_RejectsDisabledUser(t *testing.T) {
-	// One of the ids on the standing emergency denylist.
-	var disabledID string
-	for id := range temporarilyDisabledUserIDs {
-		disabledID = id
-		break
-	}
+// Renewal keeps the session generation, so a session ended by an incident
+// response cannot be renewed into a current one.
+func TestRenewSessionToken_KeepsTokenVersion(t *testing.T) {
 	claims := sessionClaims(t, time.Now().Add(time.Hour), "sid-1")
-	claims["sub"] = disabledID
+	claims[TokenVersionClaim] = float64(3)
 
-	_, _, err := RenewSessionToken(claims)
-	if err != ErrTemporarilyDisabledUser {
-		t.Fatalf("err = %v, want ErrTemporarilyDisabledUser", err)
+	token, _, err := RenewSessionToken(claims)
+	if err != nil {
+		t.Fatalf("RenewSessionToken: %v", err)
+	}
+	renewed, err := ParseSessionToken(token)
+	if err != nil {
+		t.Fatalf("ParseSessionToken: %v", err)
+	}
+	if got := SessionTokenVersion(renewed); got != 3 {
+		t.Fatalf("token version = %d, want 3", got)
 	}
 }
 
