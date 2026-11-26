@@ -6008,6 +6008,13 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// An admin cleared this run's log. A late flush (a cancelled run's tail, a
+	// retried batch) must not put it back; the daemon does not retry here, so
+	// acknowledge and drop.
+	if task.TranscriptPurgedAt.Valid {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 
 	// Broadcast reach is deliberately unchanged: only issue- and chat-backed
 	// tasks streamed live messages before, and widening that to autopilot /

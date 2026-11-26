@@ -3,7 +3,8 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
@@ -18,12 +19,23 @@ vi.mock("./use-trace-issue-labels", () => ({
 }));
 
 const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const memberRole = vi.hoisted(() => ({ current: "member" as "owner" | "admin" | "member" }));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     getAgent: vi.fn().mockResolvedValue(null),
     listRuntimes: vi.fn().mockResolvedValue([]),
+    purgeTaskTranscript: vi.fn(),
   },
+}));
+
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useCurrentMember: () => ({ userId: "user-1", role: memberRole.current, member: null, isLoading: false }),
+}));
+
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: (_type: string, id: string) => (id === "user-1" ? "Ada" : "Unknown") }),
 }));
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
@@ -67,6 +79,7 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
     <div role="dialog">{children}</div>
   ),
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  SafeAreaLayer: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
@@ -219,15 +232,21 @@ const items: TimelineItem[] = [
   },
 ];
 
+function renderWithClient(ui: ReactElement, options: { locale?: SupportedLocale } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithI18n(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, options);
+}
+
 function renderDialog(
   dialogItems: TimelineItem[] = items,
   options: {
     task?: AgentTask;
     isLive?: boolean;
     locale?: SupportedLocale;
+    onTranscriptPurged?: () => void;
   } = {},
 ) {
-  return renderWithI18n(
+  return renderWithClient(
     <AgentTranscriptDialog
       open
       onOpenChange={vi.fn()}
@@ -235,6 +254,7 @@ function renderDialog(
       items={dialogItems}
       agentName="Codex"
       isLive={options.isLive}
+      onTranscriptPurged={options.onTranscriptPurged}
     />,
     { locale: options.locale },
   );
@@ -243,7 +263,9 @@ function renderDialog(
 beforeEach(() => {
   cleanup();
   copyTextMock.mockClear();
+  memberRole.current = "member";
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
+  vi.mocked(api.purgeTaskTranscript).mockReset();
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
     selectedFilterKeys: [],
@@ -437,7 +459,7 @@ describe("AgentTranscriptDialog", () => {
   // element was the one value that never changes. Identity belongs to the run,
   // and the header already carries it.
   it("states the agent once in the header, not on every prose row", () => {
-    renderWithI18n(
+    renderWithClient(
       <AgentTranscriptDialog
         open
         onOpenChange={vi.fn()}
@@ -1253,5 +1275,102 @@ describe("tool output completeness", () => {
 
     expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("clearing a run's log", () => {
+  it("lets an admin clear a finished run after confirming", async () => {
+    memberRole.current = "admin";
+    vi.mocked(api.purgeTaskTranscript).mockResolvedValue({
+      transcript_purged_at: "2026-06-08T09:00:00Z",
+      transcript_purged_by: "user-1",
+      messages_deleted: 3,
+    });
+    const onTranscriptPurged = vi.fn();
+    renderDialog(items, { onTranscriptPurged });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText(/can't be undone/)).toBeInTheDocument();
+    expect(api.purgeTaskTranscript).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirm).getByRole("button", { name: "Clear log" }));
+
+    expect(await screen.findByText(/Run log cleared by Ada/)).toBeInTheDocument();
+    expect(api.purgeTaskTranscript).toHaveBeenCalledWith("task-1");
+    expect(onTranscriptPurged).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear run log" })).not.toBeInTheDocument();
+  });
+
+  it("reads a cleared log from a response missing its fields as cleared by the caller", async () => {
+    memberRole.current = "admin";
+    vi.mocked(api.purgeTaskTranscript).mockResolvedValue({
+      transcript_purged_at: null,
+      transcript_purged_by: "",
+      messages_deleted: 0,
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear log" }));
+
+    const notice = await screen.findByText(/Run log cleared by Ada/);
+    expect(notice.textContent).not.toMatch(/Invalid Date/);
+  });
+
+  it("forgets a clear when the dialog moves on to another run", async () => {
+    memberRole.current = "admin";
+    vi.mocked(api.purgeTaskTranscript).mockResolvedValue({
+      transcript_purged_at: "2026-06-08T09:00:00Z",
+      transcript_purged_by: "user-1",
+      messages_deleted: 3,
+    });
+    const view = renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear log" }));
+    await screen.findByText(/Run log cleared by Ada/);
+
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <AgentTranscriptDialog open onOpenChange={vi.fn()} task={{ ...baseTask, id: "task-2" }} items={items} agentName="Codex" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText(/Run log cleared by/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("rich-content")).toBeInTheDocument();
+  });
+
+  it("keeps the log when the confirmation is cancelled", async () => {
+    memberRole.current = "owner";
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    expect(api.purgeTaskTranscript).not.toHaveBeenCalled();
+    expect(screen.getByTestId("rich-content")).toBeInTheDocument();
+  });
+
+  it("offers nothing to a plain member or on a run still going", () => {
+    renderDialog();
+    expect(screen.queryByRole("button", { name: "Clear run log" })).not.toBeInTheDocument();
+
+    cleanup();
+    memberRole.current = "admin";
+    renderDialog([], { task: liveTask, isLive: true });
+    expect(screen.queryByRole("button", { name: "Clear run log" })).not.toBeInTheDocument();
+  });
+
+  it("says who cleared a run that was cleared earlier", () => {
+    memberRole.current = "admin";
+    renderDialog(items, {
+      task: { ...baseTask, transcript_purged_at: "2026-06-08T09:00:00Z", transcript_purged_by: "user-1" },
+    });
+
+    expect(screen.getByText(/Run log cleared by Ada/)).toBeInTheDocument();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear run log" })).not.toBeInTheDocument();
   });
 });

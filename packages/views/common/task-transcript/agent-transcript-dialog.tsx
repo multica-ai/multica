@@ -28,7 +28,25 @@ import {
   Info,
   Coins,
   GitBranch,
+  Trash2,
 } from "@multica/ui/icons";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import { canPurgeRunLog, useCurrentMember } from "@multica/core/permissions";
+import { useActorName } from "@multica/core/workspace/hooks";
+import { chatKeys } from "@multica/core/chat/queries";
+import { issueKeys } from "@multica/core/issues/queries";
+import { agentTasksKeys } from "@multica/core/agents/queries";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -142,7 +160,13 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  /** Called after an admin clears this run's log, so a caller holding its own
+   * copy of the timeline can drop it. */
+  onTranscriptPurged?: () => void;
 }
+
+const NO_ITEMS: TimelineItem[] = [];
+const PURGEABLE_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -326,17 +350,33 @@ export function AgentTranscriptDialog({
   open,
   onOpenChange,
   task,
-  items,
+  items: itemsProp,
   agentName,
   isLive = false,
   finalFocus = false,
   headerSlot,
   contentState,
+  onTranscriptPurged,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const formatSpend = useFormatSpend();
   const locale = useLocale();
-  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
+  const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
+  const { userId, role } = useCurrentMember(wsId);
+  const { getActorName } = useActorName();
+  const [localPurge, setLocalPurge] = useState<{ taskId: string; at: string; by: string } | null>(null);
+  const purge = task.transcript_purged_at
+    ? { at: task.transcript_purged_at, by: task.transcript_purged_by ?? "" }
+    : localPurge?.taskId === task.id
+      ? localPurge
+      : null;
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const canPurge =
+    !purge && !isLive && PURGEABLE_STATUSES.has(task.status) && canPurgeRunLog({ userId, role }).allowed;
+  const items = purge ? NO_ITEMS : itemsProp;
+  const formatText = useTraceIssueLabels(wsId, task.issue_id, items, open);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -751,6 +791,29 @@ export function AgentTranscriptDialog({
       showCopied();
     });
   }, [displayRows, showCopied]);
+
+  const handlePurge = useCallback(() => {
+    setPurging(true);
+    api
+      .purgeTaskTranscript(task.id)
+      .then(
+        (res) => {
+          setLocalPurge({
+            taskId: task.id,
+            at: res.transcript_purged_at ?? new Date().toISOString(),
+            by: res.transcript_purged_by || (userId ?? ""),
+          });
+          setConfirmPurge(false);
+          queryClient.setQueryData(chatKeys.taskMessages(task.id), []);
+          void queryClient.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+          void queryClient.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+          onTranscriptPurged?.();
+          toast.success(t(($) => $.transcript.purge_done));
+        },
+        () => toast.error(t(($) => $.transcript.purge_failed)),
+      )
+      .finally(() => setPurging(false));
+  }, [task.id, userId, queryClient, wsId, onTranscriptPurged, t]);
 
   const handleToggleGroup = useCallback((seq: number) => {
     setExpandedGroups((prev) => {
@@ -1267,6 +1330,15 @@ export function AgentTranscriptDialog({
                 <CopyCheckIcon copied={copied} />
                 {copyTranscriptLabel}
               </DropdownMenuItem>
+              {canPurge && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => setConfirmPurge(true)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {t(($) => $.transcript.purge_log)}
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1280,6 +1352,14 @@ export function AgentTranscriptDialog({
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t(($) => $.transcript.waiting_events)}
+                  </div>
+                ) : purge ? (
+                  <div className="flex items-center gap-2">
+                    <Trash2 aria-hidden className="h-4 w-4" />
+                    {t(($) => $.transcript.purged_by, {
+                      name: getActorName("member", purge.by),
+                      time: formatRunTime(purge.at, locale),
+                    })}
                   </div>
                 ) : steps.length === 0 ? (
                   t(($) => $.transcript.no_data)
@@ -1346,6 +1426,21 @@ export function AgentTranscriptDialog({
             )}
           </AnimatePresence>
         </div>
+        <AlertDialog open={confirmPurge} onOpenChange={(next) => !purging && setConfirmPurge(next)}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.transcript.purge_confirm_title)}</AlertDialogTitle>
+              <AlertDialogDescription>{t(($) => $.transcript.purge_confirm_body)}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={purging}>{t(($) => $.transcript.purge_cancel)}</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={purging} aria-busy={purging} onClick={handlePurge}>
+                {purging && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t(($) => $.transcript.purge_confirm_action)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );
