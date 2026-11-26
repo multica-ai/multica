@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -164,6 +165,10 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 		params.AnchorSuffix = firstRunes(strings.ReplaceAll(req.AnchorSuffix, "\x00", ""), docCommentMaxContext)
 	}
 
+	if actorType == "agent" && !h.docRunMayReply(w, r, doc, root) {
+		return
+	}
+
 	params.AuthorType = actorType
 	params.AuthorID = parseUUID(actorID)
 	params.SourceTaskID, _ = h.docTaskContext(r, actorType)
@@ -181,6 +186,36 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 	service.NotifyDocComment(r.Context(), h.Queries, h.Bus, doc, root, comment, actorType, actorID)
 	h.triggerDocCommentAgents(r, doc, root, replyTo, comment, actorType, actorID)
 	writeJSON(w, http.StatusCreated, docCommentToResponse(comment))
+}
+
+// docRunMayReply keeps a doc discussion run in the discussion that asked for
+// it. The run was pointed at that one discussion; a reply anywhere else would
+// notify its participants and hand off to its agents on a discussion nobody
+// asked this agent into. Runs started from an issue or a chat are not tied to
+// a discussion and may reply in any discussion they can reach.
+func (h *Handler) docRunMayReply(w http.ResponseWriter, r *http.Request, doc db.Doc, root db.DocComment) bool {
+	taskUUID, err := util.ParseUUID(r.Header.Get("X-Task-ID"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, "agent replies need the run that writes them")
+		return false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusForbidden, "agent replies need the run that writes them")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to create comment")
+		}
+		return false
+	}
+	if !task.DocID.Valid {
+		return true
+	}
+	if task.DocID != doc.ID || task.DocThreadID != root.ID {
+		writeError(w, http.StatusForbidden, "a doc discussion run can only reply in the discussion that asked for it")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) loadDocComment(w http.ResponseWriter, r *http.Request, doc db.Doc) (db.DocComment, bool) {

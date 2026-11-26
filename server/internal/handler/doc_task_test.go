@@ -312,7 +312,7 @@ func TestDocCommentRunWithoutReplyPostsItsOutput(t *testing.T) {
 		return dbfx.Count(t, "SELECT count(*) FROM doc_comment WHERE doc_id = $1 AND parent_id = $2 AND author_type = 'agent' AND author_id = $3", doc.ID, root.ID, agentID)
 	}
 
-	// A comment the run left in another discussion does not answer this one.
+	// The run cannot answer in another discussion instead of this one.
 	var other DocCommentResponse
 	testutil.Call(t, testHandler.CreateDocComment, withURLParam(newRequest("POST", "/comments", map[string]any{
 		"content": "Unrelated", "anchor_quote": "First",
@@ -321,7 +321,7 @@ func TestDocCommentRunWithoutReplyPostsItsOutput(t *testing.T) {
 	elsewhere.Header.Set("X-Actor-Source", "task_token")
 	elsewhere.Header.Set("X-Agent-ID", agentID)
 	elsewhere.Header.Set("X-Task-ID", tasks[0].ID)
-	testutil.Call(t, testHandler.CreateDocComment, elsewhere).Want(http.StatusCreated)
+	testutil.Call(t, testHandler.CreateDocComment, elsewhere).Want(http.StatusForbidden)
 	notified := func() int {
 		return dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE recipient_id = $1 AND type = 'doc_comment' AND details->>'thread_id' = $2", testUserID, root.ID)
 	}
@@ -552,5 +552,59 @@ func TestDocTaskRunsHideDetailsOfAgentsTheViewerCannotSee(t *testing.T) {
 	}
 	if running != 1 {
 		t.Fatalf("the running run must stay listed behind 201 newer finished runs, have %d running", running)
+	}
+}
+
+// A doc discussion run replies only in the discussion that asked for it: not
+// in another discussion on the same doc, and not on another doc.
+func TestDocCommentRunRepliesOnlyInItsDiscussion(t *testing.T) {
+	doc := createDocForTest(t)
+	other := createDocForTest(t)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, id := range []string{doc.ID, other.ID} {
+			testPool.Exec(ctx, "DELETE FROM agent_task_queue WHERE doc_id = $1", id)
+			testPool.Exec(ctx, "DELETE FROM doc_comment WHERE doc_id = $1", id)
+		}
+	})
+	agentID := createHandlerTestAgent(t, fmt.Sprintf("Doc Scoped %d", time.Now().UnixNano()), nil)
+	post := func(docID string, body map[string]any) DocCommentResponse {
+		t.Helper()
+		var c DocCommentResponse
+		testutil.Call(t, testHandler.CreateDocComment, withURLParam(newRequest("POST", "/comments", body), "id", docID)).Want(http.StatusCreated).JSON(&c)
+		return c
+	}
+	asked := post(doc.ID, map[string]any{"content": "Fix this [@A](mention://agent/" + agentID + ")", "anchor_quote": "Original"})
+	tasks := docTasksFor(t, doc.ID)
+	if len(tasks) != 1 || tasks[0].ThreadID != asked.ID {
+		t.Fatalf("want one run on the discussion, have %+v", tasks)
+	}
+	run := tasks[0].ID
+	humanReply := post(doc.ID, map[string]any{"content": "Context for you.", "parent_id": asked.ID})
+	elsewhere := post(doc.ID, map[string]any{"content": "Unrelated", "anchor_quote": "First"})
+	otherDoc := post(other.ID, map[string]any{"content": "Elsewhere", "anchor_quote": "Original"})
+
+	reply := func(docID, parentID string, want int) {
+		t.Helper()
+		req := withURLParam(newRequest("POST", "/comments", map[string]any{
+			"content": "Reply from the run", "parent_id": parentID,
+		}), "id", docID)
+		req.Header.Set("X-Actor-Source", "task_token")
+		req.Header.Set("X-Agent-ID", agentID)
+		req.Header.Set("X-Task-ID", run)
+		testutil.Call(t, testHandler.CreateDocComment, req).Want(want)
+	}
+	reply(doc.ID, asked.ID, http.StatusCreated)
+	reply(doc.ID, humanReply.ID, http.StatusCreated)
+	reply(doc.ID, elsewhere.ID, http.StatusForbidden)
+	reply(other.ID, otherDoc.ID, http.StatusForbidden)
+
+	for _, id := range []string{elsewhere.ID, otherDoc.ID} {
+		if n := dbfx.Count(t, "SELECT count(*) FROM doc_comment WHERE parent_id = $1", id); n != 0 {
+			t.Fatalf("a refused reply must not be written, discussion %s has %d replies", id, n)
+		}
+	}
+	if n := dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE doc_id = $1 AND id <> $2", doc.ID, run); n != 0 {
+		t.Fatalf("a refused reply must not hand off, have %d other runs", n)
 	}
 }
