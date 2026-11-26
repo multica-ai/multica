@@ -1303,6 +1303,44 @@ describe("clearing a run's log", () => {
     expect(screen.queryByRole("button", { name: "Clear run log" })).not.toBeInTheDocument();
   });
 
+  it("reads a cleared log from a response missing its fields as cleared by the caller", async () => {
+    memberRole.current = "admin";
+    vi.mocked(api.purgeTaskTranscript).mockResolvedValue({
+      transcript_purged_at: null,
+      transcript_purged_by: "",
+      messages_deleted: 0,
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear log" }));
+
+    const notice = await screen.findByText(/Run log cleared by Ada/);
+    expect(notice.textContent).not.toMatch(/Invalid Date/);
+  });
+
+  it("forgets a clear when the dialog moves on to another run", async () => {
+    memberRole.current = "admin";
+    vi.mocked(api.purgeTaskTranscript).mockResolvedValue({
+      transcript_purged_at: "2026-06-08T09:00:00Z",
+      transcript_purged_by: "user-1",
+      messages_deleted: 3,
+    });
+    const view = renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Clear run log" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear log" }));
+    await screen.findByText(/Run log cleared by Ada/);
+
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <AgentTranscriptDialog open onOpenChange={vi.fn()} task={{ ...baseTask, id: "task-2" }} items={items} agentName="Codex" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText(/Run log cleared by/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("rich-content")).toBeInTheDocument();
+  });
+
   it("keeps the log when the confirmation is cancelled", async () => {
     memberRole.current = "owner";
     renderDialog();

@@ -365,11 +365,12 @@ export function AgentTranscriptDialog({
   const queryClient = useQueryClient();
   const { userId, role } = useCurrentMember(wsId);
   const { getActorName } = useActorName();
-  const [purge, setPurge] = useState<{ at: string; by: string } | null>(() =>
-    task.transcript_purged_at
-      ? { at: task.transcript_purged_at, by: task.transcript_purged_by ?? "" }
-      : null,
-  );
+  const [localPurge, setLocalPurge] = useState<{ taskId: string; at: string; by: string } | null>(null);
+  const purge = task.transcript_purged_at
+    ? { at: task.transcript_purged_at, by: task.transcript_purged_by ?? "" }
+    : localPurge?.taskId === task.id
+      ? localPurge
+      : null;
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purging, setPurging] = useState(false);
   const canPurge =
@@ -797,7 +798,11 @@ export function AgentTranscriptDialog({
       .purgeTaskTranscript(task.id)
       .then(
         (res) => {
-          setPurge({ at: res.transcript_purged_at, by: res.transcript_purged_by });
+          setLocalPurge({
+            taskId: task.id,
+            at: res.transcript_purged_at ?? new Date().toISOString(),
+            by: res.transcript_purged_by || (userId ?? ""),
+          });
           setConfirmPurge(false);
           queryClient.setQueryData(chatKeys.taskMessages(task.id), []);
           void queryClient.invalidateQueries({ queryKey: issueKeys.tasksAll() });
@@ -808,7 +813,7 @@ export function AgentTranscriptDialog({
         () => toast.error(t(($) => $.transcript.purge_failed)),
       )
       .finally(() => setPurging(false));
-  }, [task.id, queryClient, wsId, onTranscriptPurged, t]);
+  }, [task.id, userId, queryClient, wsId, onTranscriptPurged, t]);
 
   const handleToggleGroup = useCallback((seq: number) => {
     setExpandedGroups((prev) => {

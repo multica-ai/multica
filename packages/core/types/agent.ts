@@ -553,7 +553,7 @@ export interface ContextReceipt {
 
 /** What clearing a run's log leaves on the run. */
 export interface TaskTranscriptPurge {
-  transcript_purged_at: string;
+  transcript_purged_at: string | null;
   transcript_purged_by: string;
   messages_deleted: number;
 }

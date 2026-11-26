@@ -458,6 +458,8 @@ import {
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
+  TaskTranscriptPurgeSchema,
+  EMPTY_TASK_TRANSCRIPT_PURGE,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -3477,7 +3479,10 @@ export class ApiClient {
 
   /** Clears a finished run's log. Workspace owners and admins only. */
   async purgeTaskTranscript(taskId: string): Promise<TaskTranscriptPurge> {
-    return this.fetch(`/api/tasks/${taskId}/messages`, { method: "DELETE" });
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`, { method: "DELETE" });
+    return parseWithFallback<TaskTranscriptPurge>(raw, TaskTranscriptPurgeSchema, EMPTY_TASK_TRANSCRIPT_PURGE, {
+      endpoint: "DELETE /api/tasks/:id/messages",
+    });
   }
 
   async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {

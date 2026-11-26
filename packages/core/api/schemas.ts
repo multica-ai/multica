@@ -2665,6 +2665,20 @@ export const TaskContextReceiptResponseSchema = z.object({
   recorded_at: z.string().optional(),
 }).loose();
 
+// `DELETE /api/tasks/:id/messages` only answers 200 once the log is gone, so a
+// malformed body must still read as cleared; the caller fills the gaps.
+export const TaskTranscriptPurgeSchema = z.object({
+  transcript_purged_at: z.string().nullable().catch(null),
+  transcript_purged_by: z.string().catch(""),
+  messages_deleted: z.number().catch(0),
+}).loose();
+
+export const EMPTY_TASK_TRANSCRIPT_PURGE = {
+  transcript_purged_at: null,
+  transcript_purged_by: "",
+  messages_deleted: 0,
+};
+
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
 // UI deletes a message from cache or restores text into the input.

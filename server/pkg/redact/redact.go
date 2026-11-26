@@ -196,8 +196,10 @@ func redactText(s string, depth int) string {
 //
 // A run may be wrapped across lines, as GNU base64 prints it at 76 columns,
 // and may be cut mid-quantum by output truncation. Both alphabets are
-// accepted.
-var base64Run = regexp.MustCompile(`[A-Za-z0-9+/_-]{20,}={0,2}(?:\r?\n[A-Za-z0-9+/_-]{4,}={0,2})*`)
+// accepted. Padding only ever ends an encoding, so a run stops there; without
+// padding the run can still swallow a neighbouring word or line, which
+// textHidesSecret tolerates.
+var base64Run = regexp.MustCompile(`[A-Za-z0-9+/_-]{20,}(?:\r?\n[A-Za-z0-9+/_-]{4,})*={0,2}`)
 
 const (
 	base64Placeholder = "[REDACTED BASE64 SECRET]"
@@ -224,9 +226,8 @@ func base64HidesSecret(run string, depth int) bool {
 	}
 	compact = base64URLAlphabet.Replace(compact)
 	// A run glued to a preceding word (`payload_<base64>`) decodes that word
-	// to a few junk bytes, and starts off the 4-character grid unless the
-	// word's length is a multiple of 4. Each alignment is tried, and the junk
-	// is skipped by decodedText.
+	// to junk bytes, and starts off the 4-character grid unless the word's
+	// length is a multiple of 4. Each alignment is tried.
 	for shift := 0; shift < 4; shift++ {
 		body := compact[shift:]
 		body = body[:len(body)-len(body)%4]
@@ -234,8 +235,7 @@ func base64HidesSecret(run string, depth int) bool {
 		if err != nil {
 			continue
 		}
-		text, ok := decodedText(decoded)
-		if ok && redactText(text, depth+1) != text {
+		if textHidesSecret(decoded, depth) {
 			return true
 		}
 	}
@@ -258,31 +258,34 @@ func mixedCase(s string) bool {
 	return false
 }
 
-const (
-	// Junk a glued prefix of up to 64 characters decodes to.
-	maxBase64Junk = 48
-	// Shorter than this, decoded text is too short to hold a secret.
-	minBase64Text = 12
-)
+// Shorter than this, decoded text is too short to hold a secret.
+const minBase64Text = 12
 
-// decodedText returns the text b decodes to after up to maxBase64Junk leading
-// junk bytes: UTF-8 with no control characters other than whitespace. That is
-// what a decoded secret looks like, and what binary or a misaligned decode
-// almost never does past its first bytes.
-func decodedText(b []byte) (string, bool) {
+// textHidesSecret scans each stretch of text in b, UTF-8 with no control
+// characters other than whitespace, for a secret. Words glued to the run or
+// lines swallowed with it decode to junk bytes around the real text, so the
+// junk splits the stretches rather than disqualifying the run; binary rarely
+// holds a stretch long enough to scan, and never one that matches a secret.
+func textHidesSecret(b []byte, depth int) bool {
 	start := 0
-	for i := 0; i < len(b); {
-		r, size := utf8.DecodeRune(b[i:])
-		if (r == utf8.RuneError && size == 1) || (r < 0x20 && r != '\n' && r != '\r' && r != '\t') || r == 0x7f {
-			if i >= maxBase64Junk {
-				return "", false
+	for i := 0; i <= len(b); {
+		size := 1
+		if i < len(b) {
+			var r rune
+			r, size = utf8.DecodeRune(b[i:])
+			if (r != utf8.RuneError || size > 1) && (r >= 0x20 || r == '\n' || r == '\r' || r == '\t') && r != 0x7f {
+				i += size
+				continue
 			}
-			start = i + size
+		}
+		if i-start >= minBase64Text {
+			text := string(b[start:i])
+			if redactText(text, depth+1) != text {
+				return true
+			}
 		}
 		i += size
+		start = i
 	}
-	if len(b)-start < minBase64Text {
-		return "", false
-	}
-	return string(b[start:]), true
+	return false
 }

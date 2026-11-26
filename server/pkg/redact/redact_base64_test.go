@@ -60,6 +60,51 @@ func TestRedactBase64EncodedSecrets(t *testing.T) {
 	}
 }
 
+// encodeAs returns the base64 of s grown by newlines until the encoding ends
+// with padding or, when padded is false, with none.
+func encodeAs(t *testing.T, s string, padded bool) string {
+	t.Helper()
+	for (len(s)%3 != 0) != padded {
+		s += "\n"
+	}
+	enc := base64.StdEncoding.EncodeToString([]byte(s))
+	if strings.HasSuffix(enc, "=") != padded {
+		t.Fatalf("encodeAs(padded=%v) = %q", padded, enc)
+	}
+	return enc
+}
+
+// Tool output rarely ends at the encoded secret: another encoded value, a
+// status word or a path follows on the next line, or a suffix on the same one.
+func TestRedactBase64SecretsNextToOtherOutput(t *testing.T) {
+	t.Parallel()
+	first := encodeAs(t, envFile(), true)
+	second := encodeAs(t, "GITHUB_TOKEN="+asm("ghp_", "AbCdEfGhIjKlMnOpQrSt", "UvWxYz0123456789")+"\n", true)
+	unpadded := encodeAs(t, envFile(), false)
+	path := "server/internal/handler/task_transcript_purge_with_a_long_descriptive_name.go"
+
+	cases := map[string]struct {
+		input   string
+		encoded []string
+	}{
+		"two padded lines":            {first + "\n" + second + "\n", []string{first, second}},
+		"padded, then a word":         {first + "\ndone_running\n", []string{first}},
+		"unpadded, then a path":       {unpadded + "\nserver/handler\n", []string{unpadded}},
+		"unpadded, glued suffix":      {unpadded + "_tail", []string{unpadded}},
+		"wrapped, then a word":        {wrap(unpadded, 76) + "\nexit_code_zero\n", []string{wrap(unpadded, 76)}},
+		"after a long path line":      {path + "\n" + first + "\n", []string{first}},
+		"glued to a long prefix word": {strings.Repeat("prefix_", 12) + unpadded, []string{unpadded}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, encoded := range tc.encoded {
+				assertBase64Redacted(t, tc.input, encoded)
+			}
+		})
+	}
+}
+
 func TestRedactBase64LeavesHarmlessRunsAlone(t *testing.T) {
 	t.Parallel()
 	binary := make([]byte, 4096)

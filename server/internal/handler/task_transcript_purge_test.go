@@ -83,6 +83,19 @@ func TestPurgeTaskTranscript_AdminClearsFinishedRun(t *testing.T) {
 	if n := taskMessageCount(t, taskID); n != 0 {
 		t.Fatalf("late flush wrote %d rows into a cleared log", n)
 	}
+
+	// Clearing again keeps the first record.
+	again := purgeTranscript(t, taskID, testUserID)
+	if again.Code != http.StatusOK {
+		t.Fatalf("second purge = %d %s", again.Code, again.Body.String())
+	}
+	var second TaskTranscriptPurgeResponse
+	if err := json.Unmarshal(again.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.TranscriptPurgedAt != resp.TranscriptPurgedAt || second.MessagesDeleted != 0 {
+		t.Errorf("second purge = %+v, first cleared at %s", second, resp.TranscriptPurgedAt)
+	}
 }
 
 func TestPurgeTaskTranscript_Refusals(t *testing.T) {
