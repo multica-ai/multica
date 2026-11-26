@@ -59,6 +59,7 @@ import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./
 import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
 import { createBlockInsertSuggestion } from "./block-insert-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
+import { BulkTextInputExtension } from "./bulk-text-input";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
 import { RICH_TABLE_CHROME_ATTRIBUTE } from "../../rich-content/rich-table";
@@ -223,6 +224,7 @@ export function createEditorExtensions(
     // Must precede the mention and slash pickers: it supplies the "the user
     // typed this trigger" signal their `shouldShow` reads (MUL-5429).
     SuggestionTriggerArmingExtension,
+    BulkTextInputExtension,
     BaseMentionExtension.configure({
       HTMLAttributes: { class: "mention" },
       ...(options.disableMentions
