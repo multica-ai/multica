@@ -877,6 +877,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
 	}
 
+	labels, err := attachAutopilotLabels(ctx, qtx, issue, currentAutopilot.LabelIds)
+	if err != nil {
+		return err
+	}
+
 	// Fan out the default subscriber template inside the same tx as the
 	// issue insert, before EventIssueCreated fires — so notification
 	// listeners see the full subscriber set on the first event instead of
@@ -921,13 +926,15 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// squad autopilots, this is what triggers shouldEnqueueSquadLeaderOnAssign
 	// → enqueueSquadLeaderTask — no separate squad-routing code needed here.
 	prefix := s.getIssuePrefix(ap.WorkspaceID)
+	issuePayload := IssueToMapResolved(ctx, s.Queries, issue, prefix)
+	issuePayload["labels"] = issueLabelsToMaps(labels)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
 		ActorType:   "agent",
 		ActorID:     util.UUIDToString(leader.ID),
 		Payload: map[string]any{
-			"issue": IssueToMapResolved(ctx, s.Queries, issue, prefix),
+			"issue": issuePayload,
 		},
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
@@ -986,6 +993,55 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+// attachAutopilotLabels attaches the autopilot's labels to the issue it just
+// created, in the same transaction, so the issue is never visible unlabeled.
+// The attach query inserts nothing for a label that no longer exists, so a
+// label deleted after the autopilot was saved is skipped rather than failing
+// the run.
+// It returns the labels now on the issue.
+func attachAutopilotLabels(ctx context.Context, qtx *db.Queries, issue db.Issue, labelIDs []pgtype.UUID) ([]db.IssueLabel, error) {
+	if len(labelIDs) == 0 {
+		return nil, nil
+	}
+	for _, labelID := range labelIDs {
+		if err := qtx.AttachLabelToIssueOnCreate(ctx, db.AttachLabelToIssueOnCreateParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return nil, fmt.Errorf("attach autopilot label: %w", err)
+		}
+	}
+	labels, err := qtx.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list autopilot issue labels: %w", err)
+	}
+	return labels, nil
+}
+
+// issueLabelsToMaps mirrors the handler's LabelResponse so the issue:created
+// payload carries the same label shape as a manually created issue.
+func issueLabelsToMaps(labels []db.IssueLabel) []map[string]any {
+	out := make([]map[string]any, len(labels))
+	for i, l := range labels {
+		out[i] = map[string]any{
+			"id":            util.UUIDToString(l.ID),
+			"workspace_id":  util.UUIDToString(l.WorkspaceID),
+			"resource_type": l.ResourceType,
+			"name":          l.Name,
+			"description":   l.Description,
+			"color":         l.Color,
+			"usage_count":   0,
+			"created_at":    util.TimestampToString(l.CreatedAt),
+			"updated_at":    util.TimestampToString(l.UpdatedAt),
+		}
+	}
+	return out
 }
 
 // notifyAutopilotSubscribersOnCreate delivers an inbox_item to each template

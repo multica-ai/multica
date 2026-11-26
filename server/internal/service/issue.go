@@ -402,7 +402,7 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
 	// are attached to the issue below, inside this same transaction, and
 	// echoed back as the authoritative snapshot in the result.
-	labels, err := validateIssueLabels(ctx, qtx, p.WorkspaceID, p.LabelIDs)
+	labels, err := ValidateIssueLabels(ctx, qtx, p.WorkspaceID, p.LabelIDs)
 	if err != nil {
 		return IssueCreateResult{}, err
 	}
@@ -732,7 +732,7 @@ func validateIssueCreateProperties(ctx context.Context, tx pgx.Tx, qtx *db.Queri
 // surfaces as ErrIssueLabelNotFound instead of a silent no-op insert. Invalid
 // (zero) UUIDs are skipped. The label count per issue is small, so a GetLabel
 // per distinct id is fine and avoids introducing a new batch query.
-func validateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) ([]db.IssueLabel, error) {
+func ValidateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) ([]db.IssueLabel, error) {
 	if len(labelIDs) == 0 {
 		return nil, nil
 	}

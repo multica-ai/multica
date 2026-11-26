@@ -765,6 +765,24 @@ func (q *Queries) ListLabelsForSkills(ctx context.Context, arg ListLabelsForSkil
 	return items, nil
 }
 
+const removeLabelFromAutopilots = `-- name: RemoveLabelFromAutopilots :exec
+UPDATE autopilot SET label_ids = array_remove(label_ids, $1::uuid)
+WHERE workspace_id = $2 AND $1::uuid = ANY(label_ids)
+`
+
+type RemoveLabelFromAutopilotsParams struct {
+	LabelID     pgtype.UUID `json:"label_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Autopilot default labels live in an array column rather than a junction
+// table. updated_at is left alone: this is catalog cleanup, not an edit, and
+// an open editor drops unknown ids before it saves.
+func (q *Queries) RemoveLabelFromAutopilots(ctx context.Context, arg RemoveLabelFromAutopilotsParams) error {
+	_, err := q.db.Exec(ctx, removeLabelFromAutopilots, arg.LabelID, arg.WorkspaceID)
+	return err
+}
+
 const updateLabel = `-- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE($3, name),

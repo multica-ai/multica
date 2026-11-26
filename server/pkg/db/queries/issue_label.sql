@@ -55,6 +55,13 @@ DELETE FROM agent_to_label WHERE label_id = $1;
 -- name: DeleteSkillLabelAssignmentsByLabel :exec
 DELETE FROM skill_to_label WHERE label_id = $1;
 
+-- name: RemoveLabelFromAutopilots :exec
+-- Autopilot default labels live in an array column rather than a junction
+-- table. updated_at is left alone: this is catalog cleanup, not an edit, and
+-- an open editor drops unknown ids before it saves.
+UPDATE autopilot SET label_ids = array_remove(label_ids, @label_id::uuid)
+WHERE workspace_id = @workspace_id AND @label_id::uuid = ANY(label_ids);
+
 -- name: DeleteAgentLabelAssignmentsByAgent :exec
 DELETE FROM agent_to_label WHERE agent_id = $1;
 
