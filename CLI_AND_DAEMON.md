@@ -1317,7 +1317,7 @@ multica squad briefs <squad-id> --agent <agent-name-or-id>
 # Record a leader evaluation on an issue
 multica squad activity <issue-id> action --reason "Delegated implementation to Frontend Agent"
 
-# Archive a squad (transfers active issues/autopilots to the former leader)
+# Archive a squad (transfers active issues, autopilots, and workflow steps to the former leader)
 multica squad delete <squad-id>
 ```
 
