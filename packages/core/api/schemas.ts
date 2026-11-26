@@ -2559,6 +2559,7 @@ export const AgentTaskSchema = z.object({
   supplement_capability: z.string().optional().catch(undefined),
   supplement_comment_ids: OptionalStringArraySchema,
   can_supplement: z.boolean().optional().catch(undefined),
+  code_change_files: z.number().int().nonnegative().optional().catch(undefined),
   trigger_summary: z.string().optional(),
   kind: z.string().optional(),
   work_dir: z.string().optional().catch(undefined),

@@ -233,3 +233,37 @@ func TestTaskCodeChanges_RemovedWithIssueTaskBatchAndWorkspace(t *testing.T) {
 		t.Fatalf("code changes survived workspace teardown (%d rows)", n)
 	}
 }
+
+// The execution log carries each finished run's changed-file count, so the
+// UI can hide the code-changes entry on runs that changed nothing.
+func TestTaskCodeChanges_FileCountOnExecutionLog(t *testing.T) {
+	issueID, changedID := codeChangeFixture(t, "count")
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `SELECT agent_id::text, runtime_id::text FROM agent_task_queue WHERE id = $1`, changedID).Scan(&agentID, &runtimeID)
+	emptyID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "running"})
+	noReportID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "completed", "completed_at": testutil.Raw("now()")})
+	runningID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "running"})
+	dbfx.Cleanup(t, `DELETE FROM task_code_change WHERE task_id = ANY($1::uuid[])`, []string{emptyID, runningID})
+
+	second := sampleCodeChangeRepo("")
+	second["path"] = "lib"
+	second["files"] = []any{map[string]any{"path": "util.go", "status": "added", "additions": 4}}
+	reportCodeChanges(t, changedID, map[string]any{"repos": []any{sampleCodeChangeRepo(""), second}}).Want(http.StatusNoContent)
+	reportCodeChanges(t, emptyID, map[string]any{"repos": []any{}}).Want(http.StatusNoContent)
+	reportCodeChanges(t, runningID, map[string]any{"repos": []any{sampleCodeChangeRepo("")}}).Want(http.StatusNoContent)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = ANY($1::uuid[])`, []string{changedID, emptyID})
+
+	var runs []AgentTaskResponse
+	testutil.Call(t, testHandler.ListTasksByIssue, withURLParam(newRequest(http.MethodGet, "/api/issues/"+issueID+"/tasks", nil), "id", issueID)).
+		Want(http.StatusOK).JSON(&runs)
+	got := map[string]int{}
+	for _, run := range runs {
+		got[run.ID] = run.CodeChangeFiles
+	}
+	want := map[string]int{changedID: 3, emptyID: 0, noReportID: 0, runningID: 0}
+	for id, n := range want {
+		if c, ok := got[id]; !ok || c != n {
+			t.Errorf("task %s: code_change_files = %d (listed %v), want %d", id, c, ok, n)
+		}
+	}
+}

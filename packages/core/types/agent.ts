@@ -403,6 +403,12 @@ export interface AgentTask {
    * trigger/coalesced union; an explicitly empty array is still authoritative.
    */
   delivered_comment_ids?: string[];
+  /**
+   * Files listed in the run's code-change snapshot, across repositories. Set
+   * on finished execution-log rows only; absent when the run changed nothing,
+   * has no snapshot, or the server predates it.
+   */
+  code_change_files?: number;
   /** Exact run-scoped live-input capability negotiated at this task's start. */
   supplement_capability?: string;
   /** Ordinary historical comments explicitly bound to this run, in send order. */

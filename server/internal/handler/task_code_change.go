@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -175,4 +177,38 @@ func (h *Handler) GetTaskCodeChanges(w http.ResponseWriter, r *http.Request) {
 	updatedAt := row.UpdatedAt.Time.UTC().Format(time.RFC3339)
 	resp.UpdatedAt = &updatedAt
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskCodeChangeFiles sets CodeChangeFiles on finished execution-log
+// rows in one query. Like usage it is display metadata: on error every row
+// keeps zero and the code-changes entry is simply not shown.
+func (h *Handler) hydrateTaskCodeChangeFiles(ctx context.Context, workspaceID pgtype.UUID, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
+	if len(tasks) != len(resp) {
+		return
+	}
+	taskIDs := make([]pgtype.UUID, 0, len(tasks))
+	for _, t := range tasks {
+		switch t.Status {
+		case "completed", "failed", "cancelled":
+			taskIDs = append(taskIDs, t.ID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return
+	}
+	rows, err := h.Queries.ListTaskCodeChangeFileCounts(ctx, db.ListTaskCodeChangeFileCountsParams{
+		WorkspaceID: workspaceID,
+		TaskIds:     taskIDs,
+	})
+	if err != nil {
+		slog.Debug("list task code change file counts failed", "error", err)
+		return
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[uuidToString(row.TaskID)] = int(row.FileCount)
+	}
+	for i := range resp {
+		resp[i].CodeChangeFiles = counts[resp[i].ID]
+	}
 }

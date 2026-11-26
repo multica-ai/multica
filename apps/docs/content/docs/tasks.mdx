@@ -67,7 +67,7 @@ While an agent is working, the issue header also carries a live chip such as "En
 In the execution log you can:
 
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
-- Click **View code changes** on a finished run to see, file by file, what it changed in the git repositories in its working directory: commits, uncommitted edits and new files. The daemon records this when the run ends, so runs from an older daemon have none.
+- Click **View code changes** on a finished run to see, file by file, what it changed in the git repositories in its working directory: commits, uncommitted edits and new files. The daemon records this when the run ends. The button appears only on runs that changed at least one file, so runs that changed nothing, and runs from an older daemon, don't show it.
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 

@@ -36,6 +36,48 @@ func (q *Queries) GetTaskCodeChange(ctx context.Context, taskID pgtype.UUID) (Ge
 	return i, err
 }
 
+const listTaskCodeChangeFileCounts = `-- name: ListTaskCodeChangeFileCounts :many
+SELECT c.task_id,
+       COALESCE(SUM(jsonb_array_length(COALESCE(r.repo->'files', '[]'::jsonb))), 0)::int AS file_count
+FROM task_code_change c
+LEFT JOIN LATERAL jsonb_array_elements(c.repos) AS r(repo) ON true
+WHERE c.workspace_id = $1
+  AND c.task_id = ANY($2::uuid[])
+GROUP BY c.task_id
+`
+
+type ListTaskCodeChangeFileCountsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	TaskIds     []pgtype.UUID `json:"task_ids"`
+}
+
+type ListTaskCodeChangeFileCountsRow struct {
+	TaskID    pgtype.UUID `json:"task_id"`
+	FileCount int32       `json:"file_count"`
+}
+
+// Changed-file count per run for the execution log, one batch for the listed
+// tasks. Runs with no snapshot have no row.
+func (q *Queries) ListTaskCodeChangeFileCounts(ctx context.Context, arg ListTaskCodeChangeFileCountsParams) ([]ListTaskCodeChangeFileCountsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskCodeChangeFileCounts, arg.WorkspaceID, arg.TaskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskCodeChangeFileCountsRow{}
+	for rows.Next() {
+		var i ListTaskCodeChangeFileCountsRow
+		if err := rows.Scan(&i.TaskID, &i.FileCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTaskCodeChange = `-- name: UpsertTaskCodeChange :exec
 INSERT INTO task_code_change (task_id, workspace_id, issue_id, repos, repos_truncated)
 VALUES ($1, $2, $3, $4, $5)

@@ -592,7 +592,7 @@ function PastRow({ task, issueId, showIssue = false }: { task: AgentTask; issueI
           </RowStatus>
           <RowActions>
             <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-            <CodeChangesButton task={task} />
+            {(task.code_change_files ?? 0) > 0 && <CodeChangesButton task={task} />}
             {canRetryRun(task) && <RetryRunButton task={task} issueId={issueId} />}
           </RowActions>
         </div>
