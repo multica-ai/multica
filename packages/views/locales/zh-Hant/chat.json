@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "模型",
+    "reasoning": "推理",
+    "inherit_model": "智能體預設值 ({{model}})",
+    "inherit_reasoning": "智能體預設值 ({{level}})",
+    "runtime_default": "執行階段預設值",
+    "inherited": "已繼承",
+    "overridden": "已覆寫",
+    "unavailable": "無法使用",
+    "stale": "此選項已不受支援。請選擇目前可用的選項。",
+    "save_failed": "無法儲存聊天設定。"
+  },
   "page": {
     "title": "聊天",
     "no_agent_title": "還沒有可以對話的 AI 代理",

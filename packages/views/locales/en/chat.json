@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "Model",
+    "reasoning": "Reasoning",
+    "inherit_model": "Agent default ({{model}})",
+    "inherit_reasoning": "Agent default ({{level}})",
+    "runtime_default": "Runtime default",
+    "inherited": "Inherited",
+    "overridden": "Overridden",
+    "unavailable": "Unavailable",
+    "stale": "This selection is no longer supported. Choose a current option.",
+    "save_failed": "Couldn't save chat settings."
+  },
   "page": {
     "title": "Chat",
     "no_agent_title": "No agent to chat with yet",

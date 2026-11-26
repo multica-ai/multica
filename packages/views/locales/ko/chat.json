@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "모델",
+    "reasoning": "추론",
+    "inherit_model": "에이전트 기본값 ({{model}})",
+    "inherit_reasoning": "에이전트 기본값 ({{level}})",
+    "runtime_default": "런타임 기본값",
+    "inherited": "상속됨",
+    "overridden": "재정의됨",
+    "unavailable": "사용할 수 없음",
+    "stale": "이 선택은 더 이상 지원되지 않습니다. 현재 옵션을 선택하세요.",
+    "save_failed": "채팅 설정을 저장하지 못했습니다."
+  },
   "page": {
     "title": "채팅",
     "no_agent_title": "아직 대화할 에이전트가 없습니다",

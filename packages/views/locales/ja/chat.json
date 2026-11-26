@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "モデル",
+    "reasoning": "推論",
+    "inherit_model": "エージェントの既定値 ({{model}})",
+    "inherit_reasoning": "エージェントの既定値 ({{level}})",
+    "runtime_default": "ランタイムの既定値",
+    "inherited": "継承",
+    "overridden": "上書き",
+    "unavailable": "利用不可",
+    "stale": "この設定は現在サポートされていません。別の設定を選んでください。",
+    "save_failed": "チャット設定を保存できませんでした。"
+  },
   "page": {
     "title": "チャット",
     "no_agent_title": "チャットできるエージェントはまだいません",

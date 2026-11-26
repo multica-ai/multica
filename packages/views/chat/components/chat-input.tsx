@@ -143,6 +143,8 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
+  /** Per-session execution controls in the composer's bottom action gutter. */
+  executionSelection?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
   /** The issue or project the page behind the composer shows. When set, the
@@ -199,6 +201,7 @@ export function ChatInput({
   agentRuntimeRequired,
   agentName,
   leftAdornment,
+  executionSelection,
   contextItems,
   pageContext,
   projects = [],
@@ -774,7 +777,7 @@ export function ChatInput({
           // composer without a definite height (percentage max-height would
           // then resolve to none).
           CHAT_COLUMN,
-          "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          "@container relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -910,88 +913,85 @@ export function ChatInput({
           />
         )}
         <ChatInputVoiceOverlay voice={voice} />
-        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
-          <div
-            aria-hidden={voice.showStrip || undefined}
-            inert={voice.showStrip}
-            className={cn(
-              "absolute bottom-1.5 left-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
-              voice.showStrip && "pointer-events-none opacity-0",
-            )}
-          >
-            {(uploadEnabled || projectSelectionEnabled) && (
-              <ChatAddMenu
-                onSelectFile={uploadEnabled
-                  ? (file) => editorRef.current?.uploadFile(file)
-                  : undefined}
-                projects={projects}
-                projectId={projectId}
-                onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
-                projectContextUnsupported={projectContextUnsupported}
-              />
-            )}
-            {leftAdornment}
-          </div>
-        )}
         <div
+          data-slot="chat-input-actions"
           aria-hidden={voice.showStrip || undefined}
           inert={voice.showStrip}
           className={cn(
-            "absolute bottom-1 right-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
+            "absolute inset-x-1.5 bottom-1 flex min-w-0 items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
             voice.showStrip && "pointer-events-none opacity-0",
           )}
         >
-          <VoiceMicButton voice={voice} />
-          {pageContext && (
-            <IconButton
-              type="button"
-              aria-pressed={!!attachedPage}
-              onClick={togglePageContext}
-              label={t(($) => $.input.page_context_add)}
-              shortcut={<ShortcutKeycaps shortcut={PAGE_CONTEXT_SHORTCUT} decorative />}
-              className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
-            >
-              <Scan />
-            </IconButton>
+          {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+            <div className="flex min-w-0 shrink-0 items-center gap-1">
+              {(uploadEnabled || projectSelectionEnabled) && (
+                <ChatAddMenu
+                  onSelectFile={uploadEnabled
+                    ? (file) => editorRef.current?.uploadFile(file)
+                    : undefined}
+                  projects={projects}
+                  projectId={projectId}
+                  onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
+                  projectContextUnsupported={projectContextUnsupported}
+                />
+              )}
+              {leftAdornment}
+            </div>
           )}
-          <SubmitButton
-            onClick={submit}
-            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
-            loading={submitting}
-            busy={gate.uploading}
-            // Queue-capable runs reuse this one action slot: an empty composer
-            // offers Stop, while live content swaps it to Send. Older
-            // servers cannot accept follow-ups, so they remain stop-only. An
-            // upload blocks submit, so it also falls back to Stop rather than
-            // removing chat's only cancellation path; the attachment node
-            // remains the visible upload-progress surface in the editor.
-            running={
-              !!isRunning &&
-              (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
-            }
-            onStop={onStop}
-            // While blocked, the placeholder copy is exactly the reason.
-            disabledReason={gate.uploading
-              ? tEditor(($) => $.upload.in_progress)
-              : disabled || noAgent
-                ? placeholder
-                : undefined}
-            tooltip={isRunning
-              ? t(($) => $.input.send_tooltip)
-              : sendShortcut
-                ? (
-                  <>
-                    {t(($) => $.input.send_tooltip)}
-                    <ShortcutKeycaps shortcut={sendShortcut} decorative />
-                  </>
-                )
+          {executionSelection}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <VoiceMicButton voice={voice} />
+            {pageContext && (
+              <IconButton
+                type="button"
+                aria-pressed={!!attachedPage}
+                onClick={togglePageContext}
+                label={t(($) => $.input.page_context_add)}
+                shortcut={<ShortcutKeycaps shortcut={PAGE_CONTEXT_SHORTCUT} decorative />}
+                className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
+              >
+                <Scan />
+              </IconButton>
+            )}
+            <SubmitButton
+              onClick={submit}
+              disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
+              loading={submitting}
+              busy={gate.uploading}
+              // Queue-capable runs reuse this one action slot: an empty composer
+              // offers Stop, while live content swaps it to Send. Older
+              // servers cannot accept follow-ups, so they remain stop-only. An
+              // upload blocks submit, so it also falls back to Stop rather than
+              // removing chat's only cancellation path; the attachment node
+              // remains the visible upload-progress surface in the editor.
+              running={
+                !!isRunning &&
+                (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
+              }
+              onStop={onStop}
+              // While blocked, the placeholder copy is exactly the reason.
+              disabledReason={gate.uploading
+                ? tEditor(($) => $.upload.in_progress)
+                : disabled || noAgent
+                  ? placeholder
+                  : undefined}
+              tooltip={isRunning
+                ? t(($) => $.input.send_tooltip)
+                : sendShortcut
+                  ? (
+                    <>
+                      {t(($) => $.input.send_tooltip)}
+                      <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                    </>
+                  )
+                  : t(($) => $.input.send_tooltip)}
+              ariaLabel={gate.uploading
+                ? tEditor(($) => $.upload.in_progress)
                 : t(($) => $.input.send_tooltip)}
-            ariaLabel={gate.uploading
-              ? tEditor(($) => $.upload.in_progress)
-              : t(($) => $.input.send_tooltip)}
-            stopTooltip={t(($) => $.input.stop_tooltip)}
-            stopAriaLabel={t(($) => $.input.stop_tooltip)}
-          />
+              stopTooltip={t(($) => $.input.stop_tooltip)}
+              stopAriaLabel={t(($) => $.input.stop_tooltip)}
+            />
+          </div>
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}
       </div>

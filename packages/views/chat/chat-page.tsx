@@ -34,6 +34,7 @@ import { ChatQueue } from "./components/chat-queue";
 import { ChatWakeupStrip, useChatWakeups } from "./components/chat-wakeups";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
+import { ChatExecutionSelection } from "./components/chat-execution-selection";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
 import { useChatController } from "./components/use-chat-controller";
@@ -487,6 +488,9 @@ export function ChatPage() {
       />
 
       <ChatInput
+        executionSelection={c.currentSession
+          ? <ChatExecutionSelection session={c.currentSession} agent={c.activeAgent} />
+          : undefined}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}

@@ -739,7 +739,7 @@ func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, m
 		return ThinkingLevelCheck{}, fmt.Errorf("%w; cannot validate %s thinking level %q", errUnverifiedCatalog, providerType, value)
 	}
 	models := catalog.Models
-	target := modelIDForCapabilityLookup(providerType, model)
+	target := ModelIDForCapabilityLookup(providerType, model)
 	if target == "" {
 		// Default model = the entry the catalog marks as Default. If no
 		// entry is flagged, fall through to the no-match return; that
@@ -766,7 +766,7 @@ func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, m
 	}
 	if providerType == "claude" {
 		for _, unavailable := range catalog.Unavailable {
-			if modelIDForCapabilityLookup(providerType, unavailable.ID) == target {
+			if ModelIDForCapabilityLookup(providerType, unavailable.ID) == target {
 				return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q is unavailable in the installed CLI", target)}, nil
 			}
 		}
@@ -778,7 +778,7 @@ func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, m
 		// already had it stripped. Comparing raw IDs would miss every tagged
 		// entry and fail the level closed, silently dropping the user's
 		// --effort (MUL-6961).
-		if modelIDForCapabilityLookup(providerType, m.ID) != target {
+		if ModelIDForCapabilityLookup(providerType, m.ID) != target {
 			continue
 		}
 		if m.Thinking == nil {

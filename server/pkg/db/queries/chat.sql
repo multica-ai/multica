@@ -242,6 +242,15 @@ SET project_id = sqlc.narg('project_id')
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 
+-- name: UpdateChatSessionExecutionSelection :one
+-- NULL inherits the agent setting; an empty string explicitly uses the
+-- runtime default. Keep updated_at stable because this is metadata.
+UPDATE chat_session
+SET model_override = sqlc.narg('model_override')::text,
+    thinking_level_override = sqlc.narg('thinking_level_override')::text
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
 -- name: UpdateChatSessionTitleIfCurrent :one
 -- Compare-and-swap the title: only overwrite it when it still equals the
 -- value the caller observed (@expected_title). This is the idempotency /
@@ -1148,7 +1157,8 @@ WHERE id = $1;
 -- attribution provenance is stamped so this path is not a NULL-source enqueue
 -- bypass (MUL-4302 §2).
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id,
+           a.model, a.thinking_level
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
       AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
@@ -1158,7 +1168,8 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, id, context
+    fire_at, channel_context_revision, id, context,
+    chat_model, chat_thinking_level
 )
 SELECT
     sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL,
@@ -1175,7 +1186,9 @@ SELECT
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    sqlc.narg('context')::jsonb
+    sqlc.narg('context')::jsonb,
+    COALESCE((SELECT model_override FROM chat_session WHERE id = sqlc.narg(chat_session_id)::uuid), enqueue_agent.model, ''),
+    COALESCE((SELECT thinking_level_override FROM chat_session WHERE id = sqlc.narg(chat_session_id)::uuid), enqueue_agent.thinking_level, '')
 FROM enqueue_agent
 RETURNING *;
 

@@ -52,6 +52,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
+import { ChatExecutionSelection } from "./chat-execution-selection";
 import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
 import { ChatWakeupStrip, useChatWakeups } from "./chat-wakeups";
@@ -435,6 +436,9 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        executionSelection={currentSession
+          ? <ChatExecutionSelection session={currentSession} agent={activeAgent} />
+          : undefined}
         hidden={!isOpen}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
@@ -538,7 +542,8 @@ export function AgentDropdown({
       triggerRender={
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
+          aria-label={activeAgent.name}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
         />
       }
       trigger={
@@ -550,7 +555,7 @@ export function AgentDropdown({
             enableHoverCard
             showStatusDot
           />
-          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <span className="hidden text-caption font-medium max-w-28 truncate @min-[560px]:inline">{activeAgent.name}</span>
           <ChevronDown className="size-3 text-muted-foreground shrink-0" />
         </>
       }

@@ -411,6 +411,8 @@ type AgentTaskResponse struct {
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
 	ID                   string                 `json:"id"`
+	ChatModel            *string                `json:"chat_model,omitempty"`
+	ChatThinkingLevel    *string                `json:"chat_thinking_level,omitempty"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
 	IssueID              string                 `json:"issue_id"`
@@ -945,6 +947,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CancelledBy:              taskCancellationActorToResponse(t),
 
 		ID:                     uuidToString(t.ID),
+		ChatModel:              textToPtr(t.ChatModel),
+		ChatThinkingLevel:      textToPtr(t.ChatThinkingLevel),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
 		IssueID:                uuidToString(t.IssueID),

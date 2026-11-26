@@ -40,6 +40,8 @@ After you send, Multica creates a run for the message, and the reply comes back 
 </Step>
 </Steps>
 
+New conversations inherit the agent’s model and reasoning level. In an open conversation, use the model and reasoning controls in the message composer to change future runs. The controls show whether each selection comes from the agent or this conversation; **Runtime default** clears a reasoning setting for this conversation. Available choices come from the agent’s runtime. If a saved choice becomes unavailable, select a supported one. Changes do not alter a run already queued or in progress.
+
 If the runtime is offline, the message waits until it comes back online. Once the agent is archived, or you lose permission to run it, you can't send new messages.
 
 Before the first message, Chat shows up to three suggestions configured for the selected agent. Selecting one only fills the composer with its full prompt; nothing is sent, so you can edit it first. Agents without configured suggestions show general-purpose examples.

@@ -319,6 +319,9 @@ export interface AgentTask {
   issue_title?: string;
   wakeup_id?: string;
   id: string;
+  /** Effective chat execution settings snapshotted when this run was queued. */
+  chat_model?: string | null;
+  chat_thinking_level?: string | null;
   agent_id: string;
   runtime_id: string;
   // Empty string ("") when the task has no linked issue — either chat- or
