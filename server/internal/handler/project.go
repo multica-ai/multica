@@ -753,6 +753,10 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Title = sanitizeNullBytesPtr(req.Title)
 	req.Description = sanitizeNullBytesPtr(req.Description)
+	if req.Title != nil && *req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 

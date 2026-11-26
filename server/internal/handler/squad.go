@@ -400,6 +400,10 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
 
 	params := db.UpdateSquadParams{ID: squad.ID}
 	if req.Name != nil {
