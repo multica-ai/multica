@@ -409,6 +409,7 @@ export function TeamPanel() {
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
   const appsAvailable = useComposioAvailable();
+  const runtimesActive = isPathWithin(pathname, p.runtimes());
   const machineCounts = useMemo(() => {
     const machines = buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
       (machine) => !machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"),
@@ -607,12 +608,12 @@ export function TeamPanel() {
               href={p.runtimes()}
               icon={<Monitor />}
               label={t(($) => $.nav.runtimes)}
-              active={isPathWithin(pathname, p.runtimes())}
+              active={runtimesActive}
               trailing={
                 machineCounts.all > 0 ? (
                   <span className={cn(
                     "shrink-0 text-caption",
-                    machineCounts.online > 0 ? "text-success" : "text-warning",
+                    !runtimesActive && (machineCounts.online > 0 ? "text-success" : "text-warning"),
                   )}>
                     {t(($) => $.panels.team.runtimes_online, { count: machineCounts.online })}
                   </span>

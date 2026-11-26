@@ -101,12 +101,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderPanel(runtimes: AgentRuntime[]) {
+function renderPanel(runtimes: AgentRuntime[], pathname = "/acme/agents") {
   qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
   return renderWithI18n(
     <QueryClientProvider client={qc}>
       <WorkspaceSlugProvider slug="acme">
-        <NavigationProvider value={adapter}>
+        <NavigationProvider value={{ ...adapter, pathname }}>
           <TeamPanel />
         </NavigationProvider>
       </WorkspaceSlugProvider>
@@ -267,6 +267,15 @@ describe("TeamPanel agent menu", () => {
 });
 
 describe("TeamPanel runtime badge", () => {
+  it.each(["online", "offline"] as const)("inherits the selected row color when %s", (status) => {
+    renderPanel([runtime({ status })], "/acme/runtimes");
+    const link = screen.getByRole("link", { name: /^Runtimes/ });
+    expect(link).toHaveAttribute("aria-current", "page");
+    const badge = within(link).getByText(/online/);
+    expect(badge).not.toHaveClass("text-success");
+    expect(badge).not.toHaveClass("text-warning");
+  });
+
   it("shows a green online machine count without a total or duplicate providers", () => {
     renderPanel([
       ...Array.from({ length: 4 }, (_, index) => [
