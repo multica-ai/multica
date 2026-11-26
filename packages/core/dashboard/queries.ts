@@ -1,6 +1,7 @@
 import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { DashboardRequestParams } from "../api/client";
+import type { ContributionIssueSort } from "../types";
 import {
   DashboardHistoryLimitTightenedError,
   isDashboardHistoryLimitTightened,
@@ -25,7 +26,10 @@ type DashboardKeyPart =
   | "runtime-daily"
   | "failures-daily"
   | "failures-by-agent"
-  | "failures-by-squad";
+  | "failures-by-squad"
+  | "contribution-summary"
+  | "contribution-events"
+  | "contribution-issues";
 
 const dashboardKey = (
   wsId: string,
@@ -141,6 +145,30 @@ function isSameDashboardScope(
 
 type DashboardFetcher<T> = (params: DashboardRequestParams) => Promise<T[]>;
 
+// Runs one dashboard request and checks the history limit it was served
+// under. A response cut to a stricter limit than the query's key promises
+// must not be cached under that key, or restoring the looser limit would
+// show it.
+async function fetchUnderHistoryLimit<R>(
+  client: QueryClient,
+  wsId: string,
+  historyLimit: DashboardHistoryLimitParam,
+  fetch: (onHistoryLimit: (limit: number | null) => void) => Promise<R>,
+): Promise<R> {
+  const requestedUnder = historyLimit ?? null;
+  let served: number | null | undefined;
+  const result = await fetch((limit) => {
+    served = limit;
+  });
+  if (served !== undefined) {
+    reportDashboardHistoryLimit(client, wsId, requestedUnder, served);
+    if (served !== null && isStricterHistoryLimit(served, requestedUnder)) {
+      throw new DashboardHistoryLimitTightenedError(requestedUnder, served);
+    }
+  }
+  return result;
+}
+
 // `tz` participates in every dashboard key so a Preferences change
 // repoints the cache. Every series — token rollups and the
 // atq.completed_at-based run-time / failure series — slices its day boundary
@@ -166,28 +194,16 @@ function dashboardOptions<T>(
   const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit, squadId);
   return queryOptions({
     queryKey,
-    queryFn: async ({ client }: { client: QueryClient }) => {
-      const requestedUnder = historyLimit ?? null;
-      let served: number | null | undefined;
-      const rows = await fetcher({
-        days,
-        project_id: projectId ?? undefined,
-        squad_id: squadId ?? undefined,
-        tz,
-        onHistoryLimit: (limit) => {
-          served = limit;
-        },
-      });
-      if (served !== undefined) {
-        reportDashboardHistoryLimit(client, wsId, requestedUnder, served);
-        // Rows cut to a stricter limit than this key promises must not be
-        // cached under it, or restoring the looser limit would show them.
-        if (served !== null && isStricterHistoryLimit(served, requestedUnder)) {
-          throw new DashboardHistoryLimitTightenedError(requestedUnder, served);
-        }
-      }
-      return rows;
-    },
+    queryFn: ({ client }: { client: QueryClient }) =>
+      fetchUnderHistoryLimit(client, wsId, historyLimit, (onHistoryLimit) =>
+        fetcher({
+          days,
+          project_id: projectId ?? undefined,
+          squad_id: squadId ?? undefined,
+          tz,
+          onHistoryLimit,
+        }),
+      ),
     enabled: !!wsId && historyLimit !== undefined,
     // The app default retries once; a tightened limit is not transient, and
     // the page re-queries under the stricter key on its own.
@@ -379,5 +395,90 @@ export function dashboardFailuresBySquadOptions(
     tz,
     historyLimit,
     squadId,
+  );
+}
+
+/** Filters shared by every contribution query. */
+export interface ContributionScope {
+  days: number;
+  projectId: string | null;
+  tz: string;
+  historyLimit: DashboardHistoryLimitParam;
+}
+
+// Contribution data is read live from issue activity rather than a rollup.
+// Paged lists add their page to the key after the shared scope, so a range
+// change keeps the previous page mounted like the other dashboard queries.
+function contributionOptions<R>(
+  part: Extract<DashboardKeyPart, `contribution-${string}`>,
+  wsId: string,
+  scope: ContributionScope,
+  page: Record<string, unknown> | null,
+  fetch: (params: DashboardRequestParams) => Promise<R>,
+  poll: boolean,
+) {
+  const base = dashboardKey(wsId, part, scope.days, scope.projectId, scope.tz, scope.historyLimit);
+  const queryKey = page === null ? base : ([...base, page] as const);
+  return queryOptions({
+    queryKey,
+    queryFn: ({ client }: { client: QueryClient }) =>
+      fetchUnderHistoryLimit(client, wsId, scope.historyLimit, (onHistoryLimit) =>
+        fetch({
+          days: scope.days,
+          project_id: scope.projectId ?? undefined,
+          tz: scope.tz,
+          onHistoryLimit,
+        }),
+      ),
+    enabled: !!wsId && scope.historyLimit !== undefined,
+    retry: (failureCount: number, error: Error) =>
+      !isDashboardHistoryLimitTightened(error) && failureCount < 1,
+    staleTime: STALE_TIME,
+    refetchInterval: poll ? REFETCH_INTERVAL : false,
+    placeholderData: (previousData, previousQuery) =>
+      isSameDashboardScope(previousQuery?.queryKey, queryKey)
+        ? keepPreviousData(previousData)
+        : undefined,
+  });
+}
+
+export function contributionSummaryOptions(wsId: string, scope: ContributionScope) {
+  return contributionOptions(
+    "contribution-summary",
+    wsId,
+    scope,
+    null,
+    (params) => api.getContributionSummary(params),
+    true,
+  );
+}
+
+export function contributionEventsOptions(
+  wsId: string,
+  scope: ContributionScope,
+  page: { actors: string[]; limit: number; offset: number },
+) {
+  return contributionOptions(
+    "contribution-events",
+    wsId,
+    scope,
+    page,
+    (params) => api.getContributionEvents({ ...params, ...page }),
+    false,
+  );
+}
+
+export function contributionIssuesOptions(
+  wsId: string,
+  scope: ContributionScope,
+  page: { sort: ContributionIssueSort; limit: number; offset: number },
+) {
+  return contributionOptions(
+    "contribution-issues",
+    wsId,
+    scope,
+    page,
+    (params) => api.getContributionIssues({ ...params, ...page }),
+    false,
   );
 }

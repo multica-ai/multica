@@ -135,5 +135,128 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "contribution": {
+    "tab": "Contribución",
+    "views": {
+      "label": "Contribution view",
+      "overview": "Resumen",
+      "members": "Miembros"
+    },
+    "status": {
+      "todo": "Pendiente",
+      "in_progress": "En curso",
+      "in_review": "En revisión",
+      "done": "Hecho",
+      "cancelled": "Cancelado"
+    },
+    "kind": {
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changed"
+    },
+    "kpi": {
+      "total": "Issues abiertos",
+      "total_hint": "Ni hechos ni cancelados, sin importar la fecha",
+      "active": "Issues activos",
+      "active_hint": "Con actividad en el periodo y sin cerrar al final",
+      "created": "Issues creados",
+      "created_hint": "People {{member}} · Agents {{agent}}",
+      "completed": "Issues completados",
+      "completed_hint": "Reopened and completed again counts once",
+      "open": "Issues sin terminar",
+      "open_hint": "In progress {{progress}} · In review {{review}}"
+    },
+    "trend": {
+      "title": "Actividad del equipo",
+      "active": "Active",
+      "collaborated": "Collaborated",
+      "delivered": "Delivered"
+    },
+    "heatmap": {
+      "title": "Activity calendar",
+      "caption": "Last 26 weeks",
+      "less": "Less",
+      "more": "More",
+      "cell": "{{date}} · {{count}} active issues"
+    },
+    "board": {
+      "title": "Clasificación",
+      "actor_type_label": "Actor type",
+      "people": "Personas",
+      "agents": "Agentes",
+      "participation": "Participation",
+      "collaboration": "Collaboration",
+      "delivery": "Delivery",
+      "unit": "issues",
+      "caption_people": "{{count}} people · ranked apart from agents",
+      "caption_agents": "{{count}} agents · ranked apart from people",
+      "system_completed": "{{count}} issues completed by the system are not ranked",
+      "empty": "No activity in this range.",
+      "restricted": "Restricted agents",
+      "unknown": "Removed"
+    },
+    "members": {
+      "title": "Contribución por miembro",
+      "member": "Member",
+      "composition": "Breakdown",
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changes",
+      "completed": "Delivered",
+      "participated": "Issues",
+      "people_group": "People · {{count}}",
+      "agents_group": "Agents · {{count}}",
+      "note": "Issues are counted once per member. One issue can appear under both people and agents, so the groups do not add up to the team total.",
+      "trend_title": "Member trend",
+      "add_member": "Add member",
+      "remove": "Remove {{name}}",
+      "metric_label": "Contribution type",
+      "pick_hint": "Add members to compare their weekly contribution.",
+      "metric_participated": "Participación",
+      "metric_collaborated": "Colaboración",
+      "metric_delivered": "Entrega"
+    },
+    "activity": {
+      "title": "Actividad",
+      "caption": "{{count}} events",
+      "export": "Export CSV",
+      "date": "Date",
+      "actor": "Member",
+      "event": "Event",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "project": "Project",
+      "status": "Status",
+      "no_project": "No project",
+      "empty": "No events in this range.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "range": "{{from}}–{{to}} of {{total}}"
+    },
+    "empty": {
+      "title": "Aún no hay actividad en issues",
+      "body": "Created issues, comments and status changes will show up here."
+    },
+    "issues": {
+      "title": "Issues",
+      "sort_label": "Ordenar issues por",
+      "sort": {
+        "interactions": "Interacciones",
+        "participants": "Participantes",
+        "completion": "Tiempo hasta hecho",
+        "recent": "Actividad reciente"
+      },
+      "caption": "{{count}} issues con actividad",
+      "empty": "No hay issues con actividad en este periodo.",
+      "hint": "Interacciones = comentarios + cambios de estado.",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "status": "Status",
+      "participants": "Participants",
+      "comments": "Comments",
+      "completion_time": "Time to done",
+      "interactions": "Interacciones"
+    }
   }
 }

@@ -85,6 +85,7 @@ import { ProjectFilter, SquadFilter, TimeRangeFilter } from "./dashboard-filters
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard, type LeaderboardGroupBy } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
+import { ContributionTab } from "./contribution/contribution-tab";
 import {
   earliestReadableDay,
   effectiveRange,
@@ -110,7 +111,7 @@ const EMPTY_FAILURE_BY_SQUAD: import("@multica/core/types").DashboardFailureBySq
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
 
-type DashboardTab = "usage" | "errors";
+type DashboardTab = "usage" | "errors" | "contribution";
 const TAB_QUERY_KEY = "tab";
 const DEFAULT_TAB: DashboardTab = "usage";
 
@@ -237,7 +238,8 @@ export function DashboardPage() {
   // flipping tabs does not stack up history entries. An unknown ?tab= value
   // falls back to Usage rather than rendering nothing.
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
-  const tab: DashboardTab = tabFromUrl === "errors" ? "errors" : DEFAULT_TAB;
+  const tab: DashboardTab =
+    tabFromUrl === "errors" || tabFromUrl === "contribution" ? tabFromUrl : DEFAULT_TAB;
   const handleTabChange = (next: string) => {
     const params = new URLSearchParams(navigation.searchParams);
     if (next === DEFAULT_TAB) params.delete(TAB_QUERY_KEY);
@@ -662,6 +664,12 @@ export function DashboardPage() {
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
+            <TabsTrigger
+              value="contribution"
+              className="h-full rounded-none px-2.5"
+            >
+              {t(($) => $.contribution.tab)}
+            </TabsTrigger>
           </TabsList>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -688,7 +696,8 @@ export function DashboardPage() {
             projectValue={projectValue}
             onProjectChange={setProjectValue}
           />
-          {squads.length > 0 ? (
+          {/* Contribution counts issue activity, which has no squad. */}
+          {squads.length > 0 && tab !== "contribution" ? (
             <SquadFilter
               squads={squads}
               squadValue={squadValue}
@@ -840,6 +849,17 @@ export function DashboardPage() {
                 squads={squads}
                 allowSquadGrouping={squadFilterParam === null && squads.length > 0}
                 locales={locales}
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="contribution">
+            {tab === "contribution" && (
+              <ContributionTab
+                days={days}
+                projectId={projectId}
+                tz={viewTZ}
+                historyLimit={historyLimit}
               />
             )}
           </TabsContent>

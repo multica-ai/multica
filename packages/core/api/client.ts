@@ -123,6 +123,10 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   DashboardFailureBySquad,
+  ContributionSummary,
+  ContributionEventsPage,
+  ContributionIssuesPage,
+  ContributionIssueSort,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -375,6 +379,10 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureBySquadListSchema,
+  ContributionSummarySchema,
+  ContributionEventsPageSchema,
+  ContributionIssuesPageSchema,
+  EMPTY_CONTRIBUTION_SUMMARY,
   DashboardUsageByAgentListSchema,
   DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
@@ -3284,6 +3292,79 @@ export class ApiClient {
       params,
       DashboardFailureBySquadListSchema,
       "GET /api/dashboard/failures/by-squad",
+    );
+  }
+
+  // Contribution dashboard: the same `days` / project / tz / history-limit
+  // contract as the rollups above, but each endpoint returns one object.
+  private async fetchDashboardObject<T>(
+    path: string,
+    params: DashboardRequestParams,
+    extra: Record<string, string | undefined>,
+    schema: ZodType,
+    fallback: T,
+    endpoint: string,
+  ): Promise<T> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    for (const [key, value] of Object.entries(extra)) {
+      if (value) search.set(key, value);
+    }
+    const res = await this.fetchRaw(`${path}?${search}`, {
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    params.onHistoryLimit?.(
+      parseDashboardHistoryLimit(res.headers.get(DASHBOARD_HISTORY_LIMIT_HEADER)),
+    );
+    const raw: unknown = await res.json();
+    return parseWithFallback<T>(raw, schema, fallback, { endpoint });
+  }
+
+  async getContributionSummary(params: DashboardRequestParams): Promise<ContributionSummary> {
+    return this.fetchDashboardObject(
+      "/api/dashboard/contribution/summary",
+      params,
+      {},
+      ContributionSummarySchema,
+      EMPTY_CONTRIBUTION_SUMMARY,
+      "GET /api/dashboard/contribution/summary",
+    );
+  }
+
+  /** `actors` narrows to "member:<id>" / "agent:<id>" keys. */
+  async getContributionEvents(
+    params: DashboardRequestParams & { actors?: string[]; limit?: number; offset?: number },
+  ): Promise<ContributionEventsPage> {
+    return this.fetchDashboardObject(
+      "/api/dashboard/contribution/events",
+      params,
+      {
+        actors: params.actors?.join(","),
+        limit: params.limit ? String(params.limit) : undefined,
+        offset: params.offset ? String(params.offset) : undefined,
+      },
+      ContributionEventsPageSchema,
+      { events: [], total: 0 },
+      "GET /api/dashboard/contribution/events",
+    );
+  }
+
+  async getContributionIssues(
+    params: DashboardRequestParams & { sort: ContributionIssueSort; limit?: number; offset?: number },
+  ): Promise<ContributionIssuesPage> {
+    return this.fetchDashboardObject(
+      "/api/dashboard/contribution/issues",
+      params,
+      {
+        sort: params.sort,
+        limit: params.limit ? String(params.limit) : undefined,
+        offset: params.offset ? String(params.offset) : undefined,
+      },
+      ContributionIssuesPageSchema,
+      { issues: [], total: 0 },
+      "GET /api/dashboard/contribution/issues",
     );
   }
 

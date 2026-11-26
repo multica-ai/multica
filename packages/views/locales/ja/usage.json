@@ -133,5 +133,128 @@
   },
   "duration": {
     "less_than_minute": "1分未満"
+  },
+  "contribution": {
+    "tab": "貢献",
+    "views": {
+      "label": "Contribution view",
+      "overview": "概要",
+      "members": "メンバー"
+    },
+    "status": {
+      "todo": "未着手",
+      "in_progress": "進行中",
+      "in_review": "レビュー中",
+      "done": "完了",
+      "cancelled": "キャンセル"
+    },
+    "kind": {
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changed"
+    },
+    "kpi": {
+      "total": "Issue 残数",
+      "total_hint": "完了・キャンセル以外（作成日を問わない）",
+      "active": "アクティブな Issue",
+      "active_hint": "期間内に動きがあり、期末に完了・キャンセルされていない",
+      "created": "作成した Issue",
+      "created_hint": "People {{member}} · Agents {{agent}}",
+      "completed": "完了した Issue",
+      "completed_hint": "Reopened and completed again counts once",
+      "open": "未完了の Issue",
+      "open_hint": "In progress {{progress}} · In review {{review}}"
+    },
+    "trend": {
+      "title": "チームの活動",
+      "active": "Active",
+      "collaborated": "Collaborated",
+      "delivered": "Delivered"
+    },
+    "heatmap": {
+      "title": "Activity calendar",
+      "caption": "Last 26 weeks",
+      "less": "Less",
+      "more": "More",
+      "cell": "{{date}} · {{count}} active issues"
+    },
+    "board": {
+      "title": "ランキング",
+      "actor_type_label": "Actor type",
+      "people": "人",
+      "agents": "エージェント",
+      "participation": "Participation",
+      "collaboration": "Collaboration",
+      "delivery": "Delivery",
+      "unit": "issues",
+      "caption_people": "{{count}} people · ranked apart from agents",
+      "caption_agents": "{{count}} agents · ranked apart from people",
+      "system_completed": "{{count}} issues completed by the system are not ranked",
+      "empty": "No activity in this range.",
+      "restricted": "Restricted agents",
+      "unknown": "Removed"
+    },
+    "members": {
+      "title": "メンバーの貢献",
+      "member": "Member",
+      "composition": "Breakdown",
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changes",
+      "completed": "Delivered",
+      "participated": "Issues",
+      "people_group": "People · {{count}}",
+      "agents_group": "Agents · {{count}}",
+      "note": "Issues are counted once per member. One issue can appear under both people and agents, so the groups do not add up to the team total.",
+      "trend_title": "Member trend",
+      "add_member": "Add member",
+      "remove": "Remove {{name}}",
+      "metric_label": "Contribution type",
+      "pick_hint": "Add members to compare their weekly contribution.",
+      "metric_participated": "参加",
+      "metric_collaborated": "協力",
+      "metric_delivered": "完了"
+    },
+    "activity": {
+      "title": "アクティビティ",
+      "caption": "{{count}} events",
+      "export": "Export CSV",
+      "date": "Date",
+      "actor": "Member",
+      "event": "Event",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "project": "Project",
+      "status": "Status",
+      "no_project": "No project",
+      "empty": "No events in this range.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "range": "{{from}}–{{to}} of {{total}}"
+    },
+    "empty": {
+      "title": "Issue のアクティビティはまだありません",
+      "body": "Created issues, comments and status changes will show up here."
+    },
+    "issues": {
+      "title": "Issue 一覧",
+      "sort_label": "Issue の並び順",
+      "sort": {
+        "interactions": "やり取り回数",
+        "participants": "参加人数",
+        "completion": "完了までの時間",
+        "recent": "最近の動き"
+      },
+      "caption": "動きのある Issue {{count}} 件",
+      "empty": "この期間に動きのある Issue はありません。",
+      "hint": "やり取り回数 = コメント + ステータス変更。",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "status": "Status",
+      "participants": "Participants",
+      "comments": "Comments",
+      "completion_time": "Time to done",
+      "interactions": "やり取り回数"
+    }
   }
 }

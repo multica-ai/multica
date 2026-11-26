@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ContributionSummarySchema,
+  ContributionEventsPageSchema,
+  ContributionIssuesPageSchema,
   AgentTaskSchema,
   IssueSchema,
   AppConfigSchema,
@@ -2649,5 +2652,34 @@ describe("Issue requester compatibility", () => {
     expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
     expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
     expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
+  });
+});
+
+describe("contribution dashboard schemas", () => {
+  it("fills a summary missing whole sections instead of failing", () => {
+    const parsed = ContributionSummarySchema.parse({ kpis: { total: 3 } });
+    expect(parsed.kpis.total).toBe(3);
+    expect(parsed.kpis.completed).toBe(0);
+    expect(parsed.daily).toEqual([]);
+    expect(parsed.actors).toEqual([]);
+  });
+
+  it("degrades a malformed list field to empty rather than dropping the page", () => {
+    const page = ContributionEventsPageSchema.parse({ events: "nope", total: 4 });
+    expect(page.events).toEqual([]);
+    expect(page.total).toBe(4);
+  });
+
+  it("treats a missing or malformed completion time as not completed", () => {
+    const page = ContributionIssuesPageSchema.parse({
+      issues: [{ issue_id: "i1", comments: 3 }, { issue_id: "i2", completion_seconds: "soon" }],
+      total: 2,
+    });
+    expect(page.issues.map((i) => i.completion_seconds)).toEqual([null, null]);
+    expect(page.issues[0]?.interactions).toBe(0);
+  });
+
+  it("rejects a non-object summary so parseWithFallback can return its fallback", () => {
+    expect(ContributionSummarySchema.safeParse(null).success).toBe(false);
   });
 });

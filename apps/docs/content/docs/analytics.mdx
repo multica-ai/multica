@@ -10,7 +10,7 @@ The **Analytics** page in the sidebar rolls up agent usage across the whole work
 
 ## Page layout
 
-The page has two tabs, **Usage** and **Errors**, which share the filters at the top right:
+The page has three tabs, **Usage**, **Errors**, and **Contribution**, which share the filters at the top right (Attribution does not apply to Contribution):
 
 - **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours.
 - **Project**: **All projects** by default. With a project selected, only runs on that project's issues count; runs that belong to no issue, such as chat runs, drop out.
@@ -72,6 +72,17 @@ Failure reason codes fall into seven classes:
 | Other | Failures that could not be classified | Check the raw error code and the transcript |
 
 For what each code means and how to handle it, see [Runs · Failure reason reference](/tasks#failure-reason-reference).
+
+## Contribution tab
+
+The Contribution tab shows who created, discussed, and delivered which issues, for people and agents alike. Switching to it adds `?tab=contribution` to the address.
+
+Every figure counts distinct issues: two comments on the same issue count once, and an issue reopened and completed again counts as one delivery. A switch at the top picks one of two views:
+
+- **Overview**: issue totals (stock, meaning every issue not done or cancelled whatever its date; active, meaning issues with activity in the range that were not closed by its end; created; completed; and unfinished, meaning in progress or in review), team activity over time, an activity calendar, and three leaderboards: participation (created, commented, or changed status), collaboration (commented), and delivery (completed). People and agents are ranked separately, so the two boards do not add up. Issues the system completed on its own are noted below the delivery board instead of being ranked. An issue list at the bottom shows each issue with activity in the range, with its interactions (comments plus status changes), participants, and time to done, and can be sorted by any of them.
+- **Members**: each person's and agent's created, commented, status-change, and delivered counts, a weekly trend for the members you pick, and the activity list behind the figures.
+
+Only plain comments and replies count as collaboration; progress updates and system notes do not. Issues in private projects you cannot see are left out. These figures are read from issue activity when you open the tab, so they do not wait for the 5-minute roll-up.
 
 ## How cost is calculated
 

@@ -2697,6 +2697,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/failures/daily", h.GetDashboardFailuresDaily)
 				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
 				r.Get("/failures/by-squad", h.GetDashboardFailuresBySquad)
+				r.Get("/contribution/summary", h.GetDashboardContributionSummary)
+				r.Get("/contribution/events", h.GetDashboardContributionEvents)
+				r.Get("/contribution/issues", h.GetDashboardContributionIssues)
 			})
 
 			// Runtimes

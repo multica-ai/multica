@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_activity_log_workspace_status_changed;
