@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Cancelar todas as execuções",
     "archive_dialog_title": "Arquivar \"{{name}}\"?",
     "archive_dialog_description": "O agente não poderá ser atribuído nem mencionado, e qualquer execução ativa será cancelada. Todo o histórico é preservado e você pode restaurá-lo depois.",
+    "archive_dialog_mika_note": " O aviso \"Começar com a Mika\" não aparecerá novamente até que a Mika seja restaurada.",
     "archive_dialog_cancel": "Cancelar",
     "archive_dialog_confirm": "Arquivar",
     "set_access_applies_to_one": "Aplica-se a {{count}} agente.",
@@ -963,6 +964,14 @@
     "search_placeholder": "Buscar nesta execução...",
     "no_matches": "Nenhuma etapa corresponde a esta busca.",
     "more_actions": "Mais",
+    "purge_log": "Limpar log da execução",
+    "purge_confirm_title": "Limpar o log desta execução?",
+    "purge_confirm_body": "Todas as etapas, entradas e saídas de ferramentas e a resposta final do agente serão excluídas para todos. O status, os tempos e o uso da execução permanecem. Esta ação não pode ser desfeita.",
+    "purge_confirm_action": "Limpar log",
+    "purge_cancel": "Cancelar",
+    "purge_done": "Log da execução limpo",
+    "purge_failed": "Não foi possível limpar o log da execução",
+    "purged_by": "Log da execução limpo por {{name}} · {{time}}",
     "kind_text": "Agente",
     "kind_tool": "Ferramenta",
     "kind_thinking": "Raciocínio",
@@ -1139,5 +1148,9 @@
     "new_app": "Novo app para este agente",
     "adds_app_note": "Responder adiciona {{app}} a {{agent}} para as próximas execuções.",
     "add_to_agent": "Adicionar {{app}} a {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Zona de perigo",
+    "restore_label": "Restaurar agente"
   }
 }
