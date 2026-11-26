@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -89,5 +90,30 @@ func TestAgentEnvOutputCanRevealValuesOnRequest(t *testing.T) {
 	}
 	if !strings.Contains(got, envOutputTestSecret) {
 		t.Fatalf("--show-values did not reveal the value: %s", got)
+	}
+}
+
+func TestAgentEnvSetWarnsOnMaskedInput(t *testing.T) {
+	var buf bytes.Buffer
+	warnAgentEnvMaskedInput(&buf, "agent-123", map[string]string{
+		"B_TOKEN": agentEnvMaskedValue,
+		"A_TOKEN": agentEnvMaskedValue,
+		"PLAIN":   envOutputTestSecret,
+	})
+	got := buf.String()
+	if !strings.Contains(got, "A_TOKEN, B_TOKEN") {
+		t.Fatalf("warning should list masked keys in sorted order: %s", got)
+	}
+	if !strings.Contains(got, "--show-values") {
+		t.Fatalf("warning should point at --show-values: %s", got)
+	}
+	if strings.Contains(got, "PLAIN") || strings.Contains(got, envOutputTestSecret) {
+		t.Fatalf("warning should mention only masked keys and never values: %s", got)
+	}
+
+	buf.Reset()
+	warnAgentEnvMaskedInput(&buf, "agent-123", map[string]string{"PLAIN": envOutputTestSecret})
+	if buf.Len() != 0 {
+		t.Fatalf("no masked values should produce no warning, got: %s", buf.String())
 	}
 }
