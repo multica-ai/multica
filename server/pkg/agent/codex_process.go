@@ -64,6 +64,7 @@ func (c *codexClient) attachTurnHooks(h codexTurnHooks) {
 	c.onAgentMessage = h.onAgentMessage
 	c.onFinalAnswer = h.onFinalAnswer
 	c.onToolActivity = h.onToolActivity
+	c.legacyTurnID = ""
 	c.onSemanticActivity = h.onSemanticActivity
 	c.onTurnDone = h.onTurnDone
 	c.guardianRateLimitCircuit = h.guardianRateLimitCircuit
@@ -100,6 +101,7 @@ func (c *codexClient) detachTurnHooks() {
 	c.onAgentMessage = nil
 	c.onFinalAnswer = nil
 	c.onToolActivity = nil
+	c.legacyTurnID = ""
 	c.onSemanticActivity = nil
 	c.onTurnDone = nil
 	c.onGuardianRateLimit = nil

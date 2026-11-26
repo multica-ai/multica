@@ -1886,6 +1886,20 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 		legacyMCPBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_begin","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
 		legacyMCPEnd   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_end","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
 		legacyWebBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"web_search_begin","call_id":"ws1"}}}`
+		legacyTurnB    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started","turn_id":"turn-b"}}}`
+		legacyEndTurnA = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"bg-a","turn_id":"turn-a","output":"done"}}}`
+		legacyEndTurnB = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"bg-b","turn_id":"turn-b","output":"done"}}}`
+		rawPlanUpdate  = `{"jsonrpc":"2.0","method":"turn/plan/updated","params":{"turnId":"t1","plan":[{"step":"Check logs","status":"in_progress"}]}}`
+		legacyPlan     = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"plan_update","plan":[{"step":"Check logs","status":"in_progress"}]}}}`
+		rawSleepStart  = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"sleep","id":"sl1","durationMs":1000}}}`
+		rawSleepEnd    = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"sleep","id":"sl1","durationMs":1000}}}`
+		rawPermsReq    = `{"jsonrpc":"2.0","id":7,"method":"item/permissions/requestApproval","params":{"itemId":"p1","permissions":{}}}`
+		legacyAskUser  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"request_user_input","call_id":"q1","turn_id":"turn-b","questions":[]}}}`
+		legacyAskPerms = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"request_permissions","call_id":"p1","turn_id":"turn-b"}}}`
+		rawUserShell   = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"commandExecution","id":"u1","command":"ls","source":"userShell"}}}`
+		rawUserShellE  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","id":"u1","command":"ls","source":"userShell","aggregatedOutput":"a"}}}`
+		legacyUserSh   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_begin","call_id":"u1","command":"ls","source":"user_shell"}}}`
+		legacyUserShE  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"u1","source":"user_shell","output":"a"}}}`
 		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
@@ -2049,6 +2063,81 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			lines:        []string{legacyFirst, legacyWebBegin},
 			want:         "",
 			wantStreamed: []string{narration},
+		},
+		{
+			// A background command from an earlier turn of the same session
+			// exits during this one. Its end names the earlier turn, so it is
+			// not tool activity here and must not retract this turn's answer.
+			name:         "an earlier turn's command end keeps this turn's answer",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacySecond, legacyEndTurnA},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "this turn's unpaired command end still clears narration",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyEndTurnB},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// update_plan reports only through turn/plan/updated.
+			name:         "phase-less narration followed by a plan update yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawPlanUpdate},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a plan update yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyPlan},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "phase-less narration followed by a sleep yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawSleepStart, rawSleepEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "phase-less narration followed by a permission request yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawPermsReq},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a user-input request yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyAskUser},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a permission request yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyTurnB, legacyFirst, legacyAskPerms},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// A command the user ran is not the model calling a tool.
+			name:         "a user shell command after the answer keeps the answer",
+			protocol:     "raw",
+			lines:        []string{rawAnswer, rawUserShell, rawUserShellE},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "a legacy user shell command after the answer keeps the answer",
+			protocol:     "legacy",
+			lines:        []string{legacySecond, legacyUserSh, legacyUserShE},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
 		},
 		{
 			// An explicitly labelled final answer survives later tool use: the

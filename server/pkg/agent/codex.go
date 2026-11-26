@@ -2362,6 +2362,11 @@ type codexClient struct {
 	// may be "" when the protocol omits it. Result.Output uses it to tell
 	// narration before a tool call from a deliverable (codexOutputSelection).
 	onToolActivity func(callID string, started bool)
+	// legacyTurnID is the turn_id of this turn's legacy task_started event; ""
+	// until it arrives or when the stream omits it. Legacy tool events carry
+	// their own turn_id, and one from an earlier turn (a background command
+	// that exits now) must not count as tool activity in this one.
+	legacyTurnID string
 	// acceptNotification isolates the active turn from same-thread history
 	// replay emitted while thread/resume is restoring prior conversation.
 	// Unit-level protocol tests leave it nil and exercise dispatch directly.
@@ -2893,6 +2898,7 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	c.reportServerRequestToolActivity(method, raw["params"])
 
 	// Auto-approve all exec/patch requests in daemon mode
 	switch method {
@@ -3358,13 +3364,10 @@ func pluralizeFiles(n int) string {
 
 func (c *codexClient) handleEvent(msg map[string]any) {
 	msgType, _ := msg["type"].(string)
-	if started, ok := codexLegacyToolEvents[msgType]; ok && c.onToolActivity != nil {
-		callID, _ := msg["call_id"].(string)
-		if callID == "" {
-			callID, _ = msg["callId"].(string)
-		}
-		c.onToolActivity(callID, started)
+	if msgType == "task_started" {
+		c.legacyTurnID, _ = msg["turn_id"].(string)
 	}
+	c.reportLegacyToolActivity(msgType, msg)
 
 	switch msgType {
 	case "task_started":
@@ -3470,6 +3473,15 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	}
 
 	switch method {
+	case "turn/plan/updated":
+		// The update_plan tool reports only through this notification, never
+		// as a thread item.
+		turnID, _ := params["turnId"].(string)
+		if active := c.activeTurnID(); c.onToolActivity != nil &&
+			(turnID == "" || active == "" || turnID == active) {
+			c.onToolActivity("", true)
+		}
+
 	case "thread/tokenUsage/updated":
 		c.updateThreadTokenUsage(params)
 
@@ -3724,7 +3736,8 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	if item == nil && method != "item/agentMessage/delta" {
 		return
 	}
-	if _, ok := codexToolItemTypes[itemType]; ok && c.onToolActivity != nil {
+	if _, ok := codexToolItemTypes[itemType]; ok && c.onToolActivity != nil &&
+		!codexIsUserShellCommand(item["source"]) {
 		switch method {
 		case "item/started":
 			c.onToolActivity(itemID, true)
@@ -3896,11 +3909,66 @@ var codexToolItemTypes = map[string]struct{}{
 	"webSearch":           {},
 	"imageView":           {},
 	"imageGeneration":     {},
+	"sleep":               {},
+}
+
+// reportLegacyToolActivity forwards a legacy codex/event tool event to
+// onToolActivity, skipping a command the user ran (source user_shell) and an
+// event whose turn_id names a turn other than this one.
+func (c *codexClient) reportLegacyToolActivity(msgType string, msg map[string]any) {
+	started, ok := codexLegacyToolEvents[msgType]
+	if !ok || c.onToolActivity == nil || codexIsUserShellCommand(msg["source"]) {
+		return
+	}
+	if turnID, _ := msg["turn_id"].(string); turnID != "" && c.legacyTurnID != "" && turnID != c.legacyTurnID {
+		return
+	}
+	callID, _ := msg["call_id"].(string)
+	if callID == "" {
+		callID, _ = msg["callId"].(string)
+	}
+	c.onToolActivity(callID, started)
+}
+
+// reportServerRequestToolActivity counts an approval request as the start of
+// the tool call it gates. request_permissions is a tool of its own, and an
+// approval may be all a denied or pending call ever reports.
+func (c *codexClient) reportServerRequestToolActivity(method string, rawParams json.RawMessage) {
+	if _, ok := codexToolServerRequests[method]; !ok || c.onToolActivity == nil {
+		return
+	}
+	var params map[string]any
+	_ = json.Unmarshal(rawParams, &params)
+	if c.isNotificationFromOtherThread(params) {
+		return
+	}
+	callID, _ := params["itemId"].(string)
+	if callID == "" {
+		callID, _ = params["callId"].(string)
+	}
+	c.onToolActivity(callID, true)
+}
+
+// codexIsUserShellCommand reports whether a command's source says the user ran
+// it rather than the model: v2 "userShell", legacy "user_shell".
+func codexIsUserShellCommand(source any) bool {
+	s, _ := source.(string)
+	return s == "userShell" || s == "user_shell"
+}
+
+// codexToolServerRequests are the app-server requests that gate a tool call.
+var codexToolServerRequests = map[string]struct{}{
+	"item/commandExecution/requestApproval": {},
+	"item/fileChange/requestApproval":       {},
+	"item/permissions/requestApproval":      {},
+	"execCommandApproval":                   {},
+	"applyPatchApproval":                    {},
 }
 
 // codexLegacyToolEvents maps each legacy codex/event tool event to whether it
-// starts (true) or ends (false) a call. view_image_tool_call is a single event
-// and counts as a start.
+// starts (true) or ends (false) a call. Single-event tools (view_image,
+// update_plan, request_user_input, request_permissions) and approval requests
+// count as a start.
 var codexLegacyToolEvents = map[string]bool{
 	"exec_command_begin":             true,
 	"exec_command_end":               false,
@@ -3913,6 +3981,11 @@ var codexLegacyToolEvents = map[string]bool{
 	"image_generation_begin":         true,
 	"image_generation_end":           false,
 	"view_image_tool_call":           true,
+	"plan_update":                    true,
+	"request_user_input":             true,
+	"request_permissions":            true,
+	"exec_approval_request":          true,
+	"apply_patch_approval_request":   true,
 	"dynamic_tool_call_request":      true,
 	"dynamic_tool_call_response":     false,
 	"collab_agent_spawn_begin":       true,
