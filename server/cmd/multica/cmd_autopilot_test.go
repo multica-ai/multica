@@ -1158,6 +1158,63 @@ func TestRunAutopilotTriggerListSurfacesIDs(t *testing.T) {
 	}
 }
 
+// The scheduler only fires enabled triggers of an active autopilot, so a
+// trigger that will not fire must not show a next run, matching the web UI.
+func TestRunAutopilotTriggerListHidesNextRunThatWillNotFire(t *testing.T) {
+	const autopilotID = "11111111-1111-1111-1111-111111111111"
+	nextRun := time.Now().Add(3*24*time.Hour + time.Hour).UTC().Format(time.RFC3339)
+
+	cases := []struct {
+		name            string
+		autopilotStatus string
+		enabled         bool
+		wantNextRun     bool
+	}{
+		{"active autopilot, enabled trigger", "active", true, true},
+		{"paused autopilot", "paused", true, false},
+		{"archived autopilot", "archived", true, false},
+		{"disabled trigger", "active", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/autopilots/"+autopilotID {
+					http.NotFound(w, r)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"autopilot": map[string]any{"id": autopilotID, "status": tc.autopilotStatus},
+					"triggers": []map[string]any{
+						{
+							"id":              "22222222-2222-2222-2222-222222222222",
+							"kind":            "schedule",
+							"enabled":         tc.enabled,
+							"cron_expression": "0 9 * * *",
+							"timezone":        "UTC",
+							"next_run_at":     nextRun,
+						},
+					},
+				})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+			out, err := captureStdout(t, func() error {
+				return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("table"), []string{autopilotID})
+			})
+			if err != nil {
+				t.Fatalf("runAutopilotTriggerList: %v", err)
+			}
+			if got := strings.Contains(out, "in 3d"); got != tc.wantNextRun {
+				t.Errorf("next run shown = %v, want %v:\n%s", got, tc.wantNextRun, out)
+			}
+		})
+	}
+}
+
 // Webhook triggers carry a URL that grants the ability to fire the autopilot,
 // so trigger-list must redact it the same way `get` does.
 func TestRunAutopilotTriggerListRedactsWebhookCredentials(t *testing.T) {
