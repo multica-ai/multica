@@ -44,7 +44,14 @@ import (
 // the requester (the admin doing the kick); for LeaveWorkspace it's the leaver
 // themselves.
 func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID) (revocationResult, error) {
-	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, nil, "")
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, nil, "", false)
+}
+
+// revokeRemoveAndBlockMember is revokeAndRemoveMember that also blocks the
+// member's email from joining the workspace again (MUL-10296), in the same
+// transaction, so no invitation or share link can slip in between.
+func (h *Handler) revokeRemoveAndBlockMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID) (revocationResult, error) {
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, nil, "", true)
 }
 
 // revokeAndDemoteToGuest is revokeAndRemoveMember for a member who becomes a
@@ -55,10 +62,10 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 // transaction locks the row, nothing changes and errMemberRoleChanged is
 // returned.
 func (h *Handler) revokeAndDemoteToGuest(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
-	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, guestProjects, fromRole)
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, guestProjects, fromRole, false)
 }
 
-func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
+func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string, blockRejoin bool) (revocationResult, error) {
 	var empty revocationResult
 	demote := guestProjects != nil
 
@@ -374,6 +381,17 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		}
 	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
+	}
+	if blockRejoin && !demote {
+		user, err := qtx.GetUser(ctx, userID)
+		if err != nil {
+			return empty, err
+		}
+		if err := qtx.BlockWorkspaceRejoin(ctx, db.BlockWorkspaceRejoinParams{
+			WorkspaceID: workspaceID, Email: user.Email, BlockedBy: archivedBy,
+		}); err != nil {
+			return empty, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

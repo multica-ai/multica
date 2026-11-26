@@ -100,6 +100,14 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if blocked, err := h.isBlockedFromWorkspace(r.Context(), requester.WorkspaceID, email); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create invitation")
+		return
+	} else if blocked {
+		writeError(w, http.StatusConflict, "this email is blocked from rejoining the workspace; unblock it in Members settings first")
+		return
+	}
+
 	// Check if the user is already a member.
 	existingUser, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err == nil {
@@ -535,6 +543,15 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "invitation does not belong to you")
 		return
 	}
+	if inv.Status == "pending" {
+		if blocked, err := h.isBlockedFromWorkspace(r.Context(), inv.WorkspaceID, user.Email); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+			return
+		} else if blocked {
+			writeError(w, http.StatusForbidden, blockedFromWorkspaceMessage)
+			return
+		}
+	}
 
 	if inv.Status != "pending" {
 		// Installed clients can hold a stale pending-invitation row for an
@@ -615,6 +632,14 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	if err := checkJoinBlock(r.Context(), qtx, inv.WorkspaceID, user.ID, user.Email); err != nil {
+		if errors.Is(err, errBlockedFromWorkspace) {
+			writeError(w, http.StatusForbidden, blockedFromWorkspaceMessage)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+		return
+	}
 	if err := memberLimit.lock(r.Context(), qtx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return

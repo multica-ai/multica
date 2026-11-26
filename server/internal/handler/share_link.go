@@ -300,6 +300,14 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if blocked, err := h.isBlockedFromWorkspace(r.Context(), linkPreview.WorkspaceID, user.Email); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	} else if blocked {
+		writeError(w, http.StatusForbidden, blockedFromWorkspaceMessage)
+		return
+	}
+
 	// A joiner who also holds a pending email invitation takes the slot that
 	// invitation reserved, exactly as accepting it would. A guest invitation
 	// reserves no slot (CountWorkspaceMemberSlots), so it holds none to take.
@@ -345,6 +353,15 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	if err := checkJoinBlock(r.Context(), qtx, linkPreview.WorkspaceID, user.ID, user.Email); err != nil {
+		h.compensateCapacityIntent(r.Context(), capacityToken)
+		if errors.Is(err, errBlockedFromWorkspace) {
+			writeError(w, http.StatusForbidden, blockedFromWorkspaceMessage)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	}
 	if err := memberLimit.lock(r.Context(), qtx); err != nil {
 		h.compensateCapacityIntent(r.Context(), capacityToken)
 		writeError(w, http.StatusInternalServerError, "failed to join workspace")

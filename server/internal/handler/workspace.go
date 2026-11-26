@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -922,8 +923,24 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// An optional body asks to also block the member from rejoining
+	// (MUL-10296); clients that send none just remove.
+	var req struct {
+		BlockRejoin bool `json:"block_rejoin"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
 	requesterUserID := requestUserID(r)
-	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
+	revoke := h.revokeAndRemoveMember
+	if req.BlockRejoin {
+		revoke = h.revokeRemoveAndBlockMember
+	}
+	result, err := revoke(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
 	if errors.Is(err, errLastOwner) {
 		writeError(w, http.StatusBadRequest, errLastOwner.Error())
 		return
