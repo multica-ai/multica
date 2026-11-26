@@ -312,8 +312,8 @@ var issueEditDescriptionCmd = &cobra.Command{
 	Long: "Replace text in an issue's description, quoting it exactly as it appears now " +
 		"(with enough surrounding text to be unique), or at least once with --replace-all. " +
 		"The edit lands wherever that text is, even while people are editing the description live; " +
-		"it fails only if someone changed that very text. Prefer this over `issue update --description*` " +
-		"for changing part of a description.",
+		"it fails, with nothing written, only when the quoted text is gone or, without --replace-all, appears more than once. " +
+		"Prefer this over `issue update --description*` for changing part of a description.",
 	Example: `  multica issue edit-description MUL-123 --old "Status: draft" --new "Status: ready"
   multica issue edit-description MUL-123 --old-file old.md --new-file new.md`,
 	Args: exactArgs(1),
@@ -670,7 +670,7 @@ func init() {
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
-	issueListCmd.Flags().Bool("blocked", false, "Only issues waiting for unfinished tasks (manual blockers or earlier stages)")
+	issueListCmd.Flags().Bool("blocked", false, "Only issues still waiting on unfinished blockers (issues added with --blocked-by, or earlier stages)")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
@@ -731,7 +731,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in when live description editing is on and the update changes nothing else (no other field flags or --attachment), and the update is refused only where both changed the same paragraphs; otherwise the update is refused if the description changed at all. Without it the description is replaced as given.")
+	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision `N` from multica issue get that your new description was written from. Changes made since then are merged in when live description editing is on and the update changes nothing else (no other field flags or --attachment), and the update is refused only where both changed the same paragraphs; otherwise the update is refused if the description changed at all. Without it the description is replaced as given.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")

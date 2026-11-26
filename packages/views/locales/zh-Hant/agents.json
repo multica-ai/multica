@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "取消全部執行",
     "archive_dialog_title": "歸檔\"{{name}}\"？",
     "archive_dialog_description": "歸檔後這個 AI 代理將無法被分配或提及，進行中的執行會被取消。所有歷史會被保留，可以稍後恢復。",
+    "archive_dialog_mika_note": "恢復 Mika 之前，不會再出現「和 Mika 開始」的提示。",
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "歸檔",
     "set_access_applies_to_other": "將應用於 {{count}} 個 AI 代理。"
@@ -936,6 +937,14 @@
     "search_placeholder": "搜尋這次執行…",
     "no_matches": "沒有匹配的步驟。",
     "more_actions": "更多",
+    "purge_log": "清除執行日誌",
+    "purge_confirm_title": "清除這次執行的日誌？",
+    "purge_confirm_body": "所有步驟、工具輸入與輸出，以及 AI 代理的最終輸出都會被刪除，任何人都無法再查看。執行的狀態、耗時和用量會保留。此操作無法復原。",
+    "purge_confirm_action": "清除日誌",
+    "purge_cancel": "取消",
+    "purge_done": "執行日誌已清除",
+    "purge_failed": "無法清除執行日誌",
+    "purged_by": "執行日誌已由 {{name}} 清除 · {{time}}",
     "kind_text": "AI 代理",
     "kind_tool": "工具",
     "kind_thinking": "思考",
@@ -1107,5 +1116,9 @@
     "new_app": "此 AI 代理的新應用",
     "adds_app_note": "回應後，{{agent}} 之後的執行都可以使用 {{app}}。",
     "add_to_agent": "將 {{app}} 新增至 {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "危險操作",
+    "restore_label": "恢復 AI 代理"
   }
 }

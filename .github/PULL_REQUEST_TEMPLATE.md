@@ -1,6 +1,6 @@
 ## Problem
 
-<!-- What is the concrete problem, who is affected, and why does it matter? -->
+<!-- What is the concrete problem, who is affected, and why does it matter? This PR is public: describe what a reader can verify from the code and the product, and leave out business and security-sensitive context (see AGENTS.md#public-repository-writing). -->
 
 ## Goal
 

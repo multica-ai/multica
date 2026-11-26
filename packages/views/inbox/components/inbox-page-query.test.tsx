@@ -35,9 +35,10 @@ vi.mock("../../issues/components/issue-detail", () => ({
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, replace, push }),
   useReportNavigating: () => {},
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => true }));
@@ -86,6 +87,7 @@ beforeEach(() => {
   } });
   searchParams = new URLSearchParams();
   replace.mockClear();
+  push.mockClear();
   detailUnmounted.mockClear();
   filterMenuUnmounted.mockClear();
   useInboxFilterStore.setState({ filtersByWorkspace: {} });

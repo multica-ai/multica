@@ -259,5 +259,9 @@
     "turn_into": "Turn into",
     "duplicate": "Duplicate",
     "delete": "Delete"
+  },
+  "plain_text": {
+    "notice": "Too long to format, shown as plain text.",
+    "download": "Download as .txt"
   }
 }

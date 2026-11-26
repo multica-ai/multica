@@ -1118,9 +1118,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
 
-	h.publish(protocol.EventDaemonRegister, req.WorkspaceID, "system", "", map[string]any{
-		"runtimes": resp,
-	})
+	// The event reaches every member of the workspace, so it only asks clients
+	// to refetch; the list endpoint applies runtime visibility.
+	h.PublishRuntimeRefresh(req.WorkspaceID, "system", "", "register")
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts)
 	if !h.daemonCredentialSeesWorkspaceConfig(r, req.WorkspaceID) {
@@ -1665,8 +1665,26 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	// Defensive consistency assertion only: the workspace scope and lease came
 	// from the same connection-time query. This does not re-authorize against DB.
-	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
+	workspaceID := lease.Snapshot().WorkspaceID
+	if !identity.AllowsWorkspace(workspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
+	}
+	// Ownership is fixed for the connection's life; membership is not. Member
+	// removal invalidates the runtime on the hub right away, and this re-check
+	// bounds how long a missed invalidation keeps the runtime alive.
+	if now := time.Now(); !lease.MembershipVerifiedWithin(now, daemonWSMembershipRecheckInterval) {
+		member, err := h.daemonConnectionPrincipalIsMember(ctx, identity, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if !member {
+			if h.DaemonRuntimeGone != nil {
+				h.NotifyRuntimeGone(runtimeID)
+				return nil, nil
+			}
+			return runtimeGoneHeartbeatAck(runtimeID), nil
+		}
+		lease.MarkMembershipVerified(now)
 	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
@@ -1680,6 +1698,40 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, req)
 	return ack, err
+}
+
+// daemonWSMembershipRecheckInterval is how often a WebSocket heartbeat
+// re-confirms that the connection's principal is still a workspace member.
+const daemonWSMembershipRecheckInterval = time.Minute
+
+// daemonConnectionPrincipalIsMember reports whether the human a daemon
+// connection acts for is still a non-guest member of workspaceID: the user
+// behind a user credential, or the owner an mdt_ token is bound to. A
+// Qoder-managed connection has no such human; its credential is governed by
+// its cloud_agent_connection instead.
+func (h *Handler) daemonConnectionPrincipalIsMember(ctx context.Context, identity daemonws.ClientIdentity, workspaceID string) (bool, error) {
+	principal := identity.UserID
+	if identity.DaemonID != "" {
+		principal = identity.DaemonTokenOwnerID
+	}
+	if principal == "" {
+		return true, nil
+	}
+	if h.MembershipCache.Get(ctx, principal, workspaceID) {
+		return true, nil
+	}
+	member, err := h.getWorkspaceMember(ctx, principal, workspaceID)
+	if isNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if projectaccess.IsGuestRole(member.Role) {
+		return false, nil
+	}
+	h.cacheMembership(ctx, member)
+	return true, nil
 }
 
 func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPayload {
@@ -5954,6 +6006,13 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	// the system (MUL-6523).
 	task, scope, ok := h.requireDaemonTaskAccessWithScope(w, r, taskID)
 	if !ok {
+		return
+	}
+	// An admin cleared this run's log. A late flush (a cancelled run's tail, a
+	// retried batch) must not put it back; the daemon does not retry here, so
+	// acknowledge and drop.
+	if task.TranscriptPurgedAt.Valid {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 

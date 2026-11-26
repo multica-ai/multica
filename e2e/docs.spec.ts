@@ -494,4 +494,11 @@ test("comment on selected text, reply, find it again after reload, resolve and r
   await panel.getByRole("button", { name: "Reopen", exact: true }).click();
   await expect(panel.getByRole("tab", { name: "Open 1" })).toHaveAttribute("aria-selected", "true");
   await expect(panel.getByRole("group", { name: selected! })).toBeVisible();
+
+  // Clicking elsewhere in the text lets go of it: the card folds to its first
+  // message and a reply count.
+  await expect(panel.getByRole("group", { name: selected! }).getByText("Yes, with CONCURRENTLY.", { exact: true })).toBeVisible();
+  await editor.getByText("Confirm the rollback owner.").click();
+  await expect(panel.getByRole("group", { name: selected! }).getByText("Yes, with CONCURRENTLY.", { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("group", { name: selected! })).toContainText("1 reply");
 });

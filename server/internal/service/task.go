@@ -2685,7 +2685,7 @@ func (s *TaskService) sendDirectChatMessage(
 					return fmt.Errorf("list bound chat attachments for title: %w", err)
 				}
 				if len(attachments) > 0 {
-					title := chattitle.Derive(attachments[0].Filename)
+					title := chattitle.DeriveFromFilename(attachments[0].Filename)
 					if title != "" {
 						if _, err := qtx.InitializeChatSessionMediaTitle(ctx, db.InitializeChatSessionMediaTitleParams{
 							ID: session.ID, MessageID: msg.ID, Title: title,

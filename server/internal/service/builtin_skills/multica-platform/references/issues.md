@@ -1,13 +1,12 @@
 # Issues
 
-Product contracts the runtime brief does not fully encode.
+Product contracts the runtime brief does not fully encode. For revision-guarded mutations, see [Conditional issue writes](issue-revisions.md).
 
 - [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
 - [Who else is running right now](#who-else-is-running-right-now)
-- [Conditional issue writes](issue-revisions.md)
 - [Sub-issues and stages](#sub-issues-and-stages)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
@@ -384,9 +383,10 @@ to coordinate with.
 
 ## Sub-issues and stages
 
-Whether to split an issue at all, `todo` vs `backlog` children, serial chains,
-stages and their parent wakeups live in `references/sub-issues.md`. Read it
-before creating a sub-issue.
+Whether to split an issue at all, `todo` vs `backlog` children, ordering them
+with stages, and the parent wakeups stages drive live in
+`references/sub-issues.md`. Read it before creating a sub-issue. Making one
+issue wait for another (`--blocked-by`) lives in `references/dependencies.md`.
 
 ## Charts and files in a comment
 

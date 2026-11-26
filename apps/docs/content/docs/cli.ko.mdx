@@ -291,7 +291,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다.
+- `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다. `agent env get`과 `agent env set`은 값을 `****`로 가려서 출력하며, 다른 에이전트로 복사할 때처럼 실제 값이 필요하면 `--show-values`를 붙입니다.
 - `agent update --mcp-config null`은 MCP 설정을 지웁니다.
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
 - 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
@@ -532,7 +532,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
 | | `tasks <id>` | 에이전트 실행 확인 | |
 | | `avatar <id>` | 아바타 업로드 | |
-| | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(에이전트 소유자 또는 워크스페이스 owner/admin. 읽을 때마다 기록됨) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`. 전체를 교체하며 값이 `****`인 키는 기존 값 유지 |
+| | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(에이전트 소유자 또는 워크스페이스 owner/admin. 읽을 때마다 기록됨) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`. 전체를 교체하며 값이 `****`인 키는 기존 값 유지. 출력 값은 `--show-values`가 없으면 `****` |
 | | `skills list/set/add <agent-id>` | 연결된 스킬 관리 | `--skill-ids`(`set`은 전체 교체, `add`는 증분 추가) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 워크스페이스 MCP 서버를 이 에이전트에 할당 | server id는 `workspace mcp list`에서 확인. 라이브러리 항목은 여기서 추가하기 전까지 동작하지 않으며, `disable`은 할당을 유지한 채 전달만 중단합니다 |
 | `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--mode`(둘 다 필수), `--agent` / `--squad` / `--squad-id` 중 하나만(필수), `--description`, `--issue-title-template`, `--project`, `--subscriber`(반복 가능) |

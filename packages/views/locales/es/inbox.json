@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "Bandeja de entrada",
-    "back": "Bandeja de entrada"
+    "title": "Bandeja de entrada"
   },
   "menu": {
     "mark_all_read": "Marcar todo como leído",

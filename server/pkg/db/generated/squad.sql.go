@@ -129,6 +129,28 @@ func (q *Queries) CreateSquad(ctx context.Context, arg CreateSquadParams) (Squad
 	return i, err
 }
 
+const deleteSquadMembersByMember = `-- name: DeleteSquadMembersByMember :exec
+DELETE FROM squad_member AS sm
+USING squad AS s
+WHERE sm.squad_id = s.id
+  AND s.workspace_id = $1
+  AND sm.member_type = 'member'
+  AND sm.member_id = $2
+`
+
+type DeleteSquadMembersByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Squad membership carries no FK to member, so member removal must prune it in
+// the same application transaction: a re-invited user must not rejoin squads
+// silently. Scoped to the workspace so the user's squads elsewhere survive.
+func (q *Queries) DeleteSquadMembersByMember(ctx context.Context, arg DeleteSquadMembersByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteSquadMembersByMember, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const getSquad = `-- name: GetSquad :one
 SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions, handoff_mode FROM squad WHERE id = $1
 `

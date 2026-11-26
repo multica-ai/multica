@@ -386,6 +386,9 @@
     "record_aria": "Change shortcut for {{action}}",
     "recording": "Press keys",
     "record_hint": "Esc cancels · Delete clears",
+    "record_sequence_hint": "Press a key, or two in a row for a sequence such as G then I · Esc cancels",
+    "record_then_hint": "Press the second key · ↵ keeps one key · Backspace starts over",
+    "then": "then",
     "unassigned": "Unassigned",
     "no_results": "No matching shortcut actions.",
     "conflict_error": "Already used by {{action}}.",
@@ -396,8 +399,10 @@
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",
+      "issue": "Issue",
       "navigation": "Navigation"
     },
+    "issue_scope": "Act on the issue in front of you: the one in a peek, the issues selected in a list, or the open issue.",
     "actions": {
       "openSearch": {
         "label": "Open search",
@@ -454,6 +459,42 @@
       "undoInboxAction": {
         "label": "Undo inbox action",
         "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
+      },
+      "setIssueStatus": {
+        "label": "Change status",
+        "description": "Open the status picker."
+      },
+      "assignIssue": {
+        "label": "Assign",
+        "description": "Open the assignee picker."
+      },
+      "setIssuePriority": {
+        "label": "Set priority",
+        "description": "Open the priority picker."
+      },
+      "setIssueLabels": {
+        "label": "Edit labels",
+        "description": "Open the label picker."
+      },
+      "setIssueDueDate": {
+        "label": "Set due date",
+        "description": "Open the due date picker."
+      },
+      "moveIssueToProject": {
+        "label": "Move to project",
+        "description": "Open the project picker."
+      },
+      "runIssueQuickAction": {
+        "label": "Run quick action",
+        "description": "Available on a single issue when quick actions are active."
+      },
+      "replyToIssue": {
+        "label": "Reply",
+        "description": "Focus the open issue's comment box."
+      },
+      "showShortcuts": {
+        "label": "Show keyboard shortcuts",
+        "description": "Open the list of shortcuts, with the current page's first."
       },
       "send": {
         "label": "Send",
@@ -531,6 +572,32 @@
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",
       "close_dialog": "Close dialog or menu"
+    },
+    "cheatsheet": {
+      "title": "Keyboard shortcuts",
+      "current_page": "current page",
+      "footer_prefix": "Shortcuts are saved on this device. Change them in ",
+      "footer_link": "Settings › Shortcuts",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Inbox",
+        "issue": "Issue",
+        "navigation": "Navigation",
+        "general": "General",
+        "list": "Lists and boards",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Move down / up",
+        "list_columns": "Move across board columns",
+        "list_open": "Open",
+        "list_peek": "Preview",
+        "list_select": "Select",
+        "list_extend": "Extend selection",
+        "list_select_all": "Select all",
+        "list_clear": "Clear selection",
+        "editor_leave": "Leave the field"
+      }
     }
   },
   "chat": {

@@ -678,20 +678,6 @@ WHERE workspace_id = $1
   AND origin_id = $3
 LIMIT 1;
 
--- name: CountCreatedIssueAssignees :many
--- Count assignees on issues created by a specific user.
-SELECT
-  assignee_type,
-  assignee_id,
-  COUNT(*)::bigint as frequency
-FROM issue
-WHERE workspace_id = $1
-  AND creator_id = $2
-  AND creator_type = 'member'
-  AND assignee_type IS NOT NULL
-  AND assignee_id IS NOT NULL
-GROUP BY assignee_type, assignee_id;
-
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,

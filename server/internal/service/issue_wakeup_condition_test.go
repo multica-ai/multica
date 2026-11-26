@@ -467,6 +467,56 @@ func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	}
 }
 
+// When a push already advanced head_sha while snapshot_head_sha still holds
+// the old head's conclusion, checks_finished must report a pending snapshot
+// instead of baselining or firing on the outdated head.
+func TestWakeupConditionPullRequestChecksIgnoresStaleHeadSnapshot(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
+	ctx := context.Background()
+	pr := f.Insert(t, "github_pull_request", testutil.Cols{
+		"workspace_id": f.WorkspaceID, "installation_id": 1,
+		"repo_owner": "fixture", "repo_name": "stale-head", "pr_number": 9,
+		"title": "PR", "state": "open", "html_url": "https://example.test/pr/9",
+		"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+		"head_sha": "new-sha", "snapshot_head_sha": "old-sha", "checks_rollup_state": "FAILURE",
+	})
+	f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+	f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Check CI",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "checks_finished"})})
+	if !w.LastError.Valid || w.LastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
+		t.Fatalf("expected pending snapshot diagnostic on stale head, got %+v", w.LastError)
+	}
+	if w.ConditionState != "" {
+		t.Fatalf("stale head must not populate condition_state, got %q", w.ConditionState)
+	}
+	if got := wakeTick(t, f, s, w.ID); wakeRuns(t, f, w.ID) != 0 || !got.LastError.Valid {
+		t.Fatalf("stale head must wait with diagnostic: runs=%d error=%+v", wakeRuns(t, f, w.ID), got.LastError)
+	}
+
+	// Snapshot catches up to new-sha while CI is still running → diagnostic clears.
+	f.Exec(t, "UPDATE github_pull_request SET snapshot_head_sha='new-sha', checks_rollup_state='PENDING' WHERE id=$1", pr)
+	if got := wakeTick(t, f, s, w.ID); wakeRuns(t, f, w.ID) != 0 || got.LastError.Valid {
+		t.Fatalf("pending checks on current head: runs=%d error=%+v", wakeRuns(t, f, w.ID), got.LastError)
+	}
+
+	// Checks finish on new-sha → fires once with current head evidence.
+	f.Exec(t, "UPDATE github_pull_request SET checks_rollup_state='SUCCESS' WHERE id=$1", pr)
+	got := wakeTick(t, f, s, w.ID)
+	if wakeRuns(t, f, w.ID) != 1 || got.Enabled || got.LastError.Valid {
+		t.Fatalf("finished checks on current head: runs=%d enabled=%t error=%+v", wakeRuns(t, f, w.ID), got.Enabled, got.LastError)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"head_sha":"new-sha"`) || !strings.Contains(task.HandoffNote.String, `"checks":"success"`) {
+		t.Fatalf("unexpected PR facts: %s", task.HandoffNote.String)
+	}
+}
+
 func TestWakeupConditionValidation(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
 	ctx := context.Background()

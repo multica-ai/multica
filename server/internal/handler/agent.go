@@ -456,6 +456,8 @@ type AgentTaskResponse struct {
 	DispatchedAt       *string                  `json:"dispatched_at"`
 	StartedAt          *string                  `json:"started_at"`
 	CompletedAt        *string                  `json:"completed_at"`
+	TranscriptPurgedAt *string                  `json:"transcript_purged_at,omitempty"`
+	TranscriptPurgedBy string                   `json:"transcript_purged_by,omitempty"`
 	Result             any                      `json:"result"`
 	Error              *string                  `json:"error"`
 	FailureReason      string                   `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
@@ -954,6 +956,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		DispatchedAt:           timestampToPtr(t.DispatchedAt),
 		StartedAt:              timestampToPtr(t.StartedAt),
 		CompletedAt:            timestampToPtr(t.CompletedAt),
+		TranscriptPurgedAt:     timestampToPtr(t.TranscriptPurgedAt),
+		TranscriptPurgedBy:     uuidToString(t.TranscriptPurgedBy),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
@@ -2095,6 +2099,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "custom_env is no longer accepted on this endpoint; use PUT /api/agents/{id}/env (or `multica agent env set`)")
 		return
 	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
 
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
@@ -2951,12 +2959,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A system agent belongs to the product, not to the workspace, and the
-	// workspace's whole entry point runs through it. Archiving it would hide
-	// it from every list while leaving the row in place — which also strands
-	// the bootstrap endpoint, since its lookup skips archived rows but the
-	// unique index does not.
-	if agent.SystemKey.Valid && agent.SystemKey.String != "" {
+	// Mika is the one product-defined agent a workspace may archive; the Mika
+	// bootstrap refuses to provision past an archived one. Other system agents
+	// are runtime infrastructure with no lifecycle of their own.
+	if agent.SystemKey.Valid && agent.SystemKey.String != "" && agent.SystemKey.String != service.MikaSystemKey {
 		writeError(w, http.StatusBadRequest, "this agent is built into Multica and cannot be archived")
 		return
 	}
@@ -3321,13 +3327,27 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
-		// A private project the caller cannot see (MUL-8472) is answered like
-		// one with nobody working, so its agents and run count stay hidden.
-		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
-		if !ok {
+	}
+
+	// A project, or a parent issue's project, that is private and that the
+	// caller cannot see (MUL-8472) is answered like one with nobody working,
+	// so its agents and run count stay hidden.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if projectID.Valid && !hidden.CanSeeProject(projectID) {
+		writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+		return
+	}
+	if parentIssueID.Valid && !hidden.Empty() {
+		parentProjectID, err := h.Queries.GetIssueProjectID(r.Context(), parentIssueID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			writeProjectAccessError(w, r, workspaceID, err)
 			return
 		}
-		if !hidden.CanSeeProject(projectID) {
+		// A missing parent is not hidden; the query below finds nothing.
+		if err == nil && !hidden.CanSeeProject(parentProjectID) {
 			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
 			return
 		}
@@ -3359,10 +3379,6 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 	// Issues in private projects the caller cannot see (MUL-8472) are left
 	// out of issue_ids; the agent and its running count stay, as on the
 	// redacted run list.
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
-	if !ok {
-		return
-	}
 	var issueIDs []pgtype.UUID
 	for _, row := range rows {
 		issueIDs = append(issueIDs, row.IssueIds...)

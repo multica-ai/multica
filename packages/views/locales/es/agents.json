@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Cancelar todas las ejecuciones",
     "archive_dialog_title": "¿Archivar \"{{name}}\"?",
     "archive_dialog_description": "El agente no podrá asignarse ni mencionarse, y sus ejecuciones activas se cancelarán. Todo el historial se conserva y podrás restaurarlo más tarde.",
+    "archive_dialog_mika_note": " La sugerencia «Empezar con Mika» no volverá a aparecer hasta que restaures a Mika.",
     "archive_dialog_cancel": "Cancelar",
     "archive_dialog_confirm": "Archivar",
     "set_access_applies_to_one": "Se aplica a {{count}} agente.",
@@ -938,6 +939,14 @@
     "search_placeholder": "Buscar en esta ejecución…",
     "no_matches": "Ningún paso coincide con esta búsqueda.",
     "more_actions": "Más",
+    "purge_log": "Borrar registro de la ejecución",
+    "purge_confirm_title": "¿Borrar el registro de esta ejecución?",
+    "purge_confirm_body": "Se eliminan para todos cada paso, las entradas y salidas de las herramientas y la salida final del agente. Se conservan el estado, la duración y el uso de la ejecución. Esta acción no se puede deshacer.",
+    "purge_confirm_action": "Borrar registro",
+    "purge_cancel": "Cancelar",
+    "purge_done": "Registro de la ejecución borrado",
+    "purge_failed": "No se pudo borrar el registro de la ejecución",
+    "purged_by": "Registro borrado por {{name}} · {{time}}",
     "kind_tool": "Herramienta",
     "kind_thinking": "Razonamiento",
     "kind_error": "Error",
@@ -1139,5 +1148,9 @@
     "new_app": "Nueva aplicación para este agente",
     "adds_app_note": "Al responder, se añade {{app}} a {{agent}} para las próximas ejecuciones.",
     "add_to_agent": "Añadir {{app}} a {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Zona peligrosa",
+    "restore_label": "Restaurar agente"
   }
 }

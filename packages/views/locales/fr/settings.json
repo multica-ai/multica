@@ -386,6 +386,9 @@
     "record_aria": "Modifier le raccourci de {{action}}",
     "recording": "Appuyez sur les touches",
     "record_hint": "Échap annule · Suppr efface",
+    "record_sequence_hint": "Appuyez sur une touche, ou deux à la suite pour une séquence comme G puis I · Échap annule",
+    "record_then_hint": "Appuyez sur la deuxième touche · ↵ garde une seule touche · Retour arrière recommence",
+    "then": "puis",
     "unassigned": "Non attribué",
     "no_results": "Aucune action de raccourci correspondante.",
     "conflict_error": "Déjà utilisé par {{action}}.",
@@ -396,8 +399,10 @@
     "send_enter_hint": "Maj+Entrée insère un paragraphe, poursuit une liste, ou ajoute un saut de ligne dans un bloc de code.",
     "categories": {
       "general": "Général",
+      "issue": "Tâche",
       "navigation": "Navigation"
     },
+    "issue_scope": "Agit sur la tâche devant vous : celle de l'aperçu, les tâches sélectionnées dans une liste ou la tâche ouverte.",
     "actions": {
       "openSearch": {
         "label": "Ouvrir la recherche",
@@ -454,6 +459,42 @@
       "undoInboxAction": {
         "label": "Annuler l'action de la boîte de réception",
         "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche ; ensuite, restaure la notification ouverte une fois archivée ou ce qu'indique Boîte de réception vide."
+      },
+      "setIssueStatus": {
+        "label": "Changer le statut",
+        "description": "Ouvre le sélecteur de statut."
+      },
+      "assignIssue": {
+        "label": "Assigner",
+        "description": "Ouvre le sélecteur de responsable."
+      },
+      "setIssuePriority": {
+        "label": "Définir la priorité",
+        "description": "Ouvre le sélecteur de priorité."
+      },
+      "setIssueLabels": {
+        "label": "Modifier les libellés",
+        "description": "Ouvre le sélecteur de libellés."
+      },
+      "setIssueDueDate": {
+        "label": "Définir l'échéance",
+        "description": "Ouvre le sélecteur d'échéance."
+      },
+      "moveIssueToProject": {
+        "label": "Déplacer vers un projet",
+        "description": "Ouvre le sélecteur de projet."
+      },
+      "runIssueQuickAction": {
+        "label": "Lancer une action rapide",
+        "description": "Disponible sur une seule tâche quand des actions rapides sont actives."
+      },
+      "replyToIssue": {
+        "label": "Répondre",
+        "description": "Place le curseur dans la zone de commentaire de la tâche ouverte."
+      },
+      "showShortcuts": {
+        "label": "Afficher les raccourcis clavier",
+        "description": "Ouvre la liste des raccourcis, ceux de la page actuelle en premier."
       },
       "send": {
         "label": "Envoyer",
@@ -531,6 +572,32 @@
       "zoom_out": "Zoom arrière",
       "reset_zoom": "Réinitialiser le zoom",
       "close_dialog": "Fermer la fenêtre ou le menu"
+    },
+    "cheatsheet": {
+      "title": "Raccourcis clavier",
+      "current_page": "page actuelle",
+      "footer_prefix": "Les raccourcis sont enregistrés sur cet appareil. Modifiez-les dans ",
+      "footer_link": "Paramètres › Raccourcis",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Boîte de réception",
+        "issue": "Tâche",
+        "navigation": "Navigation",
+        "general": "Général",
+        "list": "Listes et tableaux",
+        "editor": "Éditeur"
+      },
+      "rows": {
+        "list_move": "Descendre / monter",
+        "list_columns": "Changer de colonne du tableau",
+        "list_open": "Ouvrir",
+        "list_peek": "Aperçu",
+        "list_select": "Sélectionner",
+        "list_extend": "Étendre la sélection",
+        "list_select_all": "Tout sélectionner",
+        "list_clear": "Effacer la sélection",
+        "editor_leave": "Quitter le champ"
+      }
     }
   },
   "chat": {

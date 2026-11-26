@@ -296,8 +296,12 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 				if !githubChecks {
 					continue
 				}
-				missingSnapshot = missingSnapshot || head == ""
-				if head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
+				// A snapshot from an older head says nothing about the pushed one.
+				if head == "" || (currentHead != "" && head != currentHead) {
+					missingSnapshot = true
+					continue
+				}
+				if slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
 					keys = append(keys, fmt.Sprintf("%d@%s:%s", number, head, checks))
 					prs = append(prs, map[string]any{"number": number, "head_sha": head, "checks": strings.ToLower(checks)})
 				}

@@ -23,6 +23,11 @@ export type CommandBarContext =
       issue: Issue;
       /** Where to land after deleting it when there is no history to go back to. */
       onDeletedFallbackPath?: string;
+      /**
+       * The issue under an issue list's keyboard cursor. It yields to every
+       * other issue or selection context, whenever either was registered.
+       */
+      cursor?: boolean;
     }
   | { kind: "issues"; issues: Issue[]; clearSelection: () => void }
   | { kind: "project"; project: Project }

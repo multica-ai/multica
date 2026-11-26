@@ -1070,6 +1070,9 @@ const InboxRow = memo(function InboxRow({
             panelRowStateClass(active),
             "relative select-none data-[popup-open]:bg-surface-hover",
             !compact && "items-start py-1.5",
+            // The agents hold the same right-edge slot as a tree row's avatars;
+            // a compact unread row ends with its dot, which keeps the other dots' column.
+            agents && !(compact && unread) && "pr-2",
           )}
         >
           {statusIcon ||
@@ -1114,10 +1117,7 @@ const InboxRow = memo(function InboxRow({
                 ) : unread ? (
                   <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span>
                 ) : (
-                  <>
-                    <span className={cn("flex shrink-0 items-center", yields)}>{dot}</span>
-                    {!agents && time}
-                  </>
+                  !agents && time
                 )}
               </>
             ) : (

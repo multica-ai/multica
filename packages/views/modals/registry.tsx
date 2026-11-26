@@ -6,6 +6,7 @@ import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
+import { KeyboardShortcutsModal } from "./keyboard-shortcuts";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { MarkDuplicateIssueModal } from "./mark-duplicate-issue";
 import { AddChildIssueModal } from "./add-child-issue";
@@ -138,6 +139,16 @@ export function ModalRegistry() {
             onClose={close}
             onOpenChangeComplete={handleOpenChangeComplete}
             data={currentData}
+          />
+        );
+        break;
+      case "keyboard-shortcuts":
+        activeModal = (
+          <KeyboardShortcutsModal
+            key={sessionKey}
+            open={isOpen}
+            onClose={close}
+            onOpenChangeComplete={handleOpenChangeComplete}
           />
         );
         break;

@@ -380,6 +380,9 @@
     "record_aria": "{{action}} 단축키 변경",
     "recording": "키를 누르세요",
     "record_hint": "Esc 취소 · Delete 지우기",
+    "record_sequence_hint": "키를 누르거나, G 다음 I처럼 두 키를 이어서 누르면 시퀀스가 됩니다 · Esc 취소",
+    "record_then_hint": "두 번째 키를 누르세요 · ↵ 한 키만 사용 · Backspace 다시 시작",
+    "then": "다음",
     "unassigned": "지정되지 않음",
     "no_results": "일치하는 단축키 동작이 없습니다.",
     "conflict_error": "이미 {{action}}에서 사용 중입니다.",
@@ -390,8 +393,10 @@
     "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
     "categories": {
       "general": "일반",
+      "issue": "태스크",
       "navigation": "탐색"
     },
+    "issue_scope": "눈앞의 태스크에 적용됩니다: 미리보기 중인 태스크, 목록에서 선택한 태스크, 또는 열려 있는 태스크.",
     "actions": {
       "openSearch": {
         "label": "검색 열기",
@@ -448,6 +453,42 @@
       "undoInboxAction": {
         "label": "인박스 작업 실행 취소",
         "description": "토스트가 보이는 동안 마지막 보관, 미루기, 구독 해제를 취소합니다. 토스트가 사라진 뒤에는 열린 알림이 보관되었다면 인박스로 되돌리고, '인박스가 비었습니다' 화면에서는 그곳에 표시된 작업을 취소합니다."
+      },
+      "setIssueStatus": {
+        "label": "상태 변경",
+        "description": "상태 선택을 엽니다."
+      },
+      "assignIssue": {
+        "label": "담당자 지정",
+        "description": "담당자 선택을 엽니다."
+      },
+      "setIssuePriority": {
+        "label": "우선순위 설정",
+        "description": "우선순위 선택을 엽니다."
+      },
+      "setIssueLabels": {
+        "label": "라벨 편집",
+        "description": "라벨 선택을 엽니다."
+      },
+      "setIssueDueDate": {
+        "label": "마감일 설정",
+        "description": "마감일 선택을 엽니다."
+      },
+      "moveIssueToProject": {
+        "label": "프로젝트로 이동",
+        "description": "프로젝트 선택을 엽니다."
+      },
+      "runIssueQuickAction": {
+        "label": "빠른 작업 실행",
+        "description": "활성화된 빠른 작업이 있는 단일 태스크에서 사용할 수 있습니다."
+      },
+      "replyToIssue": {
+        "label": "답글",
+        "description": "열린 태스크의 댓글 입력란에 포커스합니다."
+      },
+      "showShortcuts": {
+        "label": "키보드 단축키 보기",
+        "description": "단축키 목록을 엽니다. 현재 페이지의 단축키가 먼저 나옵니다."
       },
       "send": {
         "label": "보내기",
@@ -525,6 +566,32 @@
       "zoom_out": "축소",
       "reset_zoom": "확대/축소 재설정",
       "close_dialog": "대화상자 또는 메뉴 닫기"
+    },
+    "cheatsheet": {
+      "title": "키보드 단축키",
+      "current_page": "현재 페이지",
+      "footer_prefix": "단축키는 이 기기에 저장됩니다. ",
+      "footer_link": "설정 › 단축키",
+      "footer_suffix": "에서 바꿀 수 있습니다.",
+      "groups": {
+        "inbox": "받은편지함",
+        "issue": "태스크",
+        "navigation": "탐색",
+        "general": "일반",
+        "list": "목록과 보드",
+        "editor": "편집기"
+      },
+      "rows": {
+        "list_move": "아래 / 위로 이동",
+        "list_columns": "보드 열 이동",
+        "list_open": "열기",
+        "list_peek": "미리보기",
+        "list_select": "선택",
+        "list_extend": "선택 확장",
+        "list_select_all": "모두 선택",
+        "list_clear": "선택 해제",
+        "editor_leave": "입력란에서 나가기"
+      }
     }
   },
   "chat": {
