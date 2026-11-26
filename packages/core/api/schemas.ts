@@ -3193,6 +3193,8 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
+  // Labels attached to each created issue; absent on older servers.
+  label_ids: z.array(z.string()).catch([]).default([]),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),

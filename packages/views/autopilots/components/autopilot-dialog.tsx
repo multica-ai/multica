@@ -60,6 +60,8 @@ import { TitleEditor, ContentEditor, type TitleEditorRef } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { LabelPicker } from "../../issues/components";
+import { sameLabelIds, useDropDeletedLabelIds } from "./autopilot-labels";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
@@ -81,6 +83,7 @@ export interface AutopilotInitial {
   title: string;
   description: string;
   project_id: string | null;
+  label_ids?: string[];
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -151,6 +154,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [subscriberUserIds, setSubscriberUserIds] = useState<string[]>(
     initial.subscriber_user_ids ?? [],
   );
+  const [labelIds, setLabelIds] = useState<string[]>(initial.label_ids ?? []);
+  const dropDeletedLabelIds = useDropDeletedLabelIds();
 
   // The schedule panel speaks for the autopilot's SCHEDULE trigger, not for
   // `triggers[0]` — on a webhook- or api-triggered autopilot that row is one no
@@ -313,6 +318,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: projectId,
+          label_ids:
+            executionMode === "create_issue" ? dropDeletedLabelIds(labelIds) : undefined,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -370,6 +377,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           changes.assignee_id = assigneeId;
         }
         if (executionMode !== opened.execution_mode) changes.execution_mode = executionMode;
+        if (!sameLabelIds(labelIds, opened.label_ids ?? [])) {
+          changes.label_ids = dropDeletedLabelIds(labelIds);
+        }
         if (subscriberUserIds.join() !== (opened.subscriber_user_ids ?? []).join()) {
           changes.subscribers = subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
@@ -618,6 +628,23 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               selectedProject={selectedProject}
               onChange={setProjectId}
             />
+
+            {executionMode === "create_issue" && (
+              <div>
+                <SectionLabel>{t(($) => $.dialog.section_labels)}</SectionLabel>
+                <LabelPicker
+                  selectedIds={labelIds}
+                  onSelectedIdsChange={setLabelIds}
+                  align="start"
+                  triggerRender={
+                    <button
+                      type="button"
+                      className="flex w-full flex-wrap items-center gap-1.5 rounded-md border bg-background px-3 py-2 text-left text-body transition-colors hover:bg-accent/40 cursor-pointer"
+                    />
+                  }
+                />
+              </div>
+            )}
 
             {executionMode === "create_issue" && (
               <SubscribersSection

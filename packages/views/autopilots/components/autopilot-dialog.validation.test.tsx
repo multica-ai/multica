@@ -60,6 +60,10 @@ vi.mock("@multica/core/autopilots/mutations", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+vi.mock("../../issues/components", () => ({
+  LabelPicker: () => null,
+}));
+
 // Tiptap in jsdom is neither cheap nor the subject here: the title is a plain
 // input whose ref honours focus(), which is all the dialog asks of it.
 vi.mock("../../editor", () => ({

@@ -63,6 +63,31 @@ vi.mock("@multica/core/autopilots/mutations", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+vi.mock("@multica/core/labels", () => ({
+  labelListOptions: (wsId: string) => ({
+    queryKey: ["labels", wsId, "issue"],
+    queryFn: async () => [
+      { id: "label-bug", name: "Bug", color: "#ef4444" },
+      { id: "label-feedback", name: "User feedback", color: "#22c55e" },
+    ],
+  }),
+}));
+
+// Stand-in label picker: reports the current selection and adds Bug.
+vi.mock("../../issues/components", () => ({
+  LabelPicker: ({
+    selectedIds = [],
+    onSelectedIdsChange,
+  }: {
+    selectedIds?: string[];
+    onSelectedIdsChange?: (ids: string[]) => void;
+  }) => (
+    <button type="button" onClick={() => onSelectedIdsChange?.([...selectedIds, "label-bug"])}>
+      add Bug
+    </button>
+  ),
+}));
+
 vi.mock("../../editor", () => ({
   TitleEditor: ({ ref, defaultValue, placeholder, onChange, onSubmit }: any) => {
     const [value, setValue] = useState(defaultValue ?? "");
@@ -294,5 +319,42 @@ describe("AutopilotDialog project section", () => {
       execution_mode: "run_only",
       project_id: "proj-1",
     });
+  });
+});
+
+describe("AutopilotDialog labels section", () => {
+  beforeEach(() => {
+    mockCreateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+  });
+
+  it("leaves labels out of a save that did not touch them", async () => {
+    const user = userEvent.setup();
+    renderEditDialog("create_issue", null, { label_ids: ["label-feedback"] });
+
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({ id: AUTOPILOT_ID });
+  });
+
+  it("sends the new labels and drops one that was deleted", async () => {
+    const user = userEvent.setup();
+    renderEditDialog("create_issue", null, { label_ids: ["label-feedback", "label-deleted"] });
+
+    await user.click(screen.getByRole("button", { name: "add Bug" }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({
+      id: AUTOPILOT_ID,
+      label_ids: ["label-feedback", "label-bug"],
+    });
+  });
+
+  it("has no labels for a run_only autopilot", () => {
+    renderCreateDialog();
+
+    expect(screen.queryByRole("button", { name: "add Bug" })).not.toBeInTheDocument();
   });
 });

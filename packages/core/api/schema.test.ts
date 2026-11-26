@@ -693,6 +693,21 @@ describe("ApiClient schema fallback", () => {
       expect(res.autopilots[0]?.assignee_type).toBe("agent");
       expect(res.autopilots[0]?.trigger_kinds).toBeUndefined();
       expect(res.autopilots[0]?.last_run_status).toBeUndefined();
+      expect(res.autopilots[0]?.label_ids).toEqual([]);
+    });
+
+    it("keeps label_ids and drops a malformed list", async () => {
+      stubFetchJson({
+        autopilots: [
+          { ...baseAutopilot, label_ids: ["label-1", "label-2"] },
+          { ...baseAutopilot, id: "ap-2", label_ids: "label-1" },
+        ],
+        total: 2,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]?.label_ids).toEqual(["label-1", "label-2"]);
+      expect(res.autopilots[1]?.label_ids).toEqual([]);
     });
 
     it("passes derived fields through and tolerates enum drift", async () => {
