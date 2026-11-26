@@ -4,77 +4,193 @@ package redact
 
 import (
 	"regexp"
+	"sort"
+	"strings"
 )
 
 // secretPattern pairs a compiled regex with its replacement text.
+//
+// A pattern with a rule is precise enough to report to people (Find), not just
+// to mask in agent output. Its secret is the subexpression named "secret", or
+// the whole match when there is none, and placeholder (replacement when
+// empty) replaces that span.
 type secretPattern struct {
 	re          *regexp.Regexp
 	replacement string
+	rule        string
+	placeholder string
 }
 
 // Patterns are checked in order; first match wins per position.
 var patterns = []secretPattern{
 	// AWS access key IDs (always start with AKIA)
-	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), "[REDACTED AWS KEY]"},
+	{re: regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), replacement: "[REDACTED AWS KEY]", rule: RuleAWSAccessKey},
 
 	// AWS secret access keys (40 char base64-ish, preceded by a common separator)
-	{regexp.MustCompile(`(?i)(?:aws_secret_access_key|secret_?access_?key)\s*[=:]\s*[A-Za-z0-9/+=]{40}`), "[REDACTED AWS SECRET]"},
+	{re: regexp.MustCompile(`(?i)(?:aws_secret_access_key|secret_?access_?key)\s*[=:]\s*(?P<secret>[A-Za-z0-9/+=]{40})`), replacement: "[REDACTED AWS SECRET]", rule: RuleAWSSecretKey},
 
 	// PEM private keys (multi-line)
-	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
+	{re: regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), replacement: "[REDACTED PRIVATE KEY]", rule: RulePrivateKey},
 
 	// GitHub tokens (classic PAT, OAuth, user-to-server, server-to-server, refresh)
-	{regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), "[REDACTED GITHUB TOKEN]"},
+	{re: regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), replacement: "[REDACTED GITHUB TOKEN]", rule: RuleGitHubToken},
 
 	// GitHub fine-grained personal access tokens use the github_pat_ prefix,
 	// which the classic ghp_/gho_/... pattern above does not cover. Without
 	// this line a fine-grained PAT emitted in agent output leaks unredacted
 	// to the database and WebSocket broadcast.
-	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,255}\b`), "[REDACTED GITHUB TOKEN]"},
+	{re: regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,255}\b`), replacement: "[REDACTED GITHUB TOKEN]", rule: RuleGitHubToken},
+
+	// Anthropic API keys. They also match the sk- rule below, which masks
+	// them the same way; this line only tells the two apart for Find.
+	{re: regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}\b`), replacement: "[REDACTED API KEY]", rule: RuleAnthropicKey},
 
 	// OpenAI / Anthropic API keys
-	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), "[REDACTED API KEY]"},
+	{re: regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), replacement: "[REDACTED API KEY]", rule: RuleOpenAIKey},
 
 	// Slack bot/user/legacy tokens. The char class includes 'e' so the
 	// newer xoxe- config/refresh tokens are covered alongside xoxb/p/o/r/a/s.
-	{regexp.MustCompile(`\bxox[bporase]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	{re: regexp.MustCompile(`\bxox[bporase]-[A-Za-z0-9\-]{10,}\b`), replacement: "[REDACTED SLACK TOKEN]", rule: RuleSlackToken},
 
 	// Slack app-level tokens use the xapp- prefix, which the xox*- rule above
 	// does not match. Without this an app-level token echoed in agent output
 	// leaks unredacted to the DB / WebSocket broadcast.
-	{regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	{re: regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{10,}\b`), replacement: "[REDACTED SLACK TOKEN]", rule: RuleSlackToken},
 
 	// GitLab personal access tokens
-	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), "[REDACTED GITLAB TOKEN]"},
+	{re: regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), replacement: "[REDACTED GITLAB TOKEN]", rule: RuleGitLabToken},
 
 	// Multica user PATs, daemon tokens, task tokens, and cloud-node PATs.
 	// Preserve short JSON control escapes that act as token separators.
 	// The space-free placeholder lets the generic TOKEN= rule below
 	// replace it in one piece.
-	{regexp.MustCompile(`(?:\b|(\\[bfnrt]))(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40}\b`), "${1}[REDACTED_MULTICA_TOKEN]"},
+	{re: regexp.MustCompile(`(?:\b|(\\[bfnrt]))(?P<secret>(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40})\b`), replacement: "${1}[REDACTED_MULTICA_TOKEN]", rule: RuleMulticaToken, placeholder: "[REDACTED_MULTICA_TOKEN]"},
 
 	// Google API keys always start with the AIza prefix and are 39 chars total
 	// (AIza + 35). Capture and restore the trailing delimiter so keys ending in
 	// a non-word character such as '-' are still redacted.
-	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)`), "[REDACTED GOOGLE API KEY]$1"},
+	{re: regexp.MustCompile(`\b(?P<secret>AIza[0-9A-Za-z_-]{35})([^0-9A-Za-z_-]|$)`), replacement: "[REDACTED GOOGLE API KEY]$2", rule: RuleGoogleAPIKey, placeholder: "[REDACTED GOOGLE API KEY]"},
 
 	// Stripe secret / restricted live keys (sk_live_ / rk_live_). The sk-
 	// rule above only matches the hyphen form used by OpenAI/Anthropic; Stripe
 	// uses an underscore, so live keys are not covered without this. Publishable
 	// keys (pk_live_) are intentionally excluded — they are not secret.
-	{regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b`), "[REDACTED STRIPE KEY]"},
+	{re: regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b`), replacement: "[REDACTED STRIPE KEY]", rule: RuleStripeKey},
 
 	// JWT tokens (three base64url segments)
-	{regexp.MustCompile(`\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`), "[REDACTED JWT]"},
+	{re: regexp.MustCompile(`\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`), replacement: "[REDACTED JWT]"},
 
 	// Generic "Bearer <token>" in output
-	{regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b`), "Bearer [REDACTED]"},
+	{re: regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b`), replacement: "Bearer [REDACTED]"},
 
 	// Connection strings with embedded passwords
-	{regexp.MustCompile(`(?i)(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^:\s]+:[^@\s]+@`), "[REDACTED CONNECTION STRING]@"},
+	{re: regexp.MustCompile(`(?i)(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^:\s]+:(?P<secret>[^@\s]+)@`), replacement: "[REDACTED CONNECTION STRING]@", rule: RuleConnectionPassword, placeholder: "[REDACTED PASSWORD]"},
 
 	// Generic key=value patterns for common secret env var names
-	{regexp.MustCompile(`(?i)(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+`), "[REDACTED CREDENTIAL]"},
+	{re: regexp.MustCompile(`(?i)(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+`), replacement: "[REDACTED CREDENTIAL]"},
+}
+
+// Rules Find reports. JWTs, Bearer headers and KEY=value pairs are masked in
+// agent output but never reported: they match too much that is not a secret.
+const (
+	RuleAWSAccessKey       = "aws_access_key"
+	RuleAWSSecretKey       = "aws_secret_key"
+	RulePrivateKey         = "private_key"
+	RuleGitHubToken        = "github_token"
+	RuleAnthropicKey       = "anthropic_api_key"
+	RuleOpenAIKey          = "openai_api_key"
+	RuleSlackToken         = "slack_token"
+	RuleGitLabToken        = "gitlab_token"
+	RuleMulticaToken       = "multica_token"
+	RuleGoogleAPIKey       = "google_api_key"
+	RuleStripeKey          = "stripe_key"
+	RuleConnectionPassword = "connection_string_password"
+)
+
+// Match is one secret Find located. Start and End are byte offsets of the
+// secret itself, which for some rules is only part of what the pattern
+// matched (the password inside a connection string).
+type Match struct {
+	Rule        string
+	Start, End  int
+	Value       string
+	Placeholder string
+}
+
+// Find returns the secrets in s that a reportable rule recognises, ordered by
+// position and never overlapping. Where two rules claim the same text, the
+// earlier pattern wins, as it does in Text.
+func Find(s string) []Match {
+	var out []Match
+	for _, p := range patterns {
+		if p.rule == "" {
+			continue
+		}
+		group := p.re.SubexpIndex("secret")
+		for _, loc := range p.re.FindAllStringSubmatchIndex(s, -1) {
+			start, end := loc[0], loc[1]
+			if group > 0 {
+				start, end = loc[2*group], loc[2*group+1]
+			}
+			if start < 0 || overlaps(out, start, end) {
+				continue
+			}
+			placeholder := p.placeholder
+			if placeholder == "" {
+				placeholder = p.replacement
+			}
+			out = append(out, Match{Rule: p.rule, Start: start, End: end, Value: s[start:end], Placeholder: placeholder})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
+	return out
+}
+
+func overlaps(ms []Match, start, end int) bool {
+	for _, m := range ms {
+		if start < m.End && m.Start < end {
+			return true
+		}
+	}
+	return false
+}
+
+// Replace returns s with each match's secret swapped for its placeholder. The
+// matches must come from Find(s).
+func Replace(s string, ms []Match) string {
+	var b strings.Builder
+	prev := 0
+	for _, m := range ms {
+		b.WriteString(s[prev:m.Start])
+		b.WriteString(m.Placeholder)
+		prev = m.End
+	}
+	b.WriteString(s[prev:])
+	return b.String()
+}
+
+var maskPrefix = regexp.MustCompile(`^(?:[a-z]+[-_]){1,3}`)
+
+// Mask is a preview of a secret that is safe to store and show: the prefix
+// that names its kind (ghp_, sk-proj-) and, for long tokens, the last four
+// characters, which is how providers list keys. Passwords and private keys
+// show nothing of their own.
+func Mask(m Match) string {
+	switch m.Rule {
+	case RuleConnectionPassword:
+		return "••••"
+	case RulePrivateKey:
+		return "-----BEGIN PRIVATE KEY----- ••••"
+	}
+	prefix := maskPrefix.FindString(m.Value)
+	if strings.HasPrefix(m.Value, "AKIA") || strings.HasPrefix(m.Value, "AIza") {
+		prefix = m.Value[:4]
+	}
+	rest := []rune(m.Value[len(prefix):])
+	if len(rest) < 16 {
+		return prefix + "••••"
+	}
+	return prefix + "••••••••" + string(rest[len(rest)-4:])
 }
 
 // maxRedactDepth bounds the walk in redactValue. Tool inputs are decoded from
