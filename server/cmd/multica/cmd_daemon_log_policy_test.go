@@ -191,11 +191,15 @@ func TestDaemonLogProfileAgeRetention(t *testing.T) {
 	if err := r.Rotate(); err != nil {
 		t.Fatal(err)
 	}
+	// The first Write and Rotate each queue a mill pass. Wait until the
+	// just-rotated backup is compressed too, or the second pass can still be
+	// writing into dir when TempDir cleanup runs.
 	waitForLogFiles(t, func() bool {
 		_, oldErr := os.Stat(old)
-		_, recentErr := os.Stat(recent)
+		plain, _ := filepath.Glob(filepath.Join(dir, "daemon-*.log"))
+		gz, _ := filepath.Glob(filepath.Join(dir, "daemon-*.log.gz"))
 		_, gzErr := os.Stat(recent + ".gz")
-		return os.IsNotExist(oldErr) && os.IsNotExist(recentErr) && gzErr == nil
+		return os.IsNotExist(oldErr) && len(plain) == 0 && len(gz) == 2 && gzErr == nil
 	})
 	if _, err := os.Stat(old + ".gz"); !os.IsNotExist(err) {
 		t.Fatalf("expired backup was compressed/retained: %v", err)
