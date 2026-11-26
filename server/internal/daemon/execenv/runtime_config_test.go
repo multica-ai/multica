@@ -1119,7 +1119,8 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 	}{
 		{"claude", "CLAUDE.md"},
 		{"codebuddy", "CODEBUDDY.md"},
-		{"codex", "AGENTS.md"},
+		// codex is inline-only; TestInjectRuntimeConfigCodexLeavesRepositoryAgentsMD
+		// covers its repository file.
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
 		{"codearts", "AGENTS.md"},
@@ -1513,7 +1514,8 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 	}{
 		{"claude", "CLAUDE.md"},
 		{"codebuddy", "CODEBUDDY.md"},
-		{"codex", "AGENTS.md"},
+		// codex is inline-only; TestInjectRuntimeConfigCodexLeavesRepositoryAgentsMD
+		// covers its repository file.
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
 		{"codearts", "AGENTS.md"},

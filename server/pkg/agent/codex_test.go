@@ -2773,26 +2773,29 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 }
 
 // codexRuntimeBriefCanary stands in for the Multica runtime brief the daemon
-// would inline if developerInstructions were ever wired back up.
+// passes as ExecOptions.SystemPrompt.
 const codexRuntimeBriefCanary = "MULTICA-RUNTIME-BRIEF-CANARY"
 
-// assertNoDeveloperInstructions pins the MUL-5392 contract: Codex loads the
-// per-task AGENTS.md from the thread's cwd, so the daemon never inlines the
-// runtime brief here. The field must still be sent — the app-server treats a
-// missing key differently from an explicit null — but always as null.
-func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
-	t.Helper()
-	got, ok := params["developerInstructions"]
-	if !ok {
-		t.Error("developerInstructions must be sent explicitly, even when null")
-		return
-	}
-	if got != nil {
-		t.Errorf("developerInstructions = %v, want null: the runtime brief is delivered via the workdir AGENTS.md, not inline (MUL-5392)", got)
+// assertDeveloperInstructions checks the developerInstructions param. The key
+// must always be sent: the app-server treats a missing key differently from an
+// explicit null.
+func assertDeveloperInstructions(want any) func(*testing.T, map[string]any) {
+	return func(t *testing.T, params map[string]any) {
+		t.Helper()
+		got, ok := params["developerInstructions"]
+		if !ok {
+			t.Error("developerInstructions must be sent explicitly, even when null")
+			return
+		}
+		if got != want {
+			t.Errorf("developerInstructions = %v, want %v", got, want)
+		}
 	}
 }
 
-func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
+// Codex truncates AGENTS.md at project_doc_max_bytes, so the brief starts the
+// thread as developerInstructions instead (GitHub #11480).
+func TestCodexThreadStartSendsBriefAsDeveloperInstructions(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
@@ -2801,12 +2804,11 @@ func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
 		{
 			method:   "thread/start",
 			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
-			assertFn: assertNoDeveloperInstructions,
+			assertFn: assertDeveloperInstructions(codexRuntimeBriefCanary),
 		},
 	})
 	defer wait()
 
-	// SystemPrompt is set deliberately; it must not reach the app-server.
 	if _, _, err := c.startOrResumeThread(
 		context.Background(),
 		ExecOptions{Cwd: "/work", SystemPrompt: codexRuntimeBriefCanary},
@@ -2816,7 +2818,28 @@ func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
+func TestCodexThreadStartWithoutBriefSendsNullDeveloperInstructions(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: assertDeveloperInstructions(nil),
+		},
+	})
+	defer wait()
+
+	if _, _, err := c.startOrResumeThread(context.Background(), ExecOptions{Cwd: "/work"}, slog.Default()); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+// thread/resume ignores developerInstructions, so the brief is never sent
+// there; a changed brief is resent in the turn instead.
+func TestCodexThreadResumeSendsNullDeveloperInstructions(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
@@ -2825,12 +2848,11 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 		{
 			method:   "thread/resume",
 			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
-			assertFn: assertNoDeveloperInstructions,
+			assertFn: assertDeveloperInstructions(nil),
 		},
 	})
 	defer wait()
 
-	// SystemPrompt is set deliberately; it must not reach the app-server.
 	if _, _, err := c.startOrResumeThread(
 		context.Background(),
 		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", SystemPrompt: codexRuntimeBriefCanary},

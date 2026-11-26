@@ -163,7 +163,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 //
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
 // For CodeBuddy: writes {workDir}/CODEBUDDY.md  (CodeBuddy's native memory filename; skills discovered natively from .codebuddy/skills/)
-// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
+// For Codex:    writes nothing; the brief travels inline as developerInstructions, see RuntimeBriefInlineOnly (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
 // For CodeArts: writes {workDir}/AGENTS.md  (skills discovered natively from .codeartsdoer/skills/)
@@ -184,12 +184,35 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Qwen:        writes {workDir}/QWEN.md (Qwen Code's native context file; it also reads AGENTS.md, but QWEN.md avoids cross-runtime ambiguity)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
+	if RuntimeBriefInlineOnly(provider) {
+		// A reused workdir, or a user's repository the daemon injected into
+		// before this provider went inline, can still carry a managed block.
+		// Strip it so the CLI does not load a stale second copy of the brief.
+		return content, CleanupRuntimeConfig(workDir, provider)
+	}
 	path := runtimeConfigPath(workDir, provider)
 	if path == "" {
 		// Unknown provider — skip config injection, prompt-only mode.
 		return content, nil
 	}
 	return content, writeRuntimeConfigFile(path, content)
+}
+
+// RuntimeBriefInlineOnly reports whether the provider receives the runtime
+// brief only inline (agent.ExecOptions.SystemPrompt) and must not also find it
+// in its instruction file, because the CLI would load both copies.
+//
+// Codex reads AGENTS.md through project_doc_max_bytes (32 KiB by default) and
+// silently drops everything past it, which cut the Workflow, Mentions and
+// Output sections off long briefs (GitHub #11480). The app-server's
+// developerInstructions has no such cap, arrives as a developer message ahead
+// of AGENTS.md, and leaves the whole project-doc budget to the repository's
+// own AGENTS.md.
+//
+// runtimeConfigPath still maps these providers to their instruction file so
+// CleanupRuntimeConfig keeps removing blocks written by older daemons.
+func RuntimeBriefInlineOnly(provider string) bool {
+	return provider == "codex"
 }
 
 // runtimeConfigPath returns the absolute path to the runtime config file that

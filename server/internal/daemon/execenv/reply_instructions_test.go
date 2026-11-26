@@ -290,18 +290,15 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 	for _, provider := range []string{"claude", "codex", "opencode"} {
 		t.Run(provider, func(t *testing.T) {
 			dir := t.TempDir()
-			if _, err := InjectRuntimeConfig(dir, provider, ctx); err != nil {
+			brief, err := InjectRuntimeConfig(dir, provider, ctx)
+			if err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
 			fileName := "CLAUDE.md"
 			if provider != "claude" {
 				fileName = "AGENTS.md"
 			}
-			data, err := os.ReadFile(filepath.Join(dir, fileName))
-			if err != nil {
-				t.Fatalf("read %s: %v", fileName, err)
-			}
-			s := string(data)
+			s := readInjectedBrief(t, dir, provider, brief)
 
 			// The Windows Comment Formatting section is file-only.
 			for _, want := range []string{

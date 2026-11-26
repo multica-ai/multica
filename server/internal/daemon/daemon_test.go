@@ -798,7 +798,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "traecli", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
-		{provider: "codex", want: false},
+		// Codex truncates AGENTS.md at project_doc_max_bytes, so its brief
+		// rides in developerInstructions instead (GitHub #11480).
+		{provider: "codex", want: true},
 		{provider: "claude", want: false},
 		// Droid uses the task AGENTS.md; TestDroidRealAgentsMDCanary verifies
 		// native discovery independently of the optional adapter SystemPrompt.

@@ -7014,11 +7014,16 @@ func providerDisplayName(name string) string {
 // issues stuck in `todo` with no comment and no error. Adding one that DOES
 // read the file just duplicates the brief on every turn.
 //
+// Codex does load AGENTS.md, but only up to project_doc_max_bytes (32 KiB by
+// default) and silently drops the rest, so long briefs lost their trailing
+// Workflow / Mentions / Output sections (GitHub #11480). It is inline-only:
+// execenv.RuntimeBriefInlineOnly keeps the brief out of AGENTS.md and the
+// backend sends it as the app-server's developerInstructions.
+//
 // Confirmed to load their context file, so deliberately absent here. MUL-5392
 // probed each one over its real launch path with a canary in the context file
-// and no inline delivery: claude 2.1.220 (CLAUDE.md), codex 0.144.6 driving the
-// app-server (AGENTS.md), opencode 1.17.7 (AGENTS.md), pi 0.67.2 (AGENTS.md),
-// hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
+// and no inline delivery: claude 2.1.220 (CLAUDE.md), opencode 1.17.7
+// (AGENTS.md), pi 0.67.2 (AGENTS.md), hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
 // native runtime contract. kiro was confirmed earlier by a kiro-cli
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 //
@@ -7030,6 +7035,9 @@ func providerDisplayName(name string) string {
 // That is the loader contract, not a canary result. No fresh MUL-5392 canary
 // was run for 1.5.2.
 func providerNeedsInlineSystemPrompt(provider string) bool {
+	if execenv.RuntimeBriefInlineOnly(provider) {
+		return true
+	}
 	switch provider {
 	case "openclaw", "kimi", "traecli", "qwenpaw":
 		return true

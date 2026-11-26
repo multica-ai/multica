@@ -15,6 +15,11 @@ func (w *LocalWorktree) ProtectRuntimeConfig(provider string) error {
 	if w == nil || w.RuntimeConfigSkipWorktree != "" {
 		return nil
 	}
+	if RuntimeBriefInlineOnly(provider) {
+		// No brief in the file, so the agent's own edits to it must stay
+		// committable.
+		return nil
+	}
 	path := runtimeConfigPath(w.WorkDir, provider)
 	if path == "" {
 		return nil

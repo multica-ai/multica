@@ -36,10 +36,11 @@ type ExecOptions struct {
 	// the daemon. Pi loads them explicitly without trusting other project files.
 	PiSkillPaths []string
 	// SystemPrompt carries the Multica runtime brief for the few providers
-	// that cannot pick it up from disk. The daemon leaves it empty for every
-	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
-	// brief is already delivered as a per-task context file in the workdir —
-	// CLAUDE.md, AGENTS.md, CODEBUDDY.md or QWEN.md depending on the runtime.
+	// that cannot pick it up from disk, or (Codex) cannot read all of it from
+	// disk. The daemon leaves it empty for every other provider (see
+	// daemon.providerNeedsInlineSystemPrompt), because the brief is already
+	// delivered as a per-task context file in the workdir — CLAUDE.md,
+	// AGENTS.md, CODEBUDDY.md or QWEN.md depending on the runtime.
 	//
 	// A backend must therefore NOT assume this is populated, and adding a new
 	// backend that only reads SystemPrompt will silently receive nothing.
