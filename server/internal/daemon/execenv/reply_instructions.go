@@ -212,9 +212,24 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 		"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n"
 }
 
+// BuildWakeupReplyInstructions is the delivery step of an issue wakeup run
+// whose rule was created from a comment (#8467 / #8807): the result goes back
+// to that original thread. It used to be a hand-written bash one-liner in
+// prompt.go, which PowerShell 5.1 cannot parse (MUL-10271).
+func BuildWakeupReplyInstructions(issueID, deliveryCommentID string) string {
+	post := fmt.Sprintf("multica issue comment add %s --parent %s --content-file ./reply.md --output table", issueID, deliveryCommentID)
+	if runtimeGOOS == "windows" {
+		return "Post your result in the original delivery thread — this is not a new comment trigger. Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above). Use the variant for the shell your command tool runs:\n\n" +
+			gatedReplyPost(post) +
+			"Do NOT drop the exit-code check or the `&&`: a bare cleanup after a failed post reports success and deletes the body.\n"
+	}
+	return "Post your result in the original delivery thread — this is not a new comment trigger:\n\n" + gatedReplyPost(post)
+}
+
 // gatedReplyPost renders the command block that posts ./reply.md with post.
-// Shared by issue comment replies and doc discussion replies so the shell
-// variants cannot drift apart.
+// Shared by issue comment replies, doc discussion replies and wakeup
+// deliveries so the shell variants cannot drift apart. Never hand-write the
+// command elsewhere; TestNoHandWrittenReplyPost enforces it.
 //
 // Cleanup is GATED on the post succeeding, never a separate statement.
 // Agents hand the whole snippet to one shell call, and an unconditional

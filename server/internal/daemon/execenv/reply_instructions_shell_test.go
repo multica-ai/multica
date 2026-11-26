@@ -104,7 +104,8 @@ func runSnippet(t *testing.T, shell string, args []string, stubDir string) (int,
 //
 // The doc discussion reply (MUL-9933) is held to the same property: it shares
 // the snippet, and a doc run on Windows gets no `## Comment Formatting`
-// section to fall back on.
+// section to fall back on. So is the wakeup delivery reply (MUL-10271), which
+// used to be a hand-written bash one-liner.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
@@ -119,6 +120,7 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 	}{
 		{"issue", func() string { return BuildCommentReplyInstructions("claude", issueID, triggerID, false) }},
 		{"doc", func() string { return BuildDocCommentReplyInstructions(issueID, triggerID) }},
+		{"wakeup", func() string { return BuildWakeupReplyInstructions(issueID, triggerID) }},
 	}
 
 	for _, tc := range []struct {
