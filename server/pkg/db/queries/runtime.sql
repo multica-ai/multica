@@ -386,6 +386,22 @@ WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: CancelAgentTasksStartedByMember :many
+-- Cancels every active task in the workspace that a departing member started,
+-- directly (initiator) or at the top of an agent chain (originator), on any
+-- runtime. CancelAgentTasksByRuntimeOrAgent only reaches the member's own
+-- runtimes and agents; a run they triggered on a colleague's agent would
+-- otherwise keep working for someone who is no longer in the workspace.
+-- initiator_user_id has no index, so the workspace's agents bound the scan
+-- through idx_agent_task_queue_agent (agent_id, status).
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(),
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = @workspace_id)
+  AND (initiator_user_id = @user_id OR originator_user_id = @user_id)
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
 -- name: ListNonOwnerActiveTasksByRuntime :many
 -- Lists live tasks whose agent owner will lose runtime access, including
 -- hidden Builder execution carriers. shared_with is the desired recipient list.

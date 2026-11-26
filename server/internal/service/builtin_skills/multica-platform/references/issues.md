@@ -383,9 +383,10 @@ to coordinate with.
 
 ## Sub-issues and stages
 
-Whether to split an issue at all, `todo` vs `backlog` children, serial chains,
-stages and their parent wakeups live in `references/sub-issues.md`. Read it
-before creating a sub-issue.
+Whether to split an issue at all, `todo` vs `backlog` children, ordering them
+with stages, and the parent wakeups stages drive live in
+`references/sub-issues.md`. Read it before creating a sub-issue. Making one
+issue wait for another (`--blocked-by`) lives in `references/dependencies.md`.
 
 ## Charts and files in a comment
 

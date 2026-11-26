@@ -184,7 +184,8 @@ var squadUpdateCmd = &cobra.Command{
 	Long: `Update a squad's fields. Only the flags you pass are changed.
 
 --handoff-mode decides who picks the next step after a member finishes:
-  leader  every member reply returns to the leader (default)
+  leader  a member reply returns to the leader unless it @mentions an agent
+          or squad, which then runs instead (default)
   direct  members hand off to each other by @mention; the leader assigns the
           first step and gets the issue back when a guard trips (3 rounds
           between two members, 20 member handoffs per issue per day, a failed

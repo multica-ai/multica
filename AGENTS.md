@@ -152,3 +152,13 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - A new built-in runtime prefix (`MULTICA_<PREFIX>_PATH`/`_ENDPOINT`) or `MULTICA_<PREFIX>_ARGS` variable must appear in every `apps/docs/content/docs/environment-variables*.mdx`; `apps/docs/lib/env-var-coverage.test.ts` enforces this, and its exemption list is for runtimes deliberately kept out of the docs.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. Follow the [pull request requirements](CONTRIBUTING.md#pull-request-requirements): Problem, Goal, Proposal (high-level design understandable without much background), Alternatives (optional), and Screenshots. Attach screenshots or a screen recording for UI or interaction changes (missing both means rejection by default). For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
+
+## Public Repository Writing
+
+This repository is public. PR titles and descriptions, commit messages, code comments, tests and fixtures, docs, screenshots, and GitHub issue or PR comments are readable by anyone, and history on `main` is permanent.
+
+- Write them from what a reader of this repository can verify: the code, its behavior, and the published product. Internal context stays in the tracking issue; refer to it only by its key (`MUL-xxx`).
+- State a motive as its effect in the code ("cap monthly app calls per workspace"), or leave it out. Do not include unpublished business detail (prices, plan limits, costs, vendor terms, customers, competitor or marketing analysis, roadmap), production data (user or workspace names, IDs, logs, query results), private repository internals beyond the interface this code consumes, internal hosts or local paths, or who requested or approved the change internally.
+- Security fixes describe the corrected behavior, not how to exploit the old one, its production scope, or how long it was exposed. An exploitable vulnerability whose fix is not deployed goes through [SECURITY.md](SECURITY.md), not a public PR or issue.
+- Squash merges use the PR title and description as the commit message on `main`. Put `Co-authored-by:` trailers that release notes should credit at the end of the description.
+- Before `gh pr create`, `gh pr edit`, or a push, reread the title, description, and commit messages against this section.

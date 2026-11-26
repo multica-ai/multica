@@ -7,6 +7,8 @@
 -- next run, last-run outcome) so the page never has to N+1 into the detail
 -- endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
 -- columns answer "how does this fire today", not "what is configured".
+-- next_run_at is also left NULL for an autopilot that is not active: the
+-- scheduler skips every trigger of a paused one.
 -- last_run_status is COALESCEd to '' (never ran) because sqlc cannot infer
 -- nullability through a scalar subquery; the handler maps '' back to omitted.
 SELECT
@@ -20,6 +22,7 @@ SELECT
     SELECT min(t.next_run_at)
     FROM autopilot_trigger t
     WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+      AND a.status = 'active'
   )::timestamptz AS next_run_at,
   COALESCE((
     SELECT r.status
@@ -134,6 +137,21 @@ SET status = 'paused',
 WHERE status = 'active'
   AND workspace_id = @workspace_id
   AND project_id = @project_id
+RETURNING *;
+
+-- name: PauseAutopilotsByCreator :many
+-- A departing member's automations stop with them: an automation whose
+-- trigger another member owns would otherwise keep running the departed
+-- member's prompt under that member's authority. The configuration is kept
+-- so an admin can take it over and resume it.
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'member_removed',
+    updated_at = now()
+WHERE workspace_id = @workspace_id
+  AND created_by_type = 'member'
+  AND created_by_id = @user_id
+  AND status = 'active'
 RETURNING *;
 
 -- name: UpdateAutopilotLastRunAt :exec
@@ -470,6 +488,10 @@ SELECT * FROM autopilot_run
 WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
+
+-- name: CountAutopilotRuns :one
+SELECT count(*) FROM autopilot_run
+WHERE autopilot_id = $1;
 
 -- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run

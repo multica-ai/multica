@@ -102,6 +102,11 @@ func runSnippet(t *testing.T, shell string, args []string, stubDir string) (int,
 // prove the command itself returns an error, not that the pasted block
 // preserves it.
 //
+// The doc discussion reply (MUL-9933) is held to the same property: it shares
+// the snippet, and a doc run on Windows gets no `## Comment Formatting`
+// section to fall back on. So is the wakeup delivery reply (MUL-10271), which
+// used to be a hand-written bash one-liner.
+//
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 	saved := runtimeGOOS
@@ -109,6 +114,14 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 
 	const issueID = "11111111-1111-1111-1111-111111111111"
 	const triggerID = "22222222-2222-2222-2222-222222222222"
+	renders := []struct {
+		name   string
+		render func() string
+	}{
+		{"issue", func() string { return BuildCommentReplyInstructions("claude", issueID, triggerID, false) }},
+		{"doc", func() string { return BuildDocCommentReplyInstructions(issueID, triggerID) }},
+		{"wakeup", func() string { return BuildWakeupReplyInstructions(issueID, triggerID) }},
+	}
 
 	for _, tc := range []struct {
 		name   string
@@ -149,27 +162,29 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 				t.Skipf("%s not available: %v", tc.shell, err)
 			}
 			runtimeGOOS = tc.goos
-			script := strings.Join(snippetBlock(t, BuildCommentReplyInstructions("claude", issueID, triggerID, false), tc.marker), "\n")
+			for _, r := range renders {
+				script := strings.Join(snippetBlock(t, r.render(), tc.marker), "\n")
 
-			t.Run("failed post keeps the failure and the body", func(t *testing.T) {
-				code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 3))
-				if code == 0 {
-					t.Errorf("failed post reported success (exit 0); the cleanup masked it\n---\n%s", script)
-				}
-				if !bodyKept {
-					t.Errorf("failed post deleted ./reply.md; the retry would have to regenerate the body\n---\n%s", script)
-				}
-			})
+				t.Run(r.name+"/failed post keeps the failure and the body", func(t *testing.T) {
+					code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 3))
+					if code == 0 {
+						t.Errorf("failed post reported success (exit 0); the cleanup masked it\n---\n%s", script)
+					}
+					if !bodyKept {
+						t.Errorf("failed post deleted ./reply.md; the retry would have to regenerate the body\n---\n%s", script)
+					}
+				})
 
-			t.Run("successful post still cleans up", func(t *testing.T) {
-				code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 0))
-				if code != 0 {
-					t.Errorf("successful post reported exit %d\n---\n%s", code, script)
-				}
-				if bodyKept {
-					t.Errorf("successful post left ./reply.md behind\n---\n%s", script)
-				}
-			})
+				t.Run(r.name+"/successful post still cleans up", func(t *testing.T) {
+					code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 0))
+					if code != 0 {
+						t.Errorf("successful post reported exit %d\n---\n%s", code, script)
+					}
+					if bodyKept {
+						t.Errorf("successful post left ./reply.md behind\n---\n%s", script)
+					}
+				})
+			}
 		})
 	}
 }

@@ -1134,3 +1134,27 @@ func TestPrivateProjectWorkingAgentsHiddenFromOutsiders(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivateProjectWorkingAgentsUnderHiddenParent(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	agentID := createHandlerTestAgent(t, f.marker+" sub-issue agent", []byte(`{}`))
+	child := dbfx.Issue(t, f.marker+" secret sub-issue", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.secretIssue})
+	dbfx.Task(t, agentID, testutil.Cols{"issue_id": child, "runtime_id": testRuntimeID, "status": "running", "started_at": time.Now()})
+	for _, userID := range []string{f.outsider, f.outsideAdmin, f.insider} {
+		req := asUser(newRequest(http.MethodGet, "/api/working-agents?type=issue&parent="+f.secretIssue, nil), userID)
+		var agents []WorkspaceWorkingAgent
+		testutil.Call(t, testHandler.ListWorkspaceWorkingAgents, req).Want(http.StatusOK).JSON(&agents)
+		found := false
+		for _, a := range agents {
+			if a.ID == agentID {
+				found = a.RunningTaskCount == 1
+			}
+		}
+		if userID == f.insider && !found {
+			t.Fatalf("project member lost the agent working under the issue: %+v", agents)
+		}
+		if userID != f.insider && len(agents) != 0 {
+			t.Fatalf("working agents under a private issue exposed to %s: %+v", userID, agents)
+		}
+	}
+}

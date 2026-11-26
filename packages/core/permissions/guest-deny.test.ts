@@ -50,6 +50,7 @@ const cases: Case[] = [
   ["canUpdateWorkspaceSettings", "admin", (role) => rules.canUpdateWorkspaceSettings({ userId: ME, role }).allowed],
   ["canDeleteWorkspace", "owner", (role) => rules.canDeleteWorkspace({ userId: ME, role }).allowed],
   ["canManageMembers", "admin", (role) => rules.canManageMembers({ userId: ME, role }).allowed],
+  ["canPurgeRunLog", "admin", (role) => rules.canPurgeRunLog({ userId: ME, role }).allowed],
   ["canChangeMemberRole", "admin", (role) => rules.canChangeMemberRole({ role: "member" }, 1, { userId: ME, role }).allowed],
 ];
 

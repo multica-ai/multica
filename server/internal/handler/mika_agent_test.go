@@ -175,36 +175,58 @@ func TestMikaSystemInstructionsUsesTheCurrentDisplayName(t *testing.T) {
 	}
 }
 
-// TestArchiveMikaIsRejected: archiving would hide the workspace's entry point
-// while leaving the row in place, which also strands the bootstrap endpoint —
-// its lookup skips archived rows but the unique index does not.
-func TestArchiveMikaIsRejected(t *testing.T) {
+// An archived Mika still holds the workspace's slot and her name, so the
+// bootstrap must refuse rather than restore her or insert a second row.
+func TestArchivedMikaIsNotReprovisioned(t *testing.T) {
 	cleanupMika(t)
-	w := createMika(t, map[string]any{
-		"runtime_id": handlerTestRuntimeID(t),
-		"language":   "en",
-	})
+	runtimeID := handlerTestRuntimeID(t)
+	w := createMika(t, map[string]any{"runtime_id": runtimeID, "language": "en"})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	agentID := decodeAgent(t, w).ID
 
-	req := withChatTestWorkspaceCtx(t, withURLParam(
-		newRequest("POST", "/api/agents/"+agentID+"/archive", nil), "id", agentID,
-	))
-	archiveW := httptest.NewRecorder()
-	testHandler.ArchiveAgent(archiveW, req)
-	if archiveW.Code != http.StatusBadRequest {
-		t.Fatalf("archiving a system agent: expected 400, got %d: %s", archiveW.Code, archiveW.Body.String())
+	lifecycle := func(action string) *httptest.ResponseRecorder {
+		req := withChatTestWorkspaceCtx(t, withURLParam(
+			newRequest("POST", "/api/agents/"+agentID+"/"+action, nil), "id", agentID,
+		))
+		rec := httptest.NewRecorder()
+		if action == "archive" {
+			testHandler.ArchiveAgent(rec, req)
+		} else {
+			testHandler.RestoreAgent(rec, req)
+		}
+		return rec
 	}
 
-	var archivedAt *string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT archived_at::text FROM agent WHERE id = $1`, agentID).Scan(&archivedAt); err != nil {
-		t.Fatalf("load agent: %v", err)
+	if rec := lifecycle("archive"); rec.Code != http.StatusOK {
+		t.Fatalf("archive Mika: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if archivedAt != nil {
-		t.Fatalf("agent must remain active, got archived_at = %v", *archivedAt)
+
+	again := createMika(t, map[string]any{"runtime_id": runtimeID, "language": "en"})
+	if again.Code != http.StatusConflict {
+		t.Fatalf("bootstrap after archive: expected 409, got %d: %s", again.Code, again.Body.String())
+	}
+	var count int
+	var archived bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*), bool_and(archived_at IS NOT NULL) FROM agent WHERE workspace_id = $1 AND system_key = $2`,
+		testWorkspaceID, service.MikaSystemKey).Scan(&count, &archived); err != nil {
+		t.Fatalf("count mika agents: %v", err)
+	}
+	if count != 1 || !archived {
+		t.Fatalf("expected the one archived Mika to stay as is, got count=%d archived=%v", count, archived)
+	}
+
+	if rec := lifecycle("restore"); rec.Code != http.StatusOK {
+		t.Fatalf("restore Mika: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	restored := createMika(t, map[string]any{"runtime_id": runtimeID, "language": "en"})
+	if restored.Code != http.StatusOK {
+		t.Fatalf("bootstrap after restore: expected 200, got %d: %s", restored.Code, restored.Body.String())
+	}
+	if got := decodeAgent(t, restored).ID; got != agentID {
+		t.Fatalf("expected the restored Mika %s back, got %s", agentID, got)
 	}
 }
 

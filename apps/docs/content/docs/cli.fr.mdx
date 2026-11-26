@@ -291,7 +291,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- Les options `--custom-env` n'existent que sur `agent create`. Pour modifier les variables ensuite, utilisez `agent env set`, qui remplace l'ensemble ; les clés dont la valeur est `****` gardent leur valeur actuelle.
+- Les options `--custom-env` n'existent que sur `agent create`. Pour modifier les variables ensuite, utilisez `agent env set`, qui remplace l'ensemble ; les clés dont la valeur est `****` gardent leur valeur actuelle. `agent env get` et `agent env set` affichent les valeurs masquées en `****` ; ajoutez `--show-values` pour les voir, par exemple pour copier les variables vers un autre agent.
 - `agent update --mcp-config null` efface la configuration MCP.
 - `--custom-args` est un tableau JSON placé à la fin des arguments de lancement. Choisissez le modèle avec `--model` ; certains outils refusent un `--model` dans les arguments personnalisés.
 - `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte.
@@ -540,7 +540,7 @@ Migration depuis l'ancien découpage CSV : remplacez `--attachment a,b` par `--a
 | | `copy <agent-id>` | Copier dans un nouvel agent ; l'original reste intact | `--name` (par défaut, le nom d'origine suivi de ` (copy)`), `--runtime-id` (copier vers un autre runtime exige aussi `--model`), `--no-skills` ; la configuration secrète comme `custom_env`, `mcp_config` et `runtime_config` n'est pas copiée — fournissez-la à nouveau avec les mêmes options que pour `create` |
 | | `tasks <id>` | Afficher les exécutions d'un agent | |
 | | `avatar <id>` | Envoyer un avatar | |
-| | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
+| | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur. Les valeurs s'affichent en `****` sauf avec `--show-values` |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
 | `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--mode` (obligatoires), exactement une option parmi `--agent` / `--squad` / `--squad-id` (obligatoire), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |

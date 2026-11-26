@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -396,6 +398,10 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -876,12 +882,19 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the member belongs to this workspace.
+	params := db.AddSquadMemberParams{
+		SquadID:    squad.ID,
+		MemberType: req.MemberType,
+		MemberID:   memberUUID,
+		Role:       req.Role,
+	}
+	var sm db.SquadMember
+	var err error
 	if req.MemberType == "agent" {
-		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, lookupErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 			ID: memberUUID, WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if lookupErr != nil {
 			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
 			return
 		}
@@ -892,22 +905,16 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "you can only add an agent you have access to")
 			return
 		}
+		sm, err = h.Queries.AddSquadMember(r.Context(), params)
 	} else {
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-			UserID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		sm, err = h.addHumanSquadMember(r.Context(), wsUUID, params)
+	}
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "member not found in this workspace")
 			return
 		}
-	}
-
-	sm, err := h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
-		SquadID:    squad.ID,
-		MemberType: req.MemberType,
-		MemberID:   memberUUID,
-		Role:       req.Role,
-	})
-	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "member already in squad")
 			return
@@ -920,6 +927,40 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
+}
+
+func (h *Handler) addHumanSquadMember(ctx context.Context, workspaceID pgtype.UUID, params db.AddSquadMemberParams) (db.SquadMember, error) {
+	var empty db.SquadMember
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return empty, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	// Revocation prunes the roster under this lock. Take it before checking
+	// workspace membership so the insert cannot land after the prune.
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+	if _, err := qtx.LockActiveMember(ctx, db.LockActiveMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+
+	sm, err := qtx.AddSquadMember(ctx, params)
+	if err != nil {
+		return empty, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return empty, err
+	}
+	return sm, nil
 }
 
 func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
