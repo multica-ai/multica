@@ -1373,6 +1373,17 @@ func (h *Handler) PublishRuntimeTeardown(ctx context.Context, res service.Runtim
 	}
 }
 
+func writeRuntimeTeardownBusy(w http.ResponseWriter, err error) bool {
+	if !isRetryableLockFailure(err) {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"code":  "runtime_delete_busy",
+		"error": "the runtime is busy with another operation. Please try again.",
+	})
+	return true
+}
+
 // PublishRuntimeRefresh asks connected clients to refetch runtime state.
 func (h *Handler) PublishRuntimeRefresh(wsID, actorType, actorID, action string) {
 	h.publish(protocol.EventDaemonRegister, wsID, actorType, actorID, map[string]any{"action": action})
@@ -1455,18 +1466,15 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// Revalidate under the runtime row lock. Agent/task inserts take a
-	// KEY SHARE lock through their runtime FK, so no active agent can appear
-	// after this check and then be silently unbound by the teardown.
-	if _, err := qtx.LockAgentRuntime(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
+	// Check the plan after locking existing agents and fencing new references.
+	target, err := service.LockRuntimeTeardown(r.Context(), qtx, rt.ID)
+	if err != nil {
+		if !writeRuntimeTeardownBusy(w, err) {
+			writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
+		}
 		return
 	}
-	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
-		return
-	}
-	activeAgents, err = qtx.ListActiveAgentsByRuntimeForUpdate(r.Context(), rt.ID)
+	activeAgents, err = qtx.ListActiveAgentsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime dependencies")
 		return
@@ -1480,7 +1488,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	// their task history, cancel what was still active, remove only the system
 	// agents. There is no active agent here by definition, but archived ones and
 	// their history can still be bound to this runtime.
-	teardown, err := service.TeardownRuntime(r.Context(), qtx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	teardown, err := service.TeardownRuntime(r.Context(), qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			slog.Error("runtime delete aborted: tasks not drained",
@@ -1664,23 +1672,16 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	// UPDATE that would point a new/moved agent at this runtime now
 	// blocks until our tx finishes. This is the "兜底" lock that keeps
 	// new actives from appearing between our snapshot and our unbind.
-	if _, err := qtx.LockAgentRuntime(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
-		return
-	}
-	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
+	target, err := service.LockRuntimeTeardown(r.Context(), qtx, rt.ID)
+	if err != nil {
+		if !writeRuntimeTeardownBusy(w, err) {
+			writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
+		}
 		return
 	}
 
-	// Re-list active agents inside the transaction, with FOR UPDATE on
-	// each row so a concurrent archive/move of one of those existing
-	// agents also blocks until we commit. Comparing against the expected
-	// set here closes the dialog-open / user-confirm race: even if a
-	// teammate creates or archives an agent on this runtime while the
-	// dialog was open, the user is approving exactly the set the server
-	// is about to unbind.
-	currentActive, err := qtx.ListActiveAgentsByRuntimeForUpdate(r.Context(), rt.ID)
+	// Compare the confirmed plan after freezing the active agent set.
+	currentActive, err := qtx.ListActiveAgentsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enumerate active agents")
 		return
@@ -1702,7 +1703,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	// agent (active and archived) plus their task history, cancel what was
 	// running or queued, and hard-delete only the system agents. Nothing the
 	// user configured is destroyed — the agents just need a new runtime.
-	teardown, err := service.TeardownRuntime(r.Context(), qtx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	teardown, err := service.TeardownRuntime(r.Context(), qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			slog.Error("runtime delete aborted: tasks not drained",

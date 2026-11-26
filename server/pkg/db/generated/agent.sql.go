@@ -5380,70 +5380,6 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 	return items, nil
 }
 
-const listActiveAgentsByRuntimeForUpdate = `-- name: ListActiveAgentsByRuntimeForUpdate :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
-ORDER BY name ASC
-FOR UPDATE
-`
-
-// FOR UPDATE variant used inside the cascade-delete transaction. Locks
-// each currently-active agent row so a concurrent archive/move of one
-// of those rows blocks until our transaction commits. Pair with
-// LockAgentRuntime, which holds the runtime row exclusively to also
-// block FK-validated INSERTs / runtime_id updates that would otherwise
-// add a new agent to the runtime mid-cascade. Together they guarantee
-// that the set we compared against expected_active_agent_ids is stable.
-func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listActiveAgentsByRuntimeForUpdate, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-			&i.ThinkingLevel,
-			&i.ComposioToolkitAllowlist,
-			&i.PermissionMode,
-			&i.Kind,
-			&i.SystemKey,
-			&i.DisabledRuntimeSkills,
-			&i.ServiceTier,
-			&i.ConversationStarters,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
@@ -6025,6 +5961,66 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 			&i.DocCommentID,
 			&i.TranscriptPurgedAt,
 			&i.TranscriptPurgedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLockedRuntimeTeardownAgents = `-- name: ListLockedRuntimeTeardownAgents :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
+WHERE runtime_id = ANY($1::uuid[])
+ORDER BY id
+FOR UPDATE NOWAIT
+`
+
+// Re-read after upgrading the runtime lock. A writer using only the FK check
+// may have bound another agent before the upgrade. Never wait on that agent
+// while holding the exclusive runtime lock.
+func (q *Queries) ListLockedRuntimeTeardownAgents(ctx context.Context, runtimeIds []pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listLockedRuntimeTeardownAgents, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
 		); err != nil {
 			return nil, err
 		}
@@ -6870,11 +6866,7 @@ WHERE runtime_id = $1 AND kind = 'user'
 ORDER BY id
 `
 
-// Non-locking companion to ListUserAgentsByRuntimeForUpdate, for callers that
-// must reason about retention GC without taking the teardown's locks.
-//
-// Archived rows are included deliberately, and that is the whole point: an
-// archived agent can still own a non-terminal task, and gcRuntime counts those
+// An archived agent can still own a non-terminal task, and gcRuntime counts those
 // before it will delete a runtime. A read that filtered them would report a
 // runtime as reclaimable when the sweeper is going to skip it.
 func (q *Queries) ListUserAgentIDsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]pgtype.UUID, error) {
@@ -6890,68 +6882,6 @@ func (q *Queries) ListUserAgentIDsByRuntime(ctx context.Context, runtimeID pgtyp
 			return nil, err
 		}
 		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUserAgentsByRuntimeForUpdate = `-- name: ListUserAgentsByRuntimeForUpdate :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
-WHERE runtime_id = $1 AND kind = 'user'
-ORDER BY id
-FOR UPDATE
-`
-
-// Locks active AND archived user agents before a runtime teardown. Locking only
-// the active snapshot leaves a restore race: an archived row can become active
-// after confirmation and then be silently unbound. Runtime/profile delete
-// locks the parent runtime first (blocking new FK references), then calls this
-// in stable ID order (blocking restore/archive/move on existing rows).
-func (q *Queries) ListUserAgentsByRuntimeForUpdate(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listUserAgentsByRuntimeForUpdate, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-			&i.ThinkingLevel,
-			&i.ComposioToolkitAllowlist,
-			&i.PermissionMode,
-			&i.Kind,
-			&i.SystemKey,
-			&i.DisabledRuntimeSkills,
-			&i.ServiceTier,
-			&i.ConversationStarters,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -7421,6 +7351,19 @@ func (q *Queries) LockAgentTaskStartClaim(ctx context.Context, arg LockAgentTask
 		&i.TranscriptPurgedBy,
 	)
 	return i, err
+}
+
+const lockRuntimeTeardownAgents = `-- name: LockRuntimeTeardownAgents :exec
+SELECT id FROM agent
+WHERE runtime_id = ANY($1::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+// Include archived agents and system carriers, which can also own tasks.
+func (q *Queries) LockRuntimeTeardownAgents(ctx context.Context, runtimeIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockRuntimeTeardownAgents, runtimeIds)
+	return err
 }
 
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one

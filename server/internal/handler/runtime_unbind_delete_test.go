@@ -3,11 +3,17 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -228,9 +234,8 @@ func TestRuntimeDeleteLockBlocksConcurrentAgentBinding(t *testing.T) {
 		t.Fatalf("begin delete transaction: %v", err)
 	}
 	defer deleteTx.Rollback(ctx)
-	if _, err := testHandler.Queries.WithTx(deleteTx).LockAgentRuntime(
-		ctx,
-		parseUUID(runtimeID),
+	if _, err := service.LockRuntimeTeardown(
+		ctx, testHandler.Queries.WithTx(deleteTx), parseUUID(runtimeID),
 	); err != nil {
 		t.Fatalf("lock runtime for delete: %v", err)
 	}
@@ -243,6 +248,7 @@ func TestRuntimeDeleteLockBlocksConcurrentAgentBinding(t *testing.T) {
 	if _, err := bindTx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
 		t.Fatalf("set lock timeout: %v", err)
 	}
+	var lockErr *pgconn.PgError
 	if _, err := bindTx.Exec(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
@@ -250,9 +256,94 @@ func TestRuntimeDeleteLockBlocksConcurrentAgentBinding(t *testing.T) {
 		)
 		VALUES ($1, 'concurrent bind probe', '', 'cloud', '{}'::jsonb,
 			$2, 'workspace', 1, $3)
-	`, testWorkspaceID, runtimeID, testUserID); err == nil {
-		t.Fatal("agent bind unexpectedly bypassed the runtime delete lock")
+	`, testWorkspaceID, runtimeID, testUserID); !errors.As(err, &lockErr) || lockErr.Code != "55P03" {
+		t.Fatalf("agent bind error = %v, want lock timeout", err)
 	}
+}
+
+func TestRuntimeTeardownLetsInFlightChatEnqueueFinish(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, context.Background(), "enqueued during runtime teardown")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started, resume := make(chan struct{}), make(chan struct{})
+	h := *testHandler
+	h.TxStarter = runtimeTeardownTestStarter{testHandler.TxStarter, started, resume}
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete",
+		map[string]any{"expected_active_agent_ids": []string{agentID}})
+	req = withURLParam(req.WithContext(ctx), "runtimeId", runtimeID)
+	deleted := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		h.UnbindAgentsAndDeleteRuntime(w, req)
+		deleted <- w
+	}()
+	select {
+	case <-started:
+	case w := <-deleted:
+		t.Fatalf("delete returned before locking existing agents: %d %s", w.Code, w.Body.String())
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	sent, err := testHandler.TaskService.SendDirectChatMessage(ctx, session, agent,
+		parseUUID(testUserID), "finish enqueue before teardown", nil, "member", parseUUID(testUserID))
+	close(resume)
+	w := <-deleted
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := testHandler.Queries.GetAgentRuntime(ctx, parseUUID(runtimeID)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("load deleted runtime: %v", err)
+	}
+	var status string
+	var runtime pgtype.UUID
+	dbfx.QueryRow(t, `SELECT status, runtime_id FROM agent_task_queue WHERE id = $1`, sent.Task.ID).Scan(&status, &runtime)
+	if status != "cancelled" || runtime.Valid {
+		t.Fatalf("enqueued task status=%q runtime=%v, want cancelled detached history", status, runtime)
+	}
+}
+
+type runtimeTeardownTestStarter struct {
+	txStarter
+	started chan struct{}
+	resume  chan struct{}
+}
+
+func (s runtimeTeardownTestStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.txStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeTeardownTestTx{Tx: tx, started: s.started, resume: s.resume}, nil
+}
+
+type runtimeTeardownTestTx struct {
+	pgx.Tx
+	started chan struct{}
+	resume  chan struct{}
+}
+
+func (tx runtimeTeardownTestTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.HasPrefix(sql, "-- name: LockRuntimeTeardownAgents :exec\n") {
+		close(tx.started)
+		select {
+		case <-tx.resume:
+		case <-ctx.Done():
+			return pgconn.CommandTag{}, ctx.Err()
+		}
+	}
+	return tx.Tx.Exec(ctx, sql, args...)
 }
 
 func TestAutopilotAssignmentLockBlocksRuntimeTeardown(t *testing.T) {
@@ -286,9 +377,8 @@ func TestAutopilotAssignmentLockBlocksRuntimeTeardown(t *testing.T) {
 	if _, err := deleteTx.Exec(ctx, `SET LOCAL lock_timeout = '50ms'`); err != nil {
 		t.Fatalf("set lock timeout: %v", err)
 	}
-	if _, err := testHandler.Queries.WithTx(deleteTx).ListUserAgentsByRuntimeForUpdate(
-		ctx,
-		parseUUID(runtimeID),
+	if _, err := service.LockRuntimeTeardown(
+		ctx, testHandler.Queries.WithTx(deleteTx), parseUUID(runtimeID),
 	); err == nil {
 		t.Fatal("runtime teardown unexpectedly bypassed the Autopilot assignment lock")
 	}

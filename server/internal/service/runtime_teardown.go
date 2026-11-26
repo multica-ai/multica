@@ -60,33 +60,87 @@ func ValidateRuntimeAgentWorkspaces(runtime db.AgentRuntime, agents []db.Agent) 
 	return nil
 }
 
+// RuntimeTeardown contains the runtime and user agents locked for deletion
+// in the caller's transaction.
+type RuntimeTeardown struct {
+	Runtime    db.AgentRuntime
+	UserAgents []db.Agent
+}
+
+func LockRuntimeTeardown(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID) (RuntimeTeardown, error) {
+	targets, err := LockRuntimeTeardowns(ctx, qtx, []pgtype.UUID{runtimeID})
+	if err != nil {
+		return RuntimeTeardown{}, err
+	}
+	return targets[0], nil
+}
+
+// LockRuntimeTeardowns prepares a batch for validation and deletion. The
+// runtime IDs must be in ascending order. Keep these locks through commit.
+func LockRuntimeTeardowns(ctx context.Context, qtx *db.Queries, runtimeIDs []pgtype.UUID) ([]RuntimeTeardown, error) {
+	if len(runtimeIDs) == 0 {
+		return nil, nil
+	}
+	// Serialize binding, claim delivery and other runtime writers. An enqueue
+	// already holding a session or agent can still take runtime KEY SHARE and
+	// finish. Upgrade only when we've locked the dependencies for the whole
+	// batch, then re-read them without waiting on any references we missed.
+	for _, id := range runtimeIDs {
+		if _, err := qtx.LockAgentRuntimeForAccessChange(ctx, id); err != nil {
+			return nil, fmt.Errorf("lock runtime for teardown: %w", err)
+		}
+	}
+	if err := qtx.LockRuntimeTeardownChatSessions(ctx, runtimeIDs); err != nil {
+		return nil, fmt.Errorf("lock runtime chat sessions: %w", err)
+	}
+	if err := qtx.LockRuntimeTeardownAgents(ctx, runtimeIDs); err != nil {
+		return nil, fmt.Errorf("lock runtime agents: %w", err)
+	}
+	targets := make([]RuntimeTeardown, len(runtimeIDs))
+	targetByID := make(map[pgtype.UUID]*RuntimeTeardown, len(runtimeIDs))
+	for i, id := range runtimeIDs {
+		runtime, err := qtx.LockAgentRuntime(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("fence runtime references: %w", err)
+		}
+		targets[i].Runtime = runtime
+		targetByID[id] = &targets[i]
+	}
+	agents, err := qtx.ListLockedRuntimeTeardownAgents(ctx, runtimeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("recheck locked runtime agents: %w", err)
+	}
+	if err := qtx.LockLateRuntimeTeardownChatSessions(ctx, runtimeIDs); err != nil {
+		return nil, fmt.Errorf("recheck locked runtime chat sessions: %w", err)
+	}
+	for _, agent := range agents {
+		if agent.Kind == "user" {
+			target := targetByID[agent.RuntimeID]
+			target.UserAgents = append(target.UserAgents, agent)
+		}
+	}
+	return targets, nil
+}
+
 // TeardownRuntime performs the shared mutation phase used immediately before
-// deleting an agent_runtime row. It takes the runtime and bound-user-agent row
-// locks itself; callers that already locked them for a confirmation check can
-// safely acquire the same locks again in their transaction.
+// deleting an agent_runtime row. The target must have been locked in the
+// same transaction.
 //
 // User agents are persistent business objects and survive unbound. System
 // agents are runtime-local infrastructure and are deleted only after their
 // non-FK dependencies are pruned; their runtime-local builder drafts and chat
 // draft restores are deleted with them. Task history is detached before runtime
 // deletion so the legacy ON DELETE CASCADE cannot erase it.
-func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID, opts RuntimeTeardownOptions) (RuntimeTeardownResult, error) {
+func TeardownRuntime(ctx context.Context, qtx *db.Queries, target RuntimeTeardown, opts RuntimeTeardownOptions) (RuntimeTeardownResult, error) {
 	var out RuntimeTeardownResult
 
-	runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
-	if err != nil {
-		return out, fmt.Errorf("load runtime: %w", err)
-	}
-	lockedAgents, err := qtx.ListUserAgentsByRuntimeForUpdate(ctx, runtimeID)
-	if err != nil {
-		return out, fmt.Errorf("lock runtime agents: %w", err)
-	}
-	if err := ValidateRuntimeAgentWorkspaces(runtime, lockedAgents); err != nil {
+	runtimeID := target.Runtime.ID
+	if err := ValidateRuntimeAgentWorkspaces(target.Runtime, target.UserAgents); err != nil {
 		return out, err
 	}
 
-	lockedAgentIDs := make([]pgtype.UUID, len(lockedAgents))
-	for i, agent := range lockedAgents {
+	lockedAgentIDs := make([]pgtype.UUID, len(target.UserAgents))
+	for i, agent := range target.UserAgents {
 		lockedAgentIDs[i] = agent.ID
 	}
 
@@ -173,9 +227,6 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 // pruneRuntimeSystemAgentChatDraftRestores removes rows without a database FK
 // before the system agents and their chat sessions cascade away.
 func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
-	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
 	if err := q.DeleteChatSubmissionReceiptsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}

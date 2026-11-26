@@ -1496,8 +1496,8 @@ WHERE id = $1
 FOR UPDATE
 `
 
-// Acquires a row-level exclusive lock on the runtime row. Used at the
-// top of the cascade-delete transaction so that:
+// Upgrades the teardown's runtime lock after locking its existing agents and
+// system chat sessions, so that:
 //  1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
 //     RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
 //     conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
@@ -1506,9 +1506,7 @@ FOR UPDATE
 //  2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
 //     delete attempt) waits for us to commit.
 //
-// Combined with ListUserAgentsByRuntimeForUpdate (which row-locks active and
-// archived user agents) this closes both plan drift and archived-agent restore
-// races under read-committed isolation.
+// Re-read dependent rows after the upgrade, before checking the delete plan.
 func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
 	row := q.db.QueryRow(ctx, lockAgentRuntime, id)
 	var i AgentRuntime
