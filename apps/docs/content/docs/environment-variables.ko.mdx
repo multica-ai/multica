@@ -254,6 +254,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_CODEX_MEMORY` | 끔 | `1`, `true`, `yes`, `on` 중 하나로 설정하면 데몬이 관리하는 Codex 실행에서 Codex 기본 메모리를 유지합니다. 기본값은 실행마다 끄는 것입니다. [Codex 기본 메모리와 하위 에이전트](/daemon-runtimes#codex-memory) 참고 |
 | `MULTICA_CODEX_MULTI_AGENT` | 끔 | 값은 위와 같으며 Codex 기본 하위 에이전트를 유지합니다. 상위 스레드가 끝나면 실행이 끝난 것으로 처리되므로 하위 에이전트가 아직 돌려주지 않은 결과는 사라집니다 |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 취소 후 Codex app-server가 `turn/interrupt`를 확인하고 `turn/completed`를 보낼 때까지의 유예 시간입니다. 프로세스를 강제 정리하기 전에 최종 토큰 사용량을 보존합니다. 특히 느린 호스트에서는 daemon 로그에 기록된 인터럽트 지연을 기준으로 조정할 수 있습니다 |
+| `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` | `60` | 최근 요청이 모델 컨텍스트 창의 이 비율 이상을 사용한 Codex 스레드는 재개하지 않고 새 스레드로 시작합니다. 그만큼 찬 스레드는 다음 실행에서 몇 번의 도구 호출 만에 다시 압축되기 때문입니다. 새 실행에는 이전 대화를 재개할 수 없었다는 사실이 전달됩니다. `0`이면 비활성화됩니다 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |

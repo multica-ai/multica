@@ -250,6 +250,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_CODEX_MEMORY` | 關閉 | 設為 `1`、`true`、`yes` 或 `on` 時，在守護程序管理的 Codex 執行中保留 Codex 原生記憶；預設按執行關閉，見 [Codex 原生記憶與子 AI 代理](/daemon-runtimes#codex-memory) |
 | `MULTICA_CODEX_MULTI_AGENT` | 關閉 | 取值同上，保留 Codex 原生子 AI 代理。父執行緒結束時執行即判為結束，子 AI 代理未交回的結果會丟失 |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 任務取消後等待 Codex app-server 確認 `turn/interrupt` 併發出 `turn/completed` 的寬限期，以便在強制清理程序前保留最終 token 用量。主機異常緩慢時，可根據 daemon 日誌記錄的中斷延遲調整 |
+| `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` | `60` | 若 Codex 執行緒最近一次請求已用掉模型上下文視窗的這個百分比以上，就不再恢復它，改為開啟新執行緒。這麼滿的執行緒在下一次執行時，幾次工具呼叫內就會再次壓縮。新的執行會被告知先前的對話無法恢復。`0` 表示停用 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自託管 `false` | 是否自動檢查並更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 檢查更新的間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二進位制被帶外替換（`brew upgrade`、重新下載、本地構建）後重啟到新二進位制。與 `MULTICA_DAEMON_AUTO_UPDATE` 相互獨立 |

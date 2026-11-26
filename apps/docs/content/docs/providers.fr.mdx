@@ -130,6 +130,8 @@ Les outils marqués ✓ permettent de poursuivre une session existante lors d'un
 
 Multica stocke l'identifiant de session renvoyé par l'outil. La prochaine fois que le travail se poursuit sur la même tâche, le runtime tente de reprendre cette session ; s'il n'y parvient pas, il crée une nouvelle session et continue. Pi stocke le chemin d'un fichier de session local ; il dépend donc davantage de l'ordinateur et du fichier d'origine.
 
+Lors du compactage d'un fil, Codex conserve le prompt de chaque exécution précédente : un fil repris au fil de nombreuses exécutions sur une même tâche peut donc saturer à nouveau la fenêtre de contexte en quelques appels d'outils. Si la dernière requête du fil à reprendre a utilisé au moins 60 % de la fenêtre de contexte du modèle, Multica démarre plutôt un nouveau fil Codex et indique à l'agent que la conversation précédente n'a pas pu être reprise. Définissez `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` pour modifier la limite, ou `0` pour la désactiver.
+
 Les règles de relance et de reprise de session se trouvent dans [Exécutions](/tasks#relance-manuelle).
 
 ## Configuration MCP
