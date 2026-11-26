@@ -286,6 +286,21 @@ func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtyp
 // updateIssueWithStatusGuard writes params under the status-archive guard,
 // leaving fields rawFields does not name as the locked row has them. It returns
 // the written issue and the row it replaced.
+// syncQueuedIssueTaskPriority moves the issue's waiting runs to its new
+// priority, so raising an issue also moves its queued runs up the claim order
+// (GH #11621). It runs after the issue write commits and is best effort: the
+// edit itself has already succeeded.
+func (h *Handler) syncQueuedIssueTaskPriority(ctx context.Context, issue db.Issue) {
+	n, err := h.Queries.SyncQueuedIssueTaskPriority(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("sync queued run priority failed", "issue_id", uuidToString(issue.ID), "error", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("queued runs follow issue priority", "issue_id", uuidToString(issue.ID), "priority", issue.Priority, "runs", n)
+	}
+}
+
 func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, db.Issue, error) {
 	var issue, current db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
@@ -4463,6 +4478,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := (req.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
+	if priorityChanged {
+		h.syncQueuedIssueTaskPriority(r.Context(), issue)
+	}
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff
 	// project_id against its own cache, which breaks once an optimistic local
@@ -5393,6 +5411,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 			statusChanged := (req.Updates.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
 			priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
+			if priorityChanged {
+				h.syncQueuedIssueTaskPriority(r.Context(), issue)
+			}
 			projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
 			batchHandoffNote := req.Updates.HandoffNote

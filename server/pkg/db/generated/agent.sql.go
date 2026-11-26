@@ -9430,6 +9430,46 @@ func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, com
 	return result.RowsAffected(), nil
 }
 
+const syncQueuedIssueTaskPriority = `-- name: SyncQueuedIssueTaskPriority :execrows
+UPDATE agent_task_queue AS atq
+SET priority = CASE i.priority
+    WHEN 'urgent' THEN 4
+    WHEN 'high' THEN 3
+    WHEN 'medium' THEN 2
+    WHEN 'low' THEN 1
+    ELSE 0
+END
+FROM issue AS i
+WHERE i.id = $1
+  AND atq.id IN (
+    SELECT waiting.id FROM agent_task_queue AS waiting
+    WHERE waiting.issue_id = $1
+      AND waiting.status IN ('queued', 'deferred')
+      AND waiting.chat_session_id IS NULL
+    FOR UPDATE SKIP LOCKED
+  )
+  AND atq.priority IS DISTINCT FROM (CASE i.priority
+    WHEN 'urgent' THEN 4
+    WHEN 'high' THEN 3
+    WHEN 'medium' THEN 2
+    WHEN 'low' THEN 1
+    ELSE 0
+  END)
+`
+
+// Issue runs take their priority from the issue when they are enqueued; a
+// later priority edit moves the runs still waiting with it. The value is read
+// from the issue row here, so concurrent edits settle on the latest one. Runs
+// a claim has locked are skipped: they are about to start. Chat runs keep
+// their own priority.
+func (q *Queries) SyncQueuedIssueTaskPriority(ctx context.Context, issueID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, syncQueuedIssueTaskPriority, issueID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const taskPassedWorkOn = `-- name: TaskPassedWorkOn :one
 SELECT (
     EXISTS (
