@@ -30,6 +30,9 @@ const (
 	DaemonAuthPathPAT         = "pat"
 	DaemonAuthPathCloudPAT    = "cloud_pat"
 	DaemonAuthPathJWT         = "jwt"
+	// DaemonAuthPathWorkspaceToken is a workspace token (mwt_): a user
+	// credential like "pat", confined to one workspace.
+	DaemonAuthPathWorkspaceToken = "workspace_token"
 )
 
 // DaemonWorkspaceIDFromContext returns the workspace ID set by DaemonAuth middleware.
@@ -45,7 +48,8 @@ func DaemonIDFromContext(ctx context.Context) string {
 }
 
 // DaemonAuthPathFromContext returns which token kind authenticated this
-// request — "daemon_token", "pat", "cloud_pat", or "jwt" — for telemetry.
+// request — "daemon_token", "pat", "workspace_token", "cloud_pat", or "jwt" —
+// for telemetry.
 // Empty when the request did not pass through DaemonAuth.
 func DaemonAuthPathFromContext(ctx context.Context) string {
 	p, _ := ctx.Value(ctxKeyDaemonAuthPath).(string)
@@ -261,6 +265,36 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				// differently depending on which one routed it.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCloudPAT)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Workspace token ("mwt_" prefix): a user credential confined to
+			// one workspace, so a daemon started with it serves that
+			// workspace only. Resolved exactly as in Auth; the daemon
+			// handlers then authorize it as its owner, and
+			// requireDaemonWorkspaceAccess holds it to the bound workspace.
+			if strings.HasPrefix(tokenString, auth.WorkspaceTokenPrefix) {
+				identity, err := resolveWorkspaceToken(r.Context(), queries, patCache, tokenString)
+				if err != nil {
+					if r.Context().Err() == context.Canceled && errors.Is(err, context.Canceled) {
+						w.WriteHeader(StatusClientClosedRequest)
+						return
+					}
+					slog.Warn("daemon_auth: invalid workspace token", "path", r.URL.Path, "error", err)
+					writeError(w, http.StatusUnauthorized, "invalid token")
+					return
+				}
+				if rejectTemporarilyDisabledUser(w, r, identity.UserID, "", DaemonAuthPathWorkspaceToken) {
+					return
+				}
+				if checkBoundWorkspaceTarget(w, r, queries, boundWorkspaceToken, identity.WorkspaceID) {
+					return
+				}
+				r.Header.Set("X-User-ID", identity.UserID)
+				r.Header.Set("X-Workspace-ID", identity.WorkspaceID)
+				ctx := WithWorkspaceToken(r.Context(), identity.WorkspaceID)
+				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathWorkspaceToken)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
