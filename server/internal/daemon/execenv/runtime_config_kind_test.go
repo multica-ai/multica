@@ -348,6 +348,38 @@ func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
 	}
 }
 
+// TestCommandWorkdirGuidanceAllKinds pins the rule against spelling out the
+// absolute task workdir in shell commands (MUL-9950) for every runtime and
+// task kind: Codex repeats it as `workdir`, Claude Code as `cd <abs> &&`.
+func TestCommandWorkdirGuidanceAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, provider := range []string{"claude", "codex", "codebuddy", "opencode", "cursor", "hermes", "antigravity", "traecli", "qwen", "omp"} {
+				brief := buildMetaSkillContent(provider, ctx)
+				for _, want := range []string{
+					"## Command Working Directory",
+					"no `cd <absolute path> &&` prefix",
+					"omit it when the tool's default directory is already the target",
+					"later commands run where the last `cd` left it",
+					"with a relative path",
+					"overrides any default guidance to always set a working directory or to prefer absolute paths",
+				} {
+					if !strings.Contains(brief, want) {
+						t.Errorf("%s brief missing %q", provider, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestBackgroundTaskSafetySlimHardPins asserts the slim brief carries the
 // same hardened Background Task Safety pins as the legacy brief (MUL-4140).
 // The verbose path is covered by

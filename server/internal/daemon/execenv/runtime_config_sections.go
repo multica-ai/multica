@@ -77,6 +77,21 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder, provider string) {
 	b.WriteString("Never terminate `multica` or `multica.exe` by executable name: a long-lived matching process may be the workspace daemon. Cancel only the exact child PID you started, and before terminating it compare that PID with `multica daemon status --output json`; never kill it if it is the reported daemon PID.\n\n")
 }
 
+// writeCommandWorkdir tells the agent to stop spelling out the task workdir in
+// shell commands. The daemon's workdir is a long absolute path full of hex ids
+// (~45–60 output tokens), and runtimes default to repeating it: Codex sets an
+// absolute `workdir` on nearly every exec_command, Claude Code prefixes many
+// Bash calls with `cd <absolute path> &&` even when it is already there. Every
+// backend starts in the task workdir (daemon.go passes env.WorkDir as Cwd), but
+// shells that keep their directory between calls (Claude Code's Bash) resolve
+// later relative paths from wherever the last `cd` left them, so the rule names
+// the starting directory only. Paths a tool requires to be absolute are left
+// alone.
+func writeCommandWorkdir(b *strings.Builder) {
+	b.WriteString("## Command Working Directory\n\n")
+	b.WriteString("Your shell starts in this task's working directory. Do not spell out that absolute path: no `cd <absolute path> &&` prefix for a directory inside it, and when your shell tool takes a working-directory parameter (such as `workdir`), omit it when the tool's default directory is already the target. If your shell keeps its directory between commands, later commands run where the last `cd` left it, not in the task directory: resolve relative paths from there, and when unsure where the shell is, switch to the target explicitly once instead of guessing. Reach a subdirectory, such as a repository from `multica repo checkout`, with a relative path (`cd <repo>/server`, `\"workdir\": \"<repo>/server\"`). Use absolute paths only for directories outside this one and wherever a tool requires them. This overrides any default guidance to always set a working directory or to prefer absolute paths in commands: the long path costs dozens of output tokens on every command.\n\n")
+}
+
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
 // agent's instructions body.
 func writeAgentIdentity(b *strings.Builder, ctx TaskContextForEnv) {
@@ -1080,8 +1095,8 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Mentions              |    ✓    |   ✓    |     —     |      —       |  —   |     ✓
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —   |     —
 //
-// Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Workspace Context, Connected Apps,
+// Always-on rows — Header, Background Task Safety, Command Working Directory,
+// Agent Identity, Requesting User, Workspace Context, Connected Apps,
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
 // unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
@@ -1095,6 +1110,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b, provider)
+	writeCommandWorkdir(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
