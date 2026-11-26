@@ -128,14 +128,21 @@ describe("RichContent past the Markdown limit", () => {
 
 describe("GFM autolink literals in a long paragraph", () => {
   it("formats a JSON export below the limit without rescanning the paragraph", () => {
-    // Unpatched, a 150k-character export takes seconds here (quadratic);
-    // patched, well under a second. The bound leaves room for slow CI.
+    // Rendering the export's thousands of links takes seconds on a busy runner
+    // either way, so time it against the same text without the opening `[`.
+    // Unpatched, the unclosed `[` makes it about ten times slower (quadratic);
+    // patched, the two take about as long.
     const content = jsonExport(150_000);
-    const start = performance.now();
-    render(<RichContent content={content} />);
+    const time = (markdown: string) => {
+      const start = performance.now();
+      render(<RichContent content={markdown} />);
+      return performance.now() - start;
+    };
+    const withoutBracket = time(` ${content.slice(1)}`);
+    const withBracket = time(content);
 
-    expect(performance.now() - start).toBeLessThan(2_000);
-  });
+    expect(withBracket).toBeLessThan(withoutBracket * 3);
+  }, 60_000);
 
   it("still links a URL that follows a label which became a link", () => {
     const { container } = render(<RichContent content="[(b)](https://e.com)https://example.com/a" />);
