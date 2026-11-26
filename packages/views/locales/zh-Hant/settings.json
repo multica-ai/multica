@@ -380,6 +380,9 @@
     "record_aria": "修改\"{{action}}\"的快捷鍵",
     "recording": "請按鍵",
     "record_hint": "Esc 取消 · Delete 清除",
+    "record_sequence_hint": "按一個鍵；連按兩個鍵可設為序列，如 G 然後 I · Esc 取消",
+    "record_then_hint": "按第二個鍵 · ↵ 只用一個鍵 · Backspace 重來",
+    "then": "然後",
     "unassigned": "未設定",
     "no_results": "沒有匹配的快捷鍵操作。",
     "conflict_error": "已被\"{{action}}\"使用。",
@@ -390,8 +393,10 @@
     "send_enter_hint": "Shift+Enter 可插入段落、繼續列表，或在程式碼塊中換行。",
     "categories": {
       "general": "常規",
+      "issue": "任務",
       "navigation": "導航"
     },
+    "issue_scope": "作用於眼前的任務：預覽中的任務、列表中選取的任務，或目前開啟的任務。",
     "actions": {
       "openSearch": {
         "label": "開啟搜尋",
@@ -448,6 +453,42 @@
       "undoInboxAction": {
         "label": "復原收件箱操作",
         "description": "提示還在時，復原上一次歸檔、延後或取消訂閱；提示消失後，開啟的通知已歸檔時把它放回收件箱，在「收件箱已清空」頁復原頁面上寫明的操作。"
+      },
+      "setIssueStatus": {
+        "label": "變更狀態",
+        "description": "開啟狀態選擇。"
+      },
+      "assignIssue": {
+        "label": "指派負責人",
+        "description": "開啟負責人選擇。"
+      },
+      "setIssuePriority": {
+        "label": "設定優先級",
+        "description": "開啟優先級選擇。"
+      },
+      "setIssueLabels": {
+        "label": "編輯標籤",
+        "description": "開啟標籤選擇。"
+      },
+      "setIssueDueDate": {
+        "label": "設定截止日期",
+        "description": "開啟截止日期選擇。"
+      },
+      "moveIssueToProject": {
+        "label": "移動到專案",
+        "description": "開啟專案選擇。"
+      },
+      "runIssueQuickAction": {
+        "label": "執行快捷操作",
+        "description": "僅在單一任務且有可用的快捷操作時可用。"
+      },
+      "replyToIssue": {
+        "label": "回覆",
+        "description": "聚焦目前任務的留言框。"
+      },
+      "showShortcuts": {
+        "label": "顯示快捷鍵",
+        "description": "開啟快捷鍵列表，目前頁面相關的排在前面。"
       },
       "send": {
         "label": "傳送",
@@ -525,6 +566,32 @@
       "zoom_out": "縮小",
       "reset_zoom": "重置縮放",
       "close_dialog": "關閉對話方塊或選單"
+    },
+    "cheatsheet": {
+      "title": "快捷鍵",
+      "current_page": "目前頁面",
+      "footer_prefix": "快捷鍵僅儲存在本裝置，可在 ",
+      "footer_link": "設定 › 快捷鍵",
+      "footer_suffix": " 中修改。",
+      "groups": {
+        "inbox": "收件匣",
+        "issue": "任務",
+        "navigation": "導航",
+        "general": "常規",
+        "list": "列表與看板",
+        "editor": "編輯器"
+      },
+      "rows": {
+        "list_move": "下移 / 上移",
+        "list_columns": "在看板欄之間移動",
+        "list_open": "開啟",
+        "list_peek": "預覽",
+        "list_select": "選取",
+        "list_extend": "擴展選取",
+        "list_select_all": "全選",
+        "list_clear": "取消選取",
+        "editor_leave": "離開輸入框"
+      }
     }
   },
   "chat": {

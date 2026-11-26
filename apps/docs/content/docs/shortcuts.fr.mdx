@@ -1,6 +1,6 @@
 ---
 title: Recherche, raccourcis et préférences
-description: Rechercher et exécuter des commandes avec ⌘K, consulter et modifier les raccourcis clavier, chercher du texte dans une tâche et régler vos préférences personnelles comme le thème, la langue et le fuseau horaire.
+description: Rechercher et exécuter des commandes avec ⌘K, piloter les tâches et les listes au clavier, consulter et modifier les raccourcis clavier, chercher du texte dans une tâche et régler vos préférences personnelles comme le thème, la langue et le fuseau horaire.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -27,8 +27,11 @@ Choisir un résultat l'ouvre. Maintenez `⌘` (`Ctrl` sous Windows et Linux) en 
 
 ## Raccourcis clavier
 
+Appuyez sur `?` n'importe où hors d'un champ de saisie pour voir tous les raccourcis. Les groupes de la page où vous êtes passent en premier, marqués **page actuelle** ; tapez dans le champ du haut pour filtrer par nom. Le lien en bas ouvre **Paramètres → Raccourcis**.
+
 | Action | macOS | Windows / Linux | Remarques |
 |---|---|---|---|
+| Afficher les raccourcis clavier | `?` | `?` | |
 | Ouvrir la recherche | `⌘K` | `Ctrl+K` | |
 | Créer une tâche | `C` | `C` | Ouvre votre mode de création préféré. Sur la page d'un projet, la nouvelle tâche est préremplie avec ce projet. |
 | Afficher ou masquer la barre latérale gauche | `⌘B` | `Ctrl+B` | |
@@ -47,9 +50,56 @@ Choisir un résultat l'ouvre. Maintenez `⌘` (`Ctrl` sous Windows et Linux) en 
 | Revenir en arrière | `⌘[` | `Ctrl+[` | |
 | Avancer | `⌘]` | `Ctrl+]` | |
 
-Les raccourcis à une seule touche (`C`, `E`, `H`, `U`, `J`, `K`, `Z`) et Revenir en arrière / Avancer ne réagissent pas pendant que vous tapez dans un champ.
+Les raccourcis à une seule touche et Revenir en arrière / Avancer ne réagissent pas pendant que vous tapez dans un champ.
 
-Le groupe **Navigation** propose aussi d'aller à la boîte de réception, aux discussions, à Mes tâches, aux tâches, aux projets, aux automatisations, aux agents, aux squads, aux statistiques, aux runtimes, aux skills et aux paramètres. Aucune de ces actions n'a de touche par défaut : attribuez-en à celles que vous utilisez. Aller à la boîte de réception ouvre la page Boîte de réception ; la liste des notifications elle-même est une section du panneau Travail, juste sous les épingles. Aller à Mes tâches ouvre la page Mes tâches, qui n'est pas la vue **Mon travail** du panneau Travail.
+### Aller à une page
+
+Appuyez sur `G`, puis sur une deuxième touche dans la seconde et demie :
+
+| Touches | Ouvre |
+|---|---|
+| `G` `I` | Boîte de réception |
+| `G` `M` | Mes tâches |
+| `G` `T` | Tâches |
+| `G` `P` | Projets |
+| `G` `C` | Discussions |
+| `G` `A` | Agents |
+
+Le groupe **Navigation** des paramètres propose aussi d'aller aux automatisations, aux squads, aux statistiques, aux runtimes, aux skills et aux paramètres, sans touche par défaut : attribuez-en à celles que vous utilisez. Aller à la boîte de réception ouvre la page Boîte de réception ; la liste des notifications elle-même est une section du panneau Travail, juste sous les épingles. Aller à Mes tâches ouvre la page Mes tâches, qui n'est pas la vue **Mon travail** du panneau Travail.
+
+Tant que `G` attend sa deuxième touche, celle-ci appartient à la séquence : `G` puis `P` ouvre les projets au lieu de définir une priorité. Toute autre touche met fin à l'attente et garde son effet habituel.
+
+### Agir sur une tâche
+
+Ces touches agissent sur la tâche devant vous : la page de tâche ouverte, la tâche dans un aperçu latéral, les tâches sélectionnées dans une liste ou la ligne où se trouve le curseur de liste. Chacune ouvre le même sélecteur que la commande correspondante de la recherche, déjà sur cette tâche ou cette sélection.
+
+| Action | Touche | Remarques |
+|---|---|---|
+| Changer le statut | `S` | |
+| Assigner | `A` | |
+| Définir la priorité | `P` | |
+| Modifier les libellés | `L` | |
+| Définir l'échéance | `⇧D` | `Shift+D` sous Windows et Linux. |
+| Déplacer vers un projet | `⇧P` | `Shift+P` sous Windows et Linux. |
+| Lancer une action rapide | `Q` | Sur une seule tâche, quand l'espace de travail a des actions rapides actives. |
+| Répondre | `R` | Place le curseur dans la zone de commentaire de la tâche ouverte. |
+
+Les invités ne peuvent utiliser que `R`.
+
+### Parcourir les listes et les tableaux
+
+Sur une liste, une table ou un tableau de tâches, les touches ci-dessous déplacent un curseur d'une tâche à l'autre. Elles ne se modifient pas. Pointer une ligne y déplace le curseur et le masque ; la touche suivante repart de cette ligne.
+
+| Action | macOS | Windows / Linux | Remarques |
+|---|---|---|---|
+| Descendre / monter | `J` / `K`, ou `↓` / `↑` | `J` / `K`, ou `↓` / `↑` | La première pression part du haut, ou du bas en montant. |
+| Changer de colonne du tableau | `←` / `→` | `←` / `→` | Sur un tableau uniquement. Dans l'aperçu latéral d'un tableau, `H` / `L` font de même. |
+| Ouvrir | `↵` | `Enter` | Ouvre la tâche comme l'indique **Ouverture des tâches** dans les préférences. |
+| Aperçu | `Space` | `Space` | Ouvre ou ferme l'aperçu latéral. |
+| Sélectionner | `X` | `X` | Ajoute la tâche à la sélection, ou l'en retire. |
+| Étendre la sélection | `⇧↓` / `⇧↑` | `Shift+↓` / `Shift+↑` | |
+| Tout sélectionner | `⌘A` | `Ctrl+A` | Une fois le curseur affiché ou une sélection faite. |
+| Effacer la sélection | `Échap` | `Échap` | Un second `Échap` masque le curseur. |
 
 ### Raccourcis système fixes
 
@@ -76,6 +126,8 @@ Ouvrez **Paramètres → Raccourcis**. Le champ de recherche en haut retrouve un
 
 Cliquez sur les touches à droite d'une action. Quand « Appuyez sur les touches » s'affiche, tapez la nouvelle combinaison. `Échap` annule ; `Suppr` efface le raccourci de l'action.
 
+Pour une action **Navigation**, vous pouvez aussi enregistrer deux touches à la suite, comme `G` puis `U`. Après une seule lettre, la ligne attend la deuxième touche : `↵` garde la lettre seule, `Retour arrière` recommence.
+
 </Step>
 <Step>
 
@@ -88,7 +140,8 @@ Les raccourcis ne sont enregistrés que sur l'appareil utilisé. Sur un autre or
 
 L'enregistrement refuse certaines combinaisons et en indique la raison sous les touches :
 
-- une combinaison déjà attribuée à une autre action ;
+- une combinaison déjà attribuée à une autre action. Une touche seule entre aussi en conflit avec toute séquence qui commence par elle : tant qu'Aller à la boîte de réception vaut `G` puis `I`, aucune autre action ne peut être `G` seul ;
+- une séquence sur une action hors **Navigation**, ou dont la première touche n'est pas une simple lettre, un chiffre ou un symbole ;
 - les combinaisons réservées au navigateur, à la fenêtre de bureau ou au système, comme `⌘W`, `⌘R`, `⌘Q`, `⌘,`, les touches d'édition (copier, coller…), `⌘0`–`⌘9` et les touches de zoom. Dans un navigateur, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D` et `⌘U` sont aussi exclus ; l'application de bureau les accepte. Sous Windows et Linux, toute combinaison avec la touche Windows / Super est refusée ;
 - les actions qui fonctionnent aussi dans un champ de saisie, comme Ouvrir la recherche, la fenêtre de discussion ou Rechercher dans la tâche, exigent `⌘`, `Ctrl` ou `Control`, pour ne jamais se déclencher pendant la frappe ; La saisie vocale accepte aussi `Option` / `Alt` avec une touche non imprimable, comme `Space`, sauf si la combinaison est réservée.
 - **Envoyer** ne peut être que `↵` ou `⌘↵`.

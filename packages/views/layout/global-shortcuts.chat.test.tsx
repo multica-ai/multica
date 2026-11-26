@@ -174,6 +174,16 @@ describe("chat toggle shortcut", () => {
     expect(h.chat.toggle).not.toHaveBeenCalled();
   });
 
+  it("leaves both chat chords alone for a guest, who has no floating chat", () => {
+    h.guest = true;
+    render(<GlobalShortcuts />);
+
+    expect(pressToggleChat()).toBe(false);
+    expect(pressNewChat()).toBe(false);
+    expect(h.chat.toggle).not.toHaveBeenCalled();
+    expect(h.chat.startNewChat).not.toHaveBeenCalled();
+  });
+
   it("reads the preference at press time, not at mount", () => {
     render(<GlobalShortcuts />);
 

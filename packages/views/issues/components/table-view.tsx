@@ -134,6 +134,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { CURSOR_ROW_CLASS, useIssueCursorId } from "../surface/issue-cursor";
 import {
   PEEK_TARGET_ATTR,
   useIssuePeekClick,
@@ -2166,6 +2167,7 @@ export function TableView({
   // Side peek steps through the loaded rows top to bottom.
   const peek = useIssuePeekActions();
   const peekedId = useIssuePeekId();
+  const cursorId = useIssueCursorId();
   const handlePeekClick = useIssuePeekClick();
   useEffect(() => {
     peek?.publishColumns([visibleIssueIds]);
@@ -2584,8 +2586,12 @@ export function TableView({
               row.original.kind === "issue"
                 ? {
                     [PEEK_TARGET_ATTR]: row.original.issue.id,
-                    className:
-                      row.original.issue.id === peekedId ? PEEKED_TABLE_ROW_CLASS : undefined,
+                    "data-cursor": row.original.issue.id === cursorId ? "" : undefined,
+                    className: cn(
+                      row.original.issue.id === peekedId && PEEKED_TABLE_ROW_CLASS,
+                      CURSOR_ROW_CLASS,
+                      "data-[cursor]:[&>td]:bg-issue-row-hover",
+                    ),
                   }
                 : undefined
             }
