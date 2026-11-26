@@ -49,6 +49,15 @@ RETURNING *;
 -- member apply one after the other and each re-checks the role it starts from.
 SELECT * FROM member WHERE id = $1 FOR UPDATE;
 
+-- name: LockWorkspaceOwners :many
+-- Locks a workspace's owner rows in id order, so changes that could take away
+-- its last owner apply one after the other and each counts the owners the
+-- previous one left.
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE;
+
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;
 

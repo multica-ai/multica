@@ -839,6 +839,8 @@ interface MentionSuggestionOptions {
   getContextItems?: () => MentionItem[];
   /** Leave guests out of the member list, where the mention leads somewhere they cannot open. */
   hideGuests?: boolean;
+  /** Leave squads out, where a squad cannot be asked (doc discussions). */
+  hideSquads?: boolean;
 }
 
 export function createMentionSuggestion(
@@ -920,6 +922,7 @@ export function createMentionSuggestion(
       .filter(
         (s) =>
           !guest &&
+          !options.hideSquads &&
           !s.archived_at &&
           (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)),
       )

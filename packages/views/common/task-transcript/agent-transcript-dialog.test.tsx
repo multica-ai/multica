@@ -588,6 +588,68 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("/c.ts")).toBeInTheDocument();
   });
 
+  it("sizes the offset column to the run's longest label so it clears the rail", () => {
+    // "+73:12:05" is nine monospace characters; a fixed column sized for
+    // "+00:30" let it run into the rail beside it.
+    renderDialog(
+      [
+        { seq: 1, type: "text", content: "Starting", created_at: "2026-06-08T08:00:30Z" },
+        { seq: 2, type: "text", content: "Still going", created_at: "2026-06-11T09:12:05Z" },
+      ],
+      { task: { ...baseTask, completed_at: "2026-06-11T09:12:10Z" } },
+    );
+
+    // Every row shares the run's widest label so the rails stay in one line.
+    expect(screen.getByText("+73:12:05")).toHaveStyle({ width: "9ch" });
+    expect(screen.getByText("+00:30")).toHaveStyle({ width: "9ch" });
+  });
+
+  it("keeps the minutes-only width for a run under an hour", () => {
+    renderDialog([
+      { seq: 1, type: "text", content: "Starting", created_at: "2026-06-08T08:00:30Z" },
+    ]);
+
+    expect(screen.getByText("+00:30")).toHaveStyle({ width: "6ch" });
+  });
+
+  it("sizes the offset column past completed_at when a step is stamped later", () => {
+    // Clock skew: the last step lands after the run's recorded completion,
+    // across the hour, so the column must fit its label too.
+    renderDialog(
+      [
+        { seq: 1, type: "text", content: "Starting", created_at: "2026-06-08T08:00:30Z" },
+        { seq: 2, type: "text", content: "Late", created_at: "2026-06-08T09:00:05Z" },
+      ],
+      { task: { ...baseTask, completed_at: "2026-06-08T08:59:50Z" } },
+    );
+
+    expect(screen.getByText("+1:00:05")).toHaveStyle({ width: "8ch" });
+  });
+
+  it("lines an expanded group's border up with the rail through a shared offset column", () => {
+    renderDialog(
+      [
+        { seq: 1, type: "tool_use", tool: "Read", input: { file_path: "/a.ts" }, created_at: "2026-06-08T08:00:30Z" },
+        { seq: 2, type: "tool_result", tool: "Read", output: "a" },
+        { seq: 3, type: "tool_use", tool: "Read", input: { file_path: "/b.ts" } },
+        { seq: 4, type: "tool_result", tool: "Read", output: "b" },
+        { seq: 5, type: "tool_use", tool: "Read", input: { file_path: "/c.ts" } },
+        { seq: 6, type: "tool_result", tool: "Read", output: "c" },
+        { seq: 7, type: "text", content: "Done", created_at: "2026-06-11T09:12:05Z" },
+      ],
+      { task: { ...baseTask, completed_at: "2026-06-11T09:12:10Z" } },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /\/a\.ts.*3 calls/ }));
+
+    // The expanded list sits beside a blank cell of the same width as the
+    // row's offset, so its border falls where the rail does.
+    const border = screen.getByText("/b.ts").closest(".border-l")!;
+    const spacer = border.previousElementSibling as HTMLElement;
+    expect(spacer).toHaveTextContent("");
+    expect(spacer).toHaveStyle({ width: "9ch" });
+  });
+
   it("narrows the list to steps matching the search", () => {
     renderDialog();
 

@@ -1,7 +1,10 @@
+import type { ReactElement } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { AgentTask, InboxItem } from "@multica/core/types";
+import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
+import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useCommandBarContextStore } from "@multica/core/command-bar";
@@ -250,6 +253,18 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
+const archiveAllDialogProps = vi.hoisted(() => ({ count: -1, open: false }));
+vi.mock("./inbox-archive-all-dialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./inbox-archive-all-dialog")>();
+  return {
+    ...actual,
+    InboxArchiveAllDialog: (props: React.ComponentProps<typeof actual.InboxArchiveAllDialog>) => {
+      archiveAllDialogProps.count = props.count;
+      archiveAllDialogProps.open = props.open;
+      return actual.InboxArchiveAllDialog(props);
+    },
+  };
+});
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
@@ -281,7 +296,10 @@ function reset() {
     heldRows: {},
     leftRowKeyByWorkspace: {},
     lastClearedByWorkspace: {},
+    manualUnreadIdByWorkspace: {},
   });
+  archiveAllDialogProps.count = -1;
+  archiveAllDialogProps.open = false;
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -295,6 +313,7 @@ function reset() {
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
+  push.mockClear();
   markReadMutate.mockReset();
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
@@ -332,8 +351,9 @@ describe("InboxPage", () => {
     const { rerender } = render(<InboxPage />);
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
     rerender(<InboxPage />);
-    const back = issueDetailProps.at(-1)?.leadingAction as { props: { onClick: () => void } };
-    act(() => back.props.onClick());
+    // Back on the list: the system back gesture, or the nav sheet's link to it.
+    searchParams = new URLSearchParams();
+    rerender(<InboxPage />);
     expect(screen.queryByTestId("issue-detail")).toBeNull();
     fireEvent.click(screen.getByTestId("row"));
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
@@ -377,6 +397,20 @@ describe("InboxPage", () => {
     // Everything is read by now, so a fresh click opens at the newest comment.
     act(() => useInboxSelectionStore.getState().requestLanding("issue-1"));
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
+  });
+
+  it("keeps an archived notification open on desktop when filters change in the sidebar", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived&issue=issue-9");
+    listData.archived = [item({ id: "archived-1", issue_id: "issue-9", type: "new_comment", archived: true })];
+    render(<InboxPage />);
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+
+    act(() => useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention"));
+
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("opens a notification the Work panel offered despite a type filter", () => {
@@ -518,14 +552,15 @@ describe("InboxPage", () => {
     expect(container.querySelector("[data-slot='list-column']")).toBeNull();
   });
 
-  it("leads the detail with the way back to the open tab on desktop, and leaves it to the back control on a phone", () => {
+  it("hands the detail the open notification, and leaves the way back to the list beside it", () => {
     reset();
     layout.width = DESKTOP;
     searchParams = new URLSearchParams("view=archived&issue=issue-9");
     listData.archived = [item({ id: "archived-1", issue_id: "issue-9", archived: true })];
-    const host = () => issueDetailProps.at(-1)?.inbox as { crumb?: { href: string }; item?: InboxItem } | undefined;
+    const host = () => issueDetailProps.at(-1)?.inbox as { crumb?: unknown; item?: InboxItem } | undefined;
     const { unmount } = render(<InboxPage />);
-    expect(host()?.crumb?.href).toBe("/acme/inbox?view=archived");
+    expect(host()).toBeDefined();
+    expect(host()?.crumb).toBeUndefined();
     // Archived, so the issue's own notification actions stay out of it.
     expect(host()?.item).toBeUndefined();
     unmount();
@@ -868,44 +903,64 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
   });
 
-  it("writes a bare issue param when selecting in the main view", () => {
+  // The phone detail's header holds the nav trigger, not a way back, so the
+  // opening has to be a history entry for the back gesture to return to the list.
+  it("opens a phone row as a history entry with a bare issue param", () => {
     reset();
     listData.active = [item({ id: "active-1", issue_id: "issue-3" })];
 
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-3");
+  });
+
+  it("hands a phone issue detail the nav trigger for every state it draws", () => {
+    reset();
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item()];
+    const { unmount } = render(<InboxPage />);
+    // The loading and not-found states draw only this slot, so it carries the
+    // nav, never a way back that would lock the nav sheet out (MUL-10233).
+    expect((issueDetailProps.at(-1)?.leadingAction as ReactElement).type).toBe(CollapsedNavTrigger);
+    unmount();
+
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item()];
+    render(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.leadingAction).toBeUndefined();
   });
 
   // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
   // not an issue, so `IssueDetail` never renders for it — and `IssueDetail` is
-  // what carries the way back in its own header on a phone. This branch has to
-  // supply its own bar or opening one of these is a dead end.
-  it("keeps a way back to the list for a notification with no issue", () => {
+  // what carries the nav trigger in its own header on a phone. This branch has
+  // to supply its own header or opening one of these is a dead end.
+  it("keeps the nav reachable for a notification with no issue", () => {
     reset();
     listData.active = [
       item({ id: "inbox-note", issue_id: null, type: "quick_create_failed" }),
     ];
 
-    render(<InboxPage />);
+    render(
+      <SidebarProvider>
+        <InboxPage />
+      </SidebarProvider>,
+    );
     fireEvent.click(screen.getByTestId("row"));
 
     // Mobile swaps the list out for the detail, so the row is gone…
     expect(screen.queryByTestId("row")).toBeNull();
 
-    // …and the only thing that can bring it back is the bar this branch adds.
-    // Located structurally: the test's `useT` returns one string for every key,
-    // so every button in this detail shares an accessible name.
-    const back = document.querySelector<HTMLButtonElement>(".h-12.border-b button");
-    expect(back).not.toBeNull();
-
-    fireEvent.click(back!);
-
-    expect(screen.getByTestId("row")).toBeInTheDocument();
+    // …and the header this branch adds keeps the way to the nav sheet.
+    const header = document.querySelector("[data-mc='page-header']");
+    expect(header?.querySelector("[data-sidebar='trigger']")).not.toBeNull();
   });
 
   it("retries a failed quick-create with its original source context", async () => {
@@ -1328,5 +1383,98 @@ describe("InboxPage", () => {
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("steps through notifications with J and K shortcuts on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", created_at: "2026-04-03T00:00:00Z" }),
+      item({ id: "inbox-b", issue_id: "issue-b", created_at: "2026-04-02T00:00:00Z" }),
+      item({ id: "inbox-c", issue_id: "issue-c", created_at: "2026-04-01T00:00:00Z" }),
+    ];
+
+    render(<InboxPage />);
+
+    // Nothing selected yet: J opens the first notification.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+
+    // J advances to the next row; K moves back to the previous row.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-b");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("next");
+
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("prev");
+
+    // Clamps at the start of the list.
+    replace.mockClear();
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("toggles unread and read on the open notification with U without auto-read reverting it", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: true }),
+    ];
+
+    const { rerender } = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    rerender(<InboxPage />);
+    expect(markReadMutate).not.toHaveBeenCalled();
+
+    // Pressing U again marks it back read and releases the guard.
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+  });
+
+  it("clears the manual-unread guard on unmount so reopening the notification marks it read again", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: true })];
+
+    const first = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    // Navigate away from the Inbox page.
+    first.unmount();
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+
+    // Reopening the same unread notification later should auto-mark it read.
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    render(<InboxPage />);
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("passes the unfiltered active count to the archive-all dialog when compact filters are active", () => {
+    reset();
+    layout.width = PHONE;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+      item({ id: "inbox-b", issue_id: "issue-b", read: true }),
+      item({ id: "inbox-c", issue_id: "issue-c", read: true }),
+    ];
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+
+    render(<InboxPage />);
+    // Only the 1 unread row is listed under the filter, but archive-all affects all 3 active rows.
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(archiveAllDialogProps.count).toBe(3);
   });
 });

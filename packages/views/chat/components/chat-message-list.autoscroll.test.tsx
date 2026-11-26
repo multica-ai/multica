@@ -902,7 +902,7 @@ describe("ChatMessageList auto-scroll", () => {
     expect(observedTargets()).toHaveLength(0);
   });
 
-  it("defers the directional enter transition until the list reaches its live end, and degrades under reduced motion", () => {
+  it("defers the directional enter transition until the list reaches its live end, and skips it under reduced motion", () => {
     const box = (el: Element, top: number, bottom: number) => {
       el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
     };
@@ -926,18 +926,30 @@ describe("ChatMessageList auto-scroll", () => {
     expect(first.scroll.el).toHaveAttribute("data-chat-enter-transition", "next");
     first.view.unmount();
 
-    // Under reduced motion, directional transitions degrade to pure opacity fade.
-    useAppearanceStore.setState({ reduceMotion: true });
-    try {
-      const reduced = renderStreamingChat({ revealKey: "enter-reduced", enterTransition: "prev" });
+    // Either reduced-motion source shows the landed list at once, without even a fade.
+    const landsInstantly = (revealKey: string) => {
+      const reduced = renderStreamingChat({ revealKey, enterTransition: "prev" });
       box(reduced.scroll.el, 0, VIEWPORT);
       box(reduced.view.container.querySelector("[data-chat-live-end]")!, VIEWPORT - 120, VIEWPORT - 16);
       settleFrames(12);
-      expect(reduced.scroll.el.className).toContain("animate-chat-enter-fade");
-      expect(reduced.scroll.el.className).not.toContain("animate-chat-enter-prev");
-      expect(reduced.scroll.el).toHaveAttribute("data-chat-enter-transition", "fade");
+      expect(reduced.scroll.el.className).not.toContain("invisible");
+      expect(reduced.scroll.el.className).not.toMatch(/animate-chat-enter/);
+      expect(reduced.scroll.el).not.toHaveAttribute("data-chat-enter-transition");
+      reduced.view.unmount();
+    };
+
+    useAppearanceStore.setState({ reduceMotion: true });
+    try {
+      landsInstantly("enter-reduced-switch");
     } finally {
       useAppearanceStore.setState({ reduceMotion: false });
     }
+
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    landsInstantly("enter-reduced-system");
   });
 });

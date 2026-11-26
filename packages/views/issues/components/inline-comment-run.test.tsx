@@ -6,10 +6,11 @@ import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
-import { InlineCommentRun } from "./inline-comment-run";
+import { InlineCommentRun, PlacedInlineCommentRun, REPLY_PENDING_CALL_NOTICE_MS } from "./inline-comment-run";
 
 const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
 
@@ -43,14 +44,38 @@ afterEach(() => {
 
 function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const view = (current: AgentTask, reply = hasReply) => <QueryClientProvider client={client}>
-    <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
-  </QueryClientProvider>;
+  const view = (current: AgentTask, reply = hasReply) => <TooltipProvider>
+    <QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
+    </QueryClientProvider>
+  </TooltipProvider>;
   const rendered = renderWithI18n(view(initialTask));
   return { client, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
 }
 
 describe("InlineCommentRun", () => {
+  it("shows a clipped tool name and its summary when the activity step is focused", async () => {
+    const tool = "mcp__company-knowledge-base__search_documents_with_filters";
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool, input: { query: "release checklist" } },
+    ]);
+    setup(task());
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const label = await screen.findByText(tool);
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { value: 360 },
+      clientWidth: { value: 120 },
+    });
+
+    const step = label.closest("summary");
+    expect(step).not.toBeNull();
+    await act(async () => { step?.focus(); });
+    expect(step).toHaveFocus();
+
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
+  });
+
   it("places a delivered steer between the steps it arrived between", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },
@@ -514,5 +539,58 @@ describe("InlineCommentRun", () => {
       await user.tab();
       expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
     });
+  });
+});
+
+describe("PlacedInlineCommentRun below a published reply", () => {
+  const startedAt = Date.parse("2026-09-07T00:10:00Z");
+  const pendingCommand: TaskMessagePayload[] = [
+    { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "run_command", call_id: "a",
+      input: { command: "./scripts/build.sh" }, created_at: "2026-09-07T00:10:00Z" },
+    { task_id: id, issue_id: "issue", seq: 2, type: "tool_use", tool: "run_command", call_id: "b",
+      input: { command: "multica issue comment add" }, created_at: "2026-09-07T00:10:01Z" },
+    { task_id: id, issue_id: "issue", seq: 3, type: "tool_result", tool: "run_command", call_id: "b",
+      output: "posted", created_at: "2026-09-07T00:10:02Z" },
+  ];
+  function placed(current: AgentTask) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    return renderWithI18n(<QueryClientProvider client={client}>
+      <PlacedInlineCommentRun run={{ task: current, commentId: "comment", hasReply: true }} />
+    </QueryClientProvider>);
+  }
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true, now: startedAt + 5_000 }));
+  afterEach(() => vi.useRealTimers());
+
+  it("names the unfinished call once the reply has waited on it, and stops the run from there", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(pendingCommand);
+    vi.mocked(api.cancelTask).mockResolvedValue(undefined as never);
+    placed(task());
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalled());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    await act(async () => { vi.setSystemTime(startedAt + REPLY_PENDING_CALL_NOTICE_MS); await vi.advanceTimersByTimeAsync(1_000); });
+    expect(await screen.findByRole("status")).toHaveTextContent("Still running: waiting for ./scripts/build.sh to finish");
+    expect(screen.getByText("1m 01s")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop run" }));
+    await waitFor(() => expect(api.cancelTask).toHaveBeenCalledWith("issue", id));
+  });
+
+  it("stays settled when every call has returned or the run has ended", async () => {
+    vi.setSystemTime(startedAt + 10 * REPLY_PENDING_CALL_NOTICE_MS);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([...pendingCommand,
+      { task_id: id, issue_id: "issue", seq: 4, type: "tool_result", tool: "run_command", call_id: "a", output: "ok", created_at: "2026-09-07T00:11:00Z" }]);
+    placed(task());
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalled());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    cleanup();
+
+    vi.mocked(api.listTaskMessages).mockResolvedValue(pendingCommand);
+    placed(task({ status: "completed", completed_at: "2026-09-07T00:20:00Z" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 });

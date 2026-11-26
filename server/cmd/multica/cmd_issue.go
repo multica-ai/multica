@@ -579,7 +579,7 @@ var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
 	"assignee_id", "creator_type", "creator_id", "requester_id", "parent_issue_id",
-	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"duplicate_of", "blocked_by", "blocked_count", "project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
 }
@@ -670,6 +670,7 @@ func init() {
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
+	issueListCmd.Flags().Bool("blocked", false, "Only issues waiting for unfinished tasks (manual blockers or earlier stages)")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
@@ -714,7 +715,8 @@ func init() {
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().Bool("assignee-picker", false, "Assign to the agent or squad selected in Quick Create (requires quick-create task context; mutually exclusive with --assignee and --assignee-id)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
-	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
+	issueCreateCmd.Flags().StringArray("blocked-by", nil, "Issue to wait for before starting (repeatable; UUID or identifier)")
+	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. Later stages wait for all earlier stages. Use todo for automatic start, backlog for a parent checkpoint.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
@@ -729,7 +731,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in, and the update is refused only where both changed the same paragraphs. Without it the description is replaced as given.")
+	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in when live description editing is on and the update changes nothing else (no other field flags or --attachment), and the update is refused only where both changed the same paragraphs; otherwise the update is refused if the description changed at all. Without it the description is replaced as given.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -741,6 +743,8 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().StringArray("blocked-by", nil, "Add an issue to wait for (repeatable; UUID or identifier)")
+	issueUpdateCmd.Flags().StringArray("remove-blocked-by", nil, "Remove a manual blocker (repeatable; stage waits follow stage/parent)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
@@ -748,9 +752,9 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue edit-description
-	issueEditDescriptionCmd.Flags().String("old", "", "Exact text to replace (required)")
+	issueEditDescriptionCmd.Flags().String("old", "", "Exact text to replace (this or --old-file is required)")
 	issueEditDescriptionCmd.Flags().String("old-file", "", "Read the text to replace from a UTF-8 file")
-	issueEditDescriptionCmd.Flags().String("new", "", "Replacement text")
+	issueEditDescriptionCmd.Flags().String("new", "", "Replacement text; \"\" deletes it (this or --new-file is required)")
 	issueEditDescriptionCmd.Flags().String("new-file", "", "Read the replacement from a UTF-8 file")
 	issueEditDescriptionCmd.Flags().Bool("replace-all", false, "Replace every occurrence of --old")
 	issueEditDescriptionCmd.Flags().String("output", "json", "Output format: table or json")
@@ -887,6 +891,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 
 	params := url.Values{}
 	params.Set("workspace_id", client.WorkspaceID)
+	if blocked, _ := cmd.Flags().GetBool("blocked"); blocked {
+		params.Set("blocked", "true")
+	}
 	since, _ := cmd.Flags().GetString("updated-since")
 	until, _ := cmd.Flags().GetString("updated-until")
 	if cmd.Flags().Changed("updated-since") != cmd.Flags().Changed("updated-until") {
@@ -1833,6 +1840,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["project_id"] = project.ID
 	}
+	if err := applyIssueBlockerFlags(ctx, client, cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
 		if stage < 1 {
@@ -2125,6 +2135,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["duplicate_of_issue_id"] = original.ID
 	}
+	if err := applyIssueBlockerFlags(ctx, client, cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
 		if stage < 1 {
@@ -2150,15 +2163,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no local attachments to update; --attachment accepts file paths, not URLs")
 	}
 	desc, changed := body["description"].(string)
+	var descRevision *int64
 	if len(pending) > 0 && !changed {
-		var issue struct {
-			Description *string `json:"description"`
-		}
-		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
+		if desc, descRevision, err = fetchIssueDescription(ctx, client, issueRef.ID); err != nil {
 			return fmt.Errorf("get issue description before binding attachments: %w", err)
-		}
-		if issue.Description != nil {
-			desc = *issue.Description
 		}
 	}
 	attachmentIDs := make([]string, 0, len(pending))
@@ -2172,9 +2180,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		attachmentRefs = append(attachmentRefs, uploaded)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	// setDescription adds the uploaded files to current. A revision makes the
+	// server refuse the write if the description changed after it was read.
+	setDescription := func(current string, revision *int64) {
+		current = applyAttachmentLinks(os.Stderr, current, "issue description", pending, attachmentRefs)
+		body["description"] = appendAttachmentReferences(current, attachmentRefs)
+		if revision != nil {
+			body["description_base_revision"] = *revision
+		}
+	}
 	if len(attachmentRefs) > 0 {
-		desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, attachmentRefs)
-		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
+		setDescription(desc, descRevision)
 		body["attachment_ids"] = attachmentIDs
 	}
 	if noStart && len(body) > 0 {
@@ -2183,7 +2199,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if len(body) > 0 {
-		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result)
+		// Someone edited the description during the upload: add the files to
+		// the new text instead of writing the old text over it.
+		for retry := 0; retry < 3 && descRevision != nil && isIssueDescriptionConflict(err); retry++ {
+			if desc, descRevision, err = fetchIssueDescription(ctx, client, issueRef.ID); err != nil {
+				break
+			}
+			setDescription(desc, descRevision)
+			err = client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result)
+		}
+		if err != nil {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
@@ -2228,6 +2254,29 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+// fetchIssueDescription reads an issue's description and its revision. The
+// revision is nil when the server does not report one.
+func fetchIssueDescription(ctx context.Context, client *cli.APIClient, issueID string) (string, *int64, error) {
+	var issue struct {
+		Description *string `json:"description"`
+		Revision    *int64  `json:"description_revision"`
+	}
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID), &issue); err != nil {
+		return "", nil, err
+	}
+	if issue.Description == nil {
+		return "", issue.Revision, nil
+	}
+	return *issue.Description, issue.Revision, nil
+}
+
+// isIssueDescriptionConflict reports whether an update was refused because the
+// description changed after it was read.
+func isIssueDescriptionConflict(err error) bool {
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict && strings.Contains(httpErr.Body, "issue_description")
+}
+
 // issueDescriptionWriteError explains a refused description write and how to
 // redo it; other errors pass through.
 func issueDescriptionWriteError(action string, err error) error {
@@ -2243,7 +2292,7 @@ func issueDescriptionWriteError(action string, err error) error {
 				"Run `multica issue get`, quote the current text (with more context if it repeats), and retry (%s)",
 				action, httpErr.Body)
 		case strings.Contains(httpErr.Body, "issue_description"):
-			return fmt.Errorf("%s: --description-base-revision is too old to merge from, so nothing was written. "+
+			return fmt.Errorf("%s: the description changed since --description-base-revision and could not be merged, so nothing was written. "+
 				"Run `multica issue get` for the latest description and description_revision, or change part of it with `multica issue edit-description` (%s)",
 				action, httpErr.Body)
 		}
@@ -4239,4 +4288,43 @@ func compactComments(comments []map[string]any) {
 			}
 		}
 	}
+}
+
+// applyIssueBlockerFlags resolves each reference before any issue mutation.
+func applyIssueBlockerFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, body map[string]any) error {
+	changed := false
+	for _, flag := range []string{"blocked-by", "remove-blocked-by"} {
+		if cmd.Flags().Lookup(flag) != nil && cmd.Flags().Changed(flag) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	var capabilities struct {
+		IssueBlockersSupported bool `json:"issue_blockers_supported"`
+	}
+	if err := client.GetJSON(ctx, "/api/config", &capabilities); err != nil {
+		return fmt.Errorf("check blocker support: %w", err)
+	}
+	if !capabilities.IssueBlockersSupported {
+		return errors.New("this server does not support issue blockers; update the server before using --blocked-by or --remove-blocked-by")
+	}
+
+	for _, flag := range []string{"blocked-by", "remove-blocked-by"} {
+		if cmd.Flags().Lookup(flag) == nil || !cmd.Flags().Changed(flag) {
+			continue
+		}
+		refs, _ := cmd.Flags().GetStringArray(flag)
+		ids := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			issue, err := resolveIssueRef(ctx, client, ref)
+			if err != nil {
+				return fmt.Errorf("resolve --%s: %w", flag, err)
+			}
+			ids = append(ids, issue.ID)
+		}
+		body[strings.ReplaceAll(flag, "-", "_")] = ids
+	}
+	return nil
 }

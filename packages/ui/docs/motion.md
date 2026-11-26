@@ -17,6 +17,7 @@ Motion explains a change where it happens: where the selection went, what opened
 - Keep UI motion at 200ms or less. An exit is shorter than its entry.
 - Never block input. A click during an animation acts on the end state, and the animation retargets from where it is.
 - In class names, write the curve as `ease-[cubic-bezier(0.23,1,0.32,1)]`; in JavaScript, use the constants.
+- In Tailwind v4, `translate-*`, `scale-*` and `rotate-*` write the standalone `translate`, `scale` and `rotate` properties, not `transform`. A hand-written transition names them, as in `transition-[translate,opacity]`; with `transition-[transform,opacity]` they snap. `transition` and `transition-transform` already cover all four. The 3D `rotate-x/y/z-*` still compose `transform`. `pnpm check:ui-transitions` reports the mix-up.
 
 ## Rules by interaction
 
@@ -27,7 +28,8 @@ Dialog, AlertDialog, Sheet, Popover, DropdownMenu, ContextMenu, Select, HoverCar
 - Enter: fade and scale from 95% toward the trigger (Sheet slides in from its edge), 100–150ms, `UI_EASE_OUT`. Exit: reverse, at most as long.
 - Use the components in `packages/ui/components/ui/` as they are. Dialog timing lives in the `--dialog-*` tokens (`dialog.md`); do not override an overlay's animation at a call site.
 - Keep the content mounted until the exit finishes. Do not gate the popup's children with `{open && …}`, and do not unmount the root when it closes. Base UI's Portal unmounts after the exit. A host that renders one modal at a time keeps the last modal and its data until `onOpenChangeComplete(false)`.
-- Tooltips that open instantly while the pointer moves across a toolbar skip their animation (`data-[instant]:animate-none`).
+- Keep the content and its data unchanged during the exit, too. `open` turns false on the exit's first frame: do not pass it to a data hook, a query's `enabled`, or an effect that resets state, or the list empties and the panel shrinks while it fades. Use `open` only to stop input, such as key listeners. The palette in `packages/views/search/search-command.tsx` calls `useRootModel(…, { active: true })` and lets the Portal unmount it after the exit.
+- Tooltips that open instantly while the pointer moves across a toolbar skip their animation by zeroing its duration (`data-[instant]:animation-duration-0`). Never remove an exit animation while it plays (`animate-none` on a state that can turn on mid-exit): Base UI then never unmounts the popup, and it stays on screen.
 
 ### Expand and collapse
 
@@ -35,7 +37,10 @@ Sections, tree nodes, disclosures, "Show N more", inline hints.
 
 - Animate height and opacity together, 150–200ms, `UI_EASE_OUT`. The content below moves with the change; it never jumps.
 - Rotate one `ChevronRight` by 90° on the same duration. Do not swap two icons.
-- Use `CollapsibleContent`. For a conditional block outside a Collapsible, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `CreateRunHint` in `packages/views/modals/create-issue.tsx` does, or motion's `height: "auto"`.
+- Inside a Base UI `Collapsible`, use `CollapsibleContent`: the issue sidebar sections, chat tool rows, sections in a dialog. `Collapsible` wires the trigger's `aria-expanded` and `aria-controls` to it.
+- Where an `open` prop drives the section and there is no `Collapsible`, use `PanelDisclosure`, as the left panels and object pages do: `PanelSection`, the tree rows in `work-tree.tsx` and `views-section.tsx`, the groups in `object-page.tsx`. It makes the exiting content `inert`, and under reduced motion unmounts it in the same frame.
+- Both unmount the content once it is closed, so a collapsed list releases its queries; do not pass `keepMounted` or `hiddenUntilFound` to a panel whose content subscribes to data. Both clip only while the height moves: a resting section must not cut off its rows' focus rings.
+- For a conditional block with nothing focusable in it, such as an inline hint, use a `grid-rows-[0fr]` → `grid-rows-[1fr]` transition, as `CreateRunHint` in `packages/views/modals/create-issue.tsx` does. Its inner `overflow-hidden` clips at rest too.
 
 ### List rows added and removed
 
@@ -44,6 +49,14 @@ Archive, complete, snooze, a new notification, a new run.
 - A removed row collapses its height, margins and opacity, 150ms, `UI_EASE_OUT`, inside `AnimatePresence initial={false}`. Rows below close the gap; they do not jump.
 - A row the user just added, or one that arrived live, fades in, with at most 4px of upward movement, 150ms.
 - Rows on first render and rows a virtual list mounts while scrolling never animate.
+
+### Drag and drop
+
+Moving issues on the board, in the list, and between swimlanes.
+
+- While dragging, the overlay is lifted with `ISSUE_DRAG_OVERLAY_CLASS`: tilted 1°, scaled to 101%, with a shadow. It follows the pointer with no easing.
+- On drop, `createIssueDropAnimation` glides the overlay into its new slot and straightens it, 170ms, `UI_EASE_OUT`. The slot stays hidden with `visibility` until the overlay lands; hiding it with `opacity` would set off the slot's own opacity transition and flash it.
+- A cancelled drop, an intercepted one (a workflow block or handoff, an archived status, a no-op in a sort-locked view), and any drop under reduced motion skip the glide. Clear the ref you pass to `createIssueDropAnimation` in `onDragStart`, and set it in `onDragEnd` or `onDragCancel` when the move does not land.
 
 ### Content switch
 
@@ -70,6 +83,15 @@ Counts, progress, copy, send/stop, save state, toggles.
 - An icon that swaps to confirm an action (copy → check, send → stop) crossfades with a small scale, about 140ms: `CopyCheckIcon` for copy.
 - Color and background state changes use `transition-colors`.
 
+## Keep interaction intact
+
+An animated container must not break the controls inside it, while it moves or after it settles.
+
+- Clip only while the size changes. A permanent `overflow-hidden` cuts off the focus rings and drop rings of the rows inside it. With motion, put `overflow: "hidden"` in `initial` and `exit`, and end `animate` with `transitionEnd: { overflow: "visible" }`, as `PanelDisclosure` in `packages/views/layout/panel-nav.tsx` and `ChatBarChip` in `packages/views/chat/components/chat-bar.tsx` do. `CollapsibleContent` already clips only while its height moves. A container that clips by design, such as a drawer that slides in from an edge or a card with rounded corners, keeps its rows inside their own scroll area, with room for the ring.
+- Content that is leaving takes no clicks and no focus. Read `useIsPresent()` in the component that `AnimatePresence` renders, and set `inert={!isPresent}` on the leaving element. `pointer-events-none` alone still lets Tab land on it. `CollapsibleContent` is inert while it closes.
+- motion owns every size it animates. motion writes `width` and `height` as inline styles, which win over a Tailwind class for the same property, such as `max-md:w-full`. When the size depends on the breakpoint, choose motion's target by breakpoint (`useIsMobile()`), as `StepInspectorDrawer` in `packages/views/common/task-transcript/agent-transcript-dialog.tsx` does.
+- A focus ring has to be drawn before it can be kept whole. In Tailwind v4, `outline-none` also sets `--tw-outline-style: none`, which `focus-visible:outline-2` reads, so on the same element the two draw nothing. Add `focus-visible:outline-solid`, as `PANEL_ROW_CLASS` in `packages/views/layout/panel-nav.tsx` does. A ring on `::after` (`focus-visible:after:outline-2`) is unaffected, because the variable does not inherit. `pnpm check:ui-outlines` reports a width left without its style.
+
 ## Reduced motion
 
 The Appearance setting "Reduce motion" and the system's `prefers-reduced-motion` both mean instant: no movement, no size animation, no fade in its place.
@@ -77,6 +99,7 @@ The Appearance setting "Reduce motion" and the system's `prefers-reduced-motion`
 - The Appearance setting zeroes CSS animation and transition durations for the whole document. The system setting reaches CSS only through media queries, so every CSS animation or transition also carries `motion-reduce:animate-none` or `motion-reduce:transition-none`.
 - JavaScript motion (motion/react, WAAPI) reads `useReducedMotion()` from `@multica/core/appearance`, or `prefersReducedMotion()` outside render, which cover both settings. With either set, pass `duration: 0` or skip the animation. motion's own `useReducedMotion` and a bare `matchMedia` check see only the system setting. `MotionProvider` at the app root makes motion/react skip transform and layout animation under either setting, but opacity and color still animate, so the `duration: 0` above still applies.
 - Test the reduced branch: with reduced motion, the end state is there in the same frame.
+- Two checks enforce this. The `NO_SYSTEM_ONLY_REDUCED_MOTION` lint rule rejects a `prefers-reduced-motion` query string in `packages/views`, `apps/web` and `apps/desktop`. `packages/ui/styles/reduced-motion.test.ts` reads every stylesheet in `packages/ui`, `packages/views`, `apps/desktop` and `apps/web` (except the marketing site), and fails when a class starts an animation and no `@media (prefers-reduced-motion: reduce)` rule in the same file stops it; the few exceptions are listed in that test by file and class, each with its reason.
 
 ## Do not animate
 
@@ -100,7 +123,10 @@ These stay instant:
 | --- | --- | --- |
 | Durations and curves | `UI_MOTION_DURATION`, `UI_EASE_OUT`, `UI_EASE_IN`, `UI_INDICATOR_SPRING` (selected-state indicators) | `packages/ui/lib/motion.ts` |
 | Overlay enter and exit | The overlay components; Dialog's `--dialog-*` tokens | `packages/ui/components/ui/`, `packages/ui/styles/tokens.css` |
-| Expand and collapse | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| Expand and collapse inside a `Collapsible` | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
+| Expand and collapse driven by an `open` prop (panel sections, tree rows, object page groups) | `PanelDisclosure` | `packages/views/layout/panel-nav.tsx` |
+| Issue drag lift and drop settle (board, list, swimlanes) | `ISSUE_DRAG_OVERLAY_CLASS`, `createIssueDropAnimation` | `packages/views/issues/components/drag-drop-animation.ts` |
+| motion container that clips only while it resizes, and leaves without taking input | `PanelDisclosure`, `ChatBarChip` | `packages/views/layout/panel-nav.tsx`, `packages/views/chat/components/chat-bar.tsx` |
 | Tabs indicator | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | Segmented control indicator | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
 | Reduced motion for motion/react | `MotionProvider` (mounted at the web and desktop roots) | `packages/views/common/motion-provider.tsx` |
@@ -119,6 +145,12 @@ Add a row when you add a primitive, and point the rules above at it.
 ## Verification
 
 jsdom has no layout, so unit tests cover wiring and the reduced-motion branch, not the animation. A static screenshot cannot show a jump or an overshoot either.
+
+Testing motion/react in jsdom:
+
+- Run tests that wait for an animation with real timers and `waitFor`. Motion's frame loop is shared by the whole test file: when it first starts under `vi.useFakeTimers()`, it stays stuck after `vi.useRealTimers()`, and later animations in that file never finish either. Keep fake timers to the reduced-motion branch, which does not animate.
+- A `duration: 0` value reaches the element's style on Motion's next frame, not in the same commit. Wait a frame before asserting it.
+- jsdom never applies discrete values from `transitionEnd`, such as `overflow` or `display`. Check those in the real app.
 
 A UI PR whose interaction changes size, position, or what is on screen attaches a GIF of it and the results of a frame-by-frame sample from the real app. `scripts/motion/capture.mjs` does both against a `make up` environment; `scripts/motion/inbox-tabs.mjs` is a complete scenario to copy:
 

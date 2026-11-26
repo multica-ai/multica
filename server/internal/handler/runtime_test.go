@@ -423,7 +423,7 @@ func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
 				'cutoff-test', 'old-day',    111, 0, 0, 0, 1),
 			(($2::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai', $3, $4, $5, NULL,
 				'cutoff-test', 'cutoff-day', 222, 0, 0, 0, 1)
-		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+		ON CONFLICT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model) DO UPDATE
 			SET input_tokens = EXCLUDED.input_tokens,
 			    output_tokens = EXCLUDED.output_tokens,
 			    cache_read_tokens = EXCLUDED.cache_read_tokens,

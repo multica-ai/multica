@@ -57,6 +57,7 @@ import { useT } from "../../i18n";
 import {
   PANEL_ROW_CLASS,
   PanelCount,
+  PanelDisclosure,
   PanelLink,
   PanelList,
   PanelSection,
@@ -546,10 +547,10 @@ function ProjectFolderTreeItem({
           <FolderMenu folder={folder} />
         </CollectionRowContext.Provider>
       )}
-      {expanded && (
-        // Same connector as an expanded project's issues, so the projects'
-        // icons sit on the folder's label column: 1px border + 5px + the
-        // row's 12px reaches the folder row's 12px + 16px icon + 10px gap.
+      <PanelDisclosure open={expanded}>
+        {/* Same connector as an expanded project's issues, so the projects'
+            icons sit on the folder's label column: 1px border + 5px + the
+            row's 12px reaches the folder row's 12px + 16px icon + 10px gap. */}
         <SortableContext items={projectIds} strategy={verticalListSortingStrategy}>
           <ul id={listId} className="ml-5 space-y-px border-l border-surface-border pl-[5px]">
             {projects.length === 0 ? (
@@ -561,7 +562,7 @@ function ProjectFolderTreeItem({
             )}
           </ul>
         </SortableContext>
-      )}
+      </PanelDisclosure>
     </li>
   );
 }
@@ -649,7 +650,7 @@ function NoProjectTreeItem({
           </span>
         }
       />
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -665,7 +666,7 @@ function NoProjectTreeItem({
             rowRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </li>
   );
 }
@@ -780,7 +781,7 @@ function ProjectTreeItem({
           />
         </CollectionRowContext.Provider>
       )}
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -796,7 +797,7 @@ function ProjectTreeItem({
             linkRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </li>
   );
 }

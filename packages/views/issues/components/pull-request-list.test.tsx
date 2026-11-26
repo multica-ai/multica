@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
@@ -329,7 +329,7 @@ describe("PullRequestList sidebar rows", () => {
     await waitForRender();
     expect(screen.getByText("#42")).toBeInTheDocument();
     expect(screen.getByText("#43")).toBeInTheDocument();
-    expect(screen.queryByText("widget#42")).not.toBeInTheDocument();
+    expect(screen.queryByText("widget")).not.toBeInTheDocument();
   });
 
   it("shows the repo and number without the owner when the PRs span repos", async () => {
@@ -339,23 +339,73 @@ describe("PullRequestList sidebar rows", () => {
     ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("widget#42")).toBeInTheDocument();
-    expect(screen.getByText("gadget#7")).toBeInTheDocument();
+    const [a, b] = screen.getAllByTestId("pull-request-row");
+    expect(a).toHaveTextContent("widget#42");
+    expect(b).toHaveTextContent("gadget#7");
+    expect(screen.queryByText(/acme\//)).not.toBeInTheDocument();
+  });
+
+  it("truncates only the repo name, never the number", async () => {
+    mockPRs = [
+      makePR({ id: "a", number: 42 }),
+      makePR({ id: "b", number: 7, repo_name: "gadget" }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("widget")).toHaveClass("truncate");
+    expect(screen.getByText("#42")).toHaveClass("shrink-0");
   });
 
   it("hides the diff size when all stats are 0 (legacy backend)", async () => {
     mockPRs = [makePR()];
     renderList();
     await waitForRender();
+    expect(screen.queryByTestId("pull-request-diff")).not.toBeInTheDocument();
     expect(screen.queryByText(/^\+0/)).not.toBeInTheDocument();
   });
 
-  it("shortens the diff size to thousands", async () => {
+  it("shows the diff size after the number, compacted and coloured", async () => {
     mockPRs = [makePR({ additions: 6743, deletions: 6, changed_files: 119 })];
     renderList();
     await waitForRender();
-    expect(screen.getByText("+6.7k")).toBeInTheDocument();
-    expect(screen.getByText("−6")).toBeInTheDocument();
+    const diff = screen.getByTestId("pull-request-diff");
+    expect(diff).toHaveClass("shrink-0");
+    expect(within(diff).getByText("+6.7k")).toHaveClass("text-success");
+    expect(within(diff).getByText("−6")).toHaveClass("text-destructive");
+    expect(screen.getByTestId("pull-request-row")).not.toHaveTextContent("119 files");
+  });
+
+  it("lets the diff wrap away on its own instead of squeezing the number", async () => {
+    // Nested in the number's shrinkable group, a narrow row drew the diff
+    // over the number; as a sibling it wraps whole onto the clipped line.
+    mockPRs = [makePR({ number: 11590, additions: 500, deletions: 22 })];
+    renderList();
+    await waitForRender();
+    const line = screen.getByTestId("pull-request-diff").parentElement!;
+    expect(line).toHaveClass("flex-wrap", "overflow-hidden");
+    expect(screen.getByText("#11590").parentElement).toBe(line);
+  });
+
+  it("gives the repo name only leftover room, so it truncates before the diff wraps", async () => {
+    mockPRs = [
+      makePR({ id: "a", number: 42, additions: 5, deletions: 1 }),
+      makePR({ id: "b", number: 7, repo_name: "gadget" }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("widget")).toHaveClass("basis-0", "grow", "max-w-fit", "truncate");
+    expect(screen.getByText("widget").parentElement).toBe(screen.getByTestId("pull-request-diff").parentElement);
+  });
+
+  it.each([
+    ["checks are running", { checks_rollup: "pending" as const, checks_total: 4, checks_running: 2 }],
+    ["the snapshot is stale", { snapshot_stale: true, snapshot_fetched_at: new Date(Date.now() - 3_600_000).toISOString() }],
+    ["the PR is merged", { state: "merged" as const, merged_at: new Date(Date.now() - 3_600_000).toISOString() }],
+  ])("keeps the diff size while %s", async (_, overrides) => {
+    mockPRs = [makePR({ additions: 48, deletions: 12, ...overrides })];
+    renderList();
+    await waitForRender();
+    expect(within(screen.getByTestId("pull-request-diff")).getByText("+48")).toBeInTheDocument();
   });
 
   // --- Collapse behaviour --------------------------------------------------
@@ -424,10 +474,19 @@ describe("PullRequestList auto-complete", () => {
   });
 
   it("falls back to Done on a backend that does not name the target", async () => {
-    mockPRs = [makePR({ id: "b", number: 19 })];
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" }), makePR({ id: "b", number: 19 })];
     mockAutoComplete = decision("waiting", ["b"], { target_status: undefined });
     renderList();
     expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("Moves to Done when #19 merges");
+  });
+
+  it("says what merging a lone PR does on the PR's own row", async () => {
+    mockPRs = [makePR({ id: "b", number: 19 })];
+    mockAutoComplete = decision("waiting", ["b"], { target_status: "in_review" });
+    renderList();
+    const row = await screen.findByTestId("pull-request-row");
+    expect(within(row).getByTestId("pr-merge-target")).toHaveTextContent("On merge → In Review");
+    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
   });
 
   it("offers to remove a PR that closed without merging", async () => {

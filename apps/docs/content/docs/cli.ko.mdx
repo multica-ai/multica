@@ -416,6 +416,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | `workflow` | 태스크 워크플로(상태와 단계별 담당자) 관리 |
 | `issue-status` | 워크스페이스 상태 카탈로그(상태, 색상, 아이콘) 관리 |
 | `label`, `property` | 워크스페이스 라벨과 사용자 지정 속성 관리 |
+| `quick-action` | 워크스페이스 퀵 액션 관리 및 실행 |
 | `view` | 저장된 뷰를 읽고 뷰에 보이는 태스크 나열 |
 | `agent`, `skill`, `squad` | 에이전트, 스킬, 스쿼드 관리 |
 | `autopilot` | 자동화, 트리거, 실행 기록 관리 |
@@ -483,10 +484,10 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 | 명령 | 하위 명령 | 용도 | 주요 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
+| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--blocked`(끝나지 않은 선행 작업이나 앞 단계를 기다리는 태스크만), `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
 | | `get <id>` | 태스크 하나 확인 | `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환) |
-| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
-| | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--description-base-revision`(`issue get`의 값; 설명이 변경되었으면 덮어쓰기 거부), `--position`, `--no-start`, `--duplicate-of` 추가 |
+| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--blocked-by`(반복 가능; 시작 전에 기다릴 태스크 키 또는 UUID), `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
+| | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--remove-blocked-by`(반복 가능; 수동 선행 작업 제거), `--description-base-revision`(`issue get`의 값; 설명이 변경되었으면 덮어쓰기 거부), `--position`, `--no-start`, `--duplicate-of` 추가 |
 | | `edit-description <id>` | 전체를 다시 쓰지 않고 태스크 설명의 정확한 텍스트를 부분 치환 | `--old` / `--old-file`(필수), `--new` / `--new-file`(필수), `--replace-all` |
 | | `batch update <id>...` | 여러 태스크에 같은 변경 적용 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 하나 이상의 태스크를 영구 삭제 | `--yes`로 확인 생략. 태스크 번호 또는 전체 UUID 사용; `--dry-run` |
@@ -525,6 +526,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `issue-status` | `list/get/create/update/archive` | 모든 워크플로가 사용하는 워크스페이스 상태 카탈로그 관리. 태스크의 현재 상태 변경은 `issue status` 사용 | `create`: `--name`, `--category`, `--color`, `--key`, `--icon`. `update`: `--name`, `--description`, `--color`, `--icon`(빈 값이면 분류 기본값으로 재설정), `--position`. `list`: `--include-archived`. 변경은 워크스페이스 owner/admin 전용 |
 | `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | `list`: `--resource-type`(`issue` 또는 `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type`(`issue` 또는 `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
+| `quick-action` | `list/get/create/update/archive/restore/delete/run` | [퀵 액션](/quick-actions) 관리 및 실행. UUID, UUID 접두사 또는 정확한 이름 지원. 생성·수정·보관·삭제는 멤버 전용(`public`은 owner/admin 전용) | `list`: `--include-archived`, `--full-id`. `create` / `update`: `--name`, `--description`, `--prompt` / `--prompt-file` / `--prompt-stdin`, `--agent` / `--squad`(`update`는 `--clear-target` 지원), `--visibility`(`private` 또는 `public`, `create` 기본값 `private`), `--status`(`update`). `run <action> <issue>`: `--dry-run`은 게시 없이 미리보기 |
 | `view` | `list/get/issues/create/update/duplicate/delete` | 열 수 있는 뷰(내 뷰와 워크스페이스에 공유된 뷰)를 읽고, `issues`로 뷰에 보이는 태스크를 저장된 정렬 순서대로 나열(저장된 필터는 모두 서버에서 적용). `create`, `update`, `duplicate`, `delete`는 앱과 같은 형식으로 뷰를 저장하므로 사이드바에 보이고 앱에서 계속 편집할 수 있음. `update`는 지정한 항목만 바꾸며, 읽은 뒤 다른 사람이 바꾼 뷰는 덮어쓰지 않고 거부함. 소유자(공유 뷰는 워크스페이스 소유자와 관리자도)만 수정하거나 삭제할 수 있음. 에이전트 실행 중에는 뷰와 '나' 조건이 런타임 소유자 기준 | `<view>`는 ID, ID 접두사 또는 정확한 이름을 받음. `list`: `--scope`(`workspace`, `my`, `project`), `--project`, `--full-id`. `issues`: `--limit`(최대 100), `--cursor`(이전 페이지의 `next_cursor`), `--today`(상대 마감일 필터의 기준일, 기본값은 오늘), `--fields`(JSON 전용), `--full-id`. `create`: `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility`. `create/update/duplicate` 필터: `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--property "Name=Value"`, `--negate <filter>` 등. 표시: `--view-mode`, `--grouping`, `--sort`, `--direction`, `--show-sub-issues` 등. `--definition-file`, `--clear-filters`, `--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin`(`create` 전용), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility`(예전 방식), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
@@ -546,7 +548,8 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `search <query>` | 스킬 검색 | |
 | | `files list/upsert/delete <skill-id>` | 스킬 내부 파일 관리 | `list`: `--with-content`; `upsert` / `delete`: `--base-revision`(내용이 변경되었으면 HTTP 409로 덮어쓰기 거부) |
 | | `label list/add/remove <skill-id>` | 스킬 라벨 관리 | `add` / `remove`: `<label-id>`에 전체 UUID 또는 짧은 접두사 사용 가능 |
-| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | |
+| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode`(`leader` 또는 `direct`, [협업 방식](/squads#협업-방식) 참고) |
+| | `briefs <squad>` | 각 에이전트 멤버가 받는 스쿼드 내용 보기. 스쿼드를 관리할 권한 필요 | `--agent`(이름 또는 ID) |
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |

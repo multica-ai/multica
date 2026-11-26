@@ -23,10 +23,12 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { CURSOR_ROW_CLASS, useIsIssueCursor } from "../surface/issue-cursor";
 import {
   PEEKED_ROW_CLASS,
   PEEK_TARGET_ATTR,
@@ -75,6 +77,7 @@ function ListRowContent({
   const locale = useLocale();
   const selection = useIssueSurfaceSelection();
   const peeked = useIsIssuePeeked(issue.id);
+  const cursor = useIsIssueCursor(issue.id);
   const peekLinkProps = useIssuePeekLinkProps(issue);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -110,13 +113,14 @@ function ListRowContent({
         data-selected={selected ? "true" : "false"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
+        data-cursor={cursor ? "" : undefined}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-colors ${
+        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-[background-color,color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
           selected
             ? "bg-issue-row-selected hover:not-data-[popup-open]:bg-issue-row-selected data-[popup-open]:bg-issue-row-selected"
-            : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover"
-        } ${PEEKED_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
+            : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover data-[cursor]:bg-issue-row-hover"
+        } ${PEEKED_ROW_CLASS} ${CURSOR_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
       >
         <div
           className="relative flex shrink-0 items-center justify-center w-4 h-4"
@@ -125,15 +129,21 @@ function ListRowContent({
           {storeProperties.priority && issue.priority !== "none" && (
             <PriorityIcon
               priority={issue.priority}
-              className={selected ? "hidden" : "group-hover/row:hidden"}
+              className={`transition-opacity duration-100 motion-reduce:transition-none ${
+                selected
+                  ? "opacity-0"
+                  : "group-hover/row:opacity-0 group-focus-within/row:opacity-0"
+              }`}
             />
           )}
           <input
             type="checkbox"
             checked={selected}
             onChange={() => toggle(issue.id)}
-            className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
+            className={`absolute inset-0 cursor-pointer accent-primary transition-opacity duration-100 motion-reduce:transition-none ${
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
             }`}
           />
         </div>
@@ -152,6 +162,7 @@ function ListRowContent({
             <span className="truncate">{issue.title}</span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
+            <IssueBlockedMarker issue={issue} />
             <IssueDuplicateOfMarker issue={issue} insideLink />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">

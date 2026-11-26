@@ -9,6 +9,7 @@ import {
   useSearchStore,
   type CommandBarContext,
 } from "@multica/core/command-bar";
+import { takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
@@ -32,6 +33,7 @@ import {
 import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
+import { registerComposerFocus } from "../issues/components/composer-focus";
 import { SearchCommand } from "./search-command";
 import { DOC_SEARCH_DEBOUNCE_MS } from "./use-doc-search";
 
@@ -1086,6 +1088,13 @@ describe("SearchCommand", () => {
       expect(input().value).toBe("");
     });
 
+    it("keeps the page's issue ahead of a list cursor registered after it", () => {
+      registerContext({ kind: "issue", issue: makeIssue({ id: "issue-2", identifier: "MUL-7" }), cursor: true });
+      renderSearch();
+
+      expect(renderedHeadings()[0]).toContain("MUL-42");
+    });
+
     it("opens a submenu from its row, with the issue in the breadcrumb", async () => {
       const user = userEvent.setup();
       renderSearch();
@@ -1094,6 +1103,20 @@ describe("SearchCommand", () => {
       expect(screen.getByRole("navigation", { name: "Current menu" })).toHaveTextContent("MUL-42Change status");
       expect(renderedValues().length).toBeGreaterThan(0);
       expect(renderedValues().every((v) => v.startsWith("status:"))).toBe(true);
+    });
+
+    it("selects the first row of a submenu opened with an empty query, and the root's on the way back", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await rowText("Change status...");
+      await user.keyboard("{Enter}");
+
+      expect(screen.getByRole("navigation", { name: "Current menu" })).toHaveTextContent("MUL-42Change status");
+      expect(selectedValue()).toBe(renderedValues()[0]);
+
+      await user.keyboard("{ArrowDown}{Backspace}");
+      expect(await screen.findByPlaceholderText(PLACEHOLDER)).toBeInTheDocument();
+      expect(selectedValue()).toBe(renderedValues()[0]);
     });
 
     it("ranks the issue's command first when its name is typed", async () => {
@@ -1329,6 +1352,183 @@ describe("SearchCommand", () => {
 
       expect(renderedValues().some((v) => v.startsWith("command:context-issues:"))).toBe(false);
       expect(renderedHeadings()).not.toContain("3 selected issues");
+    });
+  });
+
+  describe("issue shortcuts", () => {
+    const issue = makeIssue({ id: "issue-1", identifier: "MUL-42", title: "Safari login loop", status: "todo" });
+    const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = document.body) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
+      act(() => void target.dispatchEvent(event));
+      return event;
+    };
+    beforeEach(() => {
+      act(() => useSearchStore.setState({ open: false }));
+      seed(issueDetailOptions("ws-test", "issue-1"), issue);
+    });
+
+    it.each([
+      ["s", false, "Change status"],
+      ["a", false, "Assign to"],
+      ["p", false, "Set priority"],
+      ["l", false, "Add label"],
+      ["D", true, "Set due date"],
+      ["P", true, "Move to project"],
+    ])("'%s' (shift: %s) opens %s on the open issue", async (key, shiftKey, page) => {
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+
+      expect(press(key, { shiftKey }).defaultPrevented).toBe(true);
+      expect(useSearchStore.getState().open).toBe(true);
+      expect(await screen.findByRole("navigation", { name: "Current menu" })).toHaveTextContent(`MUL-42${page}`);
+    });
+
+    it("goes back to the palette root on Backspace", async () => {
+      const user = userEvent.setup();
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      press("s");
+
+      await screen.findByRole("navigation", { name: "Current menu" });
+      await user.keyboard("{Backspace}");
+      expect(await screen.findByPlaceholderText(PLACEHOLDER)).toBeInTheDocument();
+      expect(renderedValues()).toContain("command:context-issue:issue-status");
+    });
+
+    it("acts on a list selection over the issue behind it", async () => {
+      registerContext({ kind: "issue", issue });
+      const selection = [makeIssue({ id: "issue-a", identifier: "MUL-1" }), makeIssue({ id: "issue-b", identifier: "MUL-2" })];
+      registerContext({ kind: "issues", issues: selection, clearSelection: vi.fn() });
+      renderSearch();
+      press("p");
+
+      expect(await screen.findByRole("navigation", { name: "Current menu" })).toHaveTextContent(
+        "2 selected issuesSet priority",
+      );
+    });
+
+    it("leaves the key alone with no issue in front of the user", () => {
+      renderSearch();
+      expect(press("s").defaultPrevented).toBe(false);
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("leaves a key typed into a field, or one a page already handled", () => {
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      const field = document.createElement("input");
+      document.body.append(field);
+
+      expect(press("s", {}, field).defaultPrevented).toBe(false);
+      const handled = new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true });
+      handled.preventDefault();
+      act(() => void document.body.dispatchEvent(handled));
+      expect(useSearchStore.getState().open).toBe(false);
+      field.remove();
+    });
+
+    it("leaves every field verb to a guest", () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+
+      for (const key of ["s", "a", "p", "l", "q"]) expect(press(key).defaultPrevented).toBe(false);
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("waits for the viewer's role before claiming a field verb or reading quick actions", () => {
+      queryData.delete(JSON.stringify(memberListOptions("ws-test").queryKey));
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+
+      for (const key of ["s", "a", "q"]) expect(press(key).defaultPrevented).toBe(false);
+      expect(useSearchStore.getState().open).toBe(false);
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
+    it("reads quick actions only with a single issue in front of the user", () => {
+      renderSearch();
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
+    it("reads no quick actions for a guest", () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
+    it("leaves 'q' alone when the workspace has no active quick action", () => {
+      seed(quickActionListOptions("ws-test"), { quick_actions: [{ id: "qa-1", name: "Triage", status: "paused" }] });
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      expect(press("q").defaultPrevented).toBe(false);
+    });
+
+    it("opens the quick actions on 'q'", async () => {
+      seed(quickActionListOptions("ws-test"), {
+        quick_actions: [{ id: "qa-1", name: "Triage", status: "active", target_name: "Lambda" }],
+      });
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      expect(press("q").defaultPrevented).toBe(true);
+      expect(await screen.findByRole("navigation", { name: "Current menu" })).toHaveTextContent("MUL-42Run quick action");
+    });
+
+    it("focuses the open issue's composer on 'r', the newest one first", () => {
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      expect(press("r").defaultPrevented).toBe(false);
+
+      const page = vi.fn();
+      const peek = vi.fn();
+      const releasePage = registerComposerFocus("issue-1", page);
+      const releasePeek = registerComposerFocus("issue-1", peek);
+      expect(press("r").defaultPrevented).toBe(true);
+      expect(peek).toHaveBeenCalledTimes(1);
+      releasePeek();
+      press("r");
+      expect(page).toHaveBeenCalledTimes(1);
+      releasePage();
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("records a status picked for the Inbox's open issue as the bar does", async () => {
+      const user = userEvent.setup();
+      registerContext({ kind: "issue", issue });
+      registerContext({
+        kind: "inbox",
+        item: { id: "inbox-1", issue_id: "issue-1" },
+        archive: vi.fn(),
+        markUnread: vi.fn(),
+        markAllRead: vi.fn(),
+      } as unknown as CommandBarContext);
+      renderSearch();
+      press("s");
+
+      await user.click(await screen.findByText("In Progress"));
+      await waitFor(() => expect(api("updateIssue")).toHaveBeenCalledWith("issue-1", { status: "in_progress" }));
+      expect(takeInboxBarAction("issue-1")).toEqual({ type: "status", status: "in_progress" });
+    });
+
+    it("records nothing for an issue the Inbox is not showing", async () => {
+      const user = userEvent.setup();
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      press("s");
+
+      await user.click(await screen.findByText("In Progress"));
+      await waitFor(() => expect(api("updateIssue")).toHaveBeenCalled());
+      expect(takeInboxBarAction("issue-1")).toBeNull();
+    });
+
+    it("shows each verb's keys on its command row", async () => {
+      registerContext({ kind: "issue", issue });
+      act(() => useSearchStore.setState({ open: true }));
+      renderSearch();
+
+      const row = (await rowText("Change status...")).closest('[cmdk-item=""]') as HTMLElement;
+      expect(within(row).getByText("S")).toBeInTheDocument();
     });
   });
 
@@ -1571,6 +1771,101 @@ describe("SearchCommand", () => {
 
       expect(mockPush).not.toHaveBeenCalled();
       expect(useSearchStore.getState().open).toBe(true);
+    });
+  });
+
+  // MUL-10220: cmdk picks the first enabled row when the input changes, which
+  // is often a local doc title hit while issue rows are still loading.
+  describe("selection while results land", () => {
+    const runbookIssue = {
+      ...makeIssue({ id: "issue-runbook", identifier: "MUL-300", title: "Runbook checklist" }),
+      match_source: "title",
+    };
+    let resolveIssues: (() => void) | null = null;
+
+    const typeRunbook = async (user: ReturnType<typeof userEvent.setup>) => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [],
+        docs: [
+          { id: "doc-release", title: "Release runbook", folderId: null },
+          { id: "doc-oncall", title: "Oncall runbook", folderId: null },
+        ],
+      });
+      api("searchIssues").mockImplementation(({ q }: { q: string }) =>
+        q === "runbook"
+          ? new Promise((resolve) => {
+              resolveIssues = () => resolve({ issues: [runbookIssue], total: 1 });
+            })
+          : Promise.resolve({ issues: [], total: 0 }),
+      );
+      renderSearch();
+      await user.type(input(), "runbook");
+      await waitFor(() => expect(selectedValue()).toBe("doc:doc-release"));
+    };
+
+    const landIssues = async () => {
+      await waitFor(() => expect(resolveIssues).not.toBeNull());
+      await act(async () => resolveIssues!());
+      await waitFor(() => expect(renderedValues()[0]).toBe("issue-runbook"));
+    };
+
+    beforeEach(() => {
+      resolveIssues = null;
+    });
+
+    it("moves the selection to the top row when higher-ranked results arrive", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+      fireEvent.keyDown(input(), { key: "n", ctrlKey: true });
+      expect(selectedValue()).toBe("doc:doc-release");
+      fireEvent.keyDown(input(), { key: "p", ctrlKey: true });
+      expect(selectedValue()).toBe("issue-runbook");
+    });
+
+    it("keeps a row the user moved to while results land", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.keyDown(input(), { key: "n", ctrlKey: true });
+      expect(selectedValue()).toBe("doc:doc-oncall");
+      await landIssues();
+
+      expect(selectedValue()).toBe("doc:doc-oncall");
+    });
+
+    it("scrolls the list back to the top row it selects", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      const list = document.querySelector<HTMLElement>("[cmdk-list]")!;
+      list.scrollTop = 120;
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+      expect(list.scrollTop).toBe(0);
+    });
+
+    it("ignores pointer moves over headings and disabled rows", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.pointerMove(screen.getByText("Docs"));
+      const handRow = document.querySelector<HTMLElement>('[cmdk-item=""][data-value="hand-to-agent"]')!;
+      expect(handRow).toHaveAttribute("aria-disabled", "true");
+      fireEvent.pointerMove(handRow);
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+    });
+
+    it("keeps a row the pointer moved to while results land", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.pointerMove(document.querySelector('[cmdk-item=""][data-value="doc:doc-oncall"]')!);
+      expect(selectedValue()).toBe("doc:doc-oncall");
+      await landIssues();
+
+      expect(selectedValue()).toBe("doc:doc-oncall");
     });
   });
 });

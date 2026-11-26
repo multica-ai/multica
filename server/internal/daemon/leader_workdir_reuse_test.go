@@ -137,6 +137,44 @@ func TestShouldReusePriorWorkdirChatAcceptsMatchingConversation(t *testing.T) {
 	}
 }
 
+// A doc discussion run continues in the env its agent last used on the same
+// doc (MUL-9933), and never in one from another doc.
+func TestShouldReusePriorWorkdirDocAcceptsMatchingDoc(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-doc", "12345678", "workdir")
+	markerPath := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	marker := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"agent-doc","doc_id":"doc-1"}`)
+	if err := os.WriteFile(markerPath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := execenv.WriteManagedEnvProvenance(filepath.Dir(workDir), execenv.ManagedEnvProvenance{
+		WorkspaceID: "ws-doc", DocID: "doc-1", AgentID: "agent-doc",
+	}); err != nil {
+		t.Fatalf("write provenance: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-doc")
+	task.WorkspaceID = "ws-doc"
+	task.IssueID = ""
+	task.DocID = "doc-1"
+	task.AgentID = "agent-doc"
+	task.IsLeaderTask = false
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); !ok {
+		t.Fatalf("doc task did not reuse its doc's workdir %q", workDir)
+	}
+
+	task.DocID = "doc-2"
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatal("doc task reused a workdir belonging to another doc")
+	}
+}
+
 // TestShouldReusePriorWorkdirDeclinesRemovedDirectory covers an automatic retry
 // whose parent's workdir was GC'd between the failure and the claim (MUL-7034):
 // the server still offers the recorded path, and the daemon must decline it so

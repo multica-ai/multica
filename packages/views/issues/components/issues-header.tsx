@@ -19,6 +19,7 @@ import {
   Columns3,
   Eye,
   Filter,
+  Flag,
   FolderKanban,
   FolderMinus,
   List,
@@ -97,9 +98,9 @@ import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
 import { sortDirectionLabelKey } from "../utils/sort-direction";
+import { SORT_LABEL_KEY } from "../utils/sort-label";
 import { LabelChip } from "../../labels/label-chip";
 import {
-  SORT_OPTIONS,
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
@@ -965,6 +966,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, typeof User> = {
   created: UserPen,
   my_agents: Bot,
   subscribed: BellRing,
+  blocked: Flag,
 };
 
 /** Read-only sentence form of the active filters, shown on hover so a closed
@@ -1990,16 +1992,6 @@ export function IssueDisplayControls({
   );
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
-    position: "sort_manual",
-    status: "sort_status",
-    priority: "sort_priority",
-    start_date: "sort_start_date",
-    due_date: "sort_due_date",
-    created_at: "sort_created",
-    updated_at: "sort_updated",
-    title: "sort_title",
-  };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
     status: "group_status",
     assignee: "group_assignee",

@@ -54,10 +54,11 @@ import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
+import { ViewVisibilityMenuItems } from "../../issue-views/view-visibility-menu-items";
 import { BUILTIN_VIEW_ICON, useBuiltinViewLabel, useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelCount, PanelDisclosure, PanelLink, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import { SECTION_SETTINGS_REVEAL_CLASS, ViewsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
@@ -406,7 +407,7 @@ function BuiltinViewRow({
           </span>
         }
       />
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -420,7 +421,7 @@ function BuiltinViewRow({
             linkRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </>
   );
 }
@@ -539,6 +540,7 @@ function SavedViewRow({
                 <Link2 className="size-3.5" />
                 {t(($) => $.panels.work.view_copy_link)}
               </DropdownMenuItem>
+              <ViewVisibilityMenuItems view={view} actions={actions} />
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => actions.sidebar.unstar(item.id)}>
                 <EyeOff className="size-3.5" />
@@ -557,7 +559,7 @@ function SavedViewRow({
           </span>
         }
       />
-      {expanded && (
+      <PanelDisclosure open={expanded}>
         <SidebarIssueList
           id={listId}
           wsId={wsId}
@@ -571,7 +573,7 @@ function SavedViewRow({
             linkRef.current?.focus();
           }}
         />
-      )}
+      </PanelDisclosure>
     </>
   );
 }

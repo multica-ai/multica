@@ -129,16 +129,26 @@ func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *
 	})
 
 	// Who could see a deleted original went with its project: nobody keeps
-	// it, not even a member of every private project there is now.
+	// it, not even a member of every private project there is now. Everyone
+	// gets the same frame, so it goes to the workspace once.
 	t.Run("deleted original", func(t *testing.T) {
-		frames := framesByMember(t, activity(ppPublicIssue, "duplicate_unmarked",
+		p := workspaceFrame(t, activity(ppPublicIssue, "duplicate_unmarked",
 			map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"}))
-		if len(frames) != 4 {
-			t.Fatalf("delivered to %d members, want the 4 non-guest members", len(frames))
+		if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
+			t.Errorf("details = %v, want the reference stripped and the reason kept", d)
+		}
+	})
+
+	// On a private issue the same frame goes only to its project's members.
+	t.Run("deleted original of a private issue", func(t *testing.T) {
+		frames := framesByMember(t, activity(ppSecretIssue, "duplicate_unmarked",
+			map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"}))
+		if len(frames) != 2 || frames[ppMember] == nil || frames[ppShared] == nil {
+			t.Fatalf("delivered to %v, want the project's two members", frames)
 		}
 		for userID, p := range frames {
-			if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
-				t.Errorf("%s: details = %v, want the reference stripped and the reason kept", userID, d)
+			if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" {
+				t.Errorf("%s: details = %v, want the reference stripped", userID, d)
 			}
 		}
 	})
@@ -178,6 +188,83 @@ func TestRegisterListeners_UnmovedDuplicateMarkKeepsOneFrame(t *testing.T) {
 			t.Errorf("%s = %s, want null", key, frame.Payload[key])
 		}
 	}
+}
+
+// workspaceFrame returns the payload of the one workspace broadcast fb got,
+// failing on anything else.
+func workspaceFrame(t *testing.T, fb *fakeBroadcaster) map[string]json.RawMessage {
+	t.Helper()
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if len(fb.workspaceCalls) != 1 || len(fb.scopeCalls) != 0 {
+		t.Fatalf("workspace=%d scoped=%d, want one workspace broadcast", len(fb.workspaceCalls), len(fb.scopeCalls))
+	}
+	var frame struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(fb.workspaceCalls[0].msg, &frame); err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	return frame.Payload
+}
+
+// With no private project left, who could see a deleted original is still
+// unknown: it may have sat in a private project deleted since. Its reference
+// is stripped for everyone, in one frame, as the HTTP reads do.
+func TestRegisterListeners_DeletedDuplicateRefIsStrippedWithoutPrivateProjects(t *testing.T) {
+	publish := func(e events.Event) *fakeBroadcaster {
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{noPrivateProjects: true}))
+		e.WorkspaceID = ppWorkspace
+		bus.Publish(e)
+		return fb
+	}
+	activity := func(action string, details map[string]string) *fakeBroadcaster {
+		body, _ := json.Marshal(details)
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{noPrivateProjects: true}))
+		publishActivityEvent(bus, events.Event{WorkspaceID: ppWorkspace}, db.ActivityLog{IssueID: ppUUID(ppPublicIssue), Action: action, Details: body})
+		return fb
+	}
+	details := func(p map[string]json.RawMessage) map[string]string {
+		var d map[string]string
+		_ = json.Unmarshal(jsonObject(p["entry"])["details"], &d)
+		return d
+	}
+
+	t.Run("original_deleted activity", func(t *testing.T) {
+		fb := activity("duplicate_unmarked",
+			map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"})
+		if d := details(workspaceFrame(t, fb)); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
+			t.Errorf("details = %v, want the reference stripped and the reason kept", d)
+		}
+	})
+
+	t.Run("issue:updated from the original's delete", func(t *testing.T) {
+		fb := publish(events.Event{Type: protocol.EventIssueUpdated, Payload: map[string]any{
+			"issue":                        map[string]any{"id": ppPublicIssue, "project_id": nil, "duplicate_of": nil},
+			"duplicate_of_issue_id":        nil,
+			"prev_duplicate_of_issue_id":   ppDeletedIssue,
+			"prev_duplicate_of_identifier": "GONE-1",
+		}})
+		p := workspaceFrame(t, fb)
+		if string(p["prev_duplicate_of_issue_id"]) != "null" {
+			t.Errorf("prev_duplicate_of_issue_id = %s, want null", p["prev_duplicate_of_issue_id"])
+		}
+		if _, leaked := p["prev_duplicate_of_identifier"]; leaked {
+			t.Errorf("prev_duplicate_of_identifier reached the wire")
+		}
+	})
+
+	t.Run("existing original is kept", func(t *testing.T) {
+		fb := activity("duplicate_marked",
+			map[string]string{"original_id": ppPublicIssue, "original_identifier": "PUB-1"})
+		if d := details(workspaceFrame(t, fb)); d["original_id"] != ppPublicIssue || d["original_identifier"] != "PUB-1" {
+			t.Errorf("details = %v, want the reference kept", d)
+		}
+	})
 }
 
 func TestRegisterListeners_ReadableDuplicateMarkKeepsWorkspaceFanout(t *testing.T) {

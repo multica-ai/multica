@@ -5,7 +5,7 @@ import type { AppAccountScope, IssueAppCall } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { useT } from "../../i18n";
 import { OutcomeIcon, outcomeLabel, toolLabel, useIssueAppCalls } from "./app-call-chips";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 type AppGroup = {
   key: string;
@@ -16,7 +16,7 @@ type AppGroup = {
 };
 
 /** Outcomes worth calling out next to an app; plain successes are not. */
-const NOTABLE = ["pending", "blocked", "rejected", "error", "rate_limited"] as const;
+const NOTABLE = ["pending", "blocked", "rejected", "error", "rate_limited", "quota_exceeded"] as const;
 
 /**
  * "Apps" in the issue sidebar: which apps, through which account, this
@@ -52,7 +52,7 @@ export function IssueAppsSection({ issueId }: { issueId: string }) {
         onOpenChange={setOpen}
         count={groups.length}
       />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="px-2">
           {groups.map((group) => {
             const name = appName(group.toolkit);
@@ -90,7 +90,7 @@ export function IssueAppsSection({ issueId }: { issueId: string }) {
             );
           })}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }

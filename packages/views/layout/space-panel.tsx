@@ -2,8 +2,11 @@
 import { DocTree } from "../docs/components/doc-tree";
 
 import { useEffect, useRef } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useCurrentWorkspace, type AppSpaceId } from "@multica/core/paths";
 import { useIsGuest } from "@multica/core/permissions";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
@@ -44,6 +47,50 @@ export function SpacePanelContent({ space }: { space: AppSpaceId | null }) {
   return Panel ? <Panel /> : null;
 }
 
+const PEEK_EXIT_DURATION = 0.11;
+
+function SpacePanelPeek({
+  isListPeek,
+  reduceMotion,
+  onPointerEnter,
+  onPointerLeave,
+  children,
+}: {
+  isListPeek: boolean;
+  reduceMotion: boolean;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.aside
+      data-slot="space-panel-peek"
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+      animate={{
+        opacity: 1,
+        x: 0,
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      exit={{
+        opacity: 0,
+        x: reduceMotion ? 0 : -8,
+        transition: { duration: reduceMotion ? 0 : PEEK_EXIT_DURATION, ease: UI_EASE_IN },
+      }}
+      className={cn(
+        NAV_PEEK_CLASS,
+        "max-md:hidden",
+        !isPresent && "pointer-events-none",
+        isListPeek && LIST_COLUMN_WIDTH_CLASS,
+      )}
+    >
+      {children}
+    </motion.aside>
+  );
+}
+
 /**
  * The space panel inside the content card: a column on the card's leading
  * edge, separated from the page by one hairline. Spaces without a shell
@@ -54,6 +101,7 @@ export function SpacePanelContent({ space }: { space: AppSpaceId | null }) {
 export function SpacePanel() {
   const shell = useAppShell();
   const { open, isCompact } = useSidebar();
+  const reduceMotion = useReducedMotion();
   const panelRef = useRef<HTMLElement>(null);
   useEffect(() => {
     // Public state hook for themes (docs/theming.md).
@@ -97,19 +145,20 @@ export function SpacePanel() {
           <PanelResizeHandle panelRef={panelRef} onToggle={shell.toggleNav} />
         </div>
       )}
-      {Peek && (
-        <aside
-          data-slot="space-panel-peek"
-          onPointerEnter={shell.holdPeek}
-          onPointerLeave={shell.releasePeek}
-          className={cn(
-            NAV_PEEK_CLASS,
-            "max-md:hidden",
-            peekSpace && LIST_PEEKS[peekSpace] && LIST_COLUMN_WIDTH_CLASS,
+      {navCollapsed && (
+        <AnimatePresence>
+          {Peek && (
+            <SpacePanelPeek
+              key="space-panel-peek"
+              isListPeek={Boolean(peekSpace && LIST_PEEKS[peekSpace])}
+              reduceMotion={reduceMotion}
+              onPointerEnter={shell.holdPeek}
+              onPointerLeave={shell.releasePeek}
+            >
+              <Peek />
+            </SpacePanelPeek>
           )}
-        >
-          <Peek />
-        </aside>
+        </AnimatePresence>
       )}
     </>
   );

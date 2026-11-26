@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "Proyecto",
     "all_projects": "Todos los proyectos",
-    "period_label": "Periodo"
+    "period_label": "Periodo",
+    "attribution_label": "Atribución",
+    "all_attribution": "Toda atribución",
+    "standalone_only": "Solo agentes independientes",
+    "squads_group": "Squads"
   },
   "history_limit": {
     "note": "Tu plan incluye los últimos {{days}} días. Mejora tu plan para ver datos anteriores. No se elimina nada.",
@@ -27,7 +31,9 @@
     "run_time_label": "Tiempo de ejecución · {{days}}D",
     "run_time_hint": "En {{tasks}} ejecuciones",
     "tasks_label": "Ejecuciones · {{days}}D",
-    "tasks_hint": "{{failed}} fallaron"
+    "tasks_hint": "{{failed}} fallaron",
+    "cost_squad_hint": "{{name}} total (incl. miembros delegados)",
+    "cost_squad_share_hint": "Activado por Squad {{cost}} ({{pct}}%)"
   },
   "dim": {
     "label": "Intervalo",
@@ -90,7 +96,8 @@
     "show_reasons": "Mostrar códigos de error",
     "hide_reasons": "Ocultar códigos de error",
     "show_all": "Mostrar todos ({{count}})",
-    "show_less": "Mostrar los {{count}} principales"
+    "show_less": "Mostrar los {{count}} principales",
+    "by_squad": "Errores por squad"
   },
   "leaderboard": {
     "title": "Clasificación",
@@ -111,7 +118,16 @@
     "usage_totals_pending": "Los totales de uso se están procesando",
     "show_all": "Mostrar todos",
     "show_less": "Mostrar los {{count}} principales",
-    "no_data": "Sin actividad de agentes en este periodo."
+    "no_data": "Sin actividad de agentes en este periodo.",
+    "group_label": "Agrupar clasificación por",
+    "group_agent": "Agentes",
+    "group_squad": "Squads",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}} squads",
+    "squad_members_title": "Desglose de miembros de {{name}}",
+    "squad_members_count": "{{count}} miembros participantes",
+    "deleted_squads": "Squads eliminados",
+    "toggle_squad_members": "Alternar miembros de {{name}}"
   },
   "empty": {
     "title": "Aún no hay uso",

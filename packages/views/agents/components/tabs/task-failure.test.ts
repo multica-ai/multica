@@ -11,6 +11,9 @@ import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 import ruAgents from "../../../locales/ru/agents.json";
 import zhHantAgents from "../../../locales/zh-Hant/agents.json";
+// Generated from server/pkg/taskfailure AllReasons; the Go test
+// TestClientFailureReasonFixture keeps it in step with the backend.
+import serverFailureReasons from "./test-fixtures/server-failure-reasons.json";
 
 import {
   FAILURE_REASON_I18N_KEYS,
@@ -46,6 +49,26 @@ function fixedT(locale: SupportedLocale): TFunction<"agents"> {
 }
 
 const enT = fixedT("en");
+
+describe("FAILURE_REASON_I18N_KEYS", () => {
+  // Every reason the backend can write needs a label, otherwise the run row
+  // shows the raw code.
+  it("has a label for every reason the server taxonomy defines", () => {
+    const missing = serverFailureReasons.filter(
+      (reason) => !Object.prototype.hasOwnProperty.call(FAILURE_REASON_I18N_KEYS, reason),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("labels a run whose process cleanup was not confirmed", () => {
+    expect(failureReasonLabel("cleanup_unconfirmed", enT)).toBe(
+      "Couldn't confirm the agent process stopped",
+    );
+    expect(failureReasonLabel("cleanup_blocked", enT)).toBe(
+      "Previous run may be active; rerun manually",
+    );
+  });
+});
 
 describe("cancellationActorLabel", () => {
   it("names the member that cancelled a run", () => {

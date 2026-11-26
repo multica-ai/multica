@@ -98,6 +98,15 @@ export function locateInColumns(
   return null;
 }
 
+/** Whether `issueId` currently exists in any published column. */
+export function hasIssueInColumns(
+  columns: IssuePeekColumns | null,
+  issueId: string | null,
+): boolean {
+  if (!columns || !issueId) return false;
+  return columns.some((column) => column.includes(issueId));
+}
+
 /**
  * What a click on an issue card or row opens: a plain click opens the preferred
  * target (Settings → Preferences), Shift+Click the other one, so either is one
@@ -117,6 +126,7 @@ export function resolveIssueClick(
 export const IssuePeekActionsContext = createContext<IssuePeekActions | null>(null);
 export const IssuePeekIdContext = createContext<string | null>(null);
 export const IssuePeekPositionContext = createContext<IssuePeekPosition | null>(null);
+export const IssuePeekColumnsContext = createContext<IssuePeekColumns | null>(null);
 
 /** `null` outside a surface that hosts a peek (e.g. a board inside a dialog). */
 export function useIssuePeekActions() {
@@ -138,6 +148,11 @@ export function useIssuePeekOpen() {
 
 export function useIssuePeekPosition() {
   return useContext(IssuePeekPositionContext);
+}
+
+/** The current view's published order (see `publishColumns`). */
+export function useIssuePeekColumns() {
+  return useContext(IssuePeekColumnsContext);
 }
 
 type PeekIssue = Pick<Issue, "id" | "identifier">;

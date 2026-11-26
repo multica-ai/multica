@@ -126,6 +126,11 @@ func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger servi
 	switch {
 	case willRun && suppressRun:
 		status, reason = DispatchDeferred, ReasonDeferred
+		// Otherwise the dependency rule starts on its next pass the run this
+		// write declined.
+		if err := h.Queries.DismissIssueBlockerRelease(r.Context(), issue.ID); err != nil {
+			slog.Warn("dismiss blocker release failed", "issue_id", uuidToString(issue.ID), "error", err)
+		}
 	case willRun:
 		status, reason = h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
 	case trigger.DeclineReason != "":

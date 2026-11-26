@@ -170,6 +170,7 @@ type TaskContextForEnv struct {
 	ProjectArchived               bool                    // project is archived; rendered as a note in the Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
+	DocID                         string                  // non-empty for doc discussion tasks (MUL-9933)
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field
@@ -659,15 +660,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// follow-up can be claimed the instant the prior task completes — before
 	// the prior handler writes .gc_meta.json — so reuse eligibility must be
 	// provable from an artifact that exists the moment the env is created. Only
-	// managed (non-local_directory) issue and chat envs get this marker; that is
-	// exactly the set with a durable conversation scope. Non-fatal: a write failure
+	// managed (non-local_directory) issue, chat and doc discussion envs get this
+	// marker; that is exactly the set with a durable conversation scope. Non-fatal: a write failure
 	// only costs the next follow-up its session reuse (it falls back to a fresh
 	// session), which must never block dispatching this task.
-	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
+	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "" || params.Task.DocID != "") {
 		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
 			WorkspaceID:   params.WorkspaceID,
 			IssueID:       params.Task.IssueID,
 			ChatSessionID: params.Task.ChatSessionID,
+			DocID:         params.Task.DocID,
 			AgentID:       params.Task.AgentID,
 		}); err != nil && logger != nil {
 			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
@@ -1173,6 +1175,9 @@ const (
 	GCKindChat         GCMetaKind = "chat"
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
 	GCKindQuickCreate  GCMetaKind = "quick_create"
+	// GCKindDoc is a doc discussion run's env, reused by the agent's next run
+	// on the same doc (MUL-9933).
+	GCKindDoc GCMetaKind = "doc"
 )
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
@@ -1190,6 +1195,7 @@ type GCMeta struct {
 	IssueID        string     `json:"issue_id,omitempty"`
 	ChatSessionID  string     `json:"chat_session_id,omitempty"`
 	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
+	DocID          string     `json:"doc_id,omitempty"`
 	TaskID         string     `json:"task_id,omitempty"`
 	WorkspaceID    string     `json:"workspace_id"`
 	CompletedAt    time.Time  `json:"completed_at"`
@@ -1271,6 +1277,7 @@ type ManagedEnvProvenance struct {
 	WorkspaceID   string `json:"workspace_id"`
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
+	DocID         string `json:"doc_id,omitempty"`
 	AgentID       string `json:"agent_id"`
 }
 

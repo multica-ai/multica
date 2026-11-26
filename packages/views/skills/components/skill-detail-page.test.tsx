@@ -755,3 +755,80 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
     expect(field.value).toBe("my unsaved edit");
   });
 });
+
+describe("SkillDetailPage edits made while a save is in flight", () => {
+  /** Starts a save whose response the test releases by hand. */
+  async function startSave() {
+    let release!: (saved: Partial<Skill>) => void;
+    vi.mocked(api.updateSkill).mockImplementationOnce(
+      (_id, payload) =>
+        new Promise((resolve) => {
+          release = (saved) => {
+            const next = {
+              ...baseSkill,
+              ...payload,
+              // The server recreates every file row on save, so ids change.
+              files: (payload.files ?? []).map((f, i) => ({ ...f, id: `saved-${i}` })),
+              updated_at: "2026-07-29T10:00:00Z",
+              ...saved,
+            } as Skill;
+            skillRef.current = next;
+            resolve(next);
+          };
+        }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+    return async (saved: Partial<Skill> = {}) => {
+      release(saved);
+      await vi.waitFor(() => expect(toast.success).toHaveBeenCalled());
+    };
+  }
+
+  it("keeps text typed into SKILL.md and leaves it unsaved", async () => {
+    renderPage(new URLSearchParams("view=files"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = screen.getByRole("textbox", { name: /SKILL\.md/ });
+    fireEvent.change(editor, { target: { value: "first" } });
+    const finish = await startSave();
+    fireEvent.change(editor, { target: { value: "first and second" } });
+    await finish();
+
+    expect(screen.getByRole("textbox", { name: /SKILL\.md/ })).toHaveValue("first and second");
+    expect(screen.getByText("Changed: 1 file")).toBeTruthy();
+    expect(screen.queryByText("Someone else updated this skill")).toBeNull();
+  });
+
+  it("keeps text typed into a supporting file without marking the others changed", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      files: [
+        ...baseSkill.files,
+        { id: "f-2", path: "other.md", content: "# Other\n" } as Skill["files"][number],
+      ],
+    };
+    renderPage(new URLSearchParams("view=files"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "patterns.md" }));
+    const editor = screen.getByRole("textbox", { name: /patterns\.md/ });
+    fireEvent.change(editor, { target: { value: "first" } });
+    const finish = await startSave();
+    fireEvent.change(editor, { target: { value: "first and second" } });
+    await finish();
+
+    expect(screen.getByRole("textbox", { name: /patterns\.md/ })).toHaveValue("first and second");
+    expect(screen.getByText("Changed: 1 file")).toBeTruthy();
+  });
+
+  it("takes the saved version of the fields nobody touched meanwhile", async () => {
+    renderPage();
+    const name = await screen.findByLabelText("Name");
+    fireEvent.change(name, { target: { value: "renamed" } });
+    const finish = await startSave();
+    fireEvent.change(await openDescription(), { target: { value: "typed later" } });
+    await finish({ name: "renamed-by-server" });
+
+    expect(screen.getByLabelText("Name")).toHaveValue("renamed-by-server");
+    expect(screen.getByLabelText("Description")).toHaveValue("typed later");
+    expect(screen.getByText(/^Changed:/).textContent).toBe("Changed: Description");
+  });
+});

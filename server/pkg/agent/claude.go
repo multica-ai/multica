@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -125,6 +126,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		usageSnapshot: usageSnapshot,
 		baselineUsage: baselineUsage,
 		rateLimits:    newRateLimitTracker(opts.OnRateLimits),
+		commandUUID:   uuid.NewString(),
 		controlErrors: make(chan error, 1),
 		resultCh:      make(chan struct{}),
 		usage:         make(map[string]TokenUsage),
@@ -189,7 +191,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if opts.SkillInvocation != nil {
 			blocks = opts.SkillInvocation.claudeTextBlocks(commands)
 		}
-		err := writeClaudeInput(proc.inputWriter, blocks...)
+		err := writeClaudeInput(proc.inputWriter, turn.commandUUID, blocks...)
 		if err != nil {
 			turn.closeInput()
 			if supplements != nil {
@@ -416,17 +418,29 @@ type claudeTurn struct {
 	resultCh                 chan struct{}
 	resultOnce               sync.Once
 	stopAfterErrorResultOnce sync.Once
+	// commandUUID tags the prompt this turn writes. Claude Code reports each
+	// queued input's progress as command_lifecycle events keyed by that UUID.
+	commandUUID string
 
 	controlMu       sync.Mutex
 	pendingControls int
 	closeRequested  bool
 
-	mu                       sync.Mutex
+	mu sync.Mutex
+	// Resuming a session whose last turn was cut off can make Claude Code
+	// re-run that turn as its own command before the queued prompt
+	// (GH #11506). A result that arrives after another command started but
+	// before this turn's own command started is not this turn's answer.
+	// Once the own command starts, every result counts, whatever other
+	// commands do meanwhile (folded in, cancelled).
+	otherCommandStarted      bool
+	ownCommandStarted        bool
 	lastAssistantText        string
 	finalResultText          string
 	sawResult                bool
 	resultIsError            bool
 	terminalReasonError      string
+	sawRefusalNoFallback     bool
 	sessionID                string
 	lastUsageResult          *claudeSDKMessage
 	lastRawModelUsage        map[string]TokenUsage
@@ -474,15 +488,46 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		if msg.SessionID != "" {
 			t.sessionID = msg.SessionID
 		}
+		// Only the main thread's refusal decides the turn. A subagent's
+		// refusal is reported back to the main thread as a tool result, and
+		// the main thread's own result says how the turn ended.
+		if msg.Subtype == claudeSubtypeModelRefusalNoFallback && msg.ParentToolUseID == "" {
+			t.sawRefusalNoFallback = true
+		}
 		sid := t.sessionID
 		t.mu.Unlock()
 		trySend(t.msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sid})
+	case "command_lifecycle":
+		if msg.State == "started" && !t.ownCommandStarted {
+			if msg.CommandUUID == t.commandUUID {
+				t.ownCommandStarted = true
+				// Text streamed by an earlier command must not become this
+				// turn's fallback output.
+				t.coalescer.flushAll()
+				t.lastAssistantText = ""
+			} else {
+				t.otherCommandStarted = true
+			}
+		}
+		t.mu.Unlock()
 	case "result":
 		t.coalescer.flushAll()
+		if t.otherCommandStarted && !t.ownCommandStarted {
+			t.mu.Unlock()
+			t.backend.cfg.Logger.Info("claude: ignoring result of a command this turn did not send",
+				"turn_command_uuid", t.commandUUID,
+				"result_bytes", len(msg.ResultText),
+				"is_error", msg.IsError,
+			)
+			return
+		}
 		t.sawResult = true
 		t.finalResultText = msg.ResultText
 		t.resultIsError = msg.IsError
 		t.terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
+		if t.terminalReasonError == "" {
+			t.terminalReasonError = claudeRefusalFailure(msg.StopReason, t.sawRefusalNoFallback, msg.IsError, msg.ResultText)
+		}
 		if msg.SessionID != "" {
 			t.sessionID = msg.SessionID
 		}
@@ -981,11 +1026,14 @@ type claudeSDKMessage struct {
 	// TerminalReason is Claude Code's structured statement of why the turn
 	// ended. Read separately from IsError because the CLI computes the two
 	// independently — see claudeTerminalReasonFailure.
-	TerminalReason string                            `json:"terminal_reason,omitempty"`
-	DurationMs     float64                           `json:"duration_ms,omitempty"`
-	NumTurns       int                               `json:"num_turns,omitempty"`
-	Usage          *claudeUsage                      `json:"usage,omitempty"`
-	ModelUsage     map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
+	TerminalReason string `json:"terminal_reason,omitempty"`
+	// StopReason is the API stop_reason of the turn's last model response.
+	// Read only to recognise a safeguards refusal — see claudeRefusalFailure.
+	StopReason string                            `json:"stop_reason,omitempty"`
+	DurationMs float64                           `json:"duration_ms,omitempty"`
+	NumTurns   int                               `json:"num_turns,omitempty"`
+	Usage      *claudeUsage                      `json:"usage,omitempty"`
+	ModelUsage map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
@@ -995,6 +1043,10 @@ type claudeSDKMessage struct {
 
 	// stream_event fields (--include-partial-messages)
 	Event json.RawMessage `json:"event,omitempty"`
+
+	// command_lifecycle fields
+	CommandUUID string `json:"command_uuid,omitempty"`
+	State       string `json:"state,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
@@ -1055,6 +1107,54 @@ func claudeTerminalReasonFailure(terminalReason, resultText string) string {
 	}
 	msg := "claude ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
 		": the session's context window is exhausted and compaction could not recover it"
+	if detail := strings.TrimSpace(resultText); detail != "" {
+		msg += " (" + detail + ")"
+	}
+	return msg
+}
+
+// ClaudeModelRefusalMarker prefixes the error claudeRefusalFailure reports. It
+// is fixed Multica prose, so the daemon can recognise the failure without
+// depending on Claude Code's refusal copy, which changes between releases
+// (2.1.263 writes "can't help with this", 2.1.280 "safeguards flagged this
+// message").
+const ClaudeModelRefusalMarker = "claude ended the turn with stop_reason=refusal"
+
+// claudeSubtypeModelRefusalNoFallback is the system event Claude Code emits on
+// the main thread when the model refused the turn and no fallback model
+// answered it.
+const claudeSubtypeModelRefusalNoFallback = "model_refusal_no_fallback"
+
+// claudeRefusalFailure turns a safeguards refusal into an error naming it, and
+// returns "" for every other turn.
+//
+// A refusal poisons the session. Claude Code keeps the refused user message in
+// the transcript, so every --resume sends it to the API again and is refused
+// again, whatever the new prompt says. A fresh session with the same new
+// prompt is answered. Reproduced against Claude Code 2.1.263 and 2.1.280; the
+// resumed frames are fixtured in
+// testdata/claude-code-2.1.280-refusal-resume.jsonl. Before this the failure
+// classified as agent_error.unknown, which no resume blacklist covers, so the
+// next comment on the issue resumed the same session and failed the same way.
+//
+// Two structured signals, either is enough:
+//
+//   - stop_reason=refusal on the result frame. The CLI copies the last model
+//     response's stop_reason there, so it is "end_turn" when a fallback model
+//     answered after the primary refused (fixtured in
+//     testdata/claude-code-2.1.280-refusal-fallback-answered.jsonl).
+//   - the model_refusal_no_fallback system event, when the result is an error.
+//     It covers a result frame that does not carry stop_reason.
+//
+// The daemon maps ClaudeModelRefusalMarker to a resume-unsafe failure reason
+// (classifyPoisonedError), which retires the session so the next task starts
+// fresh. The CLI's own text rides along for the user.
+func claudeRefusalFailure(stopReason string, sawRefusalNoFallback, isError bool, resultText string) string {
+	if strings.TrimSpace(stopReason) != "refusal" && !(sawRefusalNoFallback && isError) {
+		return ""
+	}
+	msg := ClaudeModelRefusalMarker +
+		": the model declined this conversation, and resuming the session would send the refused message again"
 	if detail := strings.TrimSpace(resultText); detail != "" {
 		msg += " (" + detail + ")"
 	}
@@ -1474,8 +1574,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompts ...string) error {
-	data, err := buildClaudeInput(prompts...)
+func writeClaudeInput(w io.Writer, commandUUID string, prompts ...string) error {
+	data, err := buildClaudeInput(commandUUID, prompts...)
 	if err != nil {
 		return err
 	}
@@ -1485,7 +1585,9 @@ func writeClaudeInput(w io.Writer, prompts ...string) error {
 	return nil
 }
 
-func buildClaudeInput(prompts ...string) ([]byte, error) {
+// buildClaudeInput encodes one user frame. A non-empty commandUUID becomes the
+// frame's uuid, which Claude Code echoes in command_lifecycle events.
+func buildClaudeInput(commandUUID string, prompts ...string) ([]byte, error) {
 	content := make([]map[string]string, 0, len(prompts))
 	for _, prompt := range prompts {
 		content = append(content, map[string]string{"type": "text", "text": prompt})
@@ -1496,6 +1598,9 @@ func buildClaudeInput(prompts ...string) ([]byte, error) {
 			"role":    "user",
 			"content": content,
 		},
+	}
+	if commandUUID != "" {
+		payload["uuid"] = commandUUID
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

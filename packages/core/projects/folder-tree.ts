@@ -68,6 +68,24 @@ export function sidebarProjectRows<P extends Pick<Project, "id">>(
     .map(({ row }) => row);
 }
 
+/**
+ * Folders in the order `sidebarProjectRows` lists them, whichever projects
+ * are shown, so a folder picker reads like the sidebar.
+ */
+export function sidebarFolderOrder<F extends SidebarFolder>(
+  folders: readonly F[],
+  settings: Pick<SidebarProjectSettings, "ordering">,
+  manualOrder: readonly string[],
+): F[] {
+  const byName = [...folders].sort((a, b) => a.name.localeCompare(b.name));
+  if (settings.ordering !== "manual") return byName;
+  const rank = new Map(manualOrder.map((id, i) => [id, i]));
+  return byName
+    .map((folder, i) => ({ folder, key: rank.get(folder.id) ?? i - byName.length }))
+    .sort((a, b) => a.key - b.key)
+    .map(({ folder }) => folder);
+}
+
 /** The rows' ids in display order, each folder followed by its projects: the manual order to save. */
 export function sidebarProjectRowIds(rows: readonly SidebarProjectRow<Pick<Project, "id">>[]): string[] {
   return rows.flatMap((row) => (row.kind === "folder" ? [row.id, ...row.projects.map((p) => p.id)] : [row.id]));

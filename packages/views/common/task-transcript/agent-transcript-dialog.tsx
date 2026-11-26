@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { UI_EASE_IN, UI_EASE_OUT, UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useTraceIssueLabels } from "./use-trace-issue-labels";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
@@ -27,6 +30,7 @@ import {
   GitBranch,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
@@ -165,6 +169,9 @@ function formatStepDuration(ms: number): string {
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
+
+/** Characters in the narrowest offset, "+00:00". */
+const MIN_OFFSET_CHARS = 6;
 
 /** Offset from the run's start, which is what a step's position means. */
 function formatOffset(ms: number): string {
@@ -546,6 +553,15 @@ export function AgentTranscriptDialog({
     return undefined;
   }, [steps]);
   const runEnd = task.completed_at ?? lastStamp;
+  // Offsets only grow, so the widest label the list shows is the run's last
+  // one. Sizing the column to it in `ch` keeps every rail in one line at any
+  // run length or font size. Take the later end: a step stamped past
+  // completed_at (clock skew) still shows its own offset.
+  const offsetChars = useMemo(() => {
+    const ends = [task.completed_at, lastStamp].flatMap((iso) => timeMs(iso ?? undefined) ?? []);
+    if (runStartMs === undefined || ends.length === 0) return MIN_OFFSET_CHARS;
+    return formatOffset(Math.max(...ends) - runStartMs).length;
+  }, [task.completed_at, lastStamp, runStartMs]);
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
@@ -625,6 +641,30 @@ export function AgentTranscriptDialog({
 
     return () => { cancelled = true; };
   }, [open, task.agent_id, task.runtime_id]);
+
+  const reduceMotion = useReducedMotion();
+  const isMobile = useIsMobile();
+  // Track rows that arrive live while the transcript is open so only newly
+  // streamed steps fade in (never historical rows mounted during Virtuoso scroll).
+  const knownSeqsRef = useRef<{ taskId: string; seqs: Set<number> } | null>(null);
+  const [enteringSeqs, setEnteringSeqs] = useState<ReadonlySet<number>>(() => new Set());
+  useEffect(() => {
+    if (!knownSeqsRef.current || knownSeqsRef.current.taskId !== task.id) {
+      knownSeqsRef.current = { taskId: task.id, seqs: new Set(displayRows.map((row) => row.seq)) };
+      setEnteringSeqs((prev) => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+    const added: number[] = [];
+    for (const row of displayRows) {
+      if (!knownSeqsRef.current.seqs.has(row.seq)) {
+        knownSeqsRef.current.seqs.add(row.seq);
+        if (isLive) added.push(row.seq);
+      }
+    }
+    if (added.length > 0) {
+      setEnteringSeqs((prev) => new Set([...prev, ...added]));
+    }
+  }, [task.id, displayRows, isLive]);
 
   // Elapsed time for live tasks
   useEffect(() => {
@@ -824,6 +864,8 @@ export function AgentTranscriptDialog({
           ? t(($) => $.transcript.trigger_chat)
           : task.kind === "quick_create"
             ? t(($) => $.transcript.trigger_quick_create)
+            : task.kind === "doc_comment" || task.doc_id
+            ? t(($) => $.transcript.trigger_doc_comment)
             : task.kind === "direct"
               ? t(($) => $.transcript.trigger_direct)
               : t(($) => $.transcript.trigger_initial);
@@ -1276,7 +1318,9 @@ export function AgentTranscriptDialog({
                     row={row}
                     formatText={formatText}
                     runStartMs={runStartMs}
+                    offsetChars={offsetChars}
                     isLive={isLive}
+                    entering={isLive && enteringSeqs.has(row.seq)}
                     selectedSeq={selectedSeq}
                     expanded={row.kind === "group" && expandedGroups.has(row.seq)}
                     onToggleGroup={handleToggleGroup}
@@ -1286,16 +1330,62 @@ export function AgentTranscriptDialog({
               />
             )}
           </div>
-          {selectedStep && (
-            <StepInspector
-              step={selectedStep}
-              runStartMs={runStartMs}
-              onClose={() => setSelectedSeq(null)}
-            />
-          )}
+          <AnimatePresence initial={false}>
+            {selectedStep && (
+              <StepInspectorDrawer
+                key="step-inspector-drawer"
+                isMobile={isMobile}
+                reduceMotion={reduceMotion}
+              >
+                <StepInspector
+                  step={selectedStep}
+                  runStartMs={runStartMs}
+                  onClose={() => setSelectedSeq(null)}
+                />
+              </StepInspectorDrawer>
+            )}
+          </AnimatePresence>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function StepInspectorDrawer({
+  isMobile,
+  reduceMotion,
+  children,
+}: {
+  isMobile: boolean;
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      inert={!isPresent}
+      // Width is always owned by motion: below md the inspector
+      // fills the dialog (its close button must stay in view), so
+      // it only fades; from md up it slides in as a drawer.
+      initial={reduceMotion ? false : { opacity: 0, width: isMobile ? "100%" : 0 }}
+      animate={{
+        opacity: 1,
+        width: isMobile ? "100%" : "auto",
+        transition: { duration: reduceMotion ? 0 : 0.2, ease: UI_EASE_OUT },
+      }}
+      exit={
+        reduceMotion
+          ? { opacity: 0, transition: { duration: 0 } }
+          : {
+              opacity: 0,
+              ...(isMobile ? {} : { width: 0 }),
+              transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_IN },
+            }
+      }
+      className="flex shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -1415,7 +1505,9 @@ interface TranscriptRowProps {
   formatText: (text: string) => string;
   row: TraceRow;
   runStartMs?: number;
+  offsetChars: number;
   isLive: boolean;
+  entering?: boolean;
   selectedSeq: number | null;
   expanded: boolean;
   onToggleGroup: (seq: number) => void;
@@ -1423,20 +1515,52 @@ interface TranscriptRowProps {
 }
 
 function TranscriptRow(props: TranscriptRowProps) {
-  const { row } = props;
-  if (isGroupRow(row)) return <GroupRow {...props} row={row} />;
-  if (!isCallStep(row) && row.kind === "text") return <ProseRow {...props} row={row} />;
-  return <StepRow {...props} row={row} />;
+  const { row, entering } = props;
+  const rowRef = useRef<HTMLDivElement>(null);
+  const animatedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!entering || animatedRef.current) return;
+    animatedRef.current = true;
+    const el = rowRef.current;
+    if (!el || typeof el.animate !== "function" || prefersReducedMotion()) return;
+    const anim = el.animate(
+      [{ opacity: 0, transform: "translateY(3px)" }, { opacity: 1, transform: "translateY(0)" }],
+      { duration: 140, easing: UI_EASE_OUT_CSS },
+    );
+    return () => { anim.cancel(); };
+  }, [entering]);
+
+  const content = isGroupRow(row)
+    ? <GroupRow {...props} row={row} />
+    : !isCallStep(row) && row.kind === "text"
+      ? <ProseRow {...props} row={row} />
+      : <StepRow {...props} row={row} />;
+  return entering ? <div ref={rowRef}>{content}</div> : content;
 }
 
-/** The offset column: where in the run this happened. */
-function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+/**
+ * The offset column: where in the run this happened. Every row gets the same
+ * `chars` so the rails beside it line up; without `startedAt` it is a blank
+ * spacer of the same width.
+ */
+function OffsetCell({
+  startedAt,
+  runStartMs,
+  chars,
+}: {
+  startedAt?: string;
+  runStartMs?: number;
+  chars: number;
+}) {
   const locale = useLocale();
   const at = timeMs(startedAt);
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
-      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      // `ch` is this cell's own monospace glyph, so the width follows the font
+      // size; min-w-11 keeps the minutes-only column as it always was.
+      className="min-w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      style={{ width: `${chars}ch` }}
       title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
@@ -1501,10 +1625,10 @@ function StepDuration({
  * identity — the glyph says "the agent's own words", which is what the facet
  * selects, and it says it in 12px without a repeated string.
  */
-function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageStep }) {
+function ProseRow({ row, runStartMs, offsetChars }: TranscriptRowProps & { row: TraceMessageStep }) {
   return (
     <div className="group flex items-start gap-2 px-4 py-2.5">
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
       <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 pr-2">
@@ -1524,6 +1648,7 @@ function StepRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   isLive,
   selectedSeq,
   onSelect,
@@ -1561,7 +1686,7 @@ function StepRow({
         row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
       <span
         aria-hidden
         className={cn(
@@ -1579,7 +1704,7 @@ function StepRow({
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <span
           className={cn(
-            "shrink-0 text-caption font-medium",
+            "max-w-[60%] shrink-0 truncate text-caption font-medium",
             row.kind === "error" ? "text-destructive" : "text-foreground",
           )}
         >
@@ -1604,6 +1729,7 @@ function GroupRow({
   row,
   formatText,
   runStartMs,
+  offsetChars,
   selectedSeq,
   expanded,
   onToggleGroup,
@@ -1627,7 +1753,7 @@ function GroupRow({
         aria-expanded={expanded}
         className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
       >
-        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} chars={offsetChars} />
         <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
         <ChevronRight
           aria-hidden
@@ -1637,7 +1763,7 @@ function GroupRow({
           )}
         />
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className="shrink-0 text-caption font-medium">{row.tool}</span>
+          <span className="max-w-[60%] shrink-0 truncate text-caption font-medium">{row.tool}</span>
           {/* Name the first thing it touched, not just how many: "Read · 4
               calls" hides the one detail that makes a folded group scannable. */}
           <span className="truncate font-mono text-micro text-muted-foreground">
@@ -1650,31 +1776,36 @@ function GroupRow({
         <DurationCell ms={row.durationMs} />
       </button>
       {expanded && (
-        <div className="ml-[4.4rem] border-l pl-3">
-          {row.steps.map((step) => (
-            <button
-              key={step.seq}
-              type="button"
-              onClick={() => onSelect(step.seq)}
-              className={cn(
-                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
-                selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
-              )}
-            >
-              <span className="truncate font-mono text-muted-foreground">
-                {callSummary(step, summaryLabels) || step.tool}
-              </span>
-              {step.durationMs === undefined ? (
-                <span className="ml-auto shrink-0" />
-              ) : (
-                <StepDuration
-                  ms={step.durationMs}
-                  unknownLabel={t(($) => $.transcript.step_duration_unknown)}
-                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
-                />
-              )}
-            </button>
-          ))}
+        // Laid out like a row, with a blank offset cell, so the border lands
+        // on the rail at whatever width the column has.
+        <div className="flex gap-2 pl-4">
+          <OffsetCell chars={offsetChars} />
+          <div className="min-w-0 flex-1 border-l pl-3">
+            {row.steps.map((step) => (
+              <button
+                key={step.seq}
+                type="button"
+                onClick={() => onSelect(step.seq)}
+                className={cn(
+                  "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
+                  selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
+                )}
+              >
+                <span className="truncate font-mono text-muted-foreground">
+                  {callSummary(step, summaryLabels) || step.tool}
+                </span>
+                {step.durationMs === undefined ? (
+                  <span className="ml-auto shrink-0" />
+                ) : (
+                  <StepDuration
+                    ms={step.durationMs}
+                    unknownLabel={t(($) => $.transcript.step_duration_unknown)}
+                    className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1720,6 +1851,7 @@ function StepInspector({
   onClose: () => void;
 }) {
   const { t } = useT("agents");
+  const reduceMotion = useReducedMotion();
   const [copied, showCopied] = useCopyFeedback();
 
   const at = timeMs(step.startedAt);
@@ -1758,8 +1890,8 @@ function StepInspector({
     <aside className="flex w-full shrink-0 flex-col border-l-0 bg-muted/25 md:w-[26rem] md:border-l">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-label font-semibold">{title}</span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
+        <span title={title} className="line-clamp-3 min-w-0 wrap-anywhere text-label font-semibold">{title}</span>
+        <span className="flex flex-1 items-center gap-1.5 whitespace-nowrap text-micro text-muted-foreground">
           {offset && <span className="font-mono tabular-nums">{offset}</span>}
           {call?.durationMs !== undefined && (
             <>
@@ -1794,24 +1926,31 @@ function StepInspector({
         </IconButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {call ? (
-          <>
-            {call.call && (
-              <InspectorSection label={t(($) => $.transcript.step_input)}>
-                <StepBody item={call.call} />
-              </InspectorSection>
-            )}
-            {call.result && (
-              <InspectorSection label={t(($) => $.transcript.step_result)}>
-                <StepBody item={call.result} />
-              </InspectorSection>
-            )}
-          </>
-        ) : (
-          <InspectorSection label={title}>
-            <ToolDetailSurface text={redactSecrets(message?.item.content ?? "")} />
-          </InspectorSection>
-        )}
+        <motion.div
+          key={step.seq}
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+        >
+          {call ? (
+            <>
+              {call.call && (
+                <InspectorSection label={t(($) => $.transcript.step_input)}>
+                  <StepBody item={call.call} />
+                </InspectorSection>
+              )}
+              {call.result && (
+                <InspectorSection label={t(($) => $.transcript.step_result)}>
+                  <StepBody item={call.result} />
+                </InspectorSection>
+              )}
+            </>
+          ) : (
+            <InspectorSection label={title}>
+              <ToolDetailSurface text={redactSecrets(message?.item.content ?? "")} />
+            </InspectorSection>
+          )}
+        </motion.div>
       </div>
     </aside>
   );

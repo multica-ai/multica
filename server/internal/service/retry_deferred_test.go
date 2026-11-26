@@ -10,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
@@ -349,6 +350,43 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 			gotDeferred := childStatus == "deferred"
 			if gotDeferred != tc.wantDeferred {
 				t.Errorf("child status = %q, want deferred=%v", childStatus, tc.wantDeferred)
+			}
+		})
+	}
+}
+
+func TestFailTaskTraeDisconnectNeedsToolHistory(t *testing.T) {
+	const disconnect = `traecli session/prompt failed: session/prompt: Internal error (code=-32603, data={"message":"stream disconnected before completion: llm response empty stream","trae_stream_errors":[{"trae_error_info":{"response_stream_disconnected":{"http_status_code":null}}}]})`
+	pool := newResolveOriginatorPool(t)
+	ws, user, agentID, _ := seedAttributionFixture(t, pool)
+	fx := testutil.New(pool, ws, user)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	var runtimeID string
+	fx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	for _, tc := range []struct {
+		name, reason       string
+		noToolCallsStarted bool
+		wantChildren       int
+	}{
+		{"missing history from an older daemon", "agent_error.provider_server_error", false, 0},
+		{"network classification alone", "agent_error.provider_network", false, 0},
+		{"verified tool-free turn", "agent_error.provider_network", true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue := fx.Issue(t, tc.name)
+			id := fx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issue, "status": "running", "max_attempts": 2})
+			t.Cleanup(func() { fx.Exec(t, `DELETE FROM agent_task_queue WHERE parent_task_id = $1`, id) })
+			failed, _, err := svc.FailTaskWithTransition(context.Background(), util.MustParseUUID(id), protocol.TaskFailRequest{
+				Error: disconnect, SessionID: "test-session", FailureReason: tc.reason, NoToolCallsStarted: tc.noToolCallsStarted,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failed.Status != "failed" || failed.FailureReason.String != "agent_error.provider_network" {
+				t.Fatalf("parent = %s / %s", failed.Status, failed.FailureReason.String)
+			}
+			if got := fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, id); got != tc.wantChildren {
+				t.Fatalf("retry children = %d, want %d", got, tc.wantChildren)
 			}
 		})
 	}

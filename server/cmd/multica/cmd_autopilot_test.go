@@ -1501,3 +1501,81 @@ func TestFormatAutopilotAssignee(t *testing.T) {
 		})
 	}
 }
+
+func newAutopilotDeliveriesTestCmd(output string) *cobra.Command {
+	cmd := &cobra.Command{Use: "deliveries"}
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().String("output", output, "")
+	return cmd
+}
+
+// An ignored delivery creates no run, so `runs` cannot explain it; the
+// deliveries command is the only CLI surface for reason_code / error.
+func TestRunAutopilotDeliveriesShowsIgnoredReason(t *testing.T) {
+	const autopilotID = "11111111-1111-1111-1111-111111111111"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/autopilots/"+autopilotID+"/deliveries" {
+			t.Fatalf("request = %s %s, want GET deliveries", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("limit"); got != "20" {
+			t.Errorf("limit = %q, want 20", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"deliveries": []map[string]any{
+				{
+					"id":          "d-1",
+					"event":       "pull_request",
+					"status":      "ignored",
+					"reason_code": "payload_filtered",
+					"error":       "payload_filtered: pull_request.draft",
+					"payload_condition_failure": map[string]any{
+						"condition":     map[string]any{"path": "pull_request.draft", "op": "equals", "value": false},
+						"actual_values": []string{"true"},
+					},
+					"received_at": "2026-11-26T01:00:00Z",
+				},
+				{
+					"id":          "d-2",
+					"event":       "push",
+					"status":      "ignored",
+					"error":       "autopilot_paused",
+					"received_at": "2026-11-26T00:00:00Z",
+				},
+			},
+			"total": 2,
+		})
+	}))
+	defer srv.Close()
+
+	setCLITestServerEnv(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotDeliveries(newAutopilotDeliveriesTestCmd("table"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotDeliveries: %v", err)
+	}
+	for _, want := range []string{"REASON", "ERROR", "ignored", "payload_filtered", "pull_request.draft", "autopilot_paused"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+
+	out, err = captureStdout(t, func() error {
+		return runAutopilotDeliveries(newAutopilotDeliveriesTestCmd("json"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotDeliveries json: %v", err)
+	}
+	var got struct {
+		Deliveries []map[string]any `json:"deliveries"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json output invalid: %v\n%s", err, out)
+	}
+	if len(got.Deliveries) != 2 || got.Deliveries[0]["payload_condition_failure"] == nil {
+		t.Fatalf("json output dropped payload_condition_failure:\n%s", out)
+	}
+}

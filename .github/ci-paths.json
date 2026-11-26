@@ -6,6 +6,8 @@
     "apps/collab/**",
     "packages/**",
     "server/internal/handler/testdata/quick_action_bodies.json",
+    "docs/theming.md",
+    "apps/*/package.json",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",

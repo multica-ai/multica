@@ -1,13 +1,13 @@
 import {
-  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type RefObject,
 } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { toast } from "sonner";
 import { X, Plus, Pin, PinOff, ListX, ListEnd, AppWindow, Link2 } from "@multica/ui/icons";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -51,6 +51,11 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
+const TAB_CLOSE_DURATION = 0.14;
+const TAB_GAP_PX = 6;
+const REDUCED_ADDED_HIGHLIGHT_MS = 180;
+const REDUCED_ATTENTION_HOLD_MS = 250;
+const REDUCED_EDGE_FEEDBACK_MS = 250;
 
 type TabSnapshot = {
   workspaceSlug: string | null;
@@ -202,6 +207,8 @@ function SortableTabItem({
     if (tab.title !== title) updateTab(tab.id, { title });
   }, [titleResolved, title, tab.id, tab.title, updateTab]);
 
+  const isPresent = useIsPresent();
+  // The sortable node is the tab frame so its drag boundary is the entire strip.
   const {
     attributes,
     listeners,
@@ -209,7 +216,7 @@ function SortableTabItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: tab.id });
+  } = useSortable({ id: tab.id, disabled: !isPresent });
 
   // Pin is a secondary interaction state, not an identity: a pinned tab keeps
   // its resource visual (a project's icon, an issue's status, an actor's
@@ -270,6 +277,24 @@ function SortableTabItem({
     setShowAddedHighlight(false);
   }, [isDragging]);
 
+  useEffect(() => {
+    if (!showAddedHighlight || !shouldReduceMotion) return;
+    const timer = window.setTimeout(
+      () => setShowAddedHighlight(false),
+      REDUCED_ADDED_HIGHLIGHT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [showAddedHighlight, shouldReduceMotion]);
+
+  useEffect(() => {
+    if (attentionSequence <= 0 || !shouldReduceMotion) return;
+    const timer = window.setTimeout(
+      () => clearTabAttention(attentionSequence),
+      REDUCED_ATTENTION_HOLD_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [attentionSequence, shouldReduceMotion, clearTabAttention]);
+
   const tabButton = (
     <button
       type="button"
@@ -311,39 +336,65 @@ function SortableTabItem({
           pointerdown (electron/electron#55100); that drops :hover, hides the
           button before mouseup, and the click lands on the tab instead. */}
       <span
-        onClick={handleTogglePin}
-        onPointerDown={stopDragOnAction}
-        role="button"
-        aria-label={pinLabel}
-        title={pinLabel}
-        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex group-active:flex hover:bg-muted-foreground/20 hover:text-foreground"
+        className={cn(
+          "pointer-events-none absolute inset-y-1.5 right-1.5 flex items-center gap-0.5 rounded-r-lg pl-3 opacity-0 transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none group-hover:opacity-100 group-active:opacity-100",
+          isActive
+            ? "bg-gradient-to-l from-page-canvas via-page-canvas/95 to-transparent"
+            : "bg-gradient-to-l from-page-canvas/90 via-page-canvas/80 to-transparent",
+        )}
       >
-        {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
-      </span>
-      {showCloseButton && (
         <span
-          onClick={handleClose}
+          onClick={handleTogglePin}
           onPointerDown={stopDragOnAction}
           role="button"
-          aria-label={closeLabel}
-          className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex group-active:flex hover:bg-muted-foreground/20 hover:text-foreground"
+          aria-label={pinLabel}
+          title={pinLabel}
+          className="pointer-events-none flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[opacity,color,background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-active:pointer-events-auto group-active:opacity-100 hover:bg-muted-foreground/20 hover:text-foreground"
         >
-          <X className="size-2.5" />
+          {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
         </span>
-      )}
+        {showCloseButton && (
+          <span
+            onClick={handleClose}
+            onPointerDown={stopDragOnAction}
+            role="button"
+            aria-label={closeLabel}
+            className="pointer-events-none flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[opacity,color,background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-active:pointer-events-auto group-active:opacity-100 hover:bg-muted-foreground/20 hover:text-foreground"
+          >
+            <X className="size-2.5" />
+          </span>
+        )}
+      </span>
     </button>
   );
 
   return (
-    <div
+    <motion.div
       ref={setNodeRef}
       style={style}
+      inert={!isPresent}
+      initial={false}
+      exit={
+        shouldReduceMotion
+          ? { opacity: 0, transition: { duration: 0 } }
+          : {
+              width: 0,
+              minWidth: 0,
+              opacity: 0,
+              marginRight: -TAB_GAP_PX,
+              transition: { duration: TAB_CLOSE_DURATION, ease: UI_EASE_OUT },
+            }
+      }
       data-tab-frame
       data-tab-id={tab.id}
       data-mc="tab"
       data-active={isActive ? "true" : "false"}
       data-pinned={tab.pinned ? "true" : "false"}
-      className={cn("h-full w-56 min-w-32", isActive && "z-10")}
+      className={cn(
+        "h-full w-56 min-w-32",
+        isActive && "z-10",
+        !isPresent && "pointer-events-none overflow-hidden",
+      )}
     >
       <motion.div
         className="group/tab relative size-full"
@@ -358,7 +409,7 @@ function SortableTabItem({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg transition-colors",
+            "pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg transition-[background-color,box-shadow,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
             isActive
               ? "bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border"
               : "bg-page-canvas/50 group-hover/tab:bg-page-canvas/80",
@@ -423,31 +474,45 @@ function SortableTabItem({
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        {showAddedHighlight && (
-          <motion.span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
-            initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
-            animate={{ opacity: 0 }}
-            transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
-            onAnimationComplete={() => setShowAddedHighlight(false)}
-          />
-        )}
-        {attentionSequence > 0 && (
+        {showAddedHighlight &&
+          (shouldReduceMotion ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 opacity-40 ring-1 ring-inset ring-primary/20"
+            />
+          ) : (
+            <motion.span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+              initial={{ opacity: 0.65 }}
+              animate={{ opacity: 0 }}
+              transition={{ duration: 0.42 }}
+              onAnimationComplete={() => setShowAddedHighlight(false)}
+            />
+          ))}
+        {attentionSequence > 0 &&
           // Keyed so each background open of this tab replays the flash.
-          <motion.span
-            key={attentionSequence}
-            aria-hidden
-            data-tab-attention
-            className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: shouldReduceMotion ? [0.5, 0] : [0, 1, 0, 1, 0] }}
-            transition={{ duration: shouldReduceMotion ? 0.2 : 0.9, ease: "easeOut" }}
-            onAnimationComplete={() => clearTabAttention(attentionSequence)}
-          />
-        )}
+          (shouldReduceMotion ? (
+            <span
+              key={attentionSequence}
+              aria-hidden
+              data-tab-attention
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 opacity-60 ring-2 ring-inset ring-brand/70"
+            />
+          ) : (
+            <motion.span
+              key={attentionSequence}
+              aria-hidden
+              data-tab-attention
+              className="pointer-events-none absolute inset-x-0 inset-y-1.5 rounded-lg bg-brand/20 ring-2 ring-inset ring-brand/70"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 1, 0, 1, 0] }}
+              transition={{ duration: 0.9, ease: "easeOut" }}
+              onAnimationComplete={() => clearTabAttention(attentionSequence)}
+            />
+          ))}
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -478,7 +543,27 @@ function NewTabEdgeFeedback({
     setSignal({ tabId: newTabId, sequence: sequenceRef.current });
   }, [newTabId, scrollerRef]);
 
+  useEffect(() => {
+    if (!signal || !shouldReduceMotion) return;
+    const { sequence } = signal;
+    const timer = window.setTimeout(() => {
+      setSignal((current) => (current?.sequence === sequence ? null : current));
+    }, REDUCED_EDGE_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [signal, shouldReduceMotion]);
+
   if (!signal) return null;
+
+  if (shouldReduceMotion) {
+    return (
+      <div
+        key={`${signal.tabId}-${signal.sequence}`}
+        aria-hidden
+        data-new-tab-edge-feedback="true"
+        className="pointer-events-none absolute inset-y-1.5 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent opacity-50"
+      />
+    );
+  }
 
   return (
     <motion.div
@@ -486,22 +571,16 @@ function NewTabEdgeFeedback({
       aria-hidden
       data-new-tab-edge-feedback="true"
       className="pointer-events-none absolute inset-y-1.5 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
-      initial={{
-        opacity: shouldReduceMotion ? 0.45 : 0,
-        x: shouldReduceMotion ? 0 : 4,
-      }}
-      animate={{
-        opacity: shouldReduceMotion ? [0.45, 0] : [0, 0.8, 0],
-        x: 0,
-      }}
+      initial={{ opacity: 0, x: 4 }}
+      animate={{ opacity: [0, 0.8, 0], x: 0 }}
       transition={{
         opacity: {
-          duration: shouldReduceMotion ? 0.2 : 0.45,
-          times: shouldReduceMotion ? [0, 1] : [0, 0.18, 1],
+          duration: 0.45,
+          times: [0, 0.18, 1],
           ease: "easeOut",
         },
         x: {
-          duration: shouldReduceMotion ? 0 : 0.18,
+          duration: 0.18,
           ease: TAB_ENTRY_EASE,
         },
       }}
@@ -671,31 +750,36 @@ export function TabBar() {
             style={tabFadeStyle}
           >
             <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
-              {tabs.map((tab, index) => (
-                <Fragment key={tab.id}>
-                  <SortableTabItem
-                    tab={tab}
-                    isActive={tab.id === activeTabId}
-                    isOnly={tabs.length === 1}
-                    canCloseOthers={tabs.some(
-                      (candidate) => candidate.id !== tab.id && !candidate.pinned,
-                    )}
-                    canCloseRight={tabs.some(
-                      (candidate, i) => i > index && !candidate.pinned,
-                    )}
-                    isNew={addedTabIdSet.has(tab.id)}
-                    shouldReduceMotion={shouldReduceMotion}
-                  />
-                  {tab.pinned &&
-                    index === pinnedCount - 1 &&
-                    unpinnedCount > 0 && (
+              <AnimatePresence key={activeWorkspaceSlug ?? "none"}>
+                {tabs.flatMap((tab, index) => {
+                  const nodes = [
+                    <SortableTabItem
+                      key={tab.id}
+                      tab={tab}
+                      isActive={tab.id === activeTabId}
+                      isOnly={tabs.length === 1}
+                      canCloseOthers={tabs.some(
+                        (candidate) => candidate.id !== tab.id && !candidate.pinned,
+                      )}
+                      canCloseRight={tabs.some(
+                        (candidate, i) => i > index && !candidate.pinned,
+                      )}
+                      isNew={addedTabIdSet.has(tab.id)}
+                      shouldReduceMotion={shouldReduceMotion}
+                    />,
+                  ];
+                  if (tab.pinned && index === pinnedCount - 1 && unpinnedCount > 0) {
+                    nodes.push(
                       <div
+                        key="__pinned-divider__"
                         aria-hidden
                         className="h-4 w-px shrink-0 bg-surface-border"
-                      />
-                    )}
-                </Fragment>
-              ))}
+                      />,
+                    );
+                  }
+                  return nodes;
+                })}
+              </AnimatePresence>
             </SortableContext>
           </div>
         </DndContext>

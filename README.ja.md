@@ -120,7 +120,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 </p>
 
 - **[実行ログ](https://multica.ai/docs/ja/tasks) →** すべてのツール呼び出し、コマンド、エラーをタイムスタンプ付きで再生できます。
-- **[実行中のエージェントに指示を出す](https://multica.ai/docs/ja/providers#割り込みへの対応) →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi、Antigravity に対応しています。
+- **[実行中のエージェントに指示を出す](https://multica.ai/docs/ja/providers#割り込みへの対応) →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Hermes、Kiro、Pi、Antigravity に対応しています。
 - **利用状況の分析 →** 各実行にかかったコストを、エージェント別・タスク別に確認できます。
 - **[レビューゲート](https://multica.ai/docs/ja/issues) →** 作業は main に直接入らず、まずレビューに回ります。何をリリースするかはあなたが決めます。
 - **[インボックス](https://multica.ai/docs/ja/inbox) →** 細かなステップごとではなく、エージェントが判断を求めてきたときだけ通知が届きます。
@@ -135,7 +135,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - **[ワークスペース](https://multica.ai/docs/ja/workspaces) →** エージェント、タスク、設定をチームごとに分けられます。
 - **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** ゲストに特定のプロジェクトを共有し、ワークスペースのロールや各エージェントを実行できる人を設定できます。
 - **[セキュリティモデル](https://multica.ai/docs/ja/security-model) →** エージェントが何にアクセスでき、何にアクセスできないか。
-- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
+- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram、WeChat は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
 - **Web、[デスクトップ](https://multica.ai/docs/ja/desktop-app)、[モバイル](https://multica.ai/docs/ja/mobile-app) →** macOS、Windows、Linux、iPhone、iPad で同じワークスペースを使えます。iOS アプリは現在ソースからビルドする形で、まだ App Store では提供していません。
 - **[CLI と API](https://multica.ai/docs/ja/cli) →** すべての機能をスクリプトから操作できます。エージェントも、あなたと同じ CLI で Multica を操作します。
 

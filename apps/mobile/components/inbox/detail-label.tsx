@@ -59,7 +59,9 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   quick_create_unconfirmed: "type.quick_create_unconfirmed",
   autopilot_paused: "type.autopilot_paused",
   autopilot_quota_exceeded: "type.autopilot_quota_exceeded",
+  app_tool_calls_quota_exceeded: "type.app_tool_calls_quota_exceeded",
   children_done: "type.children_done",
+  blockers_done: "type.blockers_done",
   project_owner_joined: "type.project_owner_joined",
   app_action_requested: "type.app_action_requested",
   app_action_reminder: "type.app_action_reminder",
@@ -172,6 +174,8 @@ export function InboxDetailLabel({
       }
       case "autopilot_quota_exceeded":
         return t("type.run_limit_blocked");
+      case "app_tool_calls_quota_exceeded":
+        return t("type.app_tool_calls_limit_blocked");
       default:
         return t(TYPE_KEY[item.type]) ?? item.type;
     }

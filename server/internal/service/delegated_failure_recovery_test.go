@@ -1340,3 +1340,42 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
 	}
 }
+
+// A squad member's recovery run, after work it handed on failed, still counts
+// toward the squad's usage: it continues the member's squad-attributed run.
+func TestDelegatedFailureRecoveryKeepsSquadUsage(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	var squadID string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'usage squad', '', $2, $3)
+		RETURNING id`, f.workspaceID, f.worker, f.userID).Scan(&squadID); err != nil {
+		t.Fatalf("seed squad: %v", err)
+	}
+	t.Cleanup(func() {
+		f.pool.Exec(context.Background(), `DELETE FROM squad_member WHERE squad_id = $1`, squadID)
+		f.pool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	if _, err := f.pool.Exec(ctx, `INSERT INTO squad_member (squad_id, member_type, member_id) VALUES ($1, 'agent', $2)`, squadID, f.coordinator); err != nil {
+		t.Fatalf("seed squad member: %v", err)
+	}
+	// The member's own run was attributed to the squad, as a run the leader
+	// handed to it is.
+	if _, err := f.pool.Exec(ctx, `UPDATE agent_task_queue SET usage_squad_id = $2 WHERE id = $1`, f.sourceTask, squadID); err != nil {
+		t.Fatalf("attribute source task: %v", err)
+	}
+	failedID := f.insertWorkerTask(t, "running", "comment", 1, 1)
+	if _, err := svc.FailTask(ctx, failedID, "worker failed", "", "", "", "agent_error.process_failure", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	var usageSquad string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT COALESCE(COALESCE(usage_squad_id, squad_id)::text, '') FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&usageSquad); err != nil {
+		t.Fatalf("read recovery task: %v", err)
+	}
+	if usageSquad != squadID {
+		t.Fatalf("recovery run squad usage = %q, want %s", usageSquad, squadID)
+	}
+}

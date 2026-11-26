@@ -61,12 +61,13 @@ import { toast } from "sonner";
 import {
   MoreHorizontal,
   Inbox,
+  Check,
   CheckCheck,
+  CircleDot,
   Archive,
   ArchiveRestore,
   BookCheck,
   ListChecks,
-  ArrowLeft,
   AlarmClock,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
@@ -86,9 +87,9 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { cn } from "@multica/ui/lib/utils";
-import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
+import { InboxArchiveAllDialog } from "./inbox-archive-all-dialog";
 import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
@@ -100,21 +101,24 @@ import { inboxTabFromParam, inboxTabHref, type InboxTab, type InboxView } from "
 import { InboxTabs } from "./inbox-tabs";
 import { InboxArchivedBar } from "./inbox-bar";
 import { SnoozedInboxList } from "./snoozed-inbox-list";
-import { useArchivedInboxRows, useSnoozedInboxRows } from "./use-inbox-tab-rows";
+import { useArchivedInboxRows, useInboxTabPrefetch, useSnoozedInboxRows } from "./use-inbox-tab-rows";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
   inboxRowHref,
   isAutopilotQuotaNotice,
+  isQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { AppCallQuotaNotice } from "./app-call-quota-notice";
 import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
+import { InboxSettledMoreMenu } from "./inbox-more-menu";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
-import { useMoveOnAfterAutoArchive } from "./use-move-on-after-auto-archive";
+import { useAutoArchiveCause } from "./use-auto-archive-cause";
 import {
   clearedLabelForItem,
   collectBatchArchiveIds,
@@ -187,12 +191,14 @@ export function InboxPage() {
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
+  const archived = useArchivedInboxRows(wsId, isArchivedView);
   const {
     query: archiveQuery,
     items: archivedItems,
     filters: archiveFilters,
     issueFieldsSupport: archiveIssueFields,
-  } = useArchivedInboxRows(wsId, isArchivedView);
+  } = archived;
+  const prefetchTab = useInboxTabPrefetch(wsId, archived);
   const fetchNextArchivedPage = archiveQuery.fetchNextPage;
   const loadNextArchivedPage = useCallback(() => { void fetchNextArchivedPage(); }, [fetchNextArchivedPage]);
   const archivedLoading = archiveQuery.isLoading;
@@ -261,10 +267,12 @@ export function InboxPage() {
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
   const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
-  // On desktop the live list is the Work panel's Inbox section, which applies
+  // On desktop the lists live in the Work panel's Inbox section, which applies
   // the filters itself. The page only opens the notification the URL names,
-  // so a filter can never refuse to open a row the section offered.
+  // so changing a filter in the sidebar (even on another tab) never closes the
+  // open detail.
   const opensAnyLiveRow = !isCompact && tab === "inbox";
+  const opensAnyArchivedRow = !isCompact && isArchivedView;
   // The open notification stays in place when something other than an Inbox
   // action takes it out of the live list (`keepOpenInboxRow`). On desktop
   // that list is the Work panel section's; a phone keeps it in the page's own.
@@ -278,8 +286,16 @@ export function InboxPage() {
     effectiveFilters,
     isCompact && tab === "inbox",
   );
-  // Leaving the page leaves its open row.
-  useEffect(() => () => useInboxSelectionStore.getState().dropRow(wsId, INBOX_PAGE_LIST), [wsId]);
+  // Leaving the page leaves its open row and releases any manual-unread guard,
+  // so reopening the same notification later marks it read again.
+  useEffect(
+    () => () => {
+      const store = useInboxSelectionStore.getState();
+      store.dropRow(wsId, INBOX_PAGE_LIST);
+      store.clearManualUnread(wsId);
+    },
+    [wsId],
+  );
   const keptRow = tab !== "inbox" ? null : opensAnyLiveRow ? sectionList.kept : pageList.kept;
   // Left the Inbox rather than only the filters, so there is nothing left to act on.
   const settledRow = keptRow && keptRow.reason !== "filtered" ? keptRow : null;
@@ -287,12 +303,37 @@ export function InboxPage() {
     if (isSnoozedView) return [];
     if (opensAnyLiveRow) return settledRow ? [...items, settledRow.item] : items;
     if (!isArchivedView) return pageList.rows;
-    if (selectedOnPage) return filteredItems;
+    if (selectedOnPage) {
+      return opensAnyArchivedRow && !filteredItems.some((i) => (i.issue_id ?? i.id) === selectedKey)
+        ? [...filteredItems, selectedOnPage]
+        : filteredItems;
+    }
+    const matchedLookup = filterInboxItems(lookupItems, effectiveFilters, filterContext);
+    const fallbackLookup =
+      opensAnyArchivedRow && matchedLookup.length === 0
+        ? deduplicateArchivedInboxItems([...lookupItems, ...presenceItems])
+        : [];
     return deduplicateArchivedInboxItems([
       ...filteredItems,
-      ...filterInboxItems(lookupItems, effectiveFilters, filterContext),
+      ...matchedLookup,
+      ...fallbackLookup,
     ]);
-  }, [isSnoozedView, opensAnyLiveRow, settledRow, items, isArchivedView, pageList.rows, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
+  }, [
+    isSnoozedView,
+    opensAnyLiveRow,
+    settledRow,
+    items,
+    isArchivedView,
+    pageList.rows,
+    selectedOnPage,
+    opensAnyArchivedRow,
+    filteredItems,
+    selectedKey,
+    lookupItems,
+    effectiveFilters,
+    filterContext,
+    presenceItems,
+  ]);
   const visibleItems =
     isArchivedView && pinnedKey ? selectionItems : isArchivedView || opensAnyLiveRow ? filteredItems : pageList.rows;
 
@@ -310,7 +351,7 @@ export function InboxPage() {
   const selectedInView = selectedOnPage ?? (isArchivedView
     ? [...lookupItems, ...presenceItems].find((i) => (i.issue_id ?? i.id) === selectedKey)
     : null);
-  const selectionFilteredOut = !isSnoozedView && !!selectedKey && !!selectedInView && !selected;
+  const selectionFilteredOut = isCompact && !isSnoozedView && !!selectedKey && !!selectedInView && !selected;
 
   // What the DETAIL pane shows, one React transition behind the click.
   //
@@ -344,6 +385,18 @@ export function InboxPage() {
     setSelectedKeyState(key);
     replace(inboxTabHref(wsPaths, tab, key));
   }, [replace, wsPaths, tab]);
+
+  // A phone opens a row in place of its list, and the detail's header holds
+  // the nav trigger rather than a way back, so the opening is a history entry:
+  // the system back gesture is what returns to the list.
+  const openFromList = useCallback((key: string) => {
+    if (!isCompact) {
+      setSelectedKey(key);
+      return;
+    }
+    setSelectedKeyState(key);
+    push(inboxTabHref(wsPaths, tab, key));
+  }, [isCompact, setSelectedKey, push, wsPaths, tab]);
 
   // Switching tabs always clears the selection: the lists are mutually
   // exclusive, so a key carried across would never resolve, and the fallback
@@ -421,6 +474,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const [archiveAllConfirmOpen, setArchiveAllConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const [retainedDeleteTarget, setRetainedDeleteTarget] = useState<InboxItem | null>(null);
   if (deleteTarget !== null && retainedDeleteTarget?.id !== deleteTarget.id) {
@@ -442,17 +496,15 @@ export function InboxPage() {
   const typeLabels = useTypeLabels();
 
 
-  // An explicit "mark as unread" on the row that is currently open has to
-  // survive the auto-read effect below, which would otherwise fire on the very
-  // next commit and silently undo it. Holds that one item's id, and only while
-  // it stays selected: moving the selection elsewhere releases the guard, so
-  // re-opening the row later marks it read again like any other open.
-  const manualUnreadIdRef = useRef<string | null>(null);
-
   // Read once on opening, even if the visible row is already read: older
   // unread notifications can still be hidden under it. Also read new unread
   // arrivals while the row stays open. Track the opening separately from the
   // optimistic cache patch so a read row cannot cause a request loop.
+  //
+  // An explicit "mark as unread" on the open row records its id in the
+  // selection store so this effect does not immediately undo it — whether the
+  // user triggered it from the Inbox bar, the Work panel sidebar, a shortcut,
+  // or the command bar.
   const openedItemIdRef = useRef<string | null>(null);
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
@@ -465,7 +517,7 @@ export function InboxPage() {
     const justOpened = openedItemIdRef.current !== selectedId;
     openedItemIdRef.current = selectedId;
     if (!justOpened && selectedRead) return;
-    if (manualUnreadIdRef.current === selectedId) return;
+    if (useInboxSelectionStore.getState().manualUnreadIdByWorkspace[wsId] === selectedId) return;
     if (filters.unreadOnly) {
       pinnedUnreadKeyRef.current = selectedKey;
       if (isArchivedView && selected) {
@@ -488,8 +540,10 @@ export function InboxPage() {
 
   // Release the guards as soon as the selection moves off their row.
   useEffect(() => {
-    if (manualUnreadIdRef.current && manualUnreadIdRef.current !== selectedId) {
-      manualUnreadIdRef.current = null;
+    const store = useInboxSelectionStore.getState();
+    const manualUnreadId = store.manualUnreadIdByWorkspace[wsId];
+    if (manualUnreadId && manualUnreadId !== selectedId) {
+      store.clearManualUnread(wsId, manualUnreadId);
     }
     if (pinnedUnreadKeyRef.current && pinnedUnreadKeyRef.current !== selectedKey) {
       pinnedUnreadKeyRef.current = null;
@@ -497,7 +551,7 @@ export function InboxPage() {
     if (pinnedAgentRef.current && pinnedAgentRef.current.key !== selectedKey) {
       pinnedAgentRef.current = null;
     }
-  }, [selectedId, selectedKey]);
+  }, [wsId, selectedId, selectedKey]);
 
   // `selected` only exists once the open row passed every filter, so under
   // the agent filter this pins a row that matched when the user opened it.
@@ -548,7 +602,7 @@ export function InboxPage() {
       writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
       if (nextKey === selectedKey) setHighlightRequestToken((t) => t + 1);
     }
-    setSelectedKey(nextKey);
+    openFromList(nextKey);
   };
 
   // The comment a notification opens at is chosen once per opening or
@@ -569,7 +623,7 @@ export function InboxPage() {
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
-    if (manualUnreadIdRef.current === id) manualUnreadIdRef.current = null;
+    useInboxSelectionStore.getState().clearManualUnread(wsId, id);
     markReadMutation.mutate(id, {
       onError: (err) =>
         toast.error(
@@ -584,14 +638,16 @@ export function InboxPage() {
     // Only the open row needs the guard — the auto-read effect never touches
     // the others, and arming it for a background row would suppress the very
     // first open of that row later.
-    if (selected?.id === id) manualUnreadIdRef.current = id;
+    if (selected?.id === id) useInboxSelectionStore.getState().markManualUnread(wsId, id);
     markUnreadMutation.mutate(id, {
-      onError: (err) =>
+      onError: (err) => {
+        useInboxSelectionStore.getState().clearManualUnread(wsId, id);
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.errors.mark_unread_failed),
-        ),
+        );
+      },
     });
   };
 
@@ -676,24 +732,10 @@ export function InboxPage() {
     void restoreInbox(id);
   };
 
-  // An issue's bar (`IssueInboxBar`) says, and moves on, when its row left
-  // the Inbox on its own; the page does for a notification without an issue.
+  // An issue's bar (`IssueInboxBar`) says when its row left the Inbox on its
+  // own; the page does for a notification without an issue.
   const settledNotice = settledRow && !settledRow.item.issue_id ? settledRow : null;
-  const settledCause = useMoveOnAfterAutoArchive({
-    settled: settledNotice,
-    next: settledNotice ? nextInboxRow(listedItems, settledNotice.key) : null,
-    onNext: () => {
-      if (!settledNotice) return;
-      advanceSelectionPast(settledNotice.item.id, listedItems, {
-        kind: "archived",
-        itemId: settledNotice.item.id,
-        key: settledNotice.key,
-        label: clearedLabelForItem(settledNotice.item),
-        href: inboxRowHref(wsPaths, settledNotice.item),
-        clearedAt: Date.now(),
-      });
-    },
-  });
+  const { cause: settledCause } = useAutoArchiveCause(settledNotice);
 
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();
@@ -720,6 +762,47 @@ export function InboxPage() {
       ? () => (isArchivedView ? handleUnarchive(selected.id) : handleArchive(selected.id))
       : null,
   );
+
+  // U toggles unread/read on any open live notification (issue-backed or not).
+  useInboxShortcut(
+    "markInboxUnread",
+    selected && tab === "inbox" && !settledRow
+      ? () => (selected.read === true ? handleMarkUnread(selected.id) : handleMarkRead(selected.id))
+      : null,
+  );
+
+  // J / K step through the current tab's rows without archiving or touching
+  // the mouse. Uses the same row order the sidebar/list displays.
+  const navigationTargets = useMemo((): readonly { key: string; issueId: string | null }[] => {
+    if (isSnoozedView) {
+      return snoozed.rows.map((entry) => ({ key: entry.issue_id, issueId: entry.issue_id }));
+    }
+    const source = isArchivedView ? (isCompact ? visibleItems : archivedItems) : listedItems;
+    return source.map((item) => ({ key: inboxRowKey(item), issueId: item.issue_id }));
+  }, [isSnoozedView, snoozed.rows, isArchivedView, isCompact, visibleItems, archivedItems, listedItems]);
+
+  const stepSelection = (direction: "next" | "prev") => {
+    if (navigationTargets.length === 0) return;
+    const current = selectedKey ? navigationTargets.findIndex((entry) => entry.key === selectedKey) : -1;
+    const nextIndex =
+      current < 0
+        ? direction === "next"
+          ? 0
+          : navigationTargets.length - 1
+        : Math.min(Math.max(current + (direction === "next" ? 1 : -1), 0), navigationTargets.length - 1);
+    if (nextIndex === current) return;
+    const target = navigationTargets[nextIndex];
+    if (!target) return;
+    if (target.issueId) {
+      writeViewState(issueHighlightMementoKey(target.issueId), undefined);
+      useInboxSelectionStore.getState().requestLanding(target.issueId);
+    }
+    recordTransition(wsId, target.key, direction);
+    setSelectedKey(target.key);
+  };
+
+  useInboxShortcut("nextInboxItem", navigationTargets.length > 0 ? () => stepSelection("next") : null);
+  useInboxShortcut("prevInboxItem", navigationTargets.length > 0 ? () => stepSelection("prev") : null);
 
   // Batch operations
   const handleMarkAllRead = () => {
@@ -800,6 +883,7 @@ export function InboxPage() {
         <InboxTabs
           tab={tab}
           onSelect={setTab}
+          onPrefetch={prefetchTab}
           unread={unreadCount}
           snoozed={snoozed.rows.length}
           size="page"
@@ -840,7 +924,7 @@ export function InboxPage() {
             {t(($) => $.menu.mark_all_read)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleArchiveAll}>
+          <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
             <Archive className="h-4 w-4" />
             {t(($) => $.menu.archive_all)}
           </DropdownMenuItem>
@@ -880,7 +964,7 @@ export function InboxPage() {
         />
       </div>
     ) : (
-      <SnoozedInboxList wsId={wsId} rows={snoozed.rows} selectedKey={selectedKey} onSelect={setSelectedKey} />
+      <SnoozedInboxList wsId={wsId} rows={snoozed.rows} selectedKey={selectedKey} onSelect={openFromList} />
     )
   ) : isArchivedView && archivedError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -978,69 +1062,50 @@ export function InboxPage() {
     </>
   );
 
-  // Compact widths only: the detail fills the screen there, so the trip back to
-  // the list has to live inside it. On desktop the list is still on screen in
-  // the left panel and needs no back control at all.
-  //
-  // The detail owns the whole compact screen in four states — loaded, loading,
-  // not-found and crashed — so this control is threaded into all four below.
-  // Miss one and that state strands the reader with no way out.
-  const compactBackAction = isCompact ? (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => setSelectedKey("")}
-      className="-ml-2 shrink-0 gap-1.5 text-muted-foreground"
-    >
-      <ArrowLeft className="h-4 w-4" />
-      {/* Back goes to the list the user came FROM, so the label has to
-          name it — "Inbox" here would be a lie about the destination. */}
-      {tab === "inbox" ? t(($) => $.page.back) : tabLabel}
-    </Button>
-  ) : undefined;
-
-  const compactBackBar = compactBackAction ? (
-    <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
-      {compactBackAction}
-    </div>
+  // Compact widths only: the detail fills the screen there, and its leading
+  // slot is the nav trigger, as on every other page. The nav sheet holds the
+  // Work panel's Inbox section with the open row lit, so that is the way to
+  // the next notification; a "back to the list" control in its place left the
+  // sheet unreachable from the detail (MUL-10233). `IssueDetail` brings its
+  // own header; the states drawn here (a notification with no issue, and a
+  // crashed detail) need this one or they strand the reader with no nav.
+  const compactHeader = isCompact ? (
+    <PageHeader>
+      <h1 className="truncate text-body font-semibold">{tabLabel}</h1>
+    </PageHeader>
   ) : null;
 
   // A notification without an issue that left the Inbox on its own: say so
-  // above it, with the way back and the way on. An issue's bar does this for
-  // an issue's notification.
+  // in a group floating over it, with the way back and the way on. An issue's
+  // group does this for an issue's notification.
+  const keptStatus = settledNotice ? keptText.status(settledNotice, settledCause) : null;
   const keptNotice =
-    settledNotice && detailItem && inboxRowKey(detailItem) === settledNotice.key ? (
-      <InboxKeptActions
-        label={keptText.notice(settledNotice, settledCause)}
-        onUndo={() => void restoreInbox(settledNotice.item.id, { quiet: true })}
-        next={nextInboxRow(listedItems, settledNotice.key)}
-        onNext={() => advanceSelectionPast(settledNotice.item.id, listedItems)}
-      />
+    settledNotice && keptStatus && detailItem && inboxRowKey(detailItem) === settledNotice.key ? (
+      <div className="@container/inbox-bar pointer-events-none absolute inset-x-0 bottom-6 z-10 flex justify-center px-6 max-md:above-chat-launcher">
+        <InboxKeptActions
+          label={keptStatus.label}
+          hint={keptStatus.hint}
+          undoLabel={keptStatus.undo}
+          onUndo={() => void restoreInbox(settledNotice.item.id, { quiet: true })}
+          next={nextInboxRow(listedItems, settledNotice.key)}
+          onNext={() => advanceSelectionPast(settledNotice.item.id, listedItems)}
+        />
+      </div>
     ) : null;
 
   // The issue the detail shows: the open notification's, or on the Snoozed
   // tab the snoozed issue itself.
   const detailIssueId = isSnoozedView ? detailKey || null : (detailItem?.issue_id ?? null);
   const inboxHost = (issueId: string): IssueDetailInboxHost => ({
-    // A phone's back control already names the list.
-    crumb: isCompact
-      ? undefined
-      : {
-          href: inboxTabHref(wsPaths, tab),
-          className: "flex min-w-0 items-center gap-1",
-          label: (
-            <>
-              <Inbox className="size-3.5 shrink-0" />
-              <span className="truncate">{t(($) => $.page.title)}</span>
-            </>
-          ),
-        },
     item: tab === "inbox" ? (detailItem ?? undefined) : undefined,
     bar: (issueActions) =>
       isArchivedView && detailItem ? (
-        <InboxArchivedBar item={detailItem} onRestore={() => handleUnarchive(detailItem.id)} />
+        <InboxArchivedBar
+          onRestore={() => handleUnarchive(detailItem.id)}
+          more={<InboxSettledMoreMenu issueId={issueId} />}
+        />
       ) : (
-        <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} />
+        <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} isSnoozedView={isSnoozedView} />
       ),
   });
 
@@ -1052,11 +1117,11 @@ export function InboxPage() {
     <ErrorBoundary
       resetKeys={[detailIssueId]}
       // The default fallback is a bare message card. On a phone it would be the
-      // only thing on screen, so it has to carry the way back too — the bar is
+      // only thing on screen, so it has to carry the nav too — the header is
       // the point here, the message is whatever the boundary caught.
-      fallback={compactBackAction ? ({ error }) => (
+      fallback={compactHeader ? ({ error }) => (
         <div className="flex flex-1 min-h-0 flex-col">
-          {compactBackBar}
+          {compactHeader}
           <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
             {error.message}
           </div>
@@ -1086,7 +1151,9 @@ export function InboxPage() {
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          leadingAction={compactBackAction}
+          // The loaded header falls back to the trigger by itself; the loading
+          // and not-found states draw only what they are handed.
+          leadingAction={isCompact ? <CollapsedNavTrigger /> : undefined}
           inbox={inboxHost(detailIssueId)}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
@@ -1101,9 +1168,9 @@ export function InboxPage() {
   ) : detailItem ? (
     <>
     {keptNotice}
-    <div className="p-6">
+    <div key={detailItem.id} className="animate-inbox-enter-fade p-6">
       <h2 className="text-title font-semibold">
-        {isAutopilotQuotaNotice(detailItem.type)
+        {isQuotaNotice(detailItem.type)
           ? typeLabels[detailItem.type]
           : getInboxDisplayTitle(detailItem)}
       </h2>
@@ -1115,6 +1182,8 @@ export function InboxPage() {
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
+      ) : detailItem.type === "app_tool_calls_quota_exceeded" ? (
+        <AppCallQuotaNotice item={detailItem} />
       ) : detailItem.type === "project_owner_joined" && detailItem.details?.joined_by ? (
         <div className="mt-4 text-body leading-relaxed text-foreground">
           {t(($) => $.detail.project_owner_joined_body, { name: detailItem.details.joined_by })}
@@ -1214,6 +1283,38 @@ export function InboxPage() {
             {t(($) => $.detail.edit_advanced)}
           </Button>
         )}
+        {!isArchivedView && !settledRow && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    detailItem.read === true
+                      ? handleMarkUnread(detailItem.id)
+                      : handleMarkRead(detailItem.id)
+                  }
+                >
+                  {detailItem.read === true ? (
+                    <CircleDot className="mr-1.5 h-3.5 w-3.5" />
+                  ) : (
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {detailItem.read === true
+                    ? t(($) => $.context_menu.mark_unread)
+                    : t(($) => $.context_menu.mark_read)}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {detailItem.read === true
+                ? t(($) => $.context_menu.mark_unread)
+                : t(($) => $.context_menu.mark_read)}
+              <ActionShortcutKeycaps action="markInboxUnread" />
+            </TooltipContent>
+          </Tooltip>
+        )}
         {/* Mirrors the row action: the button always reverses the view the
             item is being read in. */}
         <Tooltip>
@@ -1279,8 +1380,8 @@ export function InboxPage() {
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
     // notification (a failed quick-create, say), not an issue.
     if (detailIssueId) {
-      // No scroll container and no back bar of our own: `IssueDetail` owns
-      // both, and takes the way back through `leadingAction`. Wrapping it in
+      // No scroll container and no header of our own: `IssueDetail` owns
+      // both, and its header keeps the nav trigger. Wrapping it in
       // an `overflow-y-auto` used to collapse its inner scroller to content
       // height, which took its header (and the done/pin/more/sidebar actions
       // in it) out of the pinned position, made `position: sticky` inside it a
@@ -1291,18 +1392,28 @@ export function InboxPage() {
     }
 
     if (detailItem) {
-      // A notification body is a plain block with no header to host a leading
-      // slot and no scroller of its own, so this branch keeps supplying both.
+      // A notification body is a plain block with no header of its own and no
+      // scroller of its own, so this branch keeps supplying both.
       return (
-        <div className="flex flex-1 flex-col min-h-0">
-          {compactBackBar}
+        <div className="relative flex flex-1 flex-col min-h-0">
+          {compactHeader}
           <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
     }
 
     // Compact: full-screen list
-    return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
+    return (
+      <div className="flex flex-1 flex-col min-h-0">
+        {listPanel}
+        <InboxArchiveAllDialog
+          open={archiveAllConfirmOpen}
+          count={items.length}
+          onClose={() => setArchiveAllConfirmOpen(false)}
+          onConfirm={handleArchiveAll}
+        />
+      </div>
+    );
   }
 
   // -- Desktop layout ----------------------------------------------------------
@@ -1347,7 +1458,7 @@ export function InboxPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
       {detailContent ?? emptyDetail}
     </div>
   );

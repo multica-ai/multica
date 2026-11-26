@@ -35,7 +35,7 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 data-open:duration-[var(--dialog-enter-duration)] data-closed:duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-black/10 data-open:animation-duration-[var(--dialog-enter-duration)] data-closed:animation-duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -58,7 +58,7 @@ function AlertDialogContent({
           data-slot="alert-dialog-content"
           data-size={size}
           className={cn(
-            "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] grid-cols-1 -translate-x-1/2 -translate-y-1/2 gap-4 rounded-dialog bg-surface-raised p-4 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border data-open:duration-[var(--dialog-enter-duration)] data-closed:duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] grid-cols-1 -translate-x-1/2 -translate-y-1/2 gap-4 rounded-dialog bg-surface-raised p-4 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-floating-border data-open:animation-duration-[var(--dialog-enter-duration)] data-closed:animation-duration-[var(--dialog-exit-duration)] data-open:ease-[var(--dialog-enter-easing)] data-closed:ease-[var(--dialog-exit-easing)] motion-reduce:animate-none! outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className
           )}
           {...props}

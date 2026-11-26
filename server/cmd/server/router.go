@@ -1436,6 +1436,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 							PublicBaseURL: callbackBase,
 							Bus:           bus,
 						}
+						// Monthly app calls (MUL-10047) are metered only
+						// while Multica Cloud is connected.
+						if h.Entitlements != nil {
+							appsCfg.CallQuota = service.AppToolCallQuota{
+								Queries: queries, Entitlements: h.Entitlements, TxStarter: pool, Bus: bus,
+							}
+						}
 						// Remote MCP apps (MUL-9792) store OAuth tokens, so
 						// they need their own at-rest key; without it they
 						// stay off and Composio apps work as before.
@@ -1928,6 +1935,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// is checked on the server regardless.
 					r.Get("/member-limit", h.GetMemberLimit)
 					r.Get("/storage-usage", h.GetStorageUsage)
+					r.Get("/app-call-usage", h.GetAppCallUsage)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
@@ -2437,12 +2445,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/move", h.MoveDoc)
 					r.Get("/versions", h.ListDocVersions)
 					r.Get("/versions/{number}", h.GetDocVersion)
+					r.Get("/task-runs", h.ListDocTaskRuns)
 					r.Route("/comments", func(r chi.Router) {
 						r.Get("/", h.ListDocComments)
-						// Writing in discussions is human-only until agents can take part.
+						// Agents reply in discussions; the rest stays with people.
+						r.Post("/", h.CreateDocComment)
 						r.Group(func(r chi.Router) {
 							r.Use(handler.RequireHumanActor)
-							r.Post("/", h.CreateDocComment)
 							r.Post("/{docCommentId}/resolve", h.ResolveDocComment)
 							r.Post("/{docCommentId}/reopen", h.ReopenDocComment)
 							r.Delete("/{docCommentId}", h.DeleteDocComment)
@@ -2505,6 +2514,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
 					r.Get("/members/status", h.ListSquadMemberStatus)
+					r.Get("/briefs", h.ListSquadBriefs)
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
@@ -2679,10 +2689,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/dashboard", func(r chi.Router) {
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
+				r.Get("/usage/by-squad", h.GetDashboardUsageBySquad)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
+				r.Get("/squad-runtime", h.GetDashboardSquadRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 				r.Get("/failures/daily", h.GetDashboardFailuresDaily)
 				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
+				r.Get("/failures/by-squad", h.GetDashboardFailuresBySquad)
 			})
 
 			// Runtimes
@@ -2792,6 +2805,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/draft-restores", h.ListChatDraftRestores)
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
 					r.Get("/wakeups", h.ListChatSessionWakeups)
+					r.Patch("/wakeups/{wakeupId}", h.RescheduleChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})

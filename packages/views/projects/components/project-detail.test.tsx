@@ -16,6 +16,8 @@ import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
   role: "admin",
+  isMobile: false,
+  defaultLayout: undefined as Record<string, number> | undefined,
   copyText: vi.fn(),
   copyTextAndHtml: vi.fn(),
   deleteProject: vi.fn(),
@@ -87,7 +89,7 @@ vi.mock("sonner", () => ({
 
 vi.mock("react-resizable-panels", () => ({
   useDefaultLayout: () => ({
-    defaultLayout: undefined,
+    defaultLayout: mocks.defaultLayout,
     onLayoutChanged: vi.fn(),
   }),
   usePanelRef: () => ({
@@ -100,7 +102,7 @@ vi.mock("react-resizable-panels", () => ({
 }));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mocks.isMobile,
 }));
 
 vi.mock("@multica/ui/components/common/emoji-picker", () => ({
@@ -158,7 +160,12 @@ vi.mock("../../editor", () => ({
   TitleEditor: ({ defaultValue }: { defaultValue: string }) => (
     <div>{defaultValue}</div>
   ),
-  ContentEditor: () => null,
+  ContentEditor: ({ flushPendingOnUnmount }: { flushPendingOnUnmount?: boolean }) => (
+    <div
+      data-testid="project-description"
+      data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
+    />
+  ),
   ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
@@ -231,12 +238,15 @@ vi.mock("../../layout/animated-right-sidebar", () => ({
   AnimatedRightSidebar: ({ children }: { children: React.ReactNode }) => (
     <aside>{children}</aside>
   ),
-  getAnimatedRightSidebarInitialOpen: () => true,
+  getAnimatedRightSidebarInitialOpen: (
+    defaultOpen: boolean,
+    layout?: Record<string, number>,
+  ) => (typeof layout?.sidebar === "number" ? layout.sidebar > 0 : defaultOpen),
   rightSidebarPanelMotionProps: {},
   useRightSidebarShortcut: vi.fn(),
-  useAnimatedRightSidebarState: () => ({
-    open: true,
-    visualOpen: true,
+  useAnimatedRightSidebarState: (initialOpen: boolean) => ({
+    open: initialOpen,
+    visualOpen: initialOpen,
     motionEnabled: false,
     beginToggle: vi.fn(),
     handleResize: vi.fn(),
@@ -295,6 +305,8 @@ function renderProjectDetail(search = "") {
 
 beforeEach(() => {
   mocks.role = "admin";
+  mocks.isMobile = false;
+  mocks.defaultLayout = undefined;
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), PROJECT);
   qc.setQueryData(["agents"], []);
@@ -337,6 +349,13 @@ describe("ProjectDetail tabs", () => {
     expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
     expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("saves a pending description edit when the tab or page closes", () => {
+    renderProjectDetail();
+    // Switching tabs unmounts the editor, so a still-debounced edit has to
+    // flush then; ContentEditor's own tests cover the flush itself.
+    expect(screen.getByTestId("project-description")).toHaveAttribute("data-flush-on-unmount", "true");
   });
 
   it("opens the panel with the properties, above the insights", () => {
@@ -670,5 +689,51 @@ describe("ProjectDetail project deletion", () => {
     expect(
       screen.queryByRole("button", { name: "Delete project" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail loading skeleton", () => {
+  beforeEach(() => {
+    qc.removeQueries({ queryKey: projectKeys.detail("workspace-1", PROJECT.id) });
+    mocks.getProject.mockReturnValue(new Promise<never>(() => {}));
+  });
+
+  it("renders aligned page header, tab slots, body, and 320px desktop sidebar while loading", () => {
+    renderProjectDetail();
+
+    const skeleton = screen.getByTestId("project-detail-skeleton");
+    expect(skeleton).toHaveAttribute("data-mc", "object-page");
+    expect(skeleton).toHaveAttribute("data-type", "project");
+    expect(skeleton).toHaveAttribute("aria-busy", "true");
+    expect(skeleton.querySelector('header[data-mc="page-header"]')).not.toBeNull();
+    expect(screen.getByTestId("project-detail-skeleton-tabs").children).toHaveLength(3);
+
+    const sidebar = screen.getByTestId("project-detail-skeleton-sidebar");
+    expect(sidebar.className).toContain("w-80");
+    expect(sidebar.className).toContain("border-l");
+  });
+
+  it("omits the desktop sidebar placeholder when the saved layout collapsed it", () => {
+    mocks.defaultLayout = { content: 100, sidebar: 0 };
+    renderProjectDetail();
+
+    expect(screen.getByTestId("project-detail-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-detail-skeleton-sidebar")).not.toBeInTheDocument();
+  });
+
+  it("matches a saved custom sidebar width percentage during loading", () => {
+    mocks.defaultLayout = { content: 72, sidebar: 28 };
+    renderProjectDetail();
+
+    const sidebar = screen.getByTestId("project-detail-skeleton-sidebar");
+    expect(sidebar).toHaveStyle({ width: "28%" });
+  });
+
+  it("hides the desktop sidebar placeholder on mobile viewports", () => {
+    mocks.isMobile = true;
+    renderProjectDetail();
+
+    expect(screen.getByTestId("project-detail-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-detail-skeleton-sidebar")).not.toBeInTheDocument();
   });
 });

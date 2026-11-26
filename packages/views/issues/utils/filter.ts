@@ -16,6 +16,7 @@ import {
 import { PROPERTY_FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-operators";
 import { todayDateOnly } from "@multica/core/issues/date";
 import type { IssueActivityState } from "../surface/activity";
+import { isIssueWaiting } from "./waiting";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
@@ -404,6 +405,8 @@ function issueMatchesRelation(
   context: IssueRelationContext,
 ): boolean | undefined {
   switch (relation) {
+    case "blocked":
+      return isIssueWaiting(issue);
     case "subscribed":
       return context.subscribedIssueIds?.has(issue.id);
     case "assigned":

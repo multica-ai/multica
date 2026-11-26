@@ -12,11 +12,16 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/spf13/cobra"
 )
 
 func TestMain(m *testing.M) {
-	for _, key := range []string{
+	// A task shell exports the daemon's identity, and a warm pooled session
+	// also exports MULTICA_TASK_ENV_FILE. main() re-applies that file before
+	// every command, so a fixture token set by a test would be replaced by the
+	// live task token. Strip both, plus every key the file can deliver.
+	for _, key := range append([]string{
 		"MULTICA_AGENT_ID",
 		"MULTICA_TASK_ID",
 		"MULTICA_TOKEN",
@@ -26,9 +31,10 @@ func TestMain(m *testing.M) {
 		"MULTICA_TASK_CONFIG_ROOT",
 		"MULTICA_TASK_WORKSPACES_ROOT",
 		"MULTICA_AGENT_NAME",
+		agent.TaskEnvFileEnv,
 		devEnvHomeEnv,
 		devEnvNameEnv,
-	} {
+	}, agent.TaskEnvVolatileKeys...) {
 		os.Unsetenv(key)
 	}
 

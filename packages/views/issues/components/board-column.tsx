@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Virtuoso } from "react-virtuoso";
 import { Ban, EyeOff, FolderMinus, MoreHorizontal, Plus, UserMinus } from "@multica/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
@@ -19,6 +20,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -36,7 +38,7 @@ import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import { useBoardWorkflow } from "./board-workflow-context";
 import { ColumnHandoff } from "../../workflows/column-handoff";
 import type { IssueCreateDefaults } from "../surface/types";
-import { paletteColor } from "@multica/core/appearance";
+import { paletteColor, useReducedMotion } from "@multica/core/appearance";
 
 // Insertion-position prediction intentionally omitted. The server's
 // ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
@@ -141,6 +143,7 @@ export const BoardColumn = memo(function BoardColumn({
   const statusFixedByView = !!status && viewBaseline?.status.has(status) === true;
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
+  const reduceMotion = useReducedMotion();
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -207,23 +210,41 @@ export const BoardColumn = memo(function BoardColumn({
     <div
       data-mc="board-column"
       style={{ width: BOARD_COL_WIDTH }}
-      className={`group/column relative flex shrink-0 flex-col rounded-board-column bg-board-column p-2 ${
+      className={`group/column relative flex shrink-0 flex-col rounded-board-column bg-board-column p-2 transition-shadow duration-150 motion-reduce:transition-none ${
         hint ? "ring-2 ring-brand/30" : ""
       }`}
     >
       {/* A dragged card whose workflow lacks this status cannot land here: the
           column is hatched over and says why. (MUL-7420) */}
-      {blockedReason && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/60 bg-[repeating-linear-gradient(135deg,transparent_0_8px,var(--color-border)_8px_9px)]"
-        >
-          <span className="flex items-center gap-1.5 rounded-md border border-surface-border bg-card px-2.5 py-1 text-caption text-muted-foreground shadow-sm">
-            <Ban className="size-3" />
-            {blockedReason}
-          </span>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {blockedReason && (
+          <motion.div
+            key="blocked-overlay"
+            aria-hidden
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{
+              opacity: 1,
+              transition: {
+                duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transition: {
+                duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_IN,
+              },
+            }}
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/60 bg-[repeating-linear-gradient(135deg,transparent_0_8px,var(--color-border)_8px_9px)]"
+          >
+            <span className="flex items-center gap-1.5 rounded-md border border-surface-border bg-card px-2.5 py-1 text-caption text-muted-foreground shadow-sm">
+              <Ban className="size-3" />
+              {blockedReason}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="mb-2 flex items-center justify-between gap-2 px-1.5">
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
@@ -307,23 +328,65 @@ export const BoardColumn = memo(function BoardColumn({
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
-        {hint && (
-          <div className="pointer-events-none absolute inset-x-1 bottom-1 z-10 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-brand/50 bg-card px-3 py-3 text-caption text-muted-foreground shadow-sm">
-            {hint.actor && <ActorAvatar actorType={hint.actor.type} actorId={hint.actor.id} size="xs" profileLink={false} />}
-            <span className="truncate">
-              {hint.run
-                ? t(($) => $.workflows.board.drop_hint_run, { name: hint.name })
-                : t(($) => $.workflows.board.drop_hint, { name: hint.name })}
-            </span>
-          </div>
-        )}
-        {isOver && sortLabel && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40">
-            <span className="rounded-md bg-popover px-2.5 py-1 text-caption font-medium text-popover-foreground shadow-sm border border-border">
-              {sortLabel}
-            </span>
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {hint && (
+            <motion.div
+              key="drop-hint-overlay"
+              initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                transition: {
+                  duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                y: reduceMotion ? 0 : 4,
+                transition: {
+                  duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro,
+                  ease: UI_EASE_IN,
+                },
+              }}
+              className="pointer-events-none absolute inset-x-1 bottom-1 z-10 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-brand/50 bg-card px-3 py-3 text-caption text-muted-foreground shadow-sm"
+            >
+              {hint.actor && <ActorAvatar actorType={hint.actor.type} actorId={hint.actor.id} size="xs" profileLink={false} />}
+              <span className="truncate">
+                {hint.run
+                  ? t(($) => $.workflows.board.drop_hint_run, { name: hint.name })
+                  : t(($) => $.workflows.board.drop_hint, { name: hint.name })}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {isOver && sortLabel && (
+            <motion.div
+              key="sort-locked-overlay"
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{
+                opacity: 1,
+                transition: {
+                  duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                transition: {
+                  duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro,
+                  ease: UI_EASE_IN,
+                },
+              }}
+              className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40"
+            >
+              <span className="rounded-md bg-popover px-2.5 py-1 text-caption font-medium text-popover-foreground shadow-sm border border-border">
+                {sortLabel}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div
           ref={mergedRef}
           // Per-column scroll registration for the tab session memento
