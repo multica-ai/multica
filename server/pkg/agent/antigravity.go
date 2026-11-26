@@ -404,6 +404,15 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (antigravity_warm.go) for built-in agy 1.5.5+ claims the ACP
+	// launch can carry; everything else — older CLIs, custom profiles, and
+	// per-task claims the ACP launch cannot carry (skills, steering, custom
+	// args) — spawns and reaps its own print-mode process below.
+	if b.cfg.WarmPool != nil && antigravityWarmEligible(b.cfg, opts) {
+		return b.executeWarmAntigravity(ctx, execPath, prompt, opts)
+	}
+
 	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
 	// with empty output, which would otherwise surface as a "completed" but
 	// empty task. opts.Model is the single funnel for both agent.model and the
