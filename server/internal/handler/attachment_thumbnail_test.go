@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/jpeg"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -129,6 +133,154 @@ func TestUploadFile_PrewarmsThumbnail(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// pausingThumbStorage holds the first thumbnail write until released, so a
+// test can finish a delete after the render has read the original.
+type pausingThumbStorage struct {
+	*mockStorage
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *pausingThumbStorage) Upload(ctx context.Context, key string, data []byte, contentType, filename string) (string, error) {
+	if strings.HasSuffix(key, ".thumb") {
+		s.once.Do(func() {
+			close(s.reached)
+			<-s.release
+		})
+	}
+	return s.mockStorage.Upload(ctx, key, data, contentType, filename)
+}
+
+// A delete that completes while a render is running must not leave the
+// render's thumbnail behind: nothing would clean it up after the row is gone.
+func TestAttachmentThumbnail_DeleteDuringRenderLeavesNoThumbnail(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	base := &mockStorage{}
+	store := &pausingThumbStorage{mockStorage: base, reached: make(chan struct{}), release: make(chan struct{})}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+
+	key := "thumbs/delete-race.jpg"
+	base.put(key, testJPEG(t, 2000, 1500))
+	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "race.jpg", "image/jpeg", 600<<10)
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(store.release) }) }
+	rendered := make(chan *httptest.ResponseRecorder, 1)
+	renderDone := make(chan struct{})
+	go func() {
+		defer close(renderDone)
+		rendered <- thumbnailRequest(t, id)
+	}()
+	// A failed assertion must not leave the render blocked on its write,
+	// holding one of the shared render slots.
+	t.Cleanup(func() {
+		release()
+		<-renderDone
+	})
+	select {
+	case <-store.reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("render did not reach the thumbnail write")
+	}
+
+	req := newRequest(http.MethodDelete, "/api/attachments/"+id, nil)
+	testutil.Call(t, testHandler.DeleteAttachment, withURLParam(req, "id", id)).Want(http.StatusNoContent)
+	release()
+
+	if w := <-rendered; w.Code != http.StatusNotFound {
+		t.Fatalf("thumbnail status = %d, want 404 once the attachment is gone", w.Code)
+	}
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.files) != 0 {
+		t.Fatalf("left behind: %v", keysOf(base.files))
+	}
+}
+
+// deadlineStorage stands in for S3 under a render that runs out of time: a
+// write can land and then end the render's context before it returns, and
+// any call made with an ended context is refused.
+type deadlineStorage struct {
+	*mockStorage
+	expireOnUpload context.CancelFunc
+}
+
+func (s *deadlineStorage) Upload(ctx context.Context, key string, data []byte, contentType, filename string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	url, err := s.mockStorage.Upload(ctx, key, data, contentType, filename)
+	if s.expireOnUpload != nil {
+		s.expireOnUpload()
+		return "", ctx.Err()
+	}
+	return url, err
+}
+
+func (s *deadlineStorage) DeleteObject(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.mockStorage.DeleteObject(ctx, key)
+}
+
+// A render's timeout must not keep it from removing the thumbnail of an
+// attachment deleted meanwhile, whether the timeout hits during the write or
+// during the check that follows it.
+func TestGenerateAttachmentThumbnail_CleansUpAfterRenderTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lateUpload bool
+		slowCheck  bool
+	}{
+		{name: "write times out after landing", lateUpload: true},
+		{name: "check outlives the render", slowCheck: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, expire := context.WithCancel(context.Background())
+			defer expire()
+			base := &mockStorage{}
+			store := &deadlineStorage{mockStorage: base}
+			if tc.lateUpload {
+				store.expireOnUpload = expire
+			}
+			objectKey := "thumbs/timeout.jpg"
+			base.put(objectKey, testJPEG(t, 2000, 1500))
+
+			// The attachment is gone; the check succeeds only if its context
+			// outlives the render's.
+			exists := func(checkCtx context.Context) (bool, error) {
+				if tc.slowCheck {
+					expire()
+				}
+				return false, checkCtx.Err()
+			}
+			_, err := generateAttachmentThumbnail(ctx, store, objectKey, objectKey+".thumb", exists)
+			if !errors.Is(err, errThumbnailUnavailable) {
+				t.Fatalf("err = %v, want errThumbnailUnavailable", err)
+			}
+			base.mu.Lock()
+			defer base.mu.Unlock()
+			if _, ok := base.files[objectKey+".thumb"]; ok {
+				t.Fatal("thumbnail left behind after the render timed out")
+			}
+		})
+	}
+}
+
+func keysOf(m map[string][]byte) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func TestAttachmentThumbnail_OnlyLargeRasterImagesGetOne(t *testing.T) {
