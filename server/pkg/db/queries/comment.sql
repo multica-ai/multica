@@ -478,6 +478,17 @@ ORDER BY c.created_at ASC, c.id ASC;
 SELECT * FROM comment
 WHERE id = $1;
 
+-- name: GetLastAgentCommentForTask :one
+-- The most recent comment the agent itself authored during one task run
+-- (source_task_id pins it to the run). @before excludes the synthetic
+-- completion fallback: the platform writes it after the completed_at flip and
+-- it is #8922's territory, not a comment "the run posted".
+SELECT * FROM comment
+WHERE source_task_id = $1 AND author_type = 'agent' AND deleted_at IS NULL
+  AND created_at < $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: GetCommentInWorkspace :one
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
