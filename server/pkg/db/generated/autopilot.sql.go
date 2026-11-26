@@ -92,6 +92,18 @@ func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const countAutopilotRuns = `-- name: CountAutopilotRuns :one
+SELECT count(*) FROM autopilot_run
+WHERE autopilot_id = $1
+`
+
+func (q *Queries) CountAutopilotRuns(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutopilotRuns, autopilotID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,

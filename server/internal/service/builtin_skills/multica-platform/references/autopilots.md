@@ -33,6 +33,7 @@ multica autopilot create --title "<title>" --description "<task prompt>" --squad
 multica autopilot update <autopilot-id> --squad <squad-name-or-id> --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
 multica autopilot runs <autopilot-id> --output json
+multica autopilot deliveries <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file ./filters.json --output json
@@ -109,7 +110,7 @@ material into comments, logs, docs, or PRs.
 2. `multica autopilot runs <id> --output json` — run status and failure reason.
 3. If assigned to a squad, inspect the squad: `multica squad get <squad-id> --output json`; execution goes to the leader.
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
-5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
+5. For webhooks, inspect deliveries with `multica autopilot deliveries <id> --output json`: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
    An `ignored` delivery created no run, so `runs` shows nothing for it. `trigger_disabled`, `autopilot_paused`, and `autopilot_archived` are recorded in its `error`; `quota_exceeded`, `event_filtered`, and `payload_filtered` in its `reason_code`. `event_filtered` means no row matched the event or action, and `payload_filtered` means a row matched but one of its `conditions` failed — `payload_condition_failure` names that condition and the payload value it saw.
 6. For `create_issue`, inspect the created issue if the run records one.
 

@@ -202,7 +202,16 @@ func (h *Handler) ListAutopilotDeliveries(w http.ResponseWriter, r *http.Request
 	for i, row := range rows {
 		resp[i] = slimDeliveryToResponse(row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deliveries": resp, "total": len(resp)})
+	total, err := h.Queries.CountWebhookDeliveriesByAutopilot(r.Context(), db.CountWebhookDeliveriesByAutopilotParams{
+		AutopilotID: autopilot.ID,
+		WorkspaceID: autopilot.WorkspaceID,
+	})
+	if err != nil {
+		slog.Error("count deliveries failed", "error", err, "autopilot_id", autopilotID)
+		writeError(w, http.StatusInternalServerError, "failed to list deliveries")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deliveries": resp, "total": total})
 }
 
 // GetAutopilotDelivery returns one delivery in full, including the raw body

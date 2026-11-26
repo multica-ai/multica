@@ -474,6 +474,10 @@ WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: CountAutopilotRuns :one
+SELECT count(*) FROM autopilot_run
+WHERE autopilot_id = $1;
+
 -- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
