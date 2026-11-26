@@ -181,7 +181,7 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 		// because these runtimes do not read the file the daemon also writes.
 		brief.Delivery, brief.Load = ReceiptDeliveryInline, ReceiptLoadDelivered
 	case configPath != "" && in.BriefWritten:
-		brief.Delivery, brief.Path = ReceiptDeliveryFile, configPath
+		brief.Delivery, brief.Path = ReceiptDeliveryFile, execenv.RuntimeBriefRelPath(in.WorkDir, in.Provider)
 		brief.Load, brief.VerifiedVersion = fileLoad, fileVerifiedAt
 	default:
 		brief.Delivery, brief.Load = ReceiptDeliveryNone, ReceiptLoadNotDelivered

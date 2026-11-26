@@ -1135,7 +1135,8 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
-		{"antigravity", "AGENTS.md"},
+		// antigravity writes split rule files; runtime_config_rules_test.go
+		// covers its repository AGENTS.md.
 		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1529,7 +1530,8 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
-		{"antigravity", "AGENTS.md"},
+		// antigravity writes split rule files; runtime_config_rules_test.go
+		// covers its repository AGENTS.md.
 		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
