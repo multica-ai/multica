@@ -2840,6 +2840,46 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+// assertProjectDocMaxBytes checks that thread setup lifts Codex's 32 KiB
+// AGENTS.md cap, which would otherwise drop the end of a long runtime brief
+// (GitHub #11480). Codex does not persist the override, so resume needs it too.
+func assertProjectDocMaxBytes(t *testing.T, params map[string]any) {
+	t.Helper()
+	config, ok := params["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config = %#v, want an object carrying project_doc_max_bytes", params["config"])
+	}
+	if got := config["project_doc_max_bytes"]; got != float64(codexProjectDocMaxBytes) {
+		t.Errorf("project_doc_max_bytes = %v, want %d", got, codexProjectDocMaxBytes)
+	}
+}
+
+func TestCodexThreadSetupLiftsProjectDocCap(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		method string
+		opts   ExecOptions
+	}{
+		{method: "thread/start", opts: ExecOptions{Cwd: "/work"}},
+		{method: "thread/resume", opts: ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			t.Parallel()
+			c, fs, _ := newTestCodexClient(t)
+			wait := drainRPCScript(t, c, fs, []rpcResponse{{
+				method:   tc.method,
+				result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+				assertFn: assertProjectDocMaxBytes,
+			}})
+			defer wait()
+			if _, _, err := c.startOrResumeThread(context.Background(), tc.opts, slog.Default()); err != nil {
+				t.Fatalf("startOrResumeThread: %v", err)
+			}
+		})
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

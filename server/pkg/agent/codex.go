@@ -1886,6 +1886,19 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+// codexProjectDocMaxBytes replaces Codex's project_doc_max_bytes (32 KiB by
+// default) for daemon threads. Codex reads AGENTS.md only up to that many bytes
+// and silently drops the rest, which cut the trailing Workflow / Mentions /
+// Output sections off long runtime briefs (GitHub #11480). The cap is not
+// persisted with the thread, so every thread/start and thread/resume sends it.
+const codexProjectDocMaxBytes = 4 << 20
+
+// codexThreadConfig is the per-thread config override the daemon sends with
+// thread/start and thread/resume.
+func codexThreadConfig() map[string]any {
+	return map[string]any{"project_doc_max_bytes": codexProjectDocMaxBytes}
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -1904,6 +1917,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
+			"config":                codexThreadConfig(),
 			"developerInstructions": nil,
 			// Only omit history from the response, not the resumed model context.
 			// We need the thread ID, not an unbounded single-line turns payload.
@@ -1966,7 +1980,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"cwd":                    opts.Cwd,
 		"approvalPolicy":         nil,
 		"sandbox":                nil,
-		"config":                 nil,
+		"config":                 codexThreadConfig(),
 		"baseInstructions":       nil,
 		"developerInstructions":  nil,
 		"compactPrompt":          nil,
