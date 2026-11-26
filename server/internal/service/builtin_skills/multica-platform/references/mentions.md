@@ -132,8 +132,9 @@ squad leader fallback, with one exception: when a member of a squad in `direct`
 handoff mode comments on that squad's issue and mentions a person but no agent,
 nobody is woken (see `references/squads.md`, Handoff mode). Otherwise a
 worker's result on a squad-assigned issue still returns to the assigned leader;
-in a guest squad's delegation thread, it still returns to the guest leader. People receive notifications as usual, and the
-existing leader self-trigger protection and pending-run dedup still apply.
+in a guest squad's delegation thread, it still returns to the guest leader.
+People receive notifications as usual, and the existing leader self-trigger
+protection and pending-run dedup still apply.
 
 For any author, an EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
