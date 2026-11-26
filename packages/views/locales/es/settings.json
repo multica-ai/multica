@@ -183,7 +183,15 @@
       "unsupported": "No disponible al crear con un agente"
     },
     "issue_fields_title": "Campos al crear tareas",
-    "region_title": "Idioma y región"
+    "region_title": "Idioma y región",
+    "open_file": {
+      "title": "Open files with",
+      "hint": "Used when opening a file from a run Diff. Saved on this device.",
+      "desktop_only": "Available in the desktop app only.",
+      "finder": "Finder",
+      "explorer": "File Explorer",
+      "file_manager": "File manager"
+    }
   },
   "appearance": {
     "reset": "Restablecer valores predeterminados",

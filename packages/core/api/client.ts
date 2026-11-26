@@ -1,6 +1,11 @@
 import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
 import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
 import {
+  parseFileChanges,
+  parseFileChangeBody,
+  unavailableFileChanges,
+} from "../agents/file-changes-schema";
+import {
   DocSchema,
   DocSummarySchema,
   DocFolderSchema,
@@ -3465,6 +3470,27 @@ export class ApiClient {
   // Per-agent 30-day total run count for the Agents-list RUNS column.
   async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
     return this.fetch(`/api/agent-run-counts`);
+  }
+
+  async listRunFileChanges(taskId: string, cursor: string) {
+    try {
+      const raw = await this.fetch<unknown>(
+        `/api/tasks/${encodeURIComponent(taskId)}/file-changes?cursor=${encodeURIComponent(cursor)}&limit=100`,
+      );
+      return parseFileChanges(raw);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return { ...unavailableFileChanges, reason: "legacy_no_baseline" };
+      }
+      throw error;
+    }
+  }
+
+  async getRunFileChangeBody(taskId: string, fileId: string) {
+    const raw = await this.fetch<unknown>(
+      `/api/tasks/${encodeURIComponent(taskId)}/file-changes/${encodeURIComponent(fileId)}`,
+    );
+    return parseFileChangeBody(raw);
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {

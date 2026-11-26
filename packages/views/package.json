@@ -130,6 +130,7 @@
     "@tiptap/suggestion": "3.31.3",
     "@tiptap/y-tiptap": "^3.3.1",
     "cmdk": "catalog:",
+    "diff": "^9.0.0",
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",
     "lowlight": "^3.3.0",

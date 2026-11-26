@@ -15,6 +15,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/rundiff"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -124,6 +125,7 @@ type repoCheckoutRequest struct {
 }
 
 type activeRepoCheckoutTask struct {
+	RunDiff     *rundiff.Collector
 	WorkspaceID string
 	TaskID      string
 	IssueID     string
@@ -607,6 +609,21 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			return
 		}
 
+		if activeTask.RunDiff != nil {
+			if err := activeTask.RunDiff.Register(r.Context(), result.Path); err != nil {
+				d.logger.Warn("checkout diff baseline unavailable", "error", err)
+			}
+			s := d.loadRunDiffIndex(activeTask.TaskID)
+			if s == nil {
+				s = &runDiffIndex{Version: runDiffIndexVersion, TaskID: activeTask.TaskID}
+			}
+			s.TaskDir = activeTask.WorkDir
+			s.Collection = activeTask.RunDiff.Pending()
+			s.Roots = activeTask.RunDiff.RootRefs()
+			if err := d.saveRunDiff(*s); err != nil {
+				d.logger.Warn("checkout diff recovery metadata failed", "error", err)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}

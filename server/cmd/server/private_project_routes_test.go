@@ -133,6 +133,7 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"groups/{conversationId}":        {why: "a DingTalk group"},
 	"install/{sessionId}":            {why: "an integration install session"},
 	"logins/{loginId}":               {why: "a Weixin login session"},
+	"file-changes/{fileId}":          {why: "a file in the manifest of the authorized task", value: func(f *privateRouteFixture) string { return f.runFileChange() }},
 }
 
 // routePrefixesNotProbed are route trees a member session cannot probe, each
@@ -216,6 +217,19 @@ func (f *privateRouteFixture) issueRun() string {
 			"issue_id": f.issue(), "runtime_id": f.shared.runtimeID, "status": "failed",
 			"originator_user_id": f.shared.insiderID, "accountable_user_id": f.shared.insiderID,
 		})
+	})
+}
+
+// runFileChange is one sanitized manifest row on the private project's run.
+func (f *privateRouteFixture) runFileChange() string {
+	return f.once("runFileChange", func() string {
+		const fileID = "probe-file"
+		taskID := f.issueRun()
+		f.fx.InsertNoID(f.t, "run_file_change", dbfx.Cols{
+			"workspace_id": f.fx.WorkspaceID, "task_id": taskID, "collection_id": uuid.NewString(),
+			"manifest": json.RawMessage(`{"status":"complete","files":[{"id":"probe-file","body_status":"unavailable"}]}`),
+		}, "task_id = $1", taskID)
+		return fileID
 	})
 }
 

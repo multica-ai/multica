@@ -223,6 +223,14 @@ type PendingWorkPayload struct {
 	Kind      string `json:"kind,omitempty"`
 }
 
+// FileChangesRequestedPayload is sent from server to daemon as a wakeup hint
+// when a run file change body request is queued for a runtime. The daemon
+// pulls the requests over HTTP; a lost or duplicated hint only costs latency
+// until the next user retry.
+type FileChangesRequestedPayload struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

@@ -10,6 +10,24 @@ export {
 } from "./window-title-bar";
 export { openExternal } from "./open-external";
 export {
+  isOpenLocalFileSupported,
+  listLocalFileOpeners,
+  openLocalFile,
+  pickEffectiveOpener,
+  resolveLocalFileCandidate,
+  resolveLocalFiles,
+  type ListLocalFileOpenersResult,
+  type LocalFileHostPlatform,
+  type LocalFileOpener,
+  type LocalFileOpenerId,
+  type OpenLocalFileResult,
+} from "./open-local-file";
+export {
+  useExistingLocalFilePaths,
+  useLocalFileOpeners,
+  useOpenLocalFileAction,
+} from "./use-open-local-file";
+export {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,

@@ -183,6 +183,14 @@
       "quick": "Create with agent",
       "manual": "Manual create",
       "unsupported": "Not available when creating with an agent"
+    },
+    "open_file": {
+      "title": "Open files with",
+      "hint": "Used when opening a file from a run Diff. Saved on this device.",
+      "desktop_only": "Available in the desktop app only.",
+      "finder": "Finder",
+      "explorer": "File Explorer",
+      "file_manager": "File manager"
     }
   },
   "appearance": {

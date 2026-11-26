@@ -25,6 +25,9 @@ deleted_task_messages AS (
 deleted_task_tokens AS (
     DELETE FROM task_token WHERE task_id IN (SELECT id FROM batch)
 ),
+deleted_run_file_changes AS (
+    DELETE FROM run_file_change WHERE task_id IN (SELECT id FROM batch)
+),
 deleted_task_supplements AS (
     DELETE FROM task_supplement WHERE task_id IN (SELECT id FROM batch)
 ),
@@ -358,6 +361,9 @@ ws_lark_installations AS MATERIALIZED (
 deleted_task_tokens AS (
     DELETE FROM task_token
     WHERE workspace_id = $1
+),
+deleted_run_file_changes AS (
+    DELETE FROM run_file_change WHERE workspace_id = $1
 ),
 deleted_orphan_task_supplements AS (
     DELETE FROM task_supplement WHERE workspace_id = $1

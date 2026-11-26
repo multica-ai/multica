@@ -1342,6 +1342,9 @@ importers:
       cmdk:
         specifier: 'catalog:'
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       hast-util-to-html:
         specifier: ^9.0.5
         version: 9.0.5
@@ -7288,6 +7291,10 @@ packages:
 
   diff@8.0.3:
     resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
+    engines: {node: '>=0.3.1'}
+
+  diff@9.0.0:
+    resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
 
   dir-compare@4.2.0:
@@ -18482,6 +18489,8 @@ snapshots:
   didyoumean@1.2.2: {}
 
   diff@8.0.3: {}
+
+  diff@9.0.0: {}
 
   dir-compare@4.2.0:
     dependencies:

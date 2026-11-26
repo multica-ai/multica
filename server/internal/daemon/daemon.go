@@ -462,9 +462,18 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg        Config
-	client     *Client
-	repoCache  repoCacheBackend
+	runDiffCursor   int
+	runDiffRecovery map[string]bool
+	// fileChangePullUnsupported latches "the server predates the file change
+	// relay routes" so the daemon stops probing a 404 path; reset on process
+	// start.
+	fileChangePullUnsupported atomic.Bool
+	// runDiffSweepAt is the last daily orphan run-diff ref sweep (unix nano),
+	// guarded by atomic access.
+	runDiffSweepAt atomic.Int64
+	cfg            Config
+	client         *Client
+	repoCache      repoCacheBackend
 	skillCache *SkillBundleCache
 	warmPool   *agent.WarmSessionPool
 	logger     *slog.Logger
@@ -5563,6 +5572,9 @@ func (d *Daemon) restartTargetBinary() (string, error) {
 // per-request timeout (WS) / the client's timeout (HTTP fallback), and the
 // server-side batch claim is index-backed + short.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
+	d.flushRunDiffSpool(ctx, true)
+	diffRetry := time.NewTicker(time.Minute)
+	defer diffRetry.Stop()
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
 	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
 
@@ -5595,6 +5607,8 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 				d.cleanupUnconfirmed.Store(true)
 			}
 			return ctx.Err()
+		case <-diffRetry.C:
+			d.flushRunDiffSpool(ctx, false)
 		case <-runtimeSetCh:
 			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
 			// pick up a registered/removed runtime promptly.
@@ -9553,7 +9567,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// branch ownership from this in-memory record instead of trusting request
 	// fields or ambient process environment. Register only for the provider
 	// execution window and always remove the credential afterwards.
+	// Same-task provider retries share this baseline. Capture runs before
+	// runtime cleanup and worktree Finalize can remove the directory.
+	runDiff := d.startRunDiff(ctx, task, env.WorkDir, taskLog)
+	defer d.finishRunDiff(ctx, task, runDiff, taskLog)
 	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
+		RunDiff:     runDiff,
 		WorkspaceID: task.WorkspaceID,
 		TaskID:      task.ID,
 		IssueID:     task.IssueID,

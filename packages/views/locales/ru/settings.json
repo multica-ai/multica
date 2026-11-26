@@ -185,6 +185,14 @@
       "quick": "Создание с агентом",
       "manual": "Ручное создание",
       "unsupported": "Недоступно при создании с агентом"
+    },
+    "open_file": {
+      "title": "Open files with",
+      "hint": "Used when opening a file from a run Diff. Saved on this device.",
+      "desktop_only": "Available in the desktop app only.",
+      "finder": "Finder",
+      "explorer": "File Explorer",
+      "file_manager": "File manager"
     }
   },
   "appearance": {

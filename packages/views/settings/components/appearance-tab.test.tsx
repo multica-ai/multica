@@ -494,3 +494,70 @@ describe("AppearanceTab", () => {
     expect(reset).toBeDisabled();
   });
 });
+
+describe("AppearanceTab — Open files with", () => {
+  const openFileMocks = vi.hoisted(() => ({
+    supported: false,
+    openers: [] as { id: string; kind: string; name: string }[],
+    platform: "darwin" as "darwin" | "win32" | "linux" | null,
+    effective: undefined as { id: string; kind: string; name: string } | undefined,
+    setOpenerId: vi.fn(),
+  }));
+
+  vi.mock("../../platform/use-open-local-file", () => ({
+    useLocalFileOpeners: () => openFileMocks,
+  }));
+
+  const toastSuccess = vi.hoisted(() => vi.fn());
+  vi.mock("sonner", () => ({
+    toast: { success: toastSuccess, warning: vi.fn(), error: vi.fn() },
+  }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    openFileMocks.supported = false;
+    openFileMocks.openers = [];
+    openFileMocks.platform = "darwin";
+    openFileMocks.effective = undefined;
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("disables the row on web and explains it is desktop-only", () => {
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    const trigger = screen.getByRole("combobox", { name: "Open files with" });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent("Available in the desktop app only.");
+    expect(
+      screen.getAllByText("Available in the desktop app only.").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("lists only detected editors plus the platform file manager on the desktop app", async () => {
+    openFileMocks.supported = true;
+    openFileMocks.platform = "darwin";
+    openFileMocks.openers = [
+      { id: "cursor", kind: "editor", name: "Cursor" },
+      { id: "file-manager", kind: "file_manager", name: "File manager" },
+    ];
+    openFileMocks.effective = { id: "cursor", kind: "editor", name: "Cursor" };
+    const user = userEvent.setup();
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    const trigger = screen.getByRole("combobox", { name: "Open files with" });
+    expect(trigger).not.toBeDisabled();
+    expect(trigger).toHaveTextContent("Cursor");
+
+    await user.click(trigger);
+    expect(await screen.findByRole("option", { name: "Cursor" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Finder" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Zed" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: "Finder" }));
+    expect(openFileMocks.setOpenerId).toHaveBeenCalledWith("file-manager");
+    expect(toastSuccess).toHaveBeenCalledTimes(1);
+  });
+});

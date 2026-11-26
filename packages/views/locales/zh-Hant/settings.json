@@ -182,6 +182,14 @@
       "quick": "AI 代理建立",
       "manual": "手動建立",
       "unsupported": "AI 代理建立時不支援此欄位"
+    },
+    "open_file": {
+      "finder": "访达",
+      "hint": "从执行记录 Diff 打开文件时使用。保存在当前设备上。",
+      "title": "打开文件",
+      "file_manager": "文件管理器",
+      "desktop_only": "仅桌面应用可用",
+      "explorer": "资源管理器"
     }
   },
   "appearance": {

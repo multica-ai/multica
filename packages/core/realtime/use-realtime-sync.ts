@@ -43,6 +43,7 @@ import {
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
+import { fileChangesKeys } from "../agents/file-changes";
 import { githubKeys } from "../github/queries";
 import { useGitHubConnectionStore } from "../github/connection-store";
 import { larkKeys } from "../lark/queries";
@@ -1116,6 +1117,9 @@ export function useRealtimeSync(
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
+        // Run file changes finalize on the task's terminal event; polling
+        // covers the collecting phase.
+        qc.invalidateQueries({ queryKey: fileChangesKeys.all(wsId) });
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating

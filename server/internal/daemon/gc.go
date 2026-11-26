@@ -132,6 +132,10 @@ func (d *Daemon) runGC(ctx context.Context) {
 	}
 	stats.taskRootIndexEntriesReclaimed += rootRecordsRemoved
 
+	// At most daily, sweep orphan run-diff refs from the repo caches and
+	// retire indexes whose task directory is gone.
+	d.sweepOrphanRunDiffRefs(ctx)
+
 	// Prune stale worktree references from all bare repo caches, then evict the
 	// caches nothing needs anymore. These live outside any workspace directory
 	// and are never reclaimed by the task walk above.
@@ -941,6 +945,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 		d.logger.Warn("gc: refusing to remove unowned task directory", "dir", taskDir, "error", ownerErr)
 		return 0, false
 	}
+	// Retire the run file change record first — pinned refs in the repo cache
+	// must not outlive the task directory that owns them.
+	d.releaseRunDiffForTask(owner.TaskID)
 	if err := execenv.RemoveCursorMcpAuthLink(taskDir, d.cfg.Profile); err != nil {
 		d.logger.Warn("gc: remove cursor mcp auth link failed", "dir", taskDir, "error", err)
 	}

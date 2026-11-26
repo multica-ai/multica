@@ -182,6 +182,14 @@
       "quick": "에이전트로 생성",
       "manual": "수동 생성",
       "unsupported": "에이전트로 생성할 때는 사용할 수 없습니다"
+    },
+    "open_file": {
+      "title": "파일 열기 앱",
+      "hint": "실행 기록 Diff에서 파일을 열 때 사용합니다. 이 기기에 저장됩니다.",
+      "desktop_only": "데스크톱 앱에서만 사용할 수 있습니다.",
+      "finder": "Finder",
+      "explorer": "파일 탐색기",
+      "file_manager": "파일 관리자"
     }
   },
   "appearance": {
