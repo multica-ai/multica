@@ -61,3 +61,42 @@ func TestClaimTaskIssueSessionPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimTaskFreshIssuePolicyPreservesChatSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for _, pointer := range []bool{true, false} {
+		name := "completed task fallback"
+		if pointer {
+			name = "chat session pointer"
+		}
+		t.Run(name, func(t *testing.T) {
+			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, t.Context())
+			dbfx.Cleanup(t, "DELETE FROM agent WHERE id = $1", agentID)
+			update := newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
+				"runtime_config": json.RawMessage(`{"issue_session_policy":"fresh"}`),
+			})
+			testutil.Call(t, testHandler.UpdateAgent, withURLParam(update, "id", agentID)).Want(http.StatusOK)
+
+			chat := testutil.Cols{"title": "Chat continuity with fresh issue sessions"}
+			if pointer {
+				chat["session_id"] = "chat-session"
+				chat["work_dir"] = "/tmp/chat-workdir"
+				chat["runtime_id"] = runtimeID
+			}
+			chatID := dbfx.ChatSession(t, agentID, chat)
+			dbfx.Task(t, agentID, testutil.Cols{
+				"chat_session_id": chatID, "runtime_id": runtimeID, "status": "completed",
+				"session_id": "chat-session", "work_dir": "/tmp/chat-workdir",
+				"started_at": testutil.Raw("now()"), "completed_at": testutil.Raw("now()"),
+			})
+			dbfx.Task(t, agentID, testutil.Cols{"chat_session_id": chatID, "runtime_id": runtimeID})
+
+			claim := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+			if claim.PriorSessionID != "chat-session" || claim.PriorWorkDir != "/tmp/chat-workdir" {
+				t.Fatalf("chat prior session/workdir = %q/%q, want chat-session and /tmp/chat-workdir", claim.PriorSessionID, claim.PriorWorkDir)
+			}
+		})
+	}
+}
