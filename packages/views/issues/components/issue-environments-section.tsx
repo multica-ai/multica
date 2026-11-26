@@ -874,4 +874,3 @@ function environmentExpiry(env: IssueEnvironment, t: IssuesT): { label: string; 
   if (hours < 48) return { label: t(($) => $.environments.expires_in_hours, { count: hours }), soon: false };
   return { label: t(($) => $.environments.expires_in_days, { count: Math.round(hours / 24) }), soon: false };
 }
-

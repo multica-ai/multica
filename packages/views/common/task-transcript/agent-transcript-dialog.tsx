@@ -2135,4 +2135,3 @@ function readPathFromInput(input: Record<string, unknown> | undefined): string |
   const path = input.file_path ?? input.path;
   return typeof path === "string" ? path : undefined;
 }
-

@@ -709,7 +709,7 @@ function MentionRow({
       aria-label={
         disabledMessage ? `${item.label}: ${disabledMessage}` : undefined
       }
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-caption transition-colors ${
+      className={`group/mention flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-caption transition-colors ${
         selected ? "bg-accent" : disabledMessage ? "" : "hover:bg-accent/50"
       } ${disabledMessage ? "cursor-not-allowed opacity-50" : ""}`}
       onClick={onSelect}
@@ -720,7 +720,12 @@ function MentionRow({
         size="sm"
         showStatusDot
       />
-      <span className="truncate font-medium">
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate font-medium",
+          item.type === "agent" && "group-hover/mention:whitespace-normal group-hover/mention:[overflow-wrap:anywhere] group-focus-visible/mention:whitespace-normal group-focus-visible/mention:[overflow-wrap:anywhere]",
+        )}
+      >
         {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
       </span>
       {item.type === "agent" && (

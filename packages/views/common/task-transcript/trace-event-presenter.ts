@@ -647,4 +647,3 @@ export function traceEventHasDetail(event: TraceEvent): boolean {
 export function traceEventSummaryIsMono(kind: TraceEventKind): boolean {
   return kind === "tool_use" || kind === "tool_result";
 }
-
