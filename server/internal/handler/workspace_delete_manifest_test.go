@@ -180,6 +180,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"app_action_rule":                    workspaceDelete,
 	"app_action_request":                 workspaceDelete,
 	"app_tool_call":                      workspaceDelete,
+	"mcp_action_audit":                   workspaceDelete,
 	"app_tool_call_quota_period":         workspaceDelete,
 	"issue_environment":                  workspaceDelete,
 	"issue_environment_command":          workspaceDelete,

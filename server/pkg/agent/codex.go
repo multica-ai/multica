@@ -3389,6 +3389,17 @@ func codexMCPToolInput(item map[string]any) map[string]any {
 	return redact.InputMap(input)
 }
 
+// codexMCPServerInput keeps the server name on a tool result so a later
+// batch can update the audit row. Arguments stay on the tool_use message.
+func codexMCPServerInput(item map[string]any) map[string]any {
+	server, _ := item["server"].(string)
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return nil
+	}
+	return map[string]any{"server": server}
+}
+
 func codexMCPToolName(item map[string]any) string {
 	if tool, _ := item["tool"].(string); strings.TrimSpace(tool) != "" {
 		return tool
@@ -3890,6 +3901,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Type:   MessageToolResult,
 				Tool:   codexMCPToolName(item),
 				CallID: itemID,
+				Input:  codexMCPServerInput(item),
 				Output: codexMCPToolResultOutput(item),
 				Status: codexNormalizePatchStatus(status),
 			})

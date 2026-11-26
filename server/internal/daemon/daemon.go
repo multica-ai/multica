@@ -8570,6 +8570,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
 		},
 		taskLog,
+		func(rec remoteMCPCallRecord) {
+			go reportRemoteMCPAudit(d.client, task.ID, rec)
+		},
 	)
 	if remoteMCPErr != nil {
 		return TaskResult{}, fmt.Errorf("prepare Remote MCP broker: %w", remoteMCPErr)

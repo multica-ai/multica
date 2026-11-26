@@ -1552,6 +1552,22 @@ func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqB
 // is derived from the deployment key and stays on the server, and routing
 // through it keeps the rate limit, circuit breaker, `net:` destination check
 // and invocation record on one code path for every trigger.
+type mcpActionAuditRequest struct {
+	Source     string          `json:"source"`
+	MCPServer  string          `json:"mcp_server,omitempty"`
+	ToolName   string          `json:"tool_name"`
+	CallID     string          `json:"call_id,omitempty"`
+	Arguments  json.RawMessage `json:"arguments,omitempty"`
+	Outcome    string          `json:"outcome"`
+	Error      string          `json:"error,omitempty"`
+	DurationMs *int32          `json:"duration_ms,omitempty"`
+}
+
+func (c *Client) ReportMCPActionAudit(ctx context.Context, taskID string, body mcpActionAuditRequest) error {
+	path := fmt.Sprintf("/api/daemon/tasks/%s/mcp-action-audits", url.PathEscape(taskID))
+	return c.postJSON(ctx, path, body, nil)
+}
+
 func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
 	var response struct {
 		Status string          `json:"status"`

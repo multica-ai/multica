@@ -63,7 +63,7 @@ func startBrokers(t *testing.T, connection remotemcp.Connection) ([]string, erro
 	t.Helper()
 	ctx := context.Background()
 	config, diagnostics, set, err := startTaskRemoteMCPBrokers(
-		ctx, ctx, "task-1", "claude", []remotemcp.Connection{connection}, fixtureCredential, nil)
+		ctx, ctx, "task-1", "claude", []remotemcp.Connection{connection}, fixtureCredential, nil, nil)
 	if set != nil {
 		t.Cleanup(set.Close)
 	}

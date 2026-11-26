@@ -4,6 +4,7 @@ package redact
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -288,4 +289,84 @@ func textHidesSecret(b []byte, depth int) bool {
 		start = i
 	}
 	return false
+}
+
+// secretArgKey names whose values are credentials even when the value itself
+// does not match a token shape. MCP tool arguments routinely use these keys.
+func secretArgKey(key string) bool {
+	switch strings.ToLower(strings.ReplaceAll(key, "-", "_")) {
+	case "password", "secret", "token", "api_key", "apikey", "authorization",
+		"access_token", "refresh_token", "auth_token", "private_key":
+		return true
+	default:
+		return false
+	}
+}
+
+func maskSecretKeys(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, child := range t {
+			if secretArgKey(k) {
+				out[k] = "[REDACTED]"
+				continue
+			}
+			out[k] = maskSecretKeys(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, child := range t {
+			out[i] = maskSecretKeys(child)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// AuditJSON redacts an MCP arguments document for the audit table.
+// Secret-named keys are masked, then every remaining string goes through Text.
+// A value that is not a JSON object or array is dropped.
+const maxAuditJSONBytes = 64 * 1024
+
+func AuditJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	if len(raw) > maxAuditJSONBytes {
+		return json.RawMessage(`{"_truncated":true}`)
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	masked := maskSecretKeys(v)
+	var cleaned any
+	switch m := masked.(type) {
+	case map[string]any:
+		cleaned = InputMap(m)
+	case []any:
+		items := make([]any, len(m))
+		for i, item := range m {
+			if child, ok := item.(map[string]any); ok {
+				items[i] = InputMap(child)
+				continue
+			}
+			if s, ok := item.(string); ok {
+				items[i] = Text(s)
+				continue
+			}
+			items[i] = item
+		}
+		cleaned = items
+	default:
+		return nil
+	}
+	out, err := json.Marshal(cleaned)
+	if err != nil {
+		return nil
+	}
+	return out
 }

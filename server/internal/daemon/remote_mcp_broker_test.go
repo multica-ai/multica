@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
 )
@@ -112,6 +113,36 @@ func TestRemoteMCPProxyRejectsUnapprovedToolWithoutCallingUpstream(t *testing.T)
 	proxy.ServeHTTP(response, request)
 	if called || !strings.Contains(response.Body.String(), "not approved") {
 		t.Fatalf("called=%v response=%s", called, response.Body.String())
+	}
+}
+
+func TestRemoteMCPProxyAuditsDeniedToolWithoutTheSecret(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unapproved tool reached upstream")
+	}))
+	defer upstream.Close()
+	endpoint, _ := url.Parse(upstream.URL)
+	var got remoteMCPCallRecord
+	audited := false
+	proxy := &remoteMCPProxy{
+		endpoint: endpoint, client: upstream.Client(), path: "/capability",
+		semaphore:  make(chan struct{}, remoteMCPMaxConcurrency),
+		connection: remotemcp.Connection{ApprovedTools: []remotemcp.Tool{{Name: "allowed"}}},
+		serverName: "plugin-toolbox-0123456789abcdef",
+		audit: func(rec remoteMCPCallRecord) {
+			audited = true
+			got = rec
+		},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/capability", bytes.NewBufferString(`{"jsonrpc":"2.0","id":"call-9","method":"tools/call","params":{"name":"denied","arguments":{"secret":"not logged"}}}`))
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+	if !audited || got.Tool != "denied" || got.ResultClass != "rejected" || got.CallID != "call-9" {
+		t.Fatalf("audit record = %+v audited=%v", got, audited)
+	}
+	redacted := redact.AuditJSON(got.Arguments)
+	if bytes.Contains(redacted, []byte("not logged")) {
+		t.Fatalf("secret leaked into audit arguments: %s", redacted)
 	}
 }
 

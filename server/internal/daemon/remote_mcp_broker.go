@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -53,7 +54,7 @@ func (set *remoteMCPBrokerSet) Close() {
 	})
 }
 
-func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []remotemcp.Connection, resolveCredential remoteMCPCredentialResolver, logger *slog.Logger) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
+func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []remotemcp.Connection, resolveCredential remoteMCPCredentialResolver, logger *slog.Logger, audit remoteMCPAuditor) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
 	if len(connections) == 0 {
 		return nil, nil, nil, nil
 	}
@@ -121,11 +122,13 @@ func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, pr
 			set.Close()
 			return nil, diagnostics, nil, err
 		}
+		name := remoteMCPServerName(connection)
 		proxy := &remoteMCPProxy{
 			taskID: taskID, connection: connection, endpoint: endpoint,
 			client: remotemcp.NewSecureHTTPClient(endpoint), credentialHeaders: headers,
 			resolveCredential: resolveCredential, path: "/" + pathToken,
 			semaphore: make(chan struct{}, remoteMCPMaxConcurrency), logger: logger,
+			serverName: name, audit: audit,
 		}
 		server := &http.Server{Handler: proxy, ReadHeaderTimeout: 5 * time.Second}
 		set.servers = append(set.servers, server)
@@ -135,7 +138,6 @@ func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, pr
 				logger.Warn("Remote MCP broker stopped unexpectedly", "task_id", taskID, "contribution", connection.ContributionKey, "error", serveErr)
 			}
 		}()
-		name := remoteMCPServerName(connection)
 		servers[name] = map[string]any{
 			"type": "http",
 			"url":  "http://" + listener.Addr().String() + proxy.path,
@@ -205,6 +207,17 @@ func remoteMCPServerName(connection remotemcp.Connection) string {
 	return "plugin-" + name + "-" + suffix
 }
 
+type remoteMCPCallRecord struct {
+	Server      string
+	Tool        string
+	CallID      string
+	Arguments   json.RawMessage
+	ResultClass string
+	Duration    time.Duration
+}
+
+type remoteMCPAuditor func(remoteMCPCallRecord)
+
 type remoteMCPProxy struct {
 	taskID            string
 	connection        remotemcp.Connection
@@ -216,6 +229,8 @@ type remoteMCPProxy struct {
 	semaphore         chan struct{}
 	calls             atomic.Int64
 	logger            *slog.Logger
+	serverName        string
+	audit             remoteMCPAuditor
 }
 
 type remoteMCPRequest struct {
@@ -225,9 +240,68 @@ type remoteMCPRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+func remoteMCPCallID(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return string(raw)
+}
+
+func brokerAuditOutcome(class string) string {
+	switch class {
+	case "success":
+		return "ok"
+	case "remote_error":
+		return "unavailable"
+	case "credential_revoked", "rejected":
+		return "denied"
+	default:
+		return "error"
+	}
+}
+
+func reportRemoteMCPAudit(client *Client, taskID string, rec remoteMCPCallRecord) {
+	if client == nil || strings.TrimSpace(rec.Tool) == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ms := rec.Duration.Milliseconds()
+	if ms < 0 {
+		ms = 0
+	}
+	if ms > 1<<31-1 {
+		ms = 1<<31 - 1
+	}
+	duration := int32(ms)
+	body := mcpActionAuditRequest{
+		Source:     "remote_broker",
+		MCPServer:  rec.Server,
+		ToolName:   rec.Tool,
+		CallID:     rec.CallID,
+		Arguments:  redact.AuditJSON(rec.Arguments),
+		Outcome:    brokerAuditOutcome(rec.ResultClass),
+		DurationMs: &duration,
+	}
+	if rec.ResultClass != "" && rec.ResultClass != "success" {
+		body.Error = rec.ResultClass
+	}
+	if err := client.ReportMCPActionAudit(ctx, taskID, body); err != nil {
+		slog.Warn("mcp action audit write failed", "task_id", taskID, "tool", rec.Tool, "error", err)
+	}
+}
+
 func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	started := time.Now()
 	toolName := ""
+	method := ""
+	var callID string
+	var arguments json.RawMessage
 	resultClass := "rejected"
 	defer func() {
 		if proxy.logger != nil {
@@ -239,6 +313,16 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 				"duration_ms", time.Since(started).Milliseconds(),
 				"result_class", resultClass,
 			)
+		}
+		if proxy.audit != nil && method == "tools/call" {
+			proxy.audit(remoteMCPCallRecord{
+				Server:      proxy.serverName,
+				Tool:        toolName,
+				CallID:      callID,
+				Arguments:   arguments,
+				ResultClass: resultClass,
+				Duration:    time.Since(started),
+			})
 		}
 	}()
 	if request.URL.Path != proxy.path || request.Method != http.MethodPost {
@@ -266,19 +350,25 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		writeRemoteMCPError(w, rpcRequest.ID, -32600, "Remote MCP request is invalid")
 		return
 	}
+	method = rpcRequest.Method
+	callID = remoteMCPCallID(rpcRequest.ID)
 	if !allowedRemoteMCPMethod(rpcRequest.Method) {
 		writeRemoteMCPError(w, rpcRequest.ID, -32601, "Only approved Remote MCP tools are available")
 		return
 	}
 	if rpcRequest.Method == "tools/call" {
 		var params struct {
-			Name string `json:"name"`
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
 		}
-		if err := json.Unmarshal(rpcRequest.Params, &params); err != nil || !proxy.toolApproved(params.Name) {
+		if err := json.Unmarshal(rpcRequest.Params, &params); err == nil {
+			toolName = params.Name
+			arguments = params.Arguments
+		}
+		if toolName == "" || !proxy.toolApproved(toolName) {
 			writeRemoteMCPError(w, rpcRequest.ID, -32602, "Remote MCP tool is not approved")
 			return
 		}
-		toolName = params.Name
 	}
 	upstream, err := http.NewRequestWithContext(request.Context(), http.MethodPost, proxy.endpoint.String(), bytes.NewReader(raw))
 	if err != nil {

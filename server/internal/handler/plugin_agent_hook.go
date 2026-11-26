@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,8 +55,10 @@ func (h *Handler) InvokeAgentPluginHook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	started := time.Now()
 	result, err := h.PluginService.InvokeAgentHook(
 		r.Context(), uuidToString(installation.ID), req.HookKey, task.AgentID, req.Input)
+	h.auditPluginHookCall(r.Context(), task, workspaceID, req, result, time.Since(started))
 	if err != nil {
 		// 200 with an error body, deliberately.
 		//

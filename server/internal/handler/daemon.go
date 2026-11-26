@@ -6155,6 +6155,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.auditTranscriptMCP(r.Context(), task, scope.WorkspaceID, req.Messages)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
