@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -446,11 +447,34 @@ func (h *Handler) loadReachableQuickAction(
 		writeError(w, http.StatusNotFound, "quick action not found")
 		return db.QuickAction{}, false
 	}
-	if qa.Visibility == "private" && uuidToString(qa.CreatedByID) != userID {
-		writeError(w, http.StatusNotFound, "quick action not found")
-		return db.QuickAction{}, false
+	if qa.Visibility == "private" {
+		viewer := h.quickActionViewer(r, userID, workspaceID)
+		if !viewer.Valid || viewer != qa.CreatedByID {
+			writeError(w, http.StatusNotFound, "quick action not found")
+			return db.QuickAction{}, false
+		}
 	}
 	return qa, true
+}
+
+// quickActionViewer is the member whose private quick actions this request may
+// reach. A task token's user id is the runtime owner, not whoever started the
+// run, so a run another member started gets an invalid UUID: it matches no
+// creator and leaves only public actions. Lookup failures fail closed the same
+// way.
+func (h *Handler) quickActionViewer(r *http.Request, userID string, workspaceID pgtype.UUID) pgtype.UUID {
+	ok, err := h.requestRepresentsUser(r, userID, workspaceID)
+	if err != nil {
+		slog.Warn("resolve quick action viewer failed", append(logger.RequestAttrs(r), "error", err)...)
+	}
+	if !ok {
+		return pgtype.UUID{}
+	}
+	viewer, err := util.ParseUUID(userID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return viewer
 }
 
 // requirePublicQuickActionRole gates writes that leave an action `public`.
@@ -465,7 +489,9 @@ func (h *Handler) requirePublicQuickActionRole(w http.ResponseWriter, r *http.Re
 // ListQuickActions returns the workspace catalog. It performs NO permission
 // work: `private` rows are scoped to their creator by the query (that is what
 // the field means, not a permission check), and every other row is returned to
-// everyone. Whether the caller may RUN one is answered by RunQuickAction.
+// everyone. Whether the caller may RUN one is answered by RunQuickAction. The
+// creator is matched against quickActionViewer, never the raw user id, because
+// a task token's user id is its runtime owner.
 func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -476,8 +502,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	viewerUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
+	if _, ok := parseUUIDOrBadRequest(w, userID, "user id"); !ok {
 		return
 	}
 
@@ -485,7 +510,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ListQuickActions(r.Context(), db.ListQuickActionsParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
-		ViewerID:        viewerUUID,
+		ViewerID:        h.quickActionViewer(r, userID, wsUUID),
 	})
 	if err != nil {
 		slog.Warn("list quick actions failed", append(logger.RequestAttrs(r), "error", err)...)

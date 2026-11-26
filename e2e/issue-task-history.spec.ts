@@ -49,7 +49,7 @@ test("issue loads compact runs until Runs requests full own or subtree history",
       const url = new URL(response.url());
       return isIssueTasks(url) && url.searchParams.get("view") === "timeline";
     });
-    await page.goto(`/${workspace.slug}/issues/${issue.id}`);
+    await page.goto(`/${workspace.slug}/issues/${issue.identifier}`);
     const compact = await (await compactResponse).json();
     expect(compact).toHaveLength(1);
     expect(compact[0].result).toEqual({ comment: "Inline run summary" });

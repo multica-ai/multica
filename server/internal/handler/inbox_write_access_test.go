@@ -1,12 +1,20 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/inboxread"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -201,4 +209,146 @@ func TestDeleteInboxItemIsHumanOnly(t *testing.T) {
 	if remaining != 0 {
 		t.Fatal("human delete left the notification in place")
 	}
+}
+
+// A task credential is bound to one workspace. When the owner triggered it
+// and belongs to other workspaces too, the cross-workspace summary must not
+// carry those workspaces' IDs or unread counts back to the agent, while the
+// owner's own credential still sees every workspace. The inbox read guard
+// coalesces concurrent summary requests per user, so the agent and the owner
+// are lined up to share one query, in both arrival orders: whichever of them
+// starts the shared query, each gets only what its credential allows.
+func TestUnreadInboxSummaryTaskCredentialStaysInBoundWorkspace(t *testing.T) {
+	f := newInboxWriteFixture(t)
+	other := newInboxWriteFixture(t)
+	f.item(t)
+	other.item(t)
+	token := f.taskToken(t, testUserID)
+
+	for _, agentFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("agent first=%v", agentFirst), func(t *testing.T) {
+			gate := make(chan struct{})
+			starter := &gatedSummaryStarter{inner: testPool, gate: gate, blocked: make(chan struct{})}
+			h := *testHandler
+			h.InboxReads = inboxread.New(inboxread.Config{Concurrency: 2})
+			h.TxStarter = starter
+			asAgent := middleware.Auth(h.Queries, nil, nil, nil)(
+				middleware.RequireWorkspaceMember(h.Queries)(http.HandlerFunc(h.UnreadInboxSummary)))
+			asOwner := middleware.RequireWorkspaceMember(h.Queries)(http.HandlerFunc(h.UnreadInboxSummary))
+			agentRequest := func() *http.Request {
+				return testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/inbox/unread-summary", nil),
+					"Authorization", "Bearer "+token, "X-Workspace-ID", f.workspaceID)
+			}
+			ownerRequest := func() *http.Request {
+				return inboxRequest(http.MethodGet, "/api/inbox/unread-summary", f.workspaceID)
+			}
+			serve := func(handler http.Handler, req *http.Request) <-chan *httptest.ResponseRecorder {
+				done := make(chan *httptest.ResponseRecorder, 1)
+				go func() {
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					done <- rec
+				}()
+				return done
+			}
+			// joined waits until n callers are inside the pending follow-up
+			// generation, counted under the guard's admission lock.
+			joined := func(n int) {
+				t.Helper()
+				deadline := time.Now().Add(2 * time.Second)
+				for h.InboxReads.PendingSummaryCallers(testUserID) != n {
+					if time.Now().After(deadline) {
+						t.Fatalf("pending summary callers = %d, want %d", h.InboxReads.PendingSummaryCallers(testUserID), n)
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}
+
+			// An owner request occupies the running query, so the next two
+			// requests queue into one shared follow-up query.
+			warmUp := serve(asOwner, ownerRequest())
+			select {
+			case <-starter.blocked:
+			case rec := <-warmUp:
+				t.Fatalf("warm-up summary finished before its query was held: %d %s", rec.Code, rec.Body.String())
+			case <-time.After(5 * time.Second):
+				t.Fatal("warm-up summary query never started")
+			}
+			var agentDone, ownerDone <-chan *httptest.ResponseRecorder
+			if agentFirst {
+				agentDone = serve(asAgent, agentRequest())
+				joined(1)
+				ownerDone = serve(asOwner, ownerRequest())
+			} else {
+				ownerDone = serve(asOwner, ownerRequest())
+				joined(1)
+				agentDone = serve(asAgent, agentRequest())
+			}
+			joined(2)
+			close(gate)
+
+			summaryOf := func(name string, done <-chan *httptest.ResponseRecorder) map[string]int64 {
+				t.Helper()
+				rec := <-done
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s summary status = %d: %s", name, rec.Code, rec.Body.String())
+				}
+				var rows []InboxWorkspaceUnreadResponse
+				if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+					t.Fatalf("%s summary: %v", name, err)
+				}
+				counts := make(map[string]int64, len(rows))
+				for _, row := range rows {
+					counts[row.WorkspaceID] = row.Count
+				}
+				return counts
+			}
+			agentView := summaryOf("agent", agentDone)
+			if len(agentView) != 1 || agentView[f.workspaceID] != 1 {
+				t.Fatalf("task credential summary = %v; want only bound workspace %s with 1 unread", agentView, f.workspaceID)
+			}
+			for name, done := range map[string]<-chan *httptest.ResponseRecorder{"owner": ownerDone, "warm-up owner": warmUp} {
+				if view := summaryOf(name, done); view[f.workspaceID] != 1 || view[other.workspaceID] != 1 {
+					t.Fatalf("%s summary = %v; want both workspaces", name, view)
+				}
+			}
+			if queries := starter.queries.Load(); queries != 2 {
+				t.Fatalf("summary queries = %d; want 2, the agent and owner sharing one", queries)
+			}
+		})
+	}
+}
+
+// gatedSummaryStarter holds every inbox read query until gate closes, and
+// counts them. Begin itself is not held: it runs under a short setup budget.
+type gatedSummaryStarter struct {
+	inner   txStarter
+	gate    <-chan struct{}
+	blocked chan struct{}
+	once    sync.Once
+	queries atomic.Int32
+}
+
+func (s *gatedSummaryStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return gatedSummaryTx{Tx: tx, starter: s}, nil
+}
+
+type gatedSummaryTx struct {
+	pgx.Tx
+	starter *gatedSummaryStarter
+}
+
+func (tx gatedSummaryTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	tx.starter.queries.Add(1)
+	tx.starter.once.Do(func() { close(tx.starter.blocked) })
+	select {
+	case <-tx.starter.gate:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return tx.Tx.Query(ctx, sql, args...)
 }

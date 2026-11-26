@@ -7,7 +7,7 @@ import type { Editor } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { canAssignAgentToIssue, useIsGuest } from "@multica/core/permissions";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
@@ -191,10 +191,12 @@ export function useQuickActionMenu(
   const queryClient = useQueryClient();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
-  const hasIssueContext = enabled && wsId !== "" && !!issueId;
+  // Quick actions run agents, which a guest (MUL-9420) cannot.
+  const guest = useIsGuest(wsId);
+  const hasIssueContext = enabled && wsId !== "" && !!issueId && !guest;
   const { data } = useQuery({
     ...quickActionListOptions(wsId),
-    enabled: enabled && wsId !== "",
+    enabled: enabled && wsId !== "" && !guest,
   });
   const { data: issue } = useQuery({
     ...issueDetailOptions(wsId, issueId ?? ""),

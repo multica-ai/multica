@@ -42,7 +42,7 @@ Sélectionnez une colonne et choisissez ce qui se passe quand une tâche y entre
 </Step>
 <Step>
 
-Pour une étape confiée à un agent, écrivez ce qu’il doit faire, puis choisissez **Une fois terminé, passer à** (la colonne suivante si vous ne choisissez rien) et **En cas de rejet, renvoyer à** (quand cette étape juge le travail reçu insuffisant et qu’il doit être repris). Si l’étape ne peut pas continuer pour une raison extérieure, utilisez **Blocked** plutôt que le renvoi.
+Pour une étape confiée à un agent, écrivez ce qu’il doit faire, puis choisissez **Une fois terminé, passer à** (si vous ne choisissez rien, la colonne suivante, en sautant les colonnes de clôture comme Won't Fix ; une colonne Terminé ou Fermée ne mène nulle part par défaut) et **En cas de rejet, renvoyer à** (quand cette étape juge le travail reçu insuffisant et qu’il doit être repris). Si l’étape ne peut pas continuer pour une raison extérieure, utilisez **Blocked** plutôt que le renvoi ; l’étape renvoie la tâche à la place seulement si le workflow n’a pas de colonne Blocked, ou si elle est elle-même une colonne Terminé ou Fermée.
 
 </Step>
 <Step>
@@ -87,8 +87,6 @@ Les administrateurs peuvent aussi configurer un passage de relais depuis le tabl
 Retirer une colonne peut vous demander de choisir un nouveau statut pour les tâches qui s’y trouvent. Les autres restent en place et ce déplacement ne lance pas d’agent. La bibliothèque de statuts, sous la liste des workflows, permet de modifier les noms et les couleurs ; ces changements s’appliquent partout où le statut est utilisé.
 
 Pour supprimer un workflow, passez d’abord les projets qui l’utilisent à un autre workflow. Les tâches gardent leur statut actuel.
-
-Si **Paramètres** ne contient pas **Workflows**, la fonctionnalité n’est pas encore disponible dans cet espace de travail ; les statuts se gèrent toujours dans **Paramètres → États des tâches**.
 
 ## Guides associés
 

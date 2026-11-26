@@ -174,7 +174,6 @@ const STATUS: Entry[] = [
 const SHAPE: Entry[] = [
   ["radius", "Base corner radius. Every `rounded-*` step and component radius below derives from it."],
   ["surface-shadow", "Resting shadow of cards and the page."],
-  ["surface-card-shadow", "Outline and shadow of borderless cards on the page canvas, like the issue sidebar's."],
   ["floating-shadow", "Dialogs and sheets."],
   ["menu-shadow", "Menus, selects and popovers."],
   ["tooltip", "Tooltip fill (dark in both modes)."],
@@ -242,7 +241,7 @@ const CONTROLS: Entry[] = [
   ["switch-unchecked-thumb", "Thumb of a switch that is off.", "var(--background)", "var(--foreground)"],
   ["switch-border-color", "Outline of a switch, on or off.", "transparent"],
   ["popover-radius", "Popovers.", "var(--radius)"],
-  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
+  ["floating-border-color", "Hairline around layers that float over the page: menus, popovers, select lists, floating panels, dialogs and alert dialogs.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

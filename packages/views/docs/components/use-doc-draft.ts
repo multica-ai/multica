@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { getCurrentWsId } from "@multica/core/platform";
 import {
   docKeys,
+  isDocNotFound,
   isDocRevisionConflict,
   setDocDraft,
   removeDocDraft,
@@ -21,7 +22,12 @@ const fromDoc = (doc: Doc): DocDraft => ({
   baseContent: doc.content,
   baseRevision: doc.revision,
 });
-export function useDocDraft(doc: Doc) {
+/**
+ * The doc as edited through the API: a local draft, saved after a pause and
+ * when the page goes away. `enabled` is false while the doc is (or may be)
+ * edited live, when the shared document saves the body: nothing is sent then.
+ */
+export function useDocDraft(doc: Doc, enabled = true) {
   const wsId = useWorkspaceId();
   const key = `${wsId}:${doc.id}`;
   const draft = useDocDraftStore((s) => s.draft.entries[key]);
@@ -38,6 +44,11 @@ export function useDocDraft(doc: Doc) {
   // before the parent passes the refreshed `doc`, so falling back to the prop
   // would briefly hand the editor the pre-save content and reset its caret.
   const savedDoc = useRef<Doc | null>(null);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  // The server trims titles. Keep what was typed in the field, so a pause
+  // after a space does not join the next word to the previous one.
+  const typedTitle = useRef<{ typed: string; saved: string } | null>(null);
   const latestDoc =
     savedDoc.current && savedDoc.current.revision > doc.revision
       ? savedDoc.current
@@ -55,7 +66,7 @@ export function useDocDraft(doc: Doc) {
       // Child editor cleanup can still publish its final pending update.
       // StrictMode's effect replay remounts before this microtask runs.
       queueMicrotask(() => {
-        if (!alive.current && statusRef.current === "saved")
+        if (!alive.current && enabledRef.current && statusRef.current === "saved")
           void saveRef.current();
       });
     };
@@ -73,9 +84,13 @@ export function useDocDraft(doc: Doc) {
         setDocDraft(key, { ...fromDoc(doc), backup: current.backup });
     }
   }, [doc, key]);
-  const value = draft ?? fromDoc(latestDoc);
+  const stored = draft ?? fromDoc(latestDoc);
   const dirty =
-    value.title !== value.baseTitle || value.content !== value.baseContent;
+    stored.title !== stored.baseTitle || stored.content !== stored.baseContent;
+  const value =
+    typedTitle.current?.saved === stored.title
+      ? { ...stored, title: typedTitle.current.typed }
+      : stored;
   const save = async () => {
     const sent = useDocDraftStore.getState().draft.entries[key];
     if (
@@ -102,6 +117,8 @@ export function useDocDraft(doc: Doc) {
       }
       qc.setQueryData(docKeys.detail(wsId, doc.id), updated);
       savedDoc.current = updated;
+      if (current.title === sent.title && updated.title !== sent.title)
+        typedTitle.current = { typed: sent.title, saved: updated.title };
       const next = {
         ...current,
         title: current.title === sent.title ? updated.title : current.title,
@@ -125,26 +142,28 @@ export function useDocDraft(doc: Doc) {
         return;
       }
       updateStatus(isDocRevisionConflict(error) ? "conflict" : "error");
-      if (isDocRevisionConflict(error))
+      // A doc deleted elsewhere answers 404: refetch so the page says so.
+      if (isDocRevisionConflict(error) || isDocNotFound(error))
         void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, doc.id) });
     } finally {
       saving.current = false;
       // Edits made during the request still need saving after navigation.
-      if (saved && !alive.current) void save();
+      if (saved && !alive.current && enabledRef.current) void save();
     }
   };
   saveRef.current = save;
   useEffect(() => {
-    if (!dirty || status !== "saved") return;
+    if (!enabled || !draft || !dirty || status !== "saved") return;
     const timer = setTimeout(() => {
-      void save();
+      void saveRef.current();
     }, 1500);
     return () => clearTimeout(timer);
-  });
+  }, [enabled, draft, dirty, status]);
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
     if (!inScope()) return;
     const current =
       useDocDraftStore.getState().draft.entries[key] ?? fromDoc(latestDoc);
+    if (patch.title !== undefined) typedTitle.current = null;
     setDocDraft(key, { ...current, ...patch });
   };
   const reload = async () => {
@@ -164,5 +183,16 @@ export function useDocDraft(doc: Doc) {
       if (inScope()) updateStatus("error");
     }
   };
-  return { draft: value, status, dirty, change, retry: save, reload };
+  /** Keeps unsaved edits as a read-only backup instead of saving them: they
+   *  were made against an older copy, and the live document has moved on. */
+  const setAside = () => {
+    const current = useDocDraftStore.getState().draft.entries[key];
+    if (!current || !inScope()) return;
+    if (current.title === current.baseTitle && current.content === current.baseContent) return;
+    setDocDraft(key, {
+      ...fromDoc(latestDoc),
+      backup: { title: current.title, content: current.content },
+    });
+  };
+  return { draft: value, status, dirty, change, retry: save, reload, setAside };
 }

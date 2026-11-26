@@ -11,16 +11,20 @@
  * screen, and how the page stalled on the way (Long Animation Frames). See
  * `lib/frame-metrics.ts` for the exact clock and `lib/core-dataset.ts` for the
  * data. Opt in with PERF_SCENARIO=core-paths (both) or core-issue/core-inbox.
+ * PERF_PLATFORM=desktop runs the same steps in the Electron renderer
+ * (`lib/perf-target.ts`, launched by `scripts/perf-desktop.mjs`).
  */
-import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
+import { expect, test, type CDPSession, type Request } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { dirname } from "node:path";
 import {
-  installFrameMetrics, interactionLatency, lastClick, lastInput, median, pageNow, quantile, settle, stallsBetween,
+  interactionLatency, lastClick, lastInput, median, pageNow, quantile, settle, stallsBetween,
   type StallSummary,
 } from "./lib/frame-metrics";
 import { DETAIL_ISSUES, ensureDataset, perfApi, resetInbox, type Manifest } from "./lib/core-dataset";
+import { perfTarget, PLATFORM, type Sample, type Target } from "./lib/perf-target";
+import { detailSelector, inboxStorage, openInbox, switchTo, waitForIssue } from "./lib/core-steps";
 
 const scenario = process.env.PERF_SCENARIO ?? "";
 const runIssue = scenario === "core-paths" || scenario === "core-issue";
@@ -54,6 +58,7 @@ test.describe.configure({ mode: "serial" });
 
 let manifest: Manifest;
 let token: string;
+let target: Target;
 const report: { issue: Record<string, unknown>[]; inbox: Record<string, unknown>[] } = { issue: [], inbox: [] };
 
 test.beforeAll(async () => {
@@ -65,16 +70,18 @@ test.beforeAll(async () => {
   manifest = await ensureDataset(api);
 });
 
-test.afterAll(async ({ browser }) => {
-  if (!manifest || !process.env.PERF_REPORT_PATH) return;
+test.afterAll(async () => {
+  if (!manifest || !target || !process.env.PERF_REPORT_PATH) return;
   const path = process.env.PERF_REPORT_PATH;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify({
     ref: process.env.PERF_REF ?? null,
     label: process.env.PERF_LABEL ?? null,
+    kind: "core-paths",
+    platform: PLATFORM,
     dataset: { version: manifest.version, digest: manifest.digest, counts: manifest.counts },
     environment: {
-      browser: browser.version(), viewport: `${VIEWPORT.width}x${VIEWPORT.height}`, cpu_throttle: CPU_THROTTLE,
+      browser: await target.version(), viewport: `${VIEWPORT.width}x${VIEWPORT.height}`, cpu_throttle: CPU_THROTTLE,
       cpu: cpus()[0]?.model, cores: cpus().length, load_1m_end: loadavg()[0], repeats: REPEATS,
       inbox_rows: INBOX_ROWS, inbox_until: INBOX_UNTIL,
     },
@@ -83,16 +90,9 @@ test.afterAll(async ({ browser }) => {
   }, null, 2));
 });
 
-async function openContext(browser: Browser): Promise<{ context: BrowserContext; page: Page; cdp: CDPSession; errors: string[] }> {
-  const context = await browser.newContext({ viewport: VIEWPORT, locale: "en-US", colorScheme: "light" });
-  const page = await context.newPage();
-  await installFrameMetrics(page, token);
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Performance.enable");
-  if (CPU_THROTTLE > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  return { context, page, cdp, errors };
+/** A fresh sample: a new browser context on the web, a cleared and reloaded renderer on desktop. */
+async function newSample(storage?: Record<string, string>): Promise<Sample> {
+  return target.newSample({ token, viewport: VIEWPORT, cpuThrottle: CPU_THROTTLE, storage });
 }
 
 /** Main-thread task time so far (ms), from the renderer's own counters. */
@@ -114,49 +114,25 @@ function summarizeToggles(toggles: Toggle[]) {
   };
 }
 
-const detailSelector = '[data-mc="issue-detail"][data-view="page"]';
-
-/** Resolves with page-clock marks once the issue's title and the target comment are on screen. */
-async function waitForIssue(page: Page, title: string, commentId: string, mode: "mounted" | "in-view" | "title") {
-  const handle = await page.waitForFunction(({ title, commentId, mode, detailSelector }) => {
-    const marks = window.__corePerf.marks;
-    const details = [...document.querySelectorAll(detailSelector)];
-    const detail = details.find((d) => d.querySelector('[data-mc="issue-title"]')?.textContent?.includes(title));
-    if (!detail) return false;
-    marks.title ??= performance.now();
-    if (mode === "title") return { title: marks.title, content: marks.title };
-    const root = detail.querySelector<HTMLElement>("[data-tab-scroll-root]");
-    const target = root?.querySelector<HTMLElement>(`[data-comment-content="${commentId}"]`);
-    if (!root || !target || !target.textContent?.trim()) return false;
-    const row = target.closest("[data-virtual-thread-mounted]");
-    if (row?.getAttribute("data-virtual-thread-mounted") === "false") return false;
-    const box = target.getBoundingClientRect();
-    if (box.height === 0) return false;
-    if (mode === "in-view") {
-      const view = root.getBoundingClientRect();
-      if (!(box.bottom > view.top && box.top < view.bottom)) return false;
-    }
-    marks.content ??= performance.now();
-    return { title: marks.title, content: marks.content };
-  }, { title, commentId, mode, detailSelector }, { polling: "raf", timeout: 60_000 });
-  return (await handle.jsonValue()) as { title: number; content: number };
-}
-
 test("open, scroll and toggle the sidebar on a big issue", async ({ browser }) => {
   test.skip(!runIssue, "issue scenario not selected");
   test.setTimeout(1_800_000);
+  target ??= await perfTarget(browser, token);
   const keys = DETAIL_ISSUES.filter((key) => !process.env.PERF_ISSUES || process.env.PERF_ISSUES.split(",").includes(key));
   for (const key of keys) {
     const issue = manifest.issues[key]!;
     for (let round = -WARMUP; round < REPEATS; round++) {
-      const { context, page, cdp, errors } = await openContext(browser);
+      const sample = await newSample();
+      const { page, cdp, errors } = sample;
+      let apiRequests = 0;
+      let imagesFetched = 0;
+      const onRequest = (request: Request) => { if (new URL(request.url()).pathname.startsWith("/api/")) apiRequests++; };
+      const onFinished = (request: Request) => { if (/\/api\/attachments\/[^/]+\/download/.test(request.url())) imagesFetched++; };
       try {
-        let apiRequests = 0;
-        let imagesFetched = 0;
-        page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/")) apiRequests++; });
-        page.on("requestfinished", (request) => { if (/\/api\/attachments\/[^/]+\/download/.test(request.url())) imagesFetched++; });
-        await page.goto(`/${manifest.workspace.slug}/issues/${issue.id}`, { waitUntil: "commit" });
-        const marks = await waitForIssue(page, issue.title, issue.firstCommentId, "mounted");
+        page.on("request", onRequest);
+        page.on("requestfinished", onFinished);
+        await sample.open(`/${manifest.workspace.slug}/issues/${issue.id}`);
+        const marks = await waitForIssue(page, issue.title, issue.firstCommentId, "first-screen");
         await settle(page, LOAD_TAIL_MS);
         const load = await stallsBetween(page, 0, await pageNow(page));
         const requestsAtLoad = apiRequests;
@@ -236,7 +212,9 @@ test("open, scroll and toggle the sidebar on a big issue", async ({ browser }) =
           console.log(JSON.stringify(record));
         }
       } finally {
-        await context.close();
+        page.off("request", onRequest);
+        page.off("requestfinished", onFinished);
+        await sample.close();
       }
     }
   }
@@ -245,40 +223,22 @@ test("open, scroll and toggle the sidebar on a big issue", async ({ browser }) =
 test("switch between Inbox rows in the Work panel", async ({ browser }) => {
   test.skip(!runInbox, "inbox scenario not selected");
   test.setTimeout(1_800_000);
+  target ??= await perfTarget(browser, token);
   const sequence: { key: string; phase: "first-visit" | "revisit" }[] = manifest.inbox.slice(0, 20).map((n) => ({ key: n.key, phase: "first-visit" }));
   for (let i = 0; i < 10; i++) sequence.push({ key: manifest.inbox[i % 5]!.key, phase: "revisit" });
 
   for (let round = -WARMUP; round < REPEATS; round++) {
     await resetInbox(manifest);
-    const { context, page, errors } = await openContext(browser);
+    const sample = await newSample(inboxStorage(manifest.workspace.slug));
+    const { page, cdp, errors } = sample;
     try {
-      await page.addInitScript((slug) => {
-        localStorage.setItem(`multica_sidebar_tree:${slug}`, JSON.stringify({ state: { inboxSettings: { limit: 20 } }, version: 0 }));
-      }, manifest.workspace.slug);
-      await page.goto(`/${manifest.workspace.slug}/issues`);
-      const rows = page.locator("li[data-inbox-row]");
-      await expect(rows.first()).toBeVisible({ timeout: 60_000 });
-      const firstTitle = manifest.issues[manifest.inbox[0]!.key]!.title;
-      await expect(rows.filter({ hasText: firstTitle })).toHaveCount(1);
-      if (INBOX_ROWS === "all") {
-        const showMore = page.getByRole("button", { name: /^Show \d+ more/ }).first();
-        const hidden = Number((await showMore.textContent())?.match(/\d+/)?.[0] ?? 0);
-        expect(hidden, "the Inbox section hides hundreds of rows").toBeGreaterThan(500);
-        await showMore.click();
-        // A virtualized list mounts only the rows near the viewport, so the
-        // expansion is read from the toggle rather than from the row count.
-        await expect(page.getByRole("button", { name: "Show fewer" }).first()).toHaveAttribute("aria-expanded", "true");
-      }
-      await expect.poll(() => rows.count(), "the Inbox section shows the twenty measured rows").toBeGreaterThanOrEqual(20);
-      await settle(page, 2000);
+      const rows = await openInbox(sample, manifest, INBOX_ROWS);
       const mountedRows = await rows.count();
 
       const switches: Record<string, unknown>[] = [];
       for (const [step, { key, phase }] of sequence.entries()) {
         const issue = manifest.issues[key]!;
-        await page.evaluate(() => { window.__corePerf.marks = {}; });
-        await rows.filter({ hasText: issue.title }).locator("a").first().click();
-        const marks = await waitForIssue(page, issue.title, issue.targetCommentId, INBOX_UNTIL === "title" ? "title" : "in-view");
+        const marks = await switchTo(page, rows, issue, INBOX_UNTIL === "title" ? "title" : "in-view");
         const click = await lastClick(page);
         await settle(page, SWITCH_DWELL_MS);
         const end = await pageNow(page);
@@ -289,10 +249,8 @@ test("switch between Inbox rows in the Work panel", async ({ browser }) => {
           title_ms: Math.round(marks.title - click), ready_ms: Math.round(marks.content - click), ...stalls,
         });
       }
-      const session = await context.newCDPSession(page);
-      await session.send("HeapProfiler.collectGarbage");
-      const heap = (await session.send("Performance.enable"), await session.send("Performance.getMetrics"))
-        .metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0;
+      await cdp.send("HeapProfiler.collectGarbage");
+      const heap = (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0;
       const domNodes = await page.evaluate(() => document.getElementsByTagName("*").length);
       expect(errors).toEqual([]);
       if (round >= 0) {
@@ -301,7 +259,7 @@ test("switch between Inbox rows in the Work panel", async ({ browser }) => {
         console.log(JSON.stringify({ round, ready_ms: switches.map((s) => s.ready_ms), heap_mb_after_gc: record.heap_mb_after_gc }));
       }
     } finally {
-      await context.close();
+      await sample.close();
     }
   }
 });

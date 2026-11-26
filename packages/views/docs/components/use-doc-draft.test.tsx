@@ -105,6 +105,28 @@ it("saves after the debounce while the editor stays mounted", async () => {
   });
 });
 
+it("saves after the last edit even when the editor rerenders", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Edited" }));
+
+  for (let elapsed = 500; elapsed < 1500; elapsed += 500) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    view.rerender();
+    expect(api.updateDoc).not.toHaveBeenCalled();
+  }
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(api.updateDoc).toHaveBeenCalledExactlyOnceWith(doc.id, {
+    title: doc.title,
+    content: "Edited",
+    baseRevision: 1,
+  });
+});
+
 it("saves the last edit when navigating away during the debounce", async () => {
   const view = mount();
   act(() => view.result.current.change({ content: "Edited" }));
@@ -359,4 +381,93 @@ it("keeps showing the saved content while the doc prop catches up", async () => 
     content: "Edited at the end",
     baseRevision: 2,
   });
+});
+
+it("keeps a space typed at the end of the title after the server saves it trimmed", async () => {
+  // The API trims titles. Pausing after a space must not drop it from the
+  // field, or the next word typed joins the previous one.
+  vi.mocked(api.updateDoc).mockImplementation(async (_id, data) => ({
+    ...doc,
+    ...data,
+    title: (data.title ?? doc.title).trim(),
+    revision: data.baseRevision + 1,
+    versionCount: data.baseRevision + 1,
+  }));
+  const view = mount();
+  act(() => view.result.current.change({ title: "Release " }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenCalledTimes(1);
+  expect(view.result.current.draft.title).toBe("Release ");
+  expect(view.result.current.dirty).toBe(false);
+
+  // The trimmed title is saved: nothing is sent again while the field rests.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).toHaveBeenCalledTimes(1);
+
+  // A body edit keeps the space too.
+  act(() => view.result.current.change({ content: "Body" }));
+  expect(view.result.current.draft.title).toBe("Release ");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenLastCalledWith(doc.id, {
+    title: "Release",
+    content: "Body",
+    baseRevision: 2,
+  });
+  expect(view.result.current.draft.title).toBe("Release ");
+
+  act(() => view.result.current.change({ title: "Release notes" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenLastCalledWith(doc.id, {
+    title: "Release notes",
+    content: "Body",
+    baseRevision: 3,
+  });
+  expect(view.result.current.draft.title).toBe("Release notes");
+});
+
+it("sends nothing while the doc is edited live, not even on exit", async () => {
+  const client = new QueryClient();
+  setDocDraft("ws-review:doc-review", {
+    title: doc.title,
+    content: "Left over from an earlier solo session",
+    baseTitle: doc.title,
+    baseContent: doc.content,
+    baseRevision: 1,
+  });
+  const view = renderHook(() => useDocDraft(doc, false), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  view.unmount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
+});
+
+it("sets unsaved edits aside as a backup instead of saving them", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Stale edit" }));
+  act(() => view.result.current.setAside());
+  expect(view.result.current.dirty).toBe(false);
+  expect(useDocDraftStore.getState().draft.entries["ws-review:doc-review"]).toMatchObject({
+    content: doc.content,
+    backup: { title: doc.title, content: "Stale edit" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).not.toHaveBeenCalled();
 });

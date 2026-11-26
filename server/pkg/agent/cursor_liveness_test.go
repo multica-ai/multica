@@ -115,6 +115,11 @@ func runFakeCursorStream(mode string) {
 				if _, err := os.Stat(gate); err == nil {
 					break
 				}
+				// A test that failed before opening the gate has removed its
+				// temp dir; exit instead of waiting forever outside its cleanup.
+				if _, err := os.Stat(filepath.Dir(gate)); err != nil {
+					return
+				}
 				time.Sleep(5 * time.Millisecond)
 			}
 		}
@@ -230,6 +235,9 @@ func TestCursorBackgroundLifecycle(t *testing.T) {
 	}
 	for _, mode := range []string{"natural", "budget", "multiple", "finish", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode != "natural" {
+				requireCursorBackgroundOwnership(t)
+			}
 			self, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)

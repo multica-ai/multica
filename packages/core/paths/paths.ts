@@ -14,6 +14,28 @@
 
 const encode = (id: string) => encodeURIComponent(id);
 
+declare const issueRouteRefBrand: unique symbol;
+
+/**
+ * The `{segment}` of an `/{ws}/issues/{segment}` link: the issue's identifier
+ * (`MUL-123`), or its UUID only when the identifier is unknown. The issue page
+ * rewrites a UUID address to the identifier once the issue loads, and on web
+ * that rewrite mounts the page and refetches the issue a second time.
+ *
+ * Branded so a bare `issue.id` cannot reach `issueDetail`: build one with
+ * `issueRouteRef`, or with `useIssueRouteRef` (`@multica/core/issues/canonical-id`)
+ * when only the UUID is at hand.
+ */
+export type IssueRouteRef = string & { readonly [issueRouteRefBrand]: true };
+
+/**
+ * The route segment for an issue. `identifier` is a required key so a caller
+ * that has none says so with `identifier: null`.
+ */
+export function issueRouteRef(issue: { id: string; identifier: string | null | undefined }): IssueRouteRef {
+  return (issue.identifier || issue.id) as IssueRouteRef;
+}
+
 /**
  * `?focus=` token that scrolls the agent's General settings to its
  * conversation-starters editor and flashes it. Lives here because it is URL
@@ -41,12 +63,12 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    issueDetail: (ref: IssueRouteRef) => `${ws}/issues/${encode(ref)}`,
     // Opens the newest upload of the deliverable named `filename` on this
     // issue. Addresses the file by name, not by attachment id, so the link
     // keeps pointing at the latest version as new ones are uploaded.
-    issueDeliverable: (id: string, filename: string) =>
-      `${ws}/issues/${encode(id)}/deliverables/${encode(filename)}`,
+    issueDeliverable: (ref: IssueRouteRef, filename: string) =>
+      `${ws}/issues/${encode(ref)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
@@ -91,6 +113,8 @@ function workspaceScoped(slug: string) {
     docFolder: (id: string) => `${ws}/docs/folders/${encode(id)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
+    apps: () => `${ws}/apps`,
+    appDetail: (toolkitSlug: string) => `${ws}/apps/${encode(toolkitSlug)}`,
     settings: () => `${ws}/settings`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };

@@ -63,10 +63,12 @@ SET status = sqlc.arg('status')::text, updated_at = now()
 WHERE connected_account_id = sqlc.arg('connected_account_id')::text AND status <> 'revoked';
 
 -- name: ListUserComposioConnectionsAnyStatus :many
--- A member's personal accounts for the app list: active and expired.
+-- A member's personal accounts in one workspace for the app list: active and
+-- expired.
 SELECT * FROM user_composio_connection
 WHERE user_id = $1 AND status <> 'revoked'
-ORDER BY connected_at DESC;
+  AND (workspace_id = sqlc.arg('workspace_id')::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL), connected_at DESC;
 
 -- name: ListAgentApps :many
 SELECT * FROM agent_app
@@ -179,8 +181,11 @@ WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
 RETURNING *;
 
 -- name: ListPendingAppActionRequestsForApprover :many
+-- Requests waiting on the person, and for an admin also every request for a
+-- team account, which any admin answers.
 SELECT * FROM app_action_request
-WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
+WHERE workspace_id = $1 AND status = 'pending'
+  AND (approver_user_id = $2 OR (sqlc.arg('as_admin')::bool AND kind = 'connect' AND account_scope = 'team'))
 ORDER BY created_at
 LIMIT 200;
 
@@ -194,7 +199,8 @@ SET status = $3,
     decided_by = $4,
     decided_at = now(),
     updated_at = now()
-WHERE id = $1 AND workspace_id = $2 AND status = 'pending' AND approver_user_id = $4
+WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
+  AND (approver_user_id = $4 OR (sqlc.arg('as_admin')::bool AND kind = 'connect' AND account_scope = 'team'))
 RETURNING *;
 
 -- name: SetAppActionRequestOutcome :one
@@ -224,6 +230,7 @@ SET reminded_at = now(), updated_at = now()
 WHERE id IN (
     SELECT r.id FROM app_action_request r
     WHERE r.status = 'pending' AND r.reminded_at IS NULL
+      AND NOT (r.kind = 'connect' AND r.account_scope = 'team')
       AND r.expires_at <= now() + interval '2 hours'
       AND r.expires_at > now()
     ORDER BY r.expires_at
@@ -259,9 +266,9 @@ WHERE workspace_id = $1
 INSERT INTO app_tool_call (
     workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by,
     account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class,
-    outcome, request_id, error
+    outcome, request_id, error, metered_period_start
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 );
 
 -- name: ListTeamAppToolCalls :many
@@ -341,8 +348,67 @@ LIMIT 500;
 -- Connection requests a member is asked to answer for one app; resolved when
 -- they finish connecting it.
 SELECT * FROM app_action_request
-WHERE approver_user_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+WHERE workspace_id = $1 AND approver_user_id = $2 AND toolkit_slug = $3 AND kind = 'connect'
   AND status = 'pending' AND account_scope = 'personal';
+
+-- name: ListPendingTeamConnectRequests :many
+-- Everything waiting for the workspace's team account for one app: agents'
+-- requests and members' asks. Connecting the account answers them all.
+SELECT * FROM app_action_request
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+  AND account_scope = 'team' AND status = 'pending'
+ORDER BY created_at
+LIMIT 500;
+
+-- name: FindPendingTeamAsk :one
+-- A member's own open ask for a team account, made outside any run.
+SELECT * FROM app_action_request
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND approver_user_id = $3
+  AND task_id IS NULL AND kind = 'connect' AND account_scope = 'team' AND status = 'pending'
+LIMIT 1;
+
+-- name: ArchiveAppRequestInbox :many
+-- A withdrawn or decided team account request leaves the admins nothing to
+-- answer. keep_recipient_id, when set, is the admin who decided it: their
+-- item stays where they acted on it.
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
+  AND details->>'request_id' = sqlc.arg('request_id')::text
+  AND recipient_id IS DISTINCT FROM sqlc.narg('keep_recipient_id')::uuid
+RETURNING recipient_type, recipient_id;
+
+-- name: ListAppRequestInboxHolders :many
+-- The members holding an open notification for any of the requests.
+SELECT DISTINCT recipient_id FROM inbox_item
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND NOT archived
+  AND recipient_type = 'member'
+  AND details->>'request_id' = ANY(sqlc.arg('request_ids')::text[]);
+
+-- name: ListTeamConnectNotifiedRecipients :many
+-- Of recipient_ids, the members who already hold an open notification for a
+-- pending request for this app's team account, so are not told again.
+SELECT DISTINCT i.recipient_id FROM inbox_item i
+JOIN app_action_request r ON r.id = (i.details->>'request_id')::uuid
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member'
+  AND i.recipient_id = ANY(sqlc.arg('recipient_ids')::uuid[])
+  AND i.type = 'app_connect_requested' AND NOT i.archived
+  AND r.workspace_id = $1 AND r.toolkit_slug = $2 AND r.kind = 'connect'
+  AND r.account_scope = 'team' AND r.status = 'pending';
+
+-- name: ListTeamAccountRequestSummaries :many
+-- One row per app with open requests for a team account: who is waiting and
+-- which agents, oldest first. A person or agent waiting on several requests
+-- repeats; callers drop the repeats.
+SELECT toolkit_slug,
+       array_agg(approver_user_id ORDER BY created_at)::uuid[] AS requested_by,
+       COALESCE(array_agg(approver_user_id ORDER BY created_at) FILTER (WHERE task_id IS NULL), '{}')::uuid[] AS asked_by,
+       COALESCE(array_agg(agent_id ORDER BY created_at) FILTER (WHERE agent_id IS NOT NULL), '{}')::uuid[] AS agent_ids,
+       max(created_at)::timestamptz AS last_requested_at
+FROM app_action_request
+WHERE workspace_id = $1 AND kind = 'connect' AND account_scope = 'team' AND status = 'pending'
+GROUP BY toolkit_slug
+ORDER BY max(created_at) DESC
+LIMIT 500;
 
 -- name: AppendQueuedTaskHandoffNote :execrows
 -- Folds a decision into a run that has not been claimed yet, so approving a
@@ -358,3 +424,25 @@ WHERE id = $1 AND status = 'queued';
 -- Keeps the legacy allowlist column in step with agent_app for older clients.
 UPDATE agent SET composio_toolkit_allowlist = sqlc.arg('slugs')::text[], updated_at = now()
 WHERE id = $1;
+
+-- name: ListPersonalAppAgentsForUser :many
+-- Agents in every workspace the user belongs to that act through the
+-- personal account of whoever triggers them for one app. The caller still
+-- filters by who may run each agent.
+SELECT a.id, a.name, a.workspace_id, w.name AS workspace_name
+FROM agent_app aa
+JOIN agent a ON a.id = aa.agent_id AND a.workspace_id = aa.workspace_id
+JOIN member m ON m.workspace_id = aa.workspace_id AND m.user_id = sqlc.arg('user_id')
+JOIN workspace w ON w.id = aa.workspace_id
+WHERE aa.toolkit_slug = sqlc.arg('toolkit_slug')
+  AND aa.account_scope = 'personal'
+  AND a.archived_at IS NULL
+  AND a.kind = 'user'
+ORDER BY w.name, a.name, a.id
+LIMIT 200;
+
+-- name: ListAgentsWithActiveTasksForOriginator :many
+SELECT DISTINCT agent_id FROM agent_task_queue
+WHERE agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND originator_user_id = sqlc.arg('originator_user_id')
+  AND status IN ('queued', 'dispatched', 'running');

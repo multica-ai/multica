@@ -26,6 +26,7 @@ vi.mock("@multica/core/properties", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
@@ -104,7 +105,7 @@ describe("ListRow side peek", () => {
     expect(navigation.push).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("link"));
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
   });
 
   it("opens on a plain click when side preview is preferred", () => {

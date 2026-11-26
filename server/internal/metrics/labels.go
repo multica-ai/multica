@@ -109,6 +109,9 @@ var businessMetricLabels = map[string][]string{
 	"multica_entitlement_decision_total":               {labelGate, labelAction, labelReason},
 	"multica_entitlement_version_regression_total":     {},
 	"multica_autopilot_quota_decision_total":           {labelAction, labelSource, labelResult},
+	"multica_storage_quota_sum_total":                  {labelSource, labelResult},
+	"multica_storage_quota_sum_duration_seconds":       {labelSource},
+	"multica_storage_quota_decision_total":             {labelAction, labelSource, labelResult},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{

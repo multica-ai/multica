@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,11 @@ const defaultStateTTL = 5 * time.Minute
 // connect/list requests does not hammer /auth_configs.
 const defaultAuthCacheTTL = 5 * time.Minute
 
+// toolkitCacheTTL bounds how long Composio's toolkit list is reused. Fetching
+// it pages through well over a thousand toolkits, which makes the Apps page
+// wait seconds for its catalog; the list itself changes rarely.
+const toolkitCacheTTL = 5 * time.Minute
+
 // maxAuthConfigPages / maxToolkitPages cap the paginated fetch-all loops so a
 // pathological or buggy upstream cursor cannot spin forever. At limit=1000 per
 // page these cover far more than any real project / catalog.
@@ -87,7 +93,8 @@ type SDK interface {
 // satisfies it; tests use an in-memory fake.
 type Store interface {
 	UpsertUserComposioConnection(ctx context.Context, arg db.UpsertUserComposioConnectionParams) (db.UserComposioConnection, error)
-	ListActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
+	ListActiveUserComposioConnections(ctx context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error)
+	ListAllActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
 	GetUserComposioConnection(ctx context.Context, arg db.GetUserComposioConnectionParams) (db.UserComposioConnection, error)
 	MarkUserComposioConnectionRevoked(ctx context.Context, arg db.MarkUserComposioConnectionRevokedParams) error
 }
@@ -129,17 +136,26 @@ type Service struct {
 	stateTTL    time.Duration
 	now         func() time.Time
 
-	// authCache holds the resolved toolkit_slug → auth_config_id map for the
+	// authCache holds the resolved toolkit_slug → auth config map for the
 	// project. It is rebuilt from Composio's /auth_configs endpoint on first
 	// use and whenever authCacheExp has passed; authCacheMu guards both fields.
 	authCacheMu  sync.Mutex
-	authCache    map[string]string
+	authCache    map[string]authConfigRef
 	authCacheExp time.Time
 	authCacheTTL time.Duration
-	// authCreateMu serializes creating managed auth configs so two concurrent
+	// authCreateMu serializes creating auth configs so two concurrent
 	// connects for the same new app do not register two configs.
 	authCreateMu sync.Mutex
-	tools        toolCache
+	// toolkitCache holds Composio's unfiltered toolkit list. Filtering by
+	// the auth config map still runs on every read, so a newly created auth
+	// config shows without waiting for this cache.
+	toolkitCacheMu  sync.Mutex
+	toolkitCache    []sdk.Toolkit
+	toolkitCacheExp time.Time
+	tools           toolCache
+	// teamConnectGate decides whether a completed team handshake may write
+	// its account; see SetTeamConnectGate.
+	teamConnectGate TeamConnectGate
 }
 
 // NewService validates its inputs and returns a ready Service. It errors when a
@@ -217,7 +233,58 @@ type ToolkitView struct {
 	Name        string `json:"name"`
 	LogoURL     string `json:"logo,omitempty"`
 	Category    string `json:"category,omitempty"`
+	CategoryID  string `json:"category_id,omitempty"`
 	Connectable bool   `json:"connectable"`
+	// ConnectMethod is how a member connects an account: ConnectOAuth or
+	// ConnectKey.
+	ConnectMethod string `json:"connect_method,omitempty"`
+}
+
+// How a member connects an account for a toolkit.
+const (
+	// ConnectOAuth signs in on the provider's consent screen.
+	ConnectOAuth = "oauth"
+	// ConnectKey enters an API key, token, or username and password on the
+	// hosted Connect Link page.
+	ConnectKey = "key"
+)
+
+// userKeySchemes are the auth schemes whose credentials a member enters
+// themselves on the Connect Link page, in order of preference.
+var userKeySchemes = []string{"API_KEY", "BEARER_TOKEN", "BASIC"}
+
+// userKeyScheme returns the scheme to register for a toolkit a member connects
+// with their own credentials, or "" when it offers none. A scheme whose auth
+// config needs a project-level value does not count: Multica has none to give.
+func userKeyScheme(tk sdk.Toolkit) string {
+	if tk.NoAuth {
+		return ""
+	}
+	modes := tk.AuthModes()
+	for _, want := range userKeySchemes {
+		for _, have := range modes {
+			if strings.EqualFold(strings.TrimSpace(have), want) && !tk.NeedsProjectCredentials(want) {
+				return want
+			}
+		}
+	}
+	return ""
+}
+
+// connectMethodFor reports how members connect a toolkit: through its
+// existing auth config when the project has one, else through the config
+// ensureAuthConfig would create.
+func connectMethodFor(tk sdk.Toolkit, existing authConfigRef) string {
+	if existing.ID != "" && existing.Scheme != "" {
+		if slices.ContainsFunc(userKeySchemes, func(s string) bool { return strings.EqualFold(s, existing.Scheme) }) {
+			return ConnectKey
+		}
+		return ConnectOAuth
+	}
+	if existing.ID == "" && len(tk.ComposioManagedAuthSchemes) == 0 && userKeyScheme(tk) != "" {
+		return ConnectKey
+	}
+	return ConnectOAuth
 }
 
 func toolkitLogoURL(slug, upstreamLogoURL string) string {
@@ -243,12 +310,13 @@ func toolkitLogoURL(slug, upstreamLogoURL string) string {
 // The composio_user_id sent to Composio is the Multica user id verbatim — the
 // invariant the rest of the integration relies on.
 func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitSlug string) (string, error) {
-	return s.BeginConnectReturning(ctx, userID, toolkitSlug, "")
+	return s.BeginConnectReturning(ctx, userID, pgtype.UUID{}, toolkitSlug, "")
 }
 
-// BeginConnectReturning is BeginConnect whose callback sends the browser back
-// to returnTo, an app path; an unsafe or empty path keeps the settings page.
-func (s *Service) BeginConnectReturning(ctx context.Context, userID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
+// BeginConnectReturning is BeginConnect for an account that belongs to
+// workspaceID, whose callback sends the browser back to returnTo, an app
+// path; an unsafe or empty path keeps the settings page.
+func (s *Service) BeginConnectReturning(ctx context.Context, userID, workspaceID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
 	if !SafeReturnPath(returnTo) {
 		returnTo = ""
 	}
@@ -265,13 +333,17 @@ func (s *Service) BeginConnectReturning(ctx context.Context, userID pgtype.UUID,
 	}
 	composioUserID := util.UUIDToString(userID)
 
-	state, err := signState(s.secret, stateClaims{
+	claims := stateClaims{
 		UserID:       composioUserID,
 		ToolkitSlug:  slug,
 		AuthConfigID: authConfigID,
 		ReturnTo:     returnTo,
 		Exp:          s.now().Add(s.stateTTL).Unix(),
-	})
+	}
+	if workspaceID.Valid {
+		claims.PersonalWorkspaceID = util.UUIDToString(workspaceID)
+	}
+	state, err := signState(s.secret, claims)
 	if err != nil {
 		return "", fmt.Errorf("composio: sign state: %w", err)
 	}
@@ -304,9 +376,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	if err != nil {
 		return CallbackResult{}, err
 	}
-	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ReturnTo: claims.ReturnTo}
+	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ConnectedBy: claims.ConnectedBy, ReturnTo: claims.ReturnTo}
 	if claims.WorkspaceID == "" {
-		result.UserID = claims.UserID
+		result.UserID, result.PersonalWorkspaceID = claims.UserID, claims.PersonalWorkspaceID
 	}
 
 	if !strings.EqualFold(strings.TrimSpace(status), "success") {
@@ -346,8 +418,15 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 		return result, err
 	}
 
+	var workspaceID pgtype.UUID
+	if claims.PersonalWorkspaceID != "" {
+		if workspaceID, err = util.ParseUUID(claims.PersonalWorkspaceID); err != nil {
+			return result, fmt.Errorf("composio: state has invalid workspace id: %w", err)
+		}
+	}
 	if _, err := s.store.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
 		UserID:             userID,
+		WorkspaceID:        workspaceID,
 		ToolkitSlug:        claims.ToolkitSlug,
 		AuthConfigID:       authConfigID,
 		ConnectedAccountID: connectedAccountID,
@@ -359,9 +438,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	return result, nil
 }
 
-// ListConnections returns the user's active connections.
+// ListConnections returns the user's active connections in every workspace.
 func (s *Service) ListConnections(ctx context.Context, userID pgtype.UUID) ([]Connection, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +521,7 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectionID pgtype.UU
 // a multi-account request shape. Until then, newest-wins keeps behavior
 // deterministic rather than order-dependent.
 func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MCPSession, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -482,6 +561,21 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 // route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
 func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
+	return s.callbackRedirect(result, success, "")
+}
+
+// CallbackFeatureLockedReason marks a failed connect the workspace's plan
+// refused (ErrTeamConnectRefused), so the page can show the upgrade prompt
+// instead of asking the user to retry. Clients that do not know the reason
+// still see the ordinary failure.
+const CallbackFeatureLockedReason = "feature_locked"
+
+// CallbackRedirectFailure is the failure redirect carrying a reason.
+func (s *Service) CallbackRedirectFailure(result CallbackResult, reason string) string {
+	return s.callbackRedirect(result, false, reason)
+}
+
+func (s *Service) callbackRedirect(result CallbackResult, success bool, reason string) string {
 	if result.ReturnTo != "" && SafeReturnPath(result.ReturnTo) {
 		path, rawQuery, _ := strings.Cut(result.ReturnTo, "?")
 		q, err := url.ParseQuery(rawQuery)
@@ -492,6 +586,9 @@ func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
 			q.Set("app_connected", result.ToolkitSlug)
 		} else {
 			q.Set("app_connect_error", result.ToolkitSlug)
+			if reason != "" {
+				q.Set("app_connect_error_reason", reason)
+			}
 		}
 		return s.frontendURL + path + "?" + q.Encode()
 	}
@@ -501,6 +598,9 @@ func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
 		q.Set("connected", result.ToolkitSlug)
 	} else {
 		q.Set("error", "composio_connect_failed")
+		if reason != "" {
+			q.Set("reason", reason)
+		}
 	}
 	if result.Team() {
 		q.Set("scope", "team")
@@ -523,14 +623,14 @@ func rowToConnection(row db.UserComposioConnection) Connection {
 }
 
 // ListToolkits returns only the Composio toolkits the project can actually
-// connect (those with an enabled auth config). Toolkits with no enabled auth
-// config are filtered out entirely (MUL-4009): a card the user can't act on is
-// noise, and the old "Not configured" grey label existed only to avoid a dead
-// button — dropping the entry removes the need for it. It fetches all pages
-// (capped by maxToolkitPages) so the UI gets the complete connectable list in
-// one call; the catalog is a few hundred entries, well within a single JSON
-// response. Every returned entry has Connectable == true, preserving Composio's
-// usage order.
+// connect: those with an enabled auth config, a Composio-managed app, or a
+// credential each member enters themselves (API key, token, Basic), for which
+// ensureAuthConfig registers a config on first connect. The rest are filtered
+// out entirely (MUL-4009): a card the user can't act on is noise. It fetches
+// all pages (capped by maxToolkitPages) so the UI gets the complete
+// connectable list in one call; the catalog is under two thousand entries,
+// well within a single JSON response. Every returned entry has Connectable ==
+// true, preserving Composio's usage order.
 //
 // Unlike the previous behavior, a resolver error is NOT masked into an
 // everything-not-connectable catalog: with filtering in place that would render
@@ -545,9 +645,60 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 	if err != nil {
 		return nil, fmt.Errorf("composio: resolve connectable toolkits: %w", err)
 	}
+	_, canCreateKeyConfigs := s.sdk.(customAuthCreator)
+	toolkits, err := s.allToolkits(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	out := []ToolkitView{}
 	seen := make(map[string]struct{})
+	for _, tk := range toolkits {
+		slug := strings.ToLower(strings.TrimSpace(tk.Slug))
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		// Omit toolkits nobody can connect: no enabled auth config, no
+		// Composio-managed app, and no credential a member enters
+		// themselves.
+		existing, hasConfig := connectable[slug]
+		if !hasConfig && len(tk.ComposioManagedAuthSchemes) == 0 &&
+			(!canCreateKeyConfigs || userKeyScheme(tk) == "") {
+			continue
+		}
+		category := tk.PrimaryCategory()
+		out = append(out, ToolkitView{
+			Slug:       tk.Slug,
+			Name:       tk.Name,
+			LogoURL:    toolkitLogoURL(slug, tk.Logo()),
+			Category:   category.Name,
+			CategoryID: category.ID,
+			// Every surfaced toolkit is connectable by construction. The
+			// wire field is kept (see ComposioToolkitResponse) for backward
+			// compatibility with older desktop clients that branch on it.
+			Connectable:   true,
+			ConnectMethod: connectMethodFor(tk, existing),
+		})
+	}
+
+	return out, nil
+}
+
+// allToolkits returns Composio's toolkit list in usage order, from the cache
+// while it is fresh. Like authConfigMap it fetches under the lock and serves
+// a stale list when a refresh fails. The cached slice is replaced, never
+// mutated, so callers may read it freely.
+func (s *Service) allToolkits(ctx context.Context) ([]sdk.Toolkit, error) {
+	s.toolkitCacheMu.Lock()
+	defer s.toolkitCacheMu.Unlock()
+	if s.toolkitCache != nil && s.now().Before(s.toolkitCacheExp) {
+		return s.toolkitCache, nil
+	}
+	toolkits := []sdk.Toolkit{}
 	cursor := ""
 	for page := 0; page < maxToolkitPages; page++ {
 		resp, err := s.sdk.ListToolkits(ctx, sdk.ListToolkitsRequest{
@@ -556,44 +707,20 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 			SortBy: "usage",
 		})
 		if err != nil {
+			if s.toolkitCache != nil {
+				return s.toolkitCache, nil
+			}
 			return nil, fmt.Errorf("composio: list toolkits: %w", err)
 		}
-		for _, tk := range resp.Items {
-			slug := strings.ToLower(strings.TrimSpace(tk.Slug))
-			if slug == "" {
-				continue
-			}
-			if _, dup := seen[slug]; dup {
-				continue
-			}
-			seen[slug] = struct{}{}
-			// Filter out toolkits with no enabled auth config: the user has no
-			// working action for them, so they are omitted from the catalog.
-			if _, canConnect := connectable[slug]; !canConnect && len(tk.ComposioManagedAuthSchemes) == 0 {
-				continue
-			}
-			category := ""
-			if len(tk.Categories) > 0 {
-				category = tk.Categories[0]
-			}
-			out = append(out, ToolkitView{
-				Slug:     tk.Slug,
-				Name:     tk.Name,
-				LogoURL:  toolkitLogoURL(slug, tk.LogoURL),
-				Category: category,
-				// Every surfaced toolkit is connectable by construction. The
-				// wire field is kept (see ComposioToolkitResponse) for backward
-				// compatibility with older desktop clients that branch on it.
-				Connectable: true,
-			})
-		}
+		toolkits = append(toolkits, resp.Items...)
 		if resp.NextCursor == "" {
 			break
 		}
 		cursor = resp.NextCursor
 	}
-
-	return out, nil
+	s.toolkitCache = toolkits
+	s.toolkitCacheExp = s.now().Add(toolkitCacheTTL)
+	return toolkits, nil
 }
 
 // authConfigForToolkit returns the chosen auth_config_id for a toolkit slug, or
@@ -608,16 +735,24 @@ func (s *Service) authConfigForToolkit(ctx context.Context, slug string) (string
 	if err != nil {
 		return "", err
 	}
-	return m[slug], nil
+	return m[slug].ID, nil
 }
 
-// authConfigMap returns the toolkit_slug → auth_config_id map for the project,
+// authConfigRef is the auth config chosen to represent a toolkit.
+type authConfigRef struct {
+	ID string
+	// Scheme is the config's auth scheme as Composio reports it (OAUTH2,
+	// API_KEY, ...); empty when unknown.
+	Scheme string
+}
+
+// authConfigMap returns the toolkit_slug → auth config map for the project,
 // rebuilding it from Composio when the cache is empty or expired. Concurrent
 // callers serialize on authCacheMu; the fetch runs under the lock, which is
 // acceptable for a short-TTL map that is cheap to build and read by a
 // low-traffic settings surface. A new map is assigned on refresh (never mutated
 // in place), so a reference handed to a caller stays safe to read.
-func (s *Service) authConfigMap(ctx context.Context) (map[string]string, error) {
+func (s *Service) authConfigMap(ctx context.Context) (map[string]authConfigRef, error) {
 	s.authCacheMu.Lock()
 	defer s.authCacheMu.Unlock()
 	if s.authCache != nil && s.now().Before(s.authCacheExp) {
@@ -641,15 +776,16 @@ func (s *Service) authConfigMap(ctx context.Context) (map[string]string, error) 
 // during resolution.
 type authCandidate struct {
 	id      string
+	scheme  string
 	managed bool
 	updated string
 }
 
 // fetchAuthConfigMap pages through the project's ENABLED auth configs and
-// reduces them to one chosen auth_config_id per toolkit slug. When a toolkit
+// reduces them to one chosen auth config per toolkit slug. When a toolkit
 // has several (e.g. a Composio-managed one plus a custom white-label one),
 // betterAuthConfig picks the winner.
-func (s *Service) fetchAuthConfigMap(ctx context.Context) (map[string]string, error) {
+func (s *Service) fetchAuthConfigMap(ctx context.Context) (map[string]authConfigRef, error) {
 	best := make(map[string]authCandidate)
 	cursor := ""
 	for page := 0; page < maxAuthConfigPages; page++ {
@@ -669,7 +805,7 @@ func (s *Service) fetchAuthConfigMap(ctx context.Context) (map[string]string, er
 			if slug == "" {
 				continue
 			}
-			cand := authCandidate{id: ac.ID, managed: ac.IsComposioManaged, updated: ac.LastUpdatedAt}
+			cand := authCandidate{id: ac.ID, scheme: ac.AuthScheme, managed: ac.IsComposioManaged, updated: ac.LastUpdatedAt}
 			if cur, ok := best[slug]; !ok || betterAuthConfig(cand, cur) {
 				best[slug] = cand
 			}
@@ -679,9 +815,9 @@ func (s *Service) fetchAuthConfigMap(ctx context.Context) (map[string]string, er
 		}
 		cursor = resp.NextCursor
 	}
-	out := make(map[string]string, len(best))
+	out := make(map[string]authConfigRef, len(best))
 	for slug, c := range best {
-		out[slug] = c.id
+		out[slug] = authConfigRef{ID: c.id, Scheme: c.scheme}
 	}
 	return out, nil
 }
@@ -730,11 +866,7 @@ func (s *Service) verifyAccountOwnership(ctx context.Context, connectedAccountID
 	// config the connect link used. An empty expected value (state missing it,
 	// or a resolver gap) is rejected rather than skipped — skipping is the
 	// fail-open hole that let a cross-toolkit account id be bound here.
-	accountAuthConfigID := acct.AuthConfigID
-	if accountAuthConfigID == "" {
-		accountAuthConfigID = acct.AuthConfig.ID
-	}
-	if expectedAuthConfigID == "" || accountAuthConfigID != expectedAuthConfigID {
+	if expectedAuthConfigID == "" || acct.AuthConfig.ID != expectedAuthConfigID {
 		return ErrAccountVerification
 	}
 	return nil

@@ -22,7 +22,7 @@ from agent credentials. Archive instead; it is reversible.
 ## Read first
 
 ```bash
-multica inbox count --output json                  # unread here and per workspace
+multica inbox count --output json                  # unread in this run's workspace only
 multica inbox list --unread --output json          # active notifications
 multica inbox list --since 1d --issue MUL-123 --output json
 multica inbox list --archived --output json        # archived instead
@@ -45,7 +45,7 @@ still found by `--issue`.
 
 ```bash
 multica inbox read <id>...                  # and the rest of each issue
-multica inbox read --issue MUL-123          # every notification on one issue
+multica inbox read --issue MUL-123          # every notification on one issue, unless it is snoozed
 multica inbox unread <id>...                # only that notification
 multica inbox archive <id>...               # and the rest of each issue
 multica inbox unarchive <id>...

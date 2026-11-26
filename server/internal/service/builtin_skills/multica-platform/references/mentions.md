@@ -44,14 +44,20 @@ blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
 its mention targets. Copy the mention syntax out of code and paste it into
 ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
-One `mention://` form deliberately sits OUTSIDE this parser:
+Two `mention://` forms deliberately sit OUTSIDE this parser. The first is
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group
 above, so the backend never parses it and it can enqueue nothing — it is a
 render-only link every client makes navigable (a chip on web and desktop, an
 ordinary link that opens the project on tap on mobile). That is the whole point:
 a project reference should never be able to start a run. Use it freely to point
-at a project; everything else in this document is about the four types (plus
-`all`) the parser does recognize.
+at a project.
+
+The second is `[Doc Title](mention://doc/<doc-id>)`:
+`doc` is not in the type group either, so a doc link is render-only and
+enqueues nothing. Read the doc it points at with `multica doc get <doc-id>`.
+
+Everything else in this document is about the four types (plus `all`) the
+parser does recognize.
 
 ## Step 1 — look up the UUID
 
@@ -122,10 +128,13 @@ fallbacks — thread parent / conversation owner. Members can use `@all` to
 announce without requesting work from the assignee.
 
 For AGENT-authored comments, member mentions and `@all` do NOT suppress the
-squad leader fallback. A worker's result on a squad-assigned issue still
-returns to the assigned leader; in a guest squad's delegation thread, it still
-returns to the guest leader. People receive notifications as usual, and the
-existing leader self-trigger protection and pending-run dedup still apply.
+squad leader fallback, with one exception: when a member of a squad in `direct`
+handoff mode comments on that squad's issue and mentions a person but no agent,
+nobody is woken (see `references/squads.md`, Handoff mode). Otherwise a
+worker's result on a squad-assigned issue still returns to the assigned leader;
+in a guest squad's delegation thread, it still returns to the guest leader.
+People receive notifications as usual, and the existing leader self-trigger
+protection and pending-run dedup still apply.
 
 For any author, an EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
@@ -303,7 +312,8 @@ Correct:
 @all broadcast: `[@all](mention://all/all) heads up` — notifies human workspace
 members and runs no specific agent by itself. It suppresses the assignee
 auto-trigger only for member authors; worker-agent comments still return to
-the assigned or guest squad leader as described above.
+the assigned or guest squad leader as described above, except a person handoff
+in a `direct`-mode squad.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.

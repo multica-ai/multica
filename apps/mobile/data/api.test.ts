@@ -26,6 +26,20 @@ describe("api.listAgents", () => {
   });
 });
 
+// The server leaves guests out of the member list unless the caller declares
+// it can render them; useIsGuest reads the caller's own row from that list.
+describe("api.listMembers", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("advertises the guest capability", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listMembers("ws-1");
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["X-Client-Capabilities"]).toBe("workspace-guests-v1");
+  });
+});
+
 describe("api.deleteComment", () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
 

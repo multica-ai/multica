@@ -88,6 +88,43 @@ const noInstance = Object.assign([notReadyT, {} as I18n, false] as [AnyT, I18n, 
 });
 const noInstanceStore = { subscribe: () => () => {}, revision: 0 };
 
+/** The key path a selector reads (`$ => $.a.b` → "a\u0001b"), or null for anything else. */
+function selectorPath(selector: (root: unknown) => unknown): string | null {
+  const path: string[] = [];
+  const recorder: object = new Proxy(Object.create(null), {
+    get(_target, key) {
+      if (typeof key === "symbol") return undefined;
+      path.push(key);
+      return recorder;
+    },
+  });
+  return selector(recorder) === recorder && path.length > 0 ? path.join("\u0001") : null;
+}
+
+/**
+ * A namespace's `t` with its plain lookups remembered. i18next resolves every
+ * call from scratch, copying its options several times, and a page mount
+ * makes thousands of `t($ => $.x.y)` calls (MUL-9609). A call with nothing
+ * but a selector depends only on the language, namespace and resources, and
+ * the store drops this `t` whenever any of them changes (`languageChanged`).
+ * Calls with options (counts, values, defaults) always go to i18next.
+ */
+function memoizeSelectorCalls(t: AnyT): AnyT {
+  const results = new Map<string, unknown>();
+  const memoized: AnyT = (...args: unknown[]) => {
+    const [key] = args;
+    if (args.length !== 1 || typeof key !== "function") return t(...args);
+    const path = selectorPath(key as (root: unknown) => unknown);
+    if (path === null) return t(...args);
+    if (results.has(path)) return results.get(path);
+    const result = t(...args);
+    results.set(path, result);
+    return result;
+  };
+  // react-i18next and callers read the fixed language and namespace off `t`.
+  return Object.assign(memoized, { lng: (t as { lng?: unknown }).lng, ns: (t as { ns?: unknown }).ns, keyPrefix: (t as { keyPrefix?: unknown }).keyPrefix });
+}
+
 function useTranslationShared(ns?: string) {
   const context = useContext(I18nContext);
   const i18n = context?.i18n ?? (getI18n() as I18n | undefined);
@@ -99,7 +136,7 @@ function useTranslationShared(ns?: string) {
     if (!i18n || !("fixedT" in store)) return noInstance;
     let t = store.fixedT.get(namespace);
     if (!t) {
-      t = i18n.getFixedT(null, namespace as never) as unknown as AnyT;
+      t = memoizeSelectorCalls(i18n.getFixedT(null, namespace as never) as unknown as AnyT);
       store.fixedT.set(namespace, t);
     }
     const result = [t, store.view, true] as [AnyT, I18n, boolean] & { t: AnyT; i18n: I18n; ready: boolean };

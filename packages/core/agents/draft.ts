@@ -9,9 +9,9 @@ import type {
   RuntimeDevice,
 } from "../types";
 import {
-  AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
+  isAgentDescriptionWithinLimit,
 } from "./constants";
 
 // Declared with the other agent wire types so `StoredAgentDraft` can name it
@@ -95,13 +95,12 @@ export function applyDraftModelChange(
 }
 
 /**
- * Mirrors the server's `utf8.RuneCountInString` check (agent.go:1013). The
- * textarea's `maxLength` covers typing and pasting, but a duplicated agent or
- * an AI-builder draft can seed a longer value programmatically — without this
- * the create button would submit into a guaranteed 400.
+ * Mirrors the server's `utf8.RuneCountInString` check. The textarea has no
+ * hard cap (a UTF-16 `maxLength` would disagree with the counter on emoji),
+ * so this gate is what keeps the create button from submitting into a 400.
  */
 export function isDraftDescriptionWithinLimit(description: string): boolean {
-  return [...description].length <= AGENT_DESCRIPTION_MAX_LENGTH;
+  return isAgentDescriptionWithinLimit(description);
 }
 
 export function buildInvocationTargets(
@@ -125,6 +124,7 @@ export function buildInvocationTargets(
 
 export function deriveDuplicateAccess(
   agent: Pick<Agent, "permission_mode" | "invocation_targets">,
+  canAddInvocationMembers = true,
 ): Pick<AgentDraft, "permissionScope" | "memberIds" | "teamIds"> {
   if (agent.permission_mode !== "public_to") {
     return {
@@ -149,7 +149,7 @@ export function deriveDuplicateAccess(
   const teamIds = targets
     .filter((target) => target.target_type === "team" && target.target_id)
     .map((target) => target.target_id as string);
-  if (memberIds.length === 0 && teamIds.length === 0) {
+  if ((memberIds.length === 0 && teamIds.length === 0) || !canAddInvocationMembers) {
     return {
       permissionScope: "private",
       memberIds: new Set(),
@@ -181,6 +181,12 @@ export function buildDuplicateDraft(
     currentUserId: string | null;
     fallbackRuntimeId: string;
     nameSuffix: string;
+    /**
+     * False when the plan lacks `agent_invocation_members`: a member list on
+     * the new agent would be refused, so the copy starts as "Only me".
+     * Defaults to true.
+     */
+    canAddInvocationMembers?: boolean;
   },
 ): AgentDraft {
   const keepsRuntime =
@@ -205,7 +211,7 @@ export function buildDuplicateDraft(
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
     skillIds: new Set(source.skills.map((skill) => skill.id)),
-    ...deriveDuplicateAccess(source),
+    ...deriveDuplicateAccess(source, options.canAddInvocationMembers ?? true),
   };
 }
 

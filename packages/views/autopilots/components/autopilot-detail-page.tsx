@@ -19,6 +19,7 @@ import {
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -204,6 +205,7 @@ function RunRow({
 }) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
+  const issueRef = useIssueRouteRef(useWorkspaceId(), run.issue_id ?? "");
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
@@ -277,7 +279,7 @@ function RunRow({
 
   if (run.issue_id) {
     return (
-      <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
+      <AppLink href={wsPaths.issueDetail(issueRef)} className={cn(rowClass, "cursor-pointer")}>
         {content}
       </AppLink>
     );
@@ -358,7 +360,17 @@ function SkippedRunsGroup({
   );
 }
 
-export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
+export function TriggerRow({
+  trigger,
+  autopilotId,
+  canWrite,
+  autopilotActive,
+}: {
+  trigger: AutopilotTrigger;
+  autopilotId: string;
+  canWrite: boolean;
+  autopilotActive: boolean;
+}) {
   const { t, i18n } = useT("autopilots");
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
@@ -490,8 +502,10 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
           {/* A disabled trigger keeps the next_run_at it had — the dispatcher
               filters on `enabled` instead of clearing it — so the row would
               otherwise carry the Disabled badge and a promise to run at 09:00
-              in the same breath. The badge is the true one. */}
-          {trigger.next_run_at && trigger.enabled && (
+              in the same breath. The badge is the true one. Pausing the
+              autopilot keeps its triggers enabled, but the scheduler skips
+              them all, so a paused autopilot shows no next run either. */}
+          {trigger.next_run_at && trigger.enabled && autopilotActive && (
             <span className="mr-1 hidden text-caption tabular-nums text-muted-foreground sm:inline">
               {t(($) => $.trigger_row.next_label, {
                 date: formatInTimeZone(
@@ -1293,7 +1307,13 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           ) : (
             <ObjectSectionCard>
               {triggers.map((trig) => (
-                <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} canWrite={canWrite} />
+                <TriggerRow
+                  key={trig.id}
+                  trigger={trig}
+                  autopilotId={autopilotId}
+                  canWrite={canWrite}
+                  autopilotActive={autopilot.status === "active"}
+                />
               ))}
             </ObjectSectionCard>
           )}

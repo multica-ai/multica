@@ -40,6 +40,22 @@ func createIfEligible(ctx context.Context, queries *db.Queries, params db.Create
 		}
 		item.SnoozedUntil = pgtype.Timestamptz{}
 		item.SnoozedAt = pgtype.Timestamptz{}
+		return item, true, nil
+	}
+	if item.SnoozedUntil.Valid {
+		// The joining row took the issue's return rank (CreateInboxItem).
+		// Failing here leaves two rows ranked by the return until the inbox
+		// limit's NormalizeInboxReturns settles it; the row itself is fine.
+		if err := queries.HandInboxReturnToRow(ctx, db.HandInboxReturnToRowParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+			KeepID:        item.ID,
+		}); err != nil {
+			slog.Warn("inbox: failed to hand the snooze's return rank to a joining row",
+				"type", item.Type, "error", err)
+		}
 	}
 	return item, true, nil
 }

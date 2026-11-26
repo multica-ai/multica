@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { EMPTY_PROJECT } from "@multica/core/api/schemas";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
 import { getProjectFoldersExtension, registerProjectFoldersExtension } from "@multica/views/extensions";
@@ -70,7 +71,10 @@ beforeEach(() => {
   setApiInstance({ request } as unknown as ApiClient);
   useFolderDialogStore.getState().close();
 });
-afterEach(() => qc.clear());
+afterEach(() => {
+  qc.clear();
+  useSidebarTreeStore.setState({ projectOrder: [] });
+});
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -124,6 +128,17 @@ it("moves a project between folders from its menu", async () => {
       body: JSON.stringify({ project_id: "p1", folder_id: "f2" }),
     }),
   );
+});
+
+it("lists folders in the menu in the sidebar's manual order", async () => {
+  useSidebarTreeStore.setState({ projectOrder: ["p1", "f2", "f1"] });
+  const user = userEvent.setup();
+  renderInMenu(<ProjectMenuItems project={project} />);
+  await user.click(screen.getByRole("button", { name: "Open" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Move to folder" }));
+  await screen.findByRole("menuitem", { name: "Sales" });
+  const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
+  expect(names.indexOf("Sales")).toBeLessThan(names.indexOf("Growth"));
 });
 
 it("creates a folder from the add menu", async () => {

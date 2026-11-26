@@ -51,7 +51,7 @@ describe("InboxSnoozeMenu", () => {
       "1 daytomorrow 2:20 PM",
       "3 daysThu 2:20 PM",
       "1 weekNov 23, 2:20 PM",
-      "Pick a date and time…",
+      "Pick a date and time...",
     ]);
   });
 

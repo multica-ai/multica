@@ -28,6 +28,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { toast } from "sonner";
@@ -53,7 +54,15 @@ type SelectedMember = {
 // How many chips we show inline before collapsing the tail into "+N".
 const CHIP_DISPLAY_LIMIT = 3;
 
-export function CreateSquadModal({ onClose }: { onClose: () => void }) {
+export function CreateSquadModal({
+  open = true,
+  onClose,
+  onOpenChangeComplete,
+}: {
+  open?: boolean;
+  onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
@@ -141,7 +150,11 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85%]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
           <DialogTitle className="text-title-sm font-semibold">
@@ -184,13 +197,13 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
                   <Label className="text-caption text-muted-foreground">
                     {t(($) => $.create_squad.description_label)}
                   </Label>
-                  <Input
-                    type="text"
+                  <Textarea
+                    rows={3}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={t(($) => $.create_squad.description_placeholder)}
                     maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
-                    className="mt-1"
+                    className="mt-1 field-sizing-fixed resize-y"
                   />
                   <div className="mt-1">
                     <CharCounter

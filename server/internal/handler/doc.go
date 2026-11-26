@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -27,6 +29,22 @@ const (
 var (
 	validDocActions = []string{"edit", "restore"}
 )
+
+func (h *Handler) docsV1Enabled(ctx context.Context) bool {
+	return featureflags.DocsV1Enabled(ctx, h.FeatureFlags)
+}
+
+// RequireDocsV1 answers 403 docs_disabled while the docs_v1 flag is off, so
+// the API, the CLI and agents cannot reach Docs before it launches.
+func (h *Handler) RequireDocsV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.docsV1Enabled(r.Context()) {
+			writeFeatureDisabled(w, "docs_disabled", "Docs is not enabled")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 type DocSummaryResponse struct {
 	ID            string  `json:"id"`
@@ -70,9 +88,17 @@ type DocVersionResponse struct {
 	ActionRef  *int32  `json:"action_ref"`
 	TaskID     *string `json:"task_id"`
 	IssueID    *string `json:"issue_id"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
-	Content    *string `json:"content,omitempty"`
+	// DocThreadID and DocThreadQuote name the discussion an agent was
+	// answering when it made this edit; null when it was not, or when that
+	// discussion has since been deleted.
+	DocThreadID    *string `json:"doc_thread_id"`
+	DocThreadQuote *string `json:"doc_thread_quote"`
+	// Contributors lists everyone whose edits the version carries. Versions
+	// saved before live co-editing have none; their author is the one.
+	Contributors []DocContributor `json:"contributors"`
+	CreatedAt    string           `json:"created_at"`
+	UpdatedAt    string           `json:"updated_at"`
+	Content      *string          `json:"content,omitempty"`
 }
 
 func docToSummary(d db.Doc) DocSummaryResponse {
@@ -124,18 +150,19 @@ func docFolderToResponse(f db.DocFolder) DocFolderResponse {
 
 func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse {
 	resp := DocVersionResponse{
-		DocID:      uuidToString(v.DocID),
-		Number:     v.Number,
-		Title:      v.Title,
-		AuthorType: v.AuthorType,
-		AuthorID:   uuidToString(v.AuthorID),
-		Message:    v.Message,
-		Action:     v.Action,
-		ActionRef:  int4ToPtr(v.ActionRef),
-		TaskID:     uuidToPtr(v.TaskID),
-		IssueID:    uuidToPtr(v.IssueID),
-		CreatedAt:  timestampToString(v.CreatedAt),
-		UpdatedAt:  timestampToString(v.UpdatedAt),
+		DocID:        uuidToString(v.DocID),
+		Number:       v.Number,
+		Title:        v.Title,
+		AuthorType:   v.AuthorType,
+		AuthorID:     uuidToString(v.AuthorID),
+		Message:      v.Message,
+		Action:       v.Action,
+		ActionRef:    int4ToPtr(v.ActionRef),
+		TaskID:       uuidToPtr(v.TaskID),
+		IssueID:      uuidToPtr(v.IssueID),
+		Contributors: parseDocContributors(v.Contributors),
+		CreatedAt:    timestampToString(v.CreatedAt),
+		UpdatedAt:    timestampToString(v.UpdatedAt),
 	}
 	if withContent {
 		content := v.Content
@@ -145,19 +172,26 @@ func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse 
 }
 
 func docVersionRowToResponse(v db.ListDocVersionsRow) DocVersionResponse {
+	var threadQuote *string
+	if v.DocThreadID.Valid {
+		threadQuote = &v.DocThreadQuote
+	}
 	return DocVersionResponse{
-		DocID:      uuidToString(v.DocID),
-		Number:     v.Number,
-		Title:      v.Title,
-		AuthorType: v.AuthorType,
-		AuthorID:   uuidToString(v.AuthorID),
-		Message:    v.Message,
-		Action:     v.Action,
-		ActionRef:  int4ToPtr(v.ActionRef),
-		TaskID:     uuidToPtr(v.TaskID),
-		IssueID:    uuidToPtr(v.IssueID),
-		CreatedAt:  timestampToString(v.CreatedAt),
-		UpdatedAt:  timestampToString(v.UpdatedAt),
+		DocThreadID:    uuidToPtr(v.DocThreadID),
+		DocThreadQuote: threadQuote,
+		DocID:          uuidToString(v.DocID),
+		Number:         v.Number,
+		Title:          v.Title,
+		AuthorType:     v.AuthorType,
+		AuthorID:       uuidToString(v.AuthorID),
+		Message:        v.Message,
+		Action:         v.Action,
+		ActionRef:      int4ToPtr(v.ActionRef),
+		TaskID:         uuidToPtr(v.TaskID),
+		IssueID:        uuidToPtr(v.IssueID),
+		Contributors:   parseDocContributors(v.Contributors),
+		CreatedAt:      timestampToString(v.CreatedAt),
+		UpdatedAt:      timestampToString(v.UpdatedAt),
 	}
 }
 
@@ -286,13 +320,24 @@ func (h *Handler) ListDocTree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetDoc(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	userID, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
 	doc, ok := h.loadDoc(w, r, wsUUID)
 	if !ok {
 		return
+	}
+	// Agents and the CLI read what people have typed so far. Editors in the
+	// app already see it live, and refetch on every save.
+	if h.Collab != nil {
+		actorType, _ := h.resolveActor(r, userID, workspaceID)
+		if actorType == "agent" || r.URL.Query().Get("flush") == "true" {
+			h.flushDocCollab(r.Context(), doc.ID)
+			if doc, ok = h.loadDoc(w, r, wsUUID); !ok {
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, DocResponse{DocSummaryResponse: docToSummary(doc), Content: doc.Content})
 }
@@ -315,7 +360,10 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip.
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
+	req.Content = sanitizeNullBytes(req.Content)
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocTitle(w, req.Title) || !validateDocContent(w, req.Content) || !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -352,18 +400,23 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
-		DocID:       doc.ID,
-		WorkspaceID: wsUUID,
-		Number:      1,
-		Title:       doc.Title,
-		Content:     doc.Content,
-		AuthorType:  actorType,
-		AuthorID:    parseUUID(actorID),
-		Message:     req.Message,
-		Action:      "create",
-		TaskID:      taskID,
-		IssueID:     issueID,
+		DocID:        doc.ID,
+		WorkspaceID:  wsUUID,
+		Number:       1,
+		Title:        doc.Title,
+		Content:      doc.Content,
+		AuthorType:   actorType,
+		AuthorID:     parseUUID(actorID),
+		Message:      req.Message,
+		Action:       "create",
+		TaskID:       taskID,
+		IssueID:      issueID,
+		Contributors: docContributorsJSON([]DocContributor{{Type: actorType, ID: actorID}}),
 	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create doc")
+		return
+	}
+	if err := recordDocRevision(ctx, qtx, doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create doc")
 		return
 	}
@@ -417,15 +470,20 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Title != nil {
-		trimmed := strings.TrimSpace(*req.Title)
+		trimmed := strings.TrimSpace(sanitizeNullBytes(*req.Title))
 		req.Title = &trimmed
 		if !validateDocTitle(w, trimmed) {
 			return
 		}
 	}
-	if req.Content != nil && !validateDocContent(w, *req.Content) {
-		return
+	if req.Content != nil {
+		content := sanitizeNullBytes(*req.Content)
+		req.Content = &content
+		if !validateDocContent(w, content) {
+			return
+		}
 	}
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -434,6 +492,12 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 	taskID, issueID := h.docTaskContext(r, actorType)
 
 	ctx := r.Context()
+	if h.Collab != nil {
+		actor := h.collabActor(ctx, actorType, actorID)
+		if h.updateDocViaCollab(w, r, wsUUID, docUUID, req, actor, taskID) {
+			return
+		}
+	}
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
@@ -482,42 +546,10 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	// Autosave writes every pause; keep one snapshot per editing stretch
 	// instead of one per pause.
-	merged := false
-	if req.Action == "edit" && req.Message == "" {
-		rows, err := qtx.MergeDocEditIntoVersion(ctx, db.MergeDocEditIntoVersionParams{
-			Title: title, Content: content, DocID: doc.ID, Number: doc.VersionCount,
-			AuthorType: actorType, AuthorID: parseUUID(actorID), TaskID: taskID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save version")
-			return
-		}
-		merged = rows == 1
-	}
-	number := doc.VersionCount
-	if !merged {
-		number++
-		var actionRef pgtype.Int4
-		if req.Action == "restore" {
-			actionRef = pgtype.Int4{Int32: *req.ActionRef, Valid: true}
-		}
-		if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
-			DocID: doc.ID, WorkspaceID: wsUUID, Number: number, Title: title, Content: content,
-			AuthorType: actorType, AuthorID: parseUUID(actorID), Message: req.Message,
-			Action: req.Action, ActionRef: actionRef, TaskID: taskID, IssueID: issueID,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save version")
-			return
-		}
-	}
-	updated, err := qtx.UpdateDocContent(ctx, db.UpdateDocContentParams{
-		Title:         title,
-		Content:       content,
-		VersionCount:  number,
-		UpdatedByType: actorType,
-		UpdatedByID:   parseUUID(actorID),
-		ID:            doc.ID,
-		WorkspaceID:   wsUUID,
+	updated, number, err := commitDocWrite(ctx, qtx, doc, docWrite{
+		title: title, content: content, actorType: actorType, actorID: actorID,
+		message: req.Message, action: req.Action, actionRef: req.ActionRef,
+		taskID: taskID, issueID: issueID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
@@ -595,10 +627,6 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if isMachineCredentialActor(r) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
-		writeError(w, http.StatusForbidden, "only humans can delete docs")
-		return
-	}
 	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "doc id")
 	if !ok {
 		return
@@ -611,12 +639,16 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	q := h.Queries.WithTx(tx)
-	if _, err = q.GetDocForUpdate(ctx, db.GetDocForUpdateParams{ID: id, WorkspaceID: wsUUID}); err != nil {
+	doc, err := q.GetDocForUpdate(ctx, db.GetDocForUpdateParams{ID: id, WorkspaceID: wsUUID})
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, 404, "doc not found")
 		} else {
 			writeError(w, 500, "failed to delete doc")
 		}
+		return
+	}
+	if !h.requireDocDeletionFor(w, r, doc) {
 		return
 	}
 	if err = q.DeleteDoc(ctx, db.DeleteDocParams{ID: id, WorkspaceID: wsUUID}); err != nil {
@@ -627,12 +659,16 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to delete doc")
 		return
 	}
+	// Runs answering the doc's discussions have nothing left to answer.
+	if err := h.TaskService.CancelTasksForDoc(ctx, id); err != nil {
+		slog.Warn("delete doc: cancel doc runs failed", "doc_id", uuidToString(id), "error", err)
+	}
 	h.publish(protocol.EventDocDeleted, workspaceID, actorType, actorID, map[string]any{"doc_id": uuidToString(id)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -646,14 +682,19 @@ func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions := make([]DocVersionResponse, len(rows))
+	issueIDs := make([]pgtype.UUID, len(rows))
 	for i, v := range rows {
 		versions[i] = docVersionRowToResponse(v)
+		issueIDs[i] = v.IssueID
+	}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, issueIDs) {
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -675,7 +716,40 @@ func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, docVersionToResponse(v, true))
+	versions := []DocVersionResponse{docVersionToResponse(v, true)}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, []pgtype.UUID{v.IssueID}) {
+		return
+	}
+	writeJSON(w, http.StatusOK, versions[0])
+}
+
+// hideDocVersionIssues clears issue_id on the versions whose issue sits in a
+// private project the caller cannot see (MUL-8472). The edit and its task_id
+// stay, as a restricted run does in an agent's history. versions and issueIDs
+// are parallel slices. It writes a 500 and returns false when access cannot
+// be resolved.
+func (h *Handler) hideDocVersionIssues(w http.ResponseWriter, r *http.Request, workspaceID string, versions []DocVersionResponse, issueIDs []pgtype.UUID) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	named := make([]pgtype.UUID, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if id.Valid {
+			named = append(named, id)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, named)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	for i, id := range issueIDs {
+		if _, hide := hiddenIssues[id]; hide {
+			versions[i].IssueID = nil
+		}
+	}
+	return true
 }
 
 // --- Folders ---
@@ -704,7 +778,7 @@ func (h *Handler) CreateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}
@@ -765,7 +839,7 @@ func (h *Handler) UpdateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}
@@ -875,11 +949,6 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, _ := h.resolveActor(r, userID, workspaceID)
-	if isMachineCredentialActor(r) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
-		writeError(w, http.StatusForbidden, "only humans can delete folders")
-		return
-	}
 	folderUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "folder id")
 	if !ok {
 		return
@@ -896,12 +965,16 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		return
 	}
-	if _, err := qtx.GetDocFolder(ctx, db.GetDocFolderParams{ID: folderUUID, WorkspaceID: wsUUID}); err != nil {
+	folder, err := qtx.GetDocFolder(ctx, db.GetDocFolderParams{ID: folderUUID, WorkspaceID: wsUUID})
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "folder not found")
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		}
+		return
+	}
+	if !h.requireDocFolderDeletionFor(w, r, folder) {
 		return
 	}
 	children, err := qtx.CountDocFolderChildren(ctx, db.CountDocFolderChildrenParams{WorkspaceID: wsUUID, FolderID: folderUUID})
@@ -921,7 +994,7 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		return
 	}
-	_, actorID := h.resolveActor(r, userID, workspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	h.publish(protocol.EventDocFolderDeleted, workspaceID, actorType, actorID, map[string]any{"folder_id": uuidToString(folderUUID)})
 	w.WriteHeader(http.StatusNoContent)
 }

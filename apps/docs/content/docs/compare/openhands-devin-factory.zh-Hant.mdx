@@ -1,0 +1,61 @@
+---
+title: Multica 與 OpenHands、Devin、Factory 比較
+description: OpenHands、Devin 和 Factory 打造的是程式設計 AI 代理；Multica 是團隊為多個 AI 代理分配、執行和審查工作的工作區，其中也包括 Devin CLI 和 Factory Droid。
+---
+
+OpenHands、Devin 和 Factory 各自打造一個程式設計 AI 代理，以及圍繞它的平台。Multica 不打造 AI 代理。它為團隊提供一個工作區：任務分配給基於 [31 種 AI 程式設計工具](/providers)的 AI 代理，這些 AI 代理執行在團隊連線的電腦上，每次執行都記錄在任務上。Devin CLI 和 Factory Droid 就是其中兩種工具，所以這不一定是二選一。
+
+本頁關於 OpenHands、Devin 和 Factory 的描述來自它們截至 2026 年 11 月的公開文件和定價頁：[OpenHands](https://docs.openhands.dev/enterprise)、[Devin](https://docs.devin.ai/admin/billing/self-serve) 和 [Factory](https://docs.factory.com/remote-control)。最新情況請以它們為準。
+
+## 簡短回答
+
+- **選 Devin 或 Factory**：如果你想要由一家供應商提供 AI 代理和託管的雲端環境，並且願意統一用這家。
+- **選 OpenHands**：如果你想要一個 MIT 授權的 AI 代理，可以修改、自託管，或基於它的 SDK 二次開發。
+- **選 Multica**：如果團隊同時在用多種程式設計工具，例如 Claude Code、Codex、Cursor Agent、Copilot CLI、Devin CLI 或 Factory Droid，並希望把它們當作隊友放在同一個看板上管理，執行在自己的機器上，按 AI 代理控制存取，並設定審查環節。Multica 可以自託管。
+
+## 比較
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| 是什麼 | 為程式設計 AI 代理分配、執行和追蹤工作的工作區 | 開源的程式設計 AI 代理和 SDK，另有 Cloud 和 Enterprise 版本 | Cognition 的 AI 軟體工程師，提供雲端工作階段、CLI 和桌面應用 | 執行其 Droid AI 代理的平台，提供 CLI、桌面端和網頁端 |
+| 自帶程式設計 AI 代理 | 沒有；AI 代理基於你選擇的工具執行 | 有 | 有 | 有 |
+| 同一工作區裡的工具 | 31 種，包括 Devin CLI 和 Factory Droid；不同 AI 代理可以用不同工具 | 自己的 AI 代理；定價頁還寫明可以執行 Codex、Claude 等其他 AI 代理 | Devin | Droid |
+| AI 代理在哪裡執行 | 你連線的電腦：筆電、伺服器、虛擬機 | 本機、Docker 或 Kubernetes、OpenHands Cloud，或自託管的 Enterprise | Devin 的雲端虛擬機，或透過 Devin CLI 在你的電腦上 | 透過 Remote Control 在你的機器上，或在 Factory 託管的 Droid Computers 上 |
+| 工作從哪裡來 | 自己的任務、評論、對話、自動化，以及 Slack、飛書等聊天整合 | Git 託管平台、Jira 和 Slack 整合 | Slack、Linear 等整合；Enterprise 支援 Jira | Factory 應用、CLI 和整合 |
+| 團隊存取控制 | 按 AI 代理設定 Access、工作區角色、訪客、私有專案 | Teams 和 Enterprise 提供多使用者 RBAC | Team 方案提供 SSO 和成本控制 | Business 和 Enterprise 提供管理控制 |
+| 自託管 | 支援，使用 Docker Compose 或 Helm | 支援 | 託管服務；Devin CLI 在本機執行 | Enterprise 提供本地部署選項 |
+| 授權 | 原始碼可用（source-available），在組織內部免費使用 | MIT | 專有 | 專有 |
+| 付費方式 | 內部自託管免費；各工具透過自己的訂閱或 API key 計費 | 開源免費；Teams 和 Enterprise 付費 | 帶用量額度的訂閱方案；Enterprise 按 ACU 計費 | 按席位付費；Enterprise 客製 |
+
+## Multica 是 Devin 的開源替代品嗎？
+
+部分是，差別很重要：
+
+- **Multica 是原始碼可用，不是 OSI 定義的開源。** 它使用 [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE)，即帶附加條件的 Apache License 2.0。在你的組織內部使用免費，包括為整個團隊自託管；作為託管服務提供給他人，或嵌入你出售的產品，需要商業授權。如果你需要 OSI 授權的 AI 代理，OpenHands 是 MIT。
+- **Multica 本身不是自主 AI 代理。** 它涵蓋的是 Devin 團隊側的能力，例如分配工作、跟進進度、審查、執行重複性工作；實際寫程式碼由你已有的 AI 代理完成，例如 Claude Code 或 Codex。
+
+## 什麼時候 OpenHands、Devin 或 Factory 更合適
+
+- 你希望每個任務都有託管的雲端環境，不想為 AI 代理保持機器上線。
+- 你想統一使用一家供應商的 AI 代理、模型和支援合約。
+- 你想基於 SDK 打造自己的 AI 代理產品，這正是 OpenHands Software Agent SDK 的用途。
+- 你的工程師主要在一個 AI 代理自己的應用裡，一次和一個 AI 代理協作。
+
+## 什麼時候 Multica 更合適
+
+- **團隊混用多種工具。** 有人習慣 Claude Code，有人用 Codex、Cursor 或 Copilot。Multica 裡每個 AI 代理各自選擇工具和模型，共用一個看板、一個[收件箱](/inbox)和一個[統計](/analytics)檢視。
+- **你想用已經付費的訂閱。** Multica 用工具自己的登入帳號驅動它們，不轉售模型，也不對 AI 代理算力計費。
+- **AI 代理應該執行在程式碼和金鑰本來所在的地方。** 執行時就是你的筆電、建置伺服器或虛擬機；自託管 Multica 時，工作區資料也留在你的伺服器上。
+- **多人共用這些 AI 代理。** [Access](/agents#權限與-access) 決定誰能執行每個 AI 代理，[小隊](/squads)把工作分給合適的那個，[工作流](/workflows)加上審查環節。見[團隊共享 AI 代理池](/team-agent-pool)。
+- **工作會重複出現。** [自動化](/autopilots)按排程或 webhook 建立並分配任務。
+
+## 在 Multica 裡使用 Devin 或 Factory
+
+Devin CLI（`devin`）和 Factory Droid（`droid`）是 Multica 內建支援的工具。在一臺已連線 Multica 的電腦上安裝並登入 CLI，然後在這個執行時上建立 AI 代理：它像其他 AI 代理一樣接任務、回覆評論、參與審查，用量由工具自己的方案承擔。Devin 的模型別名、Droid 的 Skills 路徑等細節見 [AI 程式設計工具對照](/providers)。OpenHands 目前不是內建工具。
+
+## 相關頁面
+
+- [Multica 與 Linear、Jira 比較](/compare/linear-jira)
+- [Multica 與本機 worktree 管理工具比較](/compare/worktree-managers)
+- [團隊共享 AI 代理池](/team-agent-pool)
+- [安全模型](/security-model)：AI 代理在執行時上能存取什麼。

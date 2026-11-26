@@ -16,6 +16,7 @@ import {
 } from "@multica/core/issue-workflows";
 import { issueLabelsOptions, labelListOptions } from "@multica/core/labels/queries";
 import { useAttachLabelToIssue, useDetachLabel } from "@multica/core/labels/mutations";
+import { takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useModalStore } from "@multica/core/modals";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { selectableProjects } from "@multica/core/projects";
@@ -28,7 +29,7 @@ import { useIssueStatusOptions } from "../../issues/utils/status-options";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { HighlightText } from "../highlight-text";
-import { useIssueTargetWriter, targetIssues } from "../issue-target";
+import { noteInboxBarActionFromPalette, useIssueTargetWriter, targetIssues } from "../issue-target";
 import { scoreRow, scoreText } from "../matching";
 import { usePalette } from "../palette-context";
 import { PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowCheck, RowHint } from "../rows";
@@ -110,6 +111,7 @@ export function IssueStatusPage({ target, query }: { target: IssueTarget; query:
       });
       return;
     }
+    if (single) noteInboxBarActionFromPalette(single.id, { type: "status", status });
     writer.apply({ status });
   };
 
@@ -189,23 +191,32 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
   const isCurrent = (type: string, id: string) => currentType === type && currentId === id;
   const q = query.trim().toLowerCase();
 
-  // Agents ordered: assignable before not, online before offline. Search
-  // keeps that order inside each match tier.
+  // Only actors that can take the issue are listed; agents ordered online
+  // before offline. Search keeps that order inside each match tier.
   const availabilityRank: Record<string, number> = { online: 0, unstable: 1, offline: 2 };
-  const sortedAgents = [...agents].sort((a, b) => {
-    if (a.assignable !== b.assignable) return a.assignable ? -1 : 1;
+  const sortedAgents = agents.filter((entry) => entry.assignable).sort((a, b) => {
     const ra = a.availability ? (availabilityRank[a.availability] ?? 3) : 3;
     const rb = b.availability ? (availabilityRank[b.availability] ?? 3) : 3;
     return ra - rb;
   });
   const visibleAgents = filterByLabel(sortedAgents, q, (e) => e.agent.name);
-  const visibleSquads = filterByLabel(squads, q, (e) => e.squad.name);
+  const visibleSquads = filterByLabel(
+    squads.filter((entry) => entry.assignable),
+    q,
+    (e) => e.squad.name,
+  );
   const visibleMembers = filterByLabel(members, q, (m) => m.name, (m) => [m.email.toLowerCase()]);
   const unassignedLabel = tIssues(($) => $.pickers.assignee.trigger_unassigned);
   const showUnassigned = !q || scoreText(unassignedLabel, q) > 0;
 
   const select = (type: "member" | "agent" | "squad" | null, id: string | null) => {
     palette.close();
+    if (target.kind === "single") {
+      noteInboxBarActionFromPalette(target.issue.id, {
+        type: "assignee",
+        assignee: type && id ? { type, id } : null,
+      });
+    }
     writer.assign(type, id);
   };
 
@@ -237,17 +248,8 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
               name={entry.agent.name}
               query={query}
               showStatusDot
-              disabled={!entry.assignable}
               onSelect={() => select("agent", entry.agent.id)}
-              detail={
-                entry.assignable ? (
-                  <AgentPresenceText availability={entry.availability} runtimeLabel={entry.runtimeLabel} />
-                ) : (
-                  <span className="text-caption text-muted-foreground">
-                    {entry.deniedReason ?? tIssues(($) => $.pickers.assignee.agent_runtime_required)}
-                  </span>
-                )
-              }
+              detail={<AgentPresenceText availability={entry.availability} runtimeLabel={entry.runtimeLabel} />}
               trailing={
                 isCurrent("agent", entry.agent.id) ? (
                   <RowCheck label={t(($) => $.pages.current)} />
@@ -269,15 +271,7 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
               actorId={entry.squad.id}
               name={entry.squad.name}
               query={query}
-              disabled={!entry.runnable}
               onSelect={() => select("squad", entry.squad.id)}
-              detail={
-                entry.runnable ? undefined : (
-                  <span className="text-caption text-muted-foreground">
-                    {tIssues(($) => $.pickers.assignee.squad_runtime_required)}
-                  </span>
-                )
-              }
               trailing={isCurrent("squad", entry.squad.id) ? <RowCheck label={t(($) => $.pages.current)} /> : null}
             />
           ))}
@@ -570,7 +564,8 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
             value={`quick-action:${action.id}`}
             onSelect={() => {
               palette.close();
-              run(action);
+              noteInboxBarActionFromPalette(issue.id, { type: "quick_action", name: action.name });
+              void run(action).then((posted) => posted || takeInboxBarAction(issue.id));
             }}
             className={ROW_CLASS}
           >

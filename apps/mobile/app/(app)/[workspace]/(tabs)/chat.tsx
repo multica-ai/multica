@@ -85,9 +85,8 @@ import {
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import { queuedChatMessages } from "@/lib/chat-queued-messages";
-import {
-  dispatchReasonCode,
-} from "@/lib/dispatch-reason";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
+import { sendFailureMessage } from "@/lib/dispatch-reason";
 import { useT } from "@/lib/i18n";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
@@ -105,20 +104,6 @@ import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 export default function ChatTab() {
   const qc = useQueryClient();
   const { t } = useT("chat");
-  const sendFailureMessage = useCallback((err: unknown) => {
-    switch (dispatchReasonCode(err)) {
-      case "invocation_not_allowed":
-        return t("failure.invocation_not_allowed");
-      case "agent_runtime_required":
-        return t("failure.agent_runtime_required");
-      case "runtime_access_denied":
-        return t("failure.runtime_access_denied", {
-          detail: t("failure.runtime_access_recovery"),
-        });
-      default:
-        return t("failure.default");
-    }
-  }, [t]);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
@@ -328,7 +313,7 @@ export default function ChatTab() {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
-        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err, t));
         throw err;
       }
       if (!sessionId) return;
@@ -401,7 +386,7 @@ export default function ChatTab() {
         // The composer restores the draft on a thrown rejection but says nothing
         // about it, so a revoked-permission 403 used to read as a silent no-op
         // (MUL-6380). Name the cause here: only this layer sees the error body.
-        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err, t));
         throw err;
       }
     },
@@ -413,7 +398,6 @@ export default function ChatTab() {
       runtimeBound,
       ensureSession,
       qc,
-      sendFailureMessage,
       t,
       promoteNewDraft,
       clearDraft,
@@ -467,7 +451,7 @@ export default function ChatTab() {
     if (!activeSession) return;
     Alert.alert(
       t("alerts.delete_title"),
-      activeSession.title || t("sessions.new_chat"),
+      chatSessionDisplayTitle(activeSession.title, t),
       [
         { text: t("common:actions.cancel"), style: "cancel" },
         {

@@ -11,6 +11,7 @@
     "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
+    "apps": "アプリ",
     "settings": "設定",
     "views": "ビュー",
     "docs": "ドキュメント"
@@ -23,6 +24,7 @@
     "member": "メンバー",
     "squad": "スクワッド",
     "skill": "スキル",
+    "app": "アプリ",
     "machine": "マシン",
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
@@ -99,7 +101,7 @@
   },
   "rail": {
     "label": "アプリナビゲーション",
-    "sheet_description": "スペースとワークスペースを切り替えます。",
+    "sheet_description": "ビューとワークスペースを切り替えます。",
     "work": "作業",
     "team": "チーム",
     "chat": "チャット",
@@ -120,7 +122,7 @@
     "reset_order": "デフォルトの順序に戻す",
     "copy_workspace_link": "ワークスペースのリンクをコピー",
     "workspace_meta_other": "{{slug}} · メンバー {{count}} 人",
-    "docs": "ドキュメント"
+    "docs": "文書"
   },
   "bottom_bar": {
     "label": "ステータスバー",
@@ -172,8 +174,6 @@
       "view_delete": "ビューを削除",
       "new_issue_here": "このプロジェクトに新規タスク",
       "inbox_actions": "インボックスの操作",
-      "inbox_view_snoozed": "スヌーズ中を表示",
-      "inbox_view_archived": "アーカイブ済みを表示",
       "inbox_empty": "通知はありません",
       "inbox_settings": "インボックスの表示",
       "inbox_all": "すべての通知",
@@ -182,22 +182,26 @@
       "inbox_show_count": "未読数",
       "inbox_rail_badge": "「作業」に未読バッジを表示",
       "inbox_types": "受け取る通知",
-      "inbox_types_hint": "オフにした種類の通知は届かなくなり、再びオンにしてもその間の通知は戻りません。",
+      "inbox_types_hint": "オフにするとこれらの通知は届かず、再度オンにしてもオフ期間中の通知は遡って配信されません。",
       "inbox_more_settings": "すべての通知設定",
       "section_limit": "表示件数",
       "pinned_settings": "ピン留めの表示",
       "views_settings": "ビューの表示",
       "views_builtin": "組み込みビュー",
-      "views_show_count": "件数"
+      "views_show_count": "件数",
+      "guest_badge": "ゲスト",
+      "guest_badge_hint": "共有されたプロジェクトを閲覧・コメントできます。",
+      "involved": "関わっているタスク",
+      "shared_projects": "共有されたプロジェクト"
     },
     "team": {
       "new_agent": "新規エージェント",
       "needs_attention": "要対応",
-      "stuck_other": "{{count}} 件のタスクがオフラインのランタイムを待機中",
+      "stuck_other": "オフラインのランタイム待ちの実行 {{count}} 件",
       "working_now": "作業中",
       "show_more_agents": "さらに {{count}} 件を表示…",
       "show_fewer_agents": "表示を減らす",
-      "running_tasks_other": "{{count}} 件のタスクを実行中",
+      "running_tasks_other": "進行中の実行 {{count}} 件",
       "all_agents": "すべてのエージェント",
       "my_agents": "マイエージェント",
       "squads_and_members": "スクワッドとメンバー",

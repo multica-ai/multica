@@ -1,82 +1,128 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { Code as CodeIcon, Copy, Check, Eye, Maximize2, RotateCw } from "@multica/ui/icons";
-import { IconButton } from "@multica/ui/components/common/icon-button";
+import { NodeSelection } from "@tiptap/pm/state";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
-import { HtmlPreviewSurface } from "../html-preview-surface";
-import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useDebouncedValue } from "../../common/use-debounced-value";
 import { useT } from "../../i18n";
-import { MermaidDiagram } from "../mermaid-diagram";
-import { CodeBlockIframe } from "../code-block-iframe";
-import { useThemeVersion } from "../hooks/use-theme-version";
-import { readEmbedTheme } from "../../common/embed-theme";
-import {
-  HTML_BLOCK_EMBED_OPTIONS,
-  NO_HTML_BLOCK_THEME,
-  buildHtmlBlockDocument,
-  htmlBlockTheme,
-  mentionsThemeTokens,
-} from "../utils/html-block-document";
+import type { DynamicBlockEditing, DynamicBlockView } from "../dynamic-block";
+import { HtmlBlockPreview } from "../html-block-preview";
+import { MermaidBlock } from "../mermaid-block";
+import { parseFenceTitle, withFenceTitle } from "../utils/fence-title";
+import { OPEN_BLOCK_SOURCE_META, isDynamicBlockLanguage } from "./code-block";
 
 // Coalesces fast keystrokes before re-rendering live previews.
 // `mermaid.initialize()` mutates a process-global config, so back-to-back
 // renders during typing can race a concurrent ReadonlyContent render
 // (e.g. a comment card) and clobber its theme variables. 200ms keeps the
 // "live preview" feel while making concurrent inits unlikely in practice.
-// HTML preview reuses the same debounce: re-keying iframe.srcDoc on every
-// keystroke causes the iframe to re-load and flicker.
+// The HTML preview takes the same debounce: every new document reloads its
+// iframe.
 const PREVIEW_DEBOUNCE_MS = 200;
 
-const HTML_PREVIEW_HEIGHT_PX = 480;
+function CodeBlockView(props: NodeViewProps) {
+  return isDynamicBlockLanguage(props.node.attrs.language) ? (
+    <DynamicCodeBlockView {...props} />
+  ) : (
+    <PlainCodeBlockView {...props} />
+  );
+}
 
-function CodeBlockView({ node }: NodeViewProps) {
+/**
+ * ```html and ```mermaid in the editor: the same dynamic block the read-only
+ * renderers draw (MUL-9760) — title bar, content height, collapse past 480px —
+ * with ProseMirror's editable `<pre>` as its source view and a title that
+ * renames in place.
+ */
+function DynamicCodeBlockView({ node, editor, getPos, selected, updateAttributes }: NodeViewProps) {
+  const text = node.textContent;
+  // A new, empty block has nothing to preview; it opens where it is written.
+  const [view, setView] = useState<DynamicBlockView>(() => (text.trim() ? "preview" : "source"));
+  const debounced = useDebouncedValue(text, PREVIEW_DEBOUNCE_MS);
+  const meta: string | null = node.attrs.meta ?? null;
+  const title = parseFenceTitle(meta);
+
+  // Read by editor listeners, which run outside React's render.
+  const viewRef = useRef(view);
+  const showView = useCallback((next: DynamicBlockView) => {
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  // The source the preview hides must never hold the caret: typing there
+  // would change the block unseen. A selection that lands inside it — arrow
+  // keys, undo, switching back to the preview — selects the whole block
+  // instead, and Enter opens the source (CodeBlockExtension).
+  const containSelection = useCallback(() => {
+    if (viewRef.current !== "preview" || editor.isDestroyed) return;
+    const pos = getPos();
+    if (typeof pos !== "number") return;
+    const block = editor.state.doc.nodeAt(pos);
+    const { selection } = editor.state;
+    if (!block || selection instanceof NodeSelection) return;
+    if (selection.from > pos && selection.to < pos + block.nodeSize) {
+      editor.commands.setNodeSelection(pos);
+    }
+  }, [editor, getPos]);
+
+  useEffect(() => {
+    const onTransaction = ({ transaction }: { transaction: { getMeta: (key: string) => unknown } }) => {
+      const pos = getPos();
+      if (typeof pos === "number" && transaction.getMeta(OPEN_BLOCK_SOURCE_META) === pos) {
+        showView("source");
+      }
+    };
+    // After the dispatch that moved the selection has finished.
+    const onSelectionUpdate = () => queueMicrotask(containSelection);
+    editor.on("transaction", onTransaction);
+    editor.on("selectionUpdate", onSelectionUpdate);
+    return () => {
+      editor.off("transaction", onTransaction);
+      editor.off("selectionUpdate", onSelectionUpdate);
+    };
+  }, [editor, getPos, showView, containSelection]);
+
+  useEffect(() => {
+    if (view === "preview") containSelection();
+  }, [view, containSelection]);
+
+  const editing: DynamicBlockEditing = {
+    source: (
+      <pre spellCheck={false} className="!m-0 !rounded-none">
+        {/* @ts-expect-error -- NodeViewContent supports as="code" at runtime */}
+        <NodeViewContent as="code" />
+      </pre>
+    ),
+    view,
+    onViewChange: showView,
+    onTitleChange: editor.isEditable
+      ? (next) => updateAttributes({ meta: withFenceTitle(meta, next) })
+      : undefined,
+    selected,
+  };
+
+  return (
+    // Block, against the editor's inline default for NodeView wrappers; the
+    // margin matches the read-only block's shell, so the doc does not shift
+    // when the live editor replaces the read-only render.
+    <NodeViewWrapper className="my-5 !block" data-dynamic-code-block="">
+      {node.attrs.language === "mermaid" ? (
+        <MermaidBlock chart={debounced} title={title} editing={editing} />
+      ) : (
+        <HtmlBlockPreview html={debounced} title={title} editing={editing} />
+      )}
+    </NodeViewWrapper>
+  );
+}
+
+function PlainCodeBlockView({ node }: NodeViewProps) {
   const { t } = useT("editor");
   const [copied, setCopied] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  const reload = () => setReloadKey((key) => key + 1);
-  // HTML blocks default to "preview"; the user can flip to "source" to
-  // edit the markup directly. Note: the source `<pre>` MUST stay mounted
-  // (just hidden) so ProseMirror keeps its NodeView bindings — unmounting
-  // it would break editing.
-  const [view, setView] = useState<"preview" | "source">("preview");
   const language = node.attrs.language || "";
-  const isMermaid = language === "mermaid";
-  const isHtml = language === "html";
-  const showHtmlPreview = isHtml && view === "preview";
-  const chart = node.textContent;
-  const debouncedChart = useDebouncedValue(
-    isMermaid ? chart : "",
-    PREVIEW_DEBOUNCE_MS,
-  );
-  const debouncedHtml = useDebouncedValue(
-    isHtml ? chart : "",
-    PREVIEW_DEBOUNCE_MS,
-    showHtmlPreview || fullscreen,
-  );
-  // The same document a read-only ```html block gets, so the embed tokens
-  // resolve while the block is being edited too. HTML that names no token
-  // gets the same document under every theme: a new srcDoc reloads the frame
-  // and loses whatever was typed or toggled in it.
-  const previewRef = useRef<HTMLDivElement>(null);
-  const themeVersion = useThemeVersion();
-  const [srcDoc, setSrcDoc] = useState("");
-  useEffect(() => {
-    const host = previewRef.current;
-    if (!host || !debouncedHtml) {
-      setSrcDoc("");
-      return;
-    }
-    const theme = mentionsThemeTokens(debouncedHtml)
-      ? htmlBlockTheme(readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS))
-      : NO_HTML_BLOCK_THEME;
-    setSrcDoc(buildHtmlBlockDocument(debouncedHtml, theme));
-  }, [debouncedHtml, themeVersion]);
 
   const handleCopy = async () => {
     const text = node.textContent;
@@ -87,46 +133,8 @@ function CodeBlockView({ node }: NodeViewProps) {
     }
   };
 
-  const toggleView = () =>
-    setView((v) => (v === "preview" ? "source" : "preview"));
-
   return (
     <NodeViewWrapper className="code-block-wrapper group/code relative my-3">
-      {isMermaid && debouncedChart.trim() && (
-        <div
-          contentEditable={false}
-          className="mermaid-diagram-preview mb-1"
-        >
-          <MermaidDiagram chart={debouncedChart} />
-        </div>
-      )}
-      {isHtml && (
-        // CSS-hidden when toggled off so the `<pre>` below stays mounted —
-        // unmounting either side would either lose ProseMirror bindings
-        // (source) or thrash iframe.srcDoc (preview).
-        <div
-          ref={previewRef}
-          contentEditable={false}
-          className={showHtmlPreview ? "mb-1" : undefined}
-          hidden={!showHtmlPreview && !fullscreen}
-        >
-          <HtmlPreviewSurface
-            open={fullscreen}
-            inlineHeight={showHtmlPreview ? HTML_PREVIEW_HEIGHT_PX : 0}
-            onOpenChange={setFullscreen}
-            onReload={reload}
-            title={t(($) => $.code_block.html_preview)}
-          >
-            <CodeBlockIframe
-              key={reloadKey}
-              html={srcDoc}
-              title={t(($) => $.code_block.html_preview)}
-              heightClassName={fullscreen ? "h-full" : "h-[480px]"}
-              className={fullscreen ? "rounded-none border-0" : undefined}
-            />
-          </HtmlPreviewSurface>
-        </div>
-      )}
       <div
         contentEditable={false}
         className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
@@ -136,57 +144,6 @@ function CodeBlockView({ node }: NodeViewProps) {
             {language}
           </span>
         )}
-        {isHtml && (
-          <TooltipHint
-            label={
-              view === "preview"
-                ? t(($) => $.code_block.show_source)
-                : t(($) => $.code_block.show_preview)
-            }
-          >
-            <button
-              type="button"
-              onClick={toggleView}
-              className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              aria-label={
-                view === "preview"
-                  ? t(($) => $.code_block.show_source)
-                  : t(($) => $.code_block.show_preview)
-              }
-            >
-              {view === "preview" ? (
-                <CodeIcon className="h-3.5 w-3.5" />
-              ) : (
-                <Eye className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </TooltipHint>
-        )}
-        {isHtml && (
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground"
-            disabled={!showHtmlPreview}
-            label={t(($) => $.attachment.reload)}
-            onClick={reload}
-          >
-            <RotateCw className="size-3.5" />
-          </IconButton>
-        )}
-        {isHtml && (
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground"
-            label={t(($) => $.code_block.fullscreen)}
-            onClick={() => setFullscreen(true)}
-          >
-            <Maximize2 className="size-3.5" />
-          </IconButton>
-        )}
         <TooltipHint label={t(($) => $.code_block.copy_code)}>
           <button
             type="button"
@@ -194,22 +151,11 @@ function CodeBlockView({ node }: NodeViewProps) {
             className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             aria-label={t(($) => $.code_block.copy_code)}
           >
-            {copied ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
+            <CopyCheckIcon copied={copied} />
           </button>
         </TooltipHint>
       </div>
-      {/* `<pre>` + NodeViewContent must remain mounted so the user can keep
-          editing the code block contents. When the HTML preview is showing
-          we just visually hide it — ProseMirror still tracks it. */}
-      <pre
-        spellCheck={false}
-        className={cn(showHtmlPreview && "sr-only")}
-        aria-hidden={showHtmlPreview ? "true" : undefined}
-      >
+      <pre spellCheck={false}>
         {/* @ts-expect-error -- NodeViewContent supports as="code" at runtime */}
         <NodeViewContent as="code" />
       </pre>

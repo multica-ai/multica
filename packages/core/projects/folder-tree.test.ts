@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NO_PROJECT_ORDER_ID } from "../issues/sidebar-list";
-import { sidebarProjectRowIds, sidebarProjectRows, type SidebarFolder } from "./folder-tree";
+import { sidebarFolderOrder, sidebarProjectRowIds, sidebarProjectRows, type SidebarFolder } from "./folder-tree";
 
 const folder = (id: string, name: string): SidebarFolder => ({ id, name });
 const project = (id: string, folder_id: string | null = null) => ({ id, folder_id });
@@ -67,5 +67,19 @@ describe("sidebarProjectRowIds", () => {
     const shown = [project("a"), project("b", "f-billing"), project("c", "f-billing")];
     const rows = sidebarProjectRows(shown, [billing], filedIn(shown), manual, ["a", "f-billing"]);
     expect(sidebarProjectRowIds(rows)).toEqual(["a", "f-billing", "b", "c"]);
+  });
+});
+
+describe("sidebarFolderOrder", () => {
+  const sales = folder("f-sales", "Sales");
+
+  it("lists folders in the sidebar's order", () => {
+    const folders = [sales, growth, billing];
+    const order = ["a", "f-sales", "b", "f-billing"];
+    for (const settings of [byName, manual]) {
+      const rows = sidebarProjectRows([], folders, new Map(), settings, order);
+      expect(sidebarFolderOrder(folders, settings, order).map((f) => f.id)).toEqual(rows.map((row) => row.id));
+    }
+    expect(sidebarFolderOrder(folders, manual, order).map((f) => f.id)).toEqual(["f-growth", "f-sales", "f-billing"]);
   });
 });

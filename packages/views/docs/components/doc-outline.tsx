@@ -2,6 +2,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { watchDom } from "./dom-throttle";
 
 export interface OutlineHeading {
   level: number;
@@ -16,13 +17,15 @@ const ACTIVE_OFFSET = 96;
 /** Space kept above a heading the outline scrolls to. */
 const SCROLL_MARGIN = 24;
 
-/** Top-level H1–H3 of the rendered document, in order; empty headings skipped. */
+/** Top-level H1–H3 of the rendered document, in order; empty headings skipped.
+ *  An editor still mounting behind `hidden` has no positions yet, so it is not read. */
 export function readOutline(root: ParentNode): OutlineHeading[] {
   return Array.from(
     root.querySelectorAll<HTMLElement>(
       ".ProseMirror > h1, .ProseMirror > h2, .ProseMirror > h3",
     ),
   )
+    .filter((element) => !element.closest("[hidden]"))
     .map((element) => ({
       level: Number(element.tagName.slice(1)),
       text: element.textContent?.trim() ?? "",
@@ -44,38 +47,50 @@ function sameOutline(a: OutlineHeading[], b: OutlineHeading[]): boolean {
 }
 
 /**
- * Headings of the editor under `rootRef`, kept current as the user types, and
- * which one the scroll position of `scrollRef` is in.
+ * Headings of the editor under `rootRef`, kept current as the user types. A
+ * new `bodyKey` reads them again at once, for a host that swaps what the root
+ * shows. Which heading is current is tracked by `DocOutline` itself: scrolling
+ * then re-renders only the outline, never the page holding the editor.
  */
 export function useDocOutline(
   rootRef: RefObject<HTMLElement | null>,
   scrollRef: RefObject<HTMLElement | null>,
+  bodyKey?: string | number,
 ) {
   const [headings, setHeadings] = useState<OutlineHeading[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    let frame = 0;
-    const refresh = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const next = readOutline(root);
-        setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
-      });
-    };
-    refresh();
     // The editor mounts after first paint and re-renders headings in place, so
     // watch the DOM rather than the Markdown.
-    const observer = new MutationObserver(refresh);
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
-  }, [rootRef]);
+    return watchDom(root, () => {
+      const next = readOutline(root);
+      setHeadings((prev) => (sameOutline(prev, next) ? prev : next));
+    });
+  }, [rootRef, bodyKey]);
 
+  const scrollTo = (heading: OutlineHeading) => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const offset =
+      heading.element.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top;
+    scroller.scrollTo({
+      top: scroller.scrollTop + offset - SCROLL_MARGIN,
+      behavior: "smooth",
+    });
+  };
+
+  return { headings, scrollTo };
+}
+
+/** Which of `headings` the scroll position of `scrollRef` is in. */
+function useActiveHeading(
+  headings: OutlineHeading[],
+  scrollRef: RefObject<HTMLElement | null>,
+): number {
+  const [activeIndex, setActiveIndex] = useState(0);
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller || headings.length === 0) return;
@@ -91,32 +106,20 @@ export function useDocOutline(
     scroller.addEventListener("scroll", update, { passive: true });
     return () => scroller.removeEventListener("scroll", update);
   }, [headings, scrollRef]);
-
-  const scrollTo = (heading: OutlineHeading) => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
-    const offset =
-      heading.element.getBoundingClientRect().top -
-      scroller.getBoundingClientRect().top;
-    scroller.scrollTo({
-      top: scroller.scrollTop + offset - SCROLL_MARGIN,
-      behavior: "smooth",
-    });
-  };
-
-  return { headings, activeIndex, scrollTo };
+  return activeIndex;
 }
 
 export function DocOutline({
   headings,
-  activeIndex,
+  scrollRef,
   onSelect,
 }: {
   headings: OutlineHeading[];
-  activeIndex: number;
+  scrollRef: RefObject<HTMLElement | null>;
   onSelect: (heading: OutlineHeading) => void;
 }) {
   const { t } = useT("docs");
+  const activeIndex = useActiveHeading(headings, scrollRef);
   const minLevel = Math.min(...headings.map((heading) => heading.level));
   return (
     <nav

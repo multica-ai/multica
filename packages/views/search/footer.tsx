@@ -25,7 +25,7 @@ function PrefixHint({ prefix, children }: { prefix: string; children: ReactNode 
   return (
     <Hint
       keys={
-        <Kbd aria-hidden="true" className="h-5 min-w-5 border border-border/70 bg-muted/80 px-1 text-micro">
+        <Kbd aria-hidden="true" compact>
           {prefix}
         </Kbd>
       }

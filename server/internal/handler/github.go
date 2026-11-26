@@ -1318,7 +1318,7 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handleInstallationEvent(ctx, body)
 	case "pull_request":
 		h.handlePullRequestEvent(ctx, body)
-	case "check_suite", "check_run", "status":
+	case "check_suite", "check_run", "status", "workflow_run":
 		// CI events are pure triggers under Plan C (MUL-5265): their payload is
 		// never read for display. Each just asks the API pipeline to re-fetch
 		// the authoritative snapshot for the PR(s) it concerns.
@@ -1662,8 +1662,9 @@ func (h *Handler) resolvePRLinkPolicy(ctx context.Context, insts []db.GithubInst
 }
 
 // ghCIEventPayload captures the shared shape of the check_suite / check_run /
-// status webhooks — enough to resolve which PR to refresh. These events are
-// pure triggers under Plan C: their payload data is never read for display.
+// status / workflow_run webhooks — enough to resolve which PR to refresh. These
+// events are pure triggers under Plan C: their payload data is never read for
+// display.
 type ghCIEventPayload struct {
 	Installation struct {
 		ID int64 `json:"id"`
@@ -1683,6 +1684,7 @@ type ghCIEventPayload struct {
 		} `json:"pull_requests"`
 	} `json:"check_suite"`
 	CheckRun struct {
+		HeadSHA      string `json:"head_sha"`
 		PullRequests []struct {
 			Number int32 `json:"number"`
 		} `json:"pull_requests"`
@@ -1690,56 +1692,72 @@ type ghCIEventPayload struct {
 			HeadSHA string `json:"head_sha"`
 		} `json:"check_suite"`
 	} `json:"check_run"`
+	WorkflowRun struct {
+		HeadSHA      string `json:"head_sha"`
+		PullRequests []struct {
+			Number int32 `json:"number"`
+		} `json:"pull_requests"`
+	} `json:"workflow_run"`
 }
 
 // triggerPRRefreshFromCIEvent enqueues an API refresh for the PR(s) a
-// check_suite / check_run / status webhook concerns. check_suite/check_run
-// carry the PR numbers directly; status events carry only a commit SHA, so we
-// map it back to the mirrored head_sha to find the PR(s).
+// check_suite / check_run / status / workflow_run webhook concerns. Check and
+// workflow events may carry the PR numbers directly; status events (and check
+// events with an empty pull_requests list) carry a commit SHA, which we map
+// back to the mirrored head_sha to find the PR(s).
+func parseCIEventTargets(body []byte) (installationID int64, owner, repo string, numbers []int32, headSHA string, ok bool) {
+	var p ghCIEventPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		return 0, "", "", nil, "", false
+	}
+	if p.Installation.ID == 0 || p.Repository.Name == "" {
+		return 0, "", "", nil, "", false
+	}
+	seen := map[int32]struct{}{}
+	add := func(number int32) {
+		if number == 0 {
+			return
+		}
+		if _, dup := seen[number]; dup {
+			return
+		}
+		seen[number] = struct{}{}
+		numbers = append(numbers, number)
+	}
+	for _, pr := range p.CheckSuite.PullRequests {
+		add(pr.Number)
+	}
+	for _, pr := range p.CheckRun.PullRequests {
+		add(pr.Number)
+	}
+	for _, pr := range p.WorkflowRun.PullRequests {
+		add(pr.Number)
+	}
+	headSHA = firstNonEmpty(p.SHA, p.CheckSuite.HeadSHA, p.CheckRun.HeadSHA, p.CheckRun.CheckSuite.HeadSHA, p.WorkflowRun.HeadSHA)
+	return p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, numbers, headSHA, true
+}
+
 func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) {
 	if !h.PRRefresh.Enabled() {
 		return
 	}
-	var p ghCIEventPayload
-	if err := json.Unmarshal(body, &p); err != nil {
+	installationID, owner, repo, numbers, sha, ok := parseCIEventTargets(body)
+	if !ok {
 		return
 	}
-	if p.Installation.ID == 0 || p.Repository.Name == "" {
-		return
-	}
-	owner, repo := p.Repository.Owner.Login, p.Repository.Name
-
-	seen := map[int32]struct{}{}
-	enqueue := func(number int32) {
-		if number == 0 {
-			return
+	if len(numbers) > 0 {
+		for _, number := range numbers {
+			h.PRRefresh.Enqueue(installationID, owner, repo, number)
 		}
-		if _, ok := seen[number]; ok {
-			return
-		}
-		seen[number] = struct{}{}
-		h.PRRefresh.Enqueue(p.Installation.ID, owner, repo, number)
-	}
-	for _, pr := range p.CheckSuite.PullRequests {
-		enqueue(pr.Number)
-	}
-	for _, pr := range p.CheckRun.PullRequests {
-		enqueue(pr.Number)
-	}
-	if len(seen) > 0 {
 		return
 	}
-	// No PR number in the payload (status event, or a check event whose
+	// No PR number in the payload (status event, or a check/workflow event whose
 	// pull_requests array was empty) — resolve by head SHA.
-	sha := p.SHA
-	if sha == "" {
-		sha = coalesce(p.CheckSuite.HeadSHA, p.CheckRun.CheckSuite.HeadSHA)
-	}
 	if sha == "" {
 		return
 	}
-	numbers, err := h.Queries.ListGitHubPRNumbersByHeadSHA(ctx, db.ListGitHubPRNumbersByHeadSHAParams{
-		InstallationID: p.Installation.ID,
+	resolved, err := h.Queries.ListGitHubPRNumbersByHeadSHA(ctx, db.ListGitHubPRNumbersByHeadSHAParams{
+		InstallationID: installationID,
 		RepoOwner:      owner,
 		RepoName:       repo,
 		HeadSha:        sha,
@@ -1747,9 +1765,18 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 	if err != nil {
 		return
 	}
-	for _, number := range numbers {
-		enqueue(number)
+	for _, number := range resolved {
+		h.PRRefresh.Enqueue(installationID, owner, repo, number)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // mirrorPullRequestForWorkspace mirrors a pull_request webhook into a single

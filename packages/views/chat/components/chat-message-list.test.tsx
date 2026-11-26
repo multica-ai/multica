@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
@@ -527,6 +528,37 @@ describe("ChatMessageList tool rows (#8835 regression)", () => {
 });
 
 describe("ChatMessageList command tool rows", () => {
+  it("shows a clipped tool name and summary on focus and keeps the row expandable", async () => {
+    const tool = "mcp__company-knowledge-base__search_documents_with_filters";
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool, input: { query: "release checklist" } }),
+    ]);
+    render(
+      <TooltipProvider>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={qc}>
+            <ChatMessageList messages={[]} pendingTask={{ task_id: TASK_ID, status: "running" }} availability="online" />
+          </QueryClientProvider>
+        </I18nProvider>
+      </TooltipProvider>,
+    );
+    const label = await screen.findByText(tool);
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { value: 360 },
+      clientWidth: { value: 120 },
+    });
+
+    const trigger = screen.getByRole("button", { name: /mcp__company-knowledge-base__search_documents_with_filters/ });
+    await act(async () => { trigger.focus(); });
+    expect(trigger).toHaveFocus();
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("shows a command line by line, not as escaped JSON", async () => {
     const qc = new QueryClient();
     qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
@@ -702,6 +734,88 @@ describe("ChatMessageList quick actions skeleton", () => {
       </I18nProvider>,
     );
     expect(container.querySelector('[aria-hidden] [data-slot="skeleton"]')).toBeNull();
+  });
+});
+
+describe("ChatMessageList reply timing caption", () => {
+  // Built from local components so the caption is stable in any host timezone;
+  // the matcher tolerates the hour's leading zero differing between Node and
+  // browser Intl ("2:32 PM" vs "02:32 PM").
+  const now = new Date();
+  const todayAt = (h: number, m: number) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+
+  it("appends the wall-clock time to the elapsed caption", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "timed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 38000,
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Replied in 38s · 0?2:32 PM/)).toBeInTheDocument();
+  });
+
+  it("shows the time alone for legacy replies without elapsed_ms", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "legacy-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/2:32 PM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Replied in/)).not.toBeInTheDocument();
+  });
+
+  it("timestamps failed replies", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "failed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "boom",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 12000,
+              failure_reason: "manual",
+            }]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Failed after 12s · 0?2:32 PM/)).toBeInTheDocument();
   });
 });
 
@@ -991,6 +1105,17 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
       await screen.findByText(
         enChat.message_list.failure.environment_prepare_failed,
       ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("tells the reader to restore or relink a deleted project folder", async () => {
+    // MUL-9665. The reason has no agent_error family to degrade into, so
+    // without an entry it would land on the generic fallback, which cannot
+    // say the folder is gone or where to fix it.
+    renderFailure("local_directory_missing");
+    expect(
+      await screen.findByText(enChat.message_list.failure.local_directory_missing),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

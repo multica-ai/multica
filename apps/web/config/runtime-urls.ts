@@ -128,8 +128,8 @@ export function runtimeRewriteDestination(
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     return appendPath(remoteApiUrl, pathname);
   }
-  if (pathname === "/ws") {
-    return appendPath(remoteApiUrl, "/ws");
+  if (pathname === "/ws" || pathname === "/collab") {
+    return appendPath(remoteApiUrl, pathname);
   }
   // `multica setup self-host` probes `{server-url}/health` and treats any
   // non-200 as "Server not reachable". The backend serves it, but a

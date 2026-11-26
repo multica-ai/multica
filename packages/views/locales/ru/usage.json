@@ -8,7 +8,21 @@
   "filter": {
     "project_label": "Проект",
     "all_projects": "Все проекты",
-    "period_label": "Период"
+    "period_label": "Период",
+    "attribution_label": "Принадлежность",
+    "all_attribution": "Все источники",
+    "standalone_only": "Только отдельные агенты",
+    "squads_group": "Squad"
+  },
+  "history_limit": {
+    "note": "Ваш тариф охватывает последние {{days}} дн. Перейдите на другой тариф, чтобы увидеть более ранние данные. Данные не удаляются.",
+    "fell_back": "Показаны данные за последние {{days}} дн. — это лимит вашего текущего тарифа.",
+    "view_plans": "Посмотреть тарифы",
+    "locked": "Не входит в ваш тариф",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "Стоимость · {{days}} дн.",
@@ -17,10 +31,12 @@
     "run_time_label": "Время выполнения · {{days}} дн.",
     "run_time_hint": "Всего запусков: {{tasks}}",
     "tasks_label": "Запуски · {{days}} дн.",
-    "tasks_hint": "{{failed}} с ошибкой"
+    "tasks_hint": "{{failed}} с ошибкой",
+    "cost_squad_hint": "{{name}} целиком (включая делегированных участников)",
+    "cost_squad_share_hint": "Через Squad {{cost}} ({{pct}}%)"
   },
   "dim": {
-    "label": "Измерение",
+    "label": "Интервал",
     "daily": "По дням",
     "weekly": "По неделям"
   },
@@ -50,7 +66,7 @@
     "kpi_failed_hint": "Из {{total}} запусков",
     "kpi_rate_label": "Доля ошибок · {{days}} дн.",
     "kpi_agents_label": "Затронуто агентов · {{days}} дн.",
-    "kpi_agents_hint": "Худший {{name}} · {{count}}",
+    "kpi_agents_hint": "Больше всего: {{name}} (ошибок: {{count}})",
     "tooltip_rate": "Доля ошибок",
     "class": {
       "auth": "Авторизация",
@@ -66,8 +82,8 @@
     "mix_title": "Структура сбоев · {{failed}}",
     "mix_label": "Структура сбоев",
     "codes_label": "Коды ошибок",
-    "by_agent": "Основные нарушители",
-    "sort_label": "Ранжировать нарушителей по",
+    "by_agent": "Ошибки по агентам",
+    "sort_label": "Сортировать агентов по",
     "sort_failed": "Сбоям",
     "sort_rate": "Доле",
     "header_agent": "Агент",
@@ -80,7 +96,8 @@
     "show_reasons": "Показать коды ошибок",
     "hide_reasons": "Скрыть коды ошибок",
     "show_all": "Показать все {{count}}",
-    "show_less": "Показать топ {{count}}"
+    "show_less": "Показать топ {{count}}",
+    "by_squad": "Ошибки по Squad"
   },
   "leaderboard": {
     "title": "Рейтинг",
@@ -105,7 +122,16 @@
     "usage_unreported_few": "{{count}} запуска не сообщили об использовании",
     "usage_unreported_many": "{{count}} запусков не сообщили об использовании",
     "usage_unreported_pending_few": "{{count}} запуска не сообщили об использовании · итоги ещё обрабатываются",
-    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются"
+    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются",
+    "group_label": "Группировка рейтинга",
+    "group_agent": "Агенты",
+    "group_squad": "Squad",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}} Squad",
+    "squad_members_title": "Состав расходов {{name}}",
+    "squad_members_count": "Участвуют {{count}} участников",
+    "deleted_squads": "Удалённые Squad",
+    "toggle_squad_members": "Показать или скрыть участников {{name}}"
   },
   "empty": {
     "title": "Данных пока нет",

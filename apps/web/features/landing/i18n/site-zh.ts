@@ -77,7 +77,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       dashboard: "进入工作台",
     },
     footer: {
-      tagline: "人和智能体一起工作的团队空间。",
+      tagline: "人和智能体一起工作的工作区。",
       navigation: "页脚导航",
       language: "语言",
       copyright: "© {year} Multica. 保留所有权利。",
@@ -90,7 +90,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     },
     cta: {
       title: "今天就让第一个智能体开工",
-      lead: "接入你已经在用的智能体，给它派第一个 Issue。",
+      lead: "接入你已经在用的智能体，给它指派第一个任务。",
       getStarted: "开始使用",
       bookDemo: "预约演示",
     },
@@ -99,7 +99,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     hero: {
       headlinePrefix: "让 ",
       headlineSuffix: " 成为你的队友。",
-      lead: "你的团队和智能体共用一个工作空间：分派任务、跟进进度、审核结果，主动权始终在你手里。",
+      lead: "你的团队和智能体共用一个工作区：指派任务、跟进进度、审核结果，主动权始终在你手里。",
       download: "下载",
       downloadFor: "下载 {os} 版",
       alsoFor: "其他版本：{platforms}",
@@ -110,7 +110,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
           label: "交付一个功能",
           short: "交付",
           description:
-            "一个由工作流驱动的 Multica 项目看板：Issue 依次经过方案、开发、代码审查、审批和已上线，轮流交给规划智能体、编码智能体、审查智能体和一位同事",
+            "一个由工作流驱动的 Multica 项目看板：任务依次经过方案、开发、代码审查、审批和已上线，轮流交给规划智能体、编码智能体、审查智能体和一位同事",
         },
         launch: {
           label: "发布内容",
@@ -122,7 +122,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
           label: "处理用户反馈",
           short: "反馈",
           description:
-            "一个由工作流驱动的支持团队项目看板：Autopilot 把用户反馈归入待处理，Issue 再依次经过复现、修复、回复和已解决，轮流交给分诊智能体、QA 智能体和编码智能体",
+            "一个由工作流驱动的支持团队项目看板：自动化任务把用户反馈归入待处理，任务再依次经过复现、修复、回复和已解决，轮流交给分诊智能体、QA 智能体和编码智能体",
         },
       },
     },
@@ -137,18 +137,18 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
         },
         workflows: {
           title: "工作流把每一步交接好",
-          body: "给每个状态指定负责人。Issue 进入下一步，就自动交给这一步的智能体或同事。",
-          alt: "“交付一个功能”工作流：方案交给 Lead Agent，开发交给 Backend Agent，代码审查交给 QA Agent，审批交给 Mia Chen，最后到已上线；右侧打开了开发这一步的交接设置",
+          body: "给每个状态指定负责人。任务进入下一步，就自动交给这一步的智能体或同事。",
+          alt: "「交付一个功能」工作流：方案交给 Lead Agent，开发交给 Backend Agent，代码审查交给 QA Agent，审批交给 Mia Chen，最后到已上线；右侧打开了开发这一步的交接设置",
         },
         chat: {
           title: "在聊天里 @ 智能体",
-          body: "在 Slack、飞书、钉钉、企业微信或 Telegram 里都可以。智能体会读完对话、建好 Issue，然后开工。",
-          alt: "团队聊天频道：Mia 就导出失败的问题 @ 了 Backend Agent，智能体在频道里回复，附上它新建并正在处理的 Multica Issue 链接",
+          body: "在 Slack、飞书、钉钉、企业微信、Telegram 或微信里都可以。智能体会读完对话、建好任务，然后开工。",
+          alt: "团队聊天频道：Mia 就导出失败的问题 @ 了 Backend Agent，智能体在频道里回复，附上它新建并正在处理的 Multica 任务链接",
         },
         autopilots: {
-          title: "Autopilot 按计划自动运行",
-          body: "依赖升级、问题分诊、定期报告，每小时或每周一自动建好 Issue，交到智能体手里。",
-          alt: "Autopilot 列表：五个定时任务，以及各自的智能体和下次运行时间",
+          title: "自动化按计划自动运行",
+          body: "依赖升级、问题分诊、定期报告，每小时或每周一自动建好任务，交到智能体手里。",
+          alt: "自动化列表：五个定时计划，以及各自的智能体和下次运行时间",
         },
         skills: {
           title: "全队共享的技能",
@@ -160,7 +160,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "不用学新的智能体。",
       title: "直接用你已经在用的。",
-      all: "全部 27 款智能体",
+      all: "全部 31 款智能体",
     },
     updates: {
       eyebrow: "更新日志",

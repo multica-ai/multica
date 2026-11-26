@@ -410,8 +410,8 @@ func main() {
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("cleanup exceeded bound: %s", elapsed)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
-		t.Fatalf("expected thread/start failure, got %+v", result)
+	if result.Status != "timeout" || !strings.Contains(result.Error, "thread/start") {
+		t.Fatalf("expected confirmed-cleanup thread/start timeout, got %+v", result)
 	}
 	entries := parseJSONLogEntries(t, logs.String())
 	failure := findCodexLifecyclePhase(t, entries, "thread_start_failure")

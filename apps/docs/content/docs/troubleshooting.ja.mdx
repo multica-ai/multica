@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+CLI がトークンを検証できない場合は、再ログインする前に表示されたエラーを確認してください。
+
 よくある原因:
 
 - CLI がまだログインしていない、またはローカルに保存されたトークンが失効している。
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+macOS でデーモンログに `connect: no route to host` が出る一方、同じ Mac のターミナルで `curl -fsS <server-url>/health` が成功する場合は、同じ時間帯の両方の結果を記録してください。デーモンの起動方法（Desktop、ログインサービス、ターミナル）と、macOS とデーモンのバージョンも添えてください。ターミナルでの成功は、そのシェルプロセスから接続できたことだけを示します。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> がサーバーに到達できないと報告する</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -160,6 +164,15 @@ multica issue runs <issue-id>
 - エージェントのカスタム引数や環境変数が有効か。
 
 まず実行用コンピューターのターミナルで、同じツールを直接実行してください。ツール単体でも起動できない場合は、先にツールのログインや設定を修復してから、実行ログから実行を再試行します。
+
+</Accordion>
+<Accordion title="macOS のプロキシ環境で AI コーディングツールがタイムアウトする" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+Grok などの AI コーディングツールがターミナルでは動作するのに Multica Desktop でタイムアウトする場合は、ターミナルでプロキシ用の環境変数をエクスポートしているか確認してください。macOS では、ローカルデーモンとデーモンが起動するツールは起動元の環境変数を引き継ぎます。Dock から Desktop を起動すると、シェルでエクスポートした変数や、macOS の「ネットワーク」で設定したプロキシは環境変数に反映されません。
+
+特定のエージェントだけで使う場合は、そのエージェントの[環境変数](/agents-create#環境変数と認証情報)にツールが必要とするプロキシ変数を追加します。ローカルの HTTP プロキシなら、たとえば `HTTPS_PROXY=http://127.0.0.1:7897` を実際のプロキシアドレスに置き換えて設定します。Multica をローカルでホストしている場合は、直接接続するホストを `NO_PROXY` に追加します。例は `localhost,127.0.0.1,::1` です。新しい実行を開始すると設定が反映されます。
+
+この設定はそのエージェントのツールのプロセスだけに適用され、デーモンには適用されません。デーモンが Multica サーバーへの接続にプロキシを必要とする場合や、最新のモデル一覧を取得したい場合（デーモンは自身の環境でモデル一覧を取得します）は、デーモンの起動環境を別途設定してください。ログイン時に自動起動するデーモンについては[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。
 
 </Accordion>
 <Accordion title="CLI のアップグレード後に macOS で実行が止まる" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">

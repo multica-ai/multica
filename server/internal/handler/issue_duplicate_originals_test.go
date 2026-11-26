@@ -180,7 +180,7 @@ func TestDuplicateOriginalResolvesWithoutPriming(t *testing.T) {
 		t.Fatalf("GetIssue: %v", err)
 	}
 	resp := issueToResponse(row, "MUL")
-	testHandler.newStatusCategoryFiller(context.Background(), row.WorkspaceID, projectaccess.Hidden{})(&resp)
+	testHandler.newStatusCategoryFiller(context.Background(), row.WorkspaceID, projectaccess.Hidden{}, nil)(&resp)
 	if resp.DuplicateOf == nil || resp.DuplicateOf.ID != original {
 		t.Fatalf("duplicate_of = %+v, want %s", resp.DuplicateOf, original)
 	}

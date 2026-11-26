@@ -70,6 +70,13 @@ default.** Reviewers should request changes or close the PR until one is
 provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
+Do not add or translate docs in `apps/docs/content/docs/` or root `README*.md`
+for features gated behind a default-off flag in
+`server/internal/featureflags/keys.go` (permanently enabled compat keys do not
+count); note why docs were skipped in the PR description instead. When a PR
+flips a flag to default-on or removes it for general availability, add the docs
+across all locales in the same PR.
+
 ### Screenshots and Recordings
 
 Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
@@ -337,8 +344,8 @@ An environment is the database, ports, CLI profile and processes that belong to
 one checkout. It is a named object: it can be listed, inspected and deleted.
 
 ```bash
-make up                      # start this checkout's environment (api + web)
-make up C=api,web,daemon     # choose the components
+make up                      # start this checkout's environment (api + collab + web)
+make up C=api,collab,web,daemon  # choose the components
 make status                  # what is running, and whether it is yours
 make list                    # every environment on this machine
 make down                    # stop the processes, keep the data
@@ -347,8 +354,11 @@ make destroy                 # stop, then drop the database and free the slot
 make gc                      # collect expired environments or ones whose checkout is gone
 ```
 
-Components are `api` (Go backend), `web` (Next.js), `daemon` (agent daemon) and
-`desktop` (Electron). Selecting any of them implies `api`. `make up` is
+Components are `api` (Go backend), `collab` (live doc co-editing), `web`
+(Next.js), `daemon` (agent daemon) and `desktop` (Electron). Selecting any of
+them implies `api`. `collab` gets its own port and a secret generated for the
+environment, and the API is wired to it only while it runs, so leaving it out
+(`make up C=api,web`) just turns docs back to saving through the API. `make up` is
 idempotent: re-running it against a live environment reuses the database, the
 profile and any component already healthy.
 
@@ -372,7 +382,9 @@ Three properties are worth knowing because the old flow lacked them:
 - **Temporary environments have a best-effort fallback.** `make up
   ARGS=--ephemeral` records a 24-hour TTL. The next `make up` automatically
   collects expired and directory-less environments; `make gc` runs the same
-  collection explicitly.
+  collection explicitly. Use `make up ARGS="--ttl 48"` to renew a checkout
+  whose environment is still registered, even after expiry. The command keeps
+  that environment's data and gives it a new 48-hour TTL.
 
 Run any command inside an environment's variables without repeating them:
 
@@ -746,7 +758,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar guest, --json
 make destroy ARGS="--yes"
 ```
 
@@ -756,6 +768,33 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`sidebar` makes the Work panel look used, for sidebar mocks and screenshots. It
+creates 11 issues across three projects, pins three of them and the Desktop 2.0
+project, and adds two saved views. Three agents (Atlas, Nova and Sage) then
+comment, mention, assign, change dates and priorities, and react through their
+own task tokens, so every inbox row comes from the server's notification
+listeners: 11 notified issues, 6 of them unread, enough for "Show 6 more". The
+notifications are then backdated with `psql` to read from minutes to days old;
+without `psql` they keep their real times. `all` leaves `sidebar` out. Running
+it again adds new issues and notifications and reuses the agents, projects and
+views.
+
+`guest` is for checking a change as a guest. It signs `guest@localhost` in
+with the dev verification code, invites it as a guest of three projects and
+accepts: Client portal (visible to the workspace), Client contracts (private)
+and Client portal v1 (archived), each with an issue. The guest sees those and
+nothing else; the Internal planning project and its issue stay hidden from it.
+In Client portal, `dev@localhost` mentions the guest on one issue, replies to
+the guest's comment on its sub-issue and assigns it a third, which leaves three
+unread issues in the guest's Inbox. `--json` prints `guest_token` and
+`guest_user_id` with the project and issue URLs; set the token as
+`multica_token` to open the app as the guest. The token is kept in the
+environment's profile directory, so running it again signs in only when that
+token stopped working, keeps the membership and adds new issues and
+notifications. `--guest-email` signs in someone else as the guest, which is
+how `e2e/guest.spec.ts` gets a fresh guest on every run. `all` leaves `guest`
+out.
 
 `task` is for UI and CLI work that needs an agent mid-run: agent status,
 the issue's execution log, Working / Idle filters, task panels. It assigns a new

@@ -11,12 +11,15 @@ type ModalType =
   | "issue-set-parent"
   | "issue-mark-duplicate"
   | "issue-add-child"
+  | "issue-add-blocker"
+  | "issue-add-blocking"
   | "project-add-issue"
   | "project-rename"
   | "issue-rename"
   | "issue-delete-confirm"
   | "issue-run-confirm"
   | "issue-workflow-handoff"
+  | "keyboard-shortcuts"
   | null;
 
 // Each reason is a Cloud-enforced limit whose recovery dialog offers billing

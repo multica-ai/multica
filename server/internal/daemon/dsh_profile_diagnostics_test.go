@@ -19,6 +19,8 @@ import (
 // No actual DSH installation, credentials or model are used by these fixtures.
 const dshCoreCompatibilityFixture = `dsh: disabling profile plugin row "agents": Plugin @deepseek-ai/dsh-agent@0.2.2-rc.1 is incompatible with dsh 0.2.2-rc.3: requirements {"engines.dsh":"0.2.2-rc.1"}.`
 
+const dshBridgeCompatibilityFixture = `dsh: skipping profile bundle "@multica-ai/dsh-runtime": Error: Plugin @multica-ai/dsh-runtime@0.1.0-private.1 is incompatible with dsh 0.2.1-rc.5: requirements {"@deepseek-ai/dsh-agent":"^0.1.0-rc.6"}`
+
 func TestProbeBuiltinRuntimeDshRetainsStartupDiagnosis(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fake CLI; classification tests are platform independent")
@@ -32,6 +34,7 @@ func TestProbeBuiltinRuntimeDshRetainsStartupDiagnosis(t *testing.T) {
 		want         builtinProbeVerdict
 	}{
 		{"confirmed core compatibility", dshCoreCompatibilityFixture, builtinProbeProfileMigration},
+		{"confirmed bridge compatibility", dshBridgeCompatibilityFixture, builtinProbeProfileMigration},
 		{"unclassified startup failure", "permission denied opening profile cache", builtinProbeUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,6 +78,14 @@ func TestProbeBuiltinRuntimeDshRetainsStartupDiagnosis(t *testing.T) {
 					t.Errorf("startup reason lost %q: %q", part, reason)
 				}
 			}
+			if tc.stderr == dshBridgeCompatibilityFixture {
+				if !strings.Contains(reason, "update the Multica bridge to a build compatible with the installed DSH") {
+					t.Errorf("missing bridge repair guidance: %q", reason)
+				}
+				if strings.Contains(reason, "align profile-local DSH core dependencies") {
+					t.Errorf("bridge refusal includes unrelated core repair guidance: %q", reason)
+				}
+			}
 			if tc.want == builtinProbeProfileMigration && !builtinProbeNeedsConfirmation(verdict) {
 				t.Error("profile repair bypassed confirmation")
 			}
@@ -106,6 +117,9 @@ func TestDshProfileDiagnosticClassification(t *testing.T) {
 		{"core session", "", strings.ReplaceAll(dshCoreCompatibilityFixture, "dsh-agent", "dsh-session"), 1, false, dshProbeNeedsMigration},
 		{"core tools", "", strings.ReplaceAll(dshCoreCompatibilityFixture, "dsh-agent", "dsh-tools"), 1, false, dshProbeNeedsMigration},
 		{"core llm", "", strings.ReplaceAll(dshCoreCompatibilityFixture, "dsh-agent", "dsh-llm"), 1, false, dshProbeNeedsMigration},
+		{"bridge refusal", "", dshBridgeCompatibilityFixture, 1, false, dshProbeNeedsMigration},
+		{"unrelated bundle", "", strings.ReplaceAll(dshBridgeCompatibilityFixture, "@multica-ai/dsh-runtime", "@example/optional-plugin"), 1, false, dshProbeUnavailable},
+		{"healthy stdout beats bridge warning", healthy, dshBridgeCompatibilityFixture, 1, false, dshProbeOK},
 		{"core refusal exits zero", "", dshCoreCompatibilityFixture, 0, false, dshProbeNeedsMigration},
 		{"optional plugin", "", strings.ReplaceAll(dshCoreCompatibilityFixture, "@deepseek-ai/dsh-agent", "@example/optional-plugin"), 1, false, dshProbeUnavailable},
 		{"incidental incompatibility text", "", "Plugin @deepseek-ai/dsh-agent@0.2.2-rc.1 is incompatible with dsh 0.2.2-rc.3", 1, false, dshProbeUnavailable},
@@ -162,7 +176,7 @@ func TestProbeBuiltinRuntimeDshRedactsStartupDiagnosis(t *testing.T) {
 func TestDshCoreCompatibilitySummaryRedactsVersionTokens(t *testing.T) {
 	secret := "sk-" + strings.Repeat("synthetic", 4)
 	line := strings.Replace(dshCoreCompatibilityFixture, "0.2.2-rc.1", "0.2.2-"+secret, 1)
-	summary := dshCoreCompatibilitySummary(line)
+	summary := dshCompatibilitySummary(line, dshCoreCompatibilityRefusal)
 	if summary == "" {
 		t.Fatal("core compatibility refusal was not recognized")
 	}

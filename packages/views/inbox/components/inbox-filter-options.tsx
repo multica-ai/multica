@@ -1,6 +1,9 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   Activity,
   AtSign,
@@ -187,27 +190,55 @@ export function useInboxFilterChips(wsId: string, filters: InboxFilters): Filter
  */
 export function InboxFilterChipsBar({ wsId, filters }: { wsId: string; filters: InboxFilters }) {
   const { t } = useT("inbox");
+  const reduceMotion = useReducedMotion();
   const chips = useInboxFilterChips(wsId, filters);
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
-  if (chips.length === 0) return null;
   return (
-    <div
-      data-testid="inbox-filter-chips"
-      className="mx-3 mb-2 flex shrink-0 flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-1.5 py-1.5"
-    >
-      {chips.map((chip) => (
-        <ChipSpan key={chip.key} chip={chip} compact />
-      ))}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label={t(($) => $.filters.clear)}
-        title={t(($) => $.filters.clear)}
-        className="ml-auto text-muted-foreground"
-        onClick={() => clearFilters(wsId)}
-      >
-        <X className="size-3" />
-      </Button>
-    </div>
+    <AnimatePresence initial={false}>
+      {chips.length > 0 && (
+        <motion.div
+          key="inbox-filter-chips"
+          initial={reduceMotion ? false : { opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" }}
+          animate={{
+            opacity: 1,
+            height: "auto",
+            marginBottom: 8,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+            transitionEnd: { overflow: "visible" },
+          }}
+          exit={
+            reduceMotion
+              ? { opacity: 0, transition: { duration: 0 } }
+              : {
+                  opacity: 0,
+                  height: 0,
+                  marginBottom: 0,
+                  overflow: "hidden",
+                  transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                }
+          }
+          className="mx-3 shrink-0"
+        >
+          <div
+            data-testid="inbox-filter-chips"
+            className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-1.5 py-1.5"
+          >
+            {chips.map((chip) => (
+              <ChipSpan key={chip.key} chip={chip} compact />
+            ))}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t(($) => $.filters.clear)}
+              title={t(($) => $.filters.clear)}
+              className="ml-auto text-muted-foreground"
+              onClick={() => clearFilters(wsId)}
+            >
+              <X className="size-3" />
+            </Button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

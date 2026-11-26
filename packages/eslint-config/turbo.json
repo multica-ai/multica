@@ -1,0 +1,17 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // The rule tests lint through the real configs of the workspaces that
+      // load this package, which none of them is a dependency of.
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/desktop/eslint.config.mjs",
+        "$TURBO_ROOT$/apps/web/eslint.config.mjs",
+        "$TURBO_ROOT$/packages/core/eslint.config.mjs",
+        "$TURBO_ROOT$/packages/views/eslint.config.mjs",
+        "$TURBO_ROOT$/packages/views/eslint-i18n-guard.mjs"
+      ]
+    }
+  }
+}

@@ -99,7 +99,8 @@ function seed(qc: QueryClient) {
     { id: "ag1", name: "Robby", avatar_url: null },
   ] as never);
   qc.setQueryData(runtimeListOptions("ws1").queryKey, [
-    { id: "rt1", name: "Claude (host)", custom_name: "Prod Box", status: "online" },
+    { id: "rt1", name: "Claude (host)", custom_name: "Prod Box", provider: "claude", status: "online" },
+    { id: "rt2", name: "Codex (host)", custom_name: null, provider: "codex", status: "online" },
   ] as never);
 }
 
@@ -170,11 +171,19 @@ describe("useTabPresentation — live from cache", () => {
     });
   });
 
-  it("machine tab uses the runtime's custom name over the raw daemon name", () => {
+  it("machine tab shows the runtime's alias with its provider", () => {
     expect(presentationOf("/acme/runtimes/rt1")).toEqual({
       visual: { kind: "icon", icon: "Monitor" },
-      title: "Prod Box",
+      title: "Prod Box (Claude)",
     });
+  });
+
+  it("runtime tab without an alias keeps the daemon name", () => {
+    expect(presentationOf("/acme/runtimes/m1/runtime/rt2").title).toBe("Codex (host)");
+  });
+
+  it("runtime tab with an alias shows the provider", () => {
+    expect(presentationOf("/acme/runtimes/m1/runtime/rt1").title).toBe("Prod Box (Claude)");
   });
 
   it("chat container: MessageSquare icon + session title", () => {

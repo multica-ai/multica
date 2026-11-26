@@ -1,12 +1,12 @@
 ---
 title: AI 程式設計工具對照
-description: 比較 Multica 支援的 AI 程式設計工具，以及模型、MCP、會話和 Skill 的差異。
+description: Multica 支援的 31 款 AI 程式設計工具，包括 Claude Code、Codex、Cursor 和 Copilot，以及偵測、模型、MCP、會話、插話和 Skill 的差異。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica 不替代你在用的 AI 程式設計工具：執行時呼叫電腦上已經安裝並登入的工具，再把執行進度和結果寫回任務。已經在用其中一款的，通常直接沿用就行。還沒定的話，看四件事：
+Multica 支援 31 款 AI 程式設計工具。它不替代你在用的工具：執行時呼叫電腦上已經安裝並登入的工具，再把執行進度和結果寫回任務。已經在用其中一款的，通常直接沿用就行。還沒定的話，看四件事：
 
 - 電腦上是否已經安裝；
 - 帳號可以使用哪些模型；
@@ -53,6 +53,12 @@ Multica 不替代你在用的 AI 程式設計工具：執行時呼叫電腦上�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+不支援 Gemini CLI。它已從內建工具中移除，把 Gemini 列為 Multica 可執行工具的頁面資訊已經過時。
+</Callout>
+
+對於 Claude Code，如果常駐程式環境中的 `CLAUDE_CONFIG_DIR` 是絕對路徑，Multica 會從該目錄列出和匯入使用者及外掛技能。掃描器無法讀取僅在啟動包裝指令碼中設定的路徑。
+
 Amp 的模型欄位用於選擇 Amp **模式**（如 `high`），而不是底層模型 ID。留空則使用 Amp 的預設模式。
 
 Amp 還需要在守護行程或 AI 代理環境中設定 `AMP_API_KEY`，僅有互動式登入紀錄不夠。
@@ -60,6 +66,41 @@ Amp 還需要在守護行程或 AI 代理環境中設定 `AMP_API_KEY`，僅有�
 "Multica 管理 MCP"指可以在 AI 代理配置中填寫 MCP server，由 Multica 在執行前傳給對應工具。這一列只說明 Multica 能否代為配置，不說明工具自身有沒有別的 MCP 配置方式。
 
 "在 Multica 選模型"為 — 的工具，模型要在工具自己的配置裡選，見[模型來源](#模型來源)。
+
+## 接入工具
+
+表中每款工具的接入方式都一樣：電腦上的 Multica 守護程序在 `PATH` 中查找各工具的命令，每找到一款就註冊一個執行時。執行在這臺電腦上進行，使用工具自己的登入和訂閱；Multica 不附帶這些工具，也不代理它們的模型呼叫。
+
+1. 按工具自己的文件安裝並登入。
+2. 在同一臺電腦上開啟 [Multica 桌面應用](/desktop-app)，它會自動接入這臺電腦；或者安裝 CLI 並啟動守護程序：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Windows 上第一行換成 `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`。自託管例項使用[自託管快速上手](/self-host-quickstart)裡的命令。
+3. 在 **執行時** 頁面這臺電腦下確認工具已經出現，也可以執行 `multica runtime list`。之後再裝新工具，執行 `multica daemon restart` 或重新開啟桌面應用。
+4. 在這個執行時上[建立 AI 代理](/agents-create)，再給它分配任務。
+
+工具裝在守護程序 `PATH` 找不到的位置時，用 `MULTICA_<PREFIX>_PATH` 指向它，見[環境變數](/environment-variables#守護程序配置)。一臺電腦可以掛多款工具，一個工作區也可以接入多臺電腦，所以團隊可以在同一個看板上讓一臺機器跑 Claude Code，另一臺跑 Codex 或 Kimi。
+
+## 插話支援
+
+你可以[給仍在工作的執行插話](/mentioning-agents#給正在執行的-ai-代理插話)，不必等下一輪。這需要 AI 程式設計工具支援，且版本不低於下表：
+
+| 工具 | 最低版本 |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+其他工具或更低版本不會出現"插話到當前執行"：回覆會在當前執行結束後作為新一輪處理，或者你停止當前執行、從頭開始。
 
 ## 模型來源
 

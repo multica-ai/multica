@@ -294,3 +294,76 @@ func TestDeleteS3ObjectsRemovesThumbnails(t *testing.T) {
 		t.Fatalf("left behind: %v", store.files)
 	}
 }
+
+// A task token is bound to one workspace. Its user may also belong to the
+// attachment's workspace, but the task must not read files from there.
+func TestAttachmentReads_TaskTokenStaysInItsBoundWorkspace(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := useThumbnailTestStorage(t)
+	ctx := context.Background()
+	var otherWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('Thumb Task Other', 'thumb-task-other', '', 'TTO')
+		RETURNING id::text
+	`).Scan(&otherWorkspaceID); err != nil {
+		t.Fatalf("seed other workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1`, otherWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, otherWorkspaceID, testUserID); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+
+	key := "thumbs/task-other.jpg"
+	store.put(key, testJPEG(t, 2000, 1500))
+	var id string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'task-other.jpg', $3, 'image/jpeg', $4)
+		RETURNING id::text
+	`, otherWorkspaceID, testUserID, "https://s3.example.com/test-bucket/"+key, 600<<10).Scan(&id); err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM attachment WHERE id = $1`, id) })
+
+	r := chi.NewRouter()
+	r.Get("/api/attachments/{id}/download", testHandler.DownloadAttachment)
+	r.Get("/api/attachments/{id}/thumbnail", testHandler.GetAttachmentThumbnail)
+	r.Get("/api/attachments/{id}/original", testHandler.GetAttachmentOriginal)
+	r.Get("/api/attachments/{id}/download-metadata", testHandler.GetAttachmentForDownload)
+	read := func(route, boundWorkspaceID string) int {
+		req := httptest.NewRequest("GET", "/api/attachments/"+id+"/"+route, nil)
+		req.Header.Set("X-User-ID", testUserID)
+		if boundWorkspaceID != "" {
+			// What Auth stamps for a mat_ token.
+			req.Header.Set("X-Actor-Source", "task_token")
+			req.Header.Set("X-Workspace-ID", boundWorkspaceID)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	for _, route := range []string{"thumbnail", "original", "download", "download-metadata"} {
+		if got := read(route, testWorkspaceID); got != http.StatusNotFound {
+			t.Fatalf("%s from a task bound to another workspace: status = %d, want 404", route, got)
+		}
+	}
+	if _, ok := store.files[key+".thumb"]; ok {
+		t.Fatal("a task bound to another workspace generated a thumbnail")
+	}
+
+	for _, route := range []string{"thumbnail", "original", "download-metadata"} {
+		if got := read(route, otherWorkspaceID); got != http.StatusOK {
+			t.Fatalf("%s from a task bound to the attachment's workspace: status = %d, want 200", route, got)
+		}
+		if got := read(route, ""); got != http.StatusOK {
+			t.Fatalf("%s from the member's own session: status = %d, want 200", route, got)
+		}
+	}
+}

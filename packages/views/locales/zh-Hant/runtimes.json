@@ -37,7 +37,7 @@
     },
     "columns": {
       "name": "名稱",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "AI 代理",
       "workload": "負載",
       "status": "狀態"
@@ -112,7 +112,7 @@
       "workload_idle": "全部空閒",
       "workload_hint": "{{running}} 個執行中 · {{queued}} 個排隊中",
       "cli": "CLI",
-      "cloud_worker": "雲端 worker",
+      "cloud_worker": "雲端節點",
       "local_daemon": "本地守護程序"
     },
     "rename": "重新命名機器",
@@ -132,7 +132,7 @@
   "health": {
     "online": {
       "label": "線上",
-      "description": "最近 45 秒內收到心跳。可以派發執行。"
+      "description": "已連線，隨時可接收執行。"
     },
     "recently_lost": {
       "label": "最近失聯",
@@ -140,11 +140,11 @@
     },
     "offline": {
       "label": "離線",
-      "description": "5 分鐘以上沒有心跳。請重啟守護程序或排查主機。"
+      "description": "已斷線超過 5 分鐘。請重新啟動此機器上的守護程序或檢查網路連線。"
     },
     "long_offline": {
       "label": "長期離線",
-      "description": "6 天以上沒有心跳。如果這臺主機不會恢復，請將關聯 AI 代理改綁到其他執行時，或刪除此執行時。"
+      "description": "已斷線超過 6 天。如果此機器不會再恢復上線，請將其 AI 代理改綁到其他執行時，或刪除此執行時。"
     }
   },
   "detail": {
@@ -154,7 +154,7 @@
     "last_seen": "最後活躍 {{when}}",
     "never_seen": "從未連線",
     "fact_owner": "所有者",
-    "fact_device": "裝置",
+    "fact_device": "機器",
     "fact_runtime": "執行時",
     "fact_daemon_cli": "守護程序 CLI",
     "fact_daemon_id": "守護程序 ID",
@@ -210,7 +210,7 @@
       "self_heal_notice": "該執行時由正在執行的本地守護程序託管。刪除會成功，但守護程序會在數秒內重新註冊一個新的執行時——若想徹底移除，請先停止守護程序。",
       "profile_backed_notice": "該執行時來自自定義執行時配置。刪除它只會移除當前執行時例項；只要配置仍存在，執行中的守護程序就可以再次註冊它。若要徹底移除，請在“自定義執行時”中刪除對應配置。",
       "light": {
-        "title": "刪除執行時？",
+        "title": "刪除此執行時？",
         "description": "確定要刪除\"{{name}}\"嗎？此操作無法撤銷。",
         "cancel": "取消",
         "confirm": "刪除執行時",
@@ -285,7 +285,7 @@
     "title": "雲端執行時",
     "description": "建立雲端執行環境。",
     "create_title": "新節點",
-    "nodes_title": "Fleet 節點",
+    "nodes_title": "雲端節點",
     "refresh": "重新整理",
     "nodes_empty": "還沒有云端節點",
     "nodes_failed": "雲端執行時不可用",
@@ -304,11 +304,11 @@
       "name": "名稱",
       "instance_type": "例項規格",
       "region": "Region",
-      "disk_size": "磁碟大小 GiB",
-      "image_id": "AMI ID",
+      "disk_size": "磁碟大小（GiB）",
+      "image_id": "映像 ID（AMI）",
       "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
-      "bootstrap_pat": "Bootstrap PAT"
+      "key_name": "SSH 金鑰對",
+      "bootstrap_pat": "初始化 Token（PAT）"
     },
     "placeholders": {
       "name": "cloud-dev-01",
@@ -332,10 +332,19 @@
     "available": "可用",
     "action": "更新",
     "retry": "重試",
+    "cancel": "取消",
+    "cancel_failed": "未能確認取消，更新仍可能執行。請重試。",
+    "cancel_conflict": "無法取消：已經開始安裝。",
     "unknown_error": "未知錯誤",
     "initiate_failed": "啟動更新失敗",
+    "scheduled_tasks": "{{running}} 個執行中",
+    "note_no_interrupt": "不會中斷正在執行的任務。",
+    "expired_note": "等待機器閒置已超過 24 小時，本次排隊已失效。",
+    "busy_note": "機器正在執行任務，本次沒有開始更新。請在閒置時重試。",
+    "another_update_note": "這台機器上已有另一個更新在排隊或安裝中。",
     "status": {
       "pending": "等待守護程序...",
+      "scheduled": "閒置後更新",
       "running": "更新中...",
       "completed": "更新完成。守護程序正在重啟...",
       "failed": "更新失敗",
@@ -391,21 +400,21 @@
     "learn_more": "檢視配置指南",
     "close": "關閉",
     "add_new": "新建自定義執行時",
-    "list_title": "執行時後端",
+    "list_title": "基礎執行時",
     "custom_section_title": "自定義執行時（{{count}}）",
     "custom_section_aria": "自定義執行時",
-    "builtin_section_title": "支援的基礎協議（{{count}}）",
-    "builtin_section_hint": "內建協議族為只讀參考。",
+    "builtin_section_title": "內建執行時（{{count}}）",
+    "builtin_section_hint": "內建執行時為唯讀參考選項。",
     "builtin_section_aria": "支援的內建協議族",
     "builtin_reference": "參考",
     "empty_title": "建立第一個自定義執行時",
-    "empty_description": "選擇一個基礎協議族，然後指定 Multica 要執行的命令。",
+    "empty_description": "選擇一個相容的基礎執行時，再指定 Multica 要執行的命令。",
     "badge_builtin": "內建",
     "badge_custom": "自定義",
     "badge_disabled": "已禁用",
     "builtin_detail": {
-      "title": "內建協議族",
-      "description": "{{family}} 是內建協議型別，無法編輯或刪除。",
+      "title": "內建執行時",
+      "description": "{{family}} 是內建執行時，無法編輯或移除。",
       "read_only": "只讀"
     },
     "detail": {
@@ -526,7 +535,7 @@
     "title": "Qoder Cloud Agents 執行時",
     "description": "連線 Qoder Cloud Agents，由 Multica 管理執行並加密儲存憑證。工作區管理員可修改配置。",
     "loading": "載入中...",
-    "unavailable": "請先在服務端配置 MULTICA_VCS_SECRET_KEY。",
+    "unavailable": "此伺服器尚未啟用 Qoder Cloud Agents。需要伺服器管理員先設定憑證加密金鑰（MULTICA_VCS_SECRET_KEY）。",
     "online": "線上",
     "error": "連線異常",
     "starting": "啟動中",
@@ -674,7 +683,7 @@
     },
     "art": {
       "this_computer": "這臺電腦 · 桌面端",
-      "detected": "自動識別到的 harness",
+      "detected": "偵測到的執行時",
       "run_there": "在那臺機器上執行",
       "connected": "{{name}} 已連接到 Multica"
     }

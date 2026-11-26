@@ -11,6 +11,7 @@
     "usage": "Analítica",
     "runtimes": "Runtimes",
     "skills": "Skills",
+    "apps": "Apps",
     "settings": "Ajustes",
     "views": "Vistas",
     "docs": "Documentos"
@@ -23,13 +24,14 @@
     "member": "Miembro",
     "squad": "Squad",
     "skill": "Skill",
+    "app": "App",
     "machine": "Máquina",
     "runtime": "Runtime",
     "attachment": "Adjunto",
     "create_agent": "Crear agente",
     "unknown": "Página desconocida",
     "my_agents": "Trabajo de mis agentes",
-    "doc": "Documentos",
+    "doc": "Documento",
     "docFolder": "Carpeta"
   },
   "help": {
@@ -100,7 +102,7 @@
   },
   "rail": {
     "label": "Navegación de la app",
-    "sheet_description": "Cambia de sección y de espacio de trabajo.",
+    "sheet_description": "Cambia de vista y de espacio de trabajo.",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
@@ -122,7 +124,7 @@
     "copy_workspace_link": "Copiar enlace del espacio de trabajo",
     "workspace_meta_one": "{{slug}} · {{count}} miembro",
     "workspace_meta_other": "{{slug}} · {{count}} miembros",
-    "docs": "Documentos"
+    "docs": "Docs"
   },
   "bottom_bar": {
     "label": "Barra de estado",
@@ -176,8 +178,6 @@
       "view_delete": "Eliminar vista",
       "new_issue_here": "Nueva tarea en este proyecto",
       "inbox_actions": "Acciones de la bandeja",
-      "inbox_view_snoozed": "Ver pospuestos",
-      "inbox_view_archived": "Ver archivadas",
       "inbox_empty": "Sin notificaciones",
       "inbox_settings": "Visualización de la bandeja",
       "inbox_all": "Todas las notificaciones",
@@ -186,13 +186,17 @@
       "inbox_show_count": "Recuento de no leídas",
       "inbox_rail_badge": "Insignia de no leídas en Trabajo",
       "inbox_types": "Notificarme sobre",
-      "inbox_types_hint": "Si desactivas un tipo, sus notificaciones dejan de llegar y no se recuperan al volver a activarlo.",
+      "inbox_types_hint": "Cuando están desactivadas, estas notificaciones no se entregan y no se recuperan retroactivamente si vuelves a activarlas.",
       "inbox_more_settings": "Toda la configuración de notificaciones",
       "section_limit": "Filas visibles",
       "pinned_settings": "Visualización de fijados",
       "views_settings": "Visualización de vistas",
       "views_builtin": "Vistas integradas",
-      "views_show_count": "Recuentos"
+      "views_show_count": "Recuentos",
+      "guest_badge": "Invitado",
+      "guest_badge_hint": "Puedes ver y comentar los proyectos compartidos contigo.",
+      "involved": "Mis tareas",
+      "shared_projects": "Compartidos contigo"
     },
     "team": {
       "new_agent": "Nuevo agente",

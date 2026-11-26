@@ -8,6 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   AlertCircle,
   AlertTriangle,
@@ -168,6 +171,37 @@ function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean 
     draft.content !== baseline.content ||
     fileSignature(draft.files) !== fileSignature(baseline.files)
   );
+}
+
+/**
+ * The draft to show once a save returns: the saved version, except the fields
+ * the user changed after `sent` left the page. Saving recreates every file row,
+ * so kept files take their new id from the path they were sent under.
+ */
+function draftAfterSave(
+  draft: SkillDraft,
+  sent: SkillDraft,
+  saved: SkillDraft,
+): SkillDraft {
+  const sentPathById = new Map(sent.files.map((f) => [f.id, f.path]));
+  const savedIdByPath = new Map(saved.files.map((f) => [f.path, f.id]));
+  return {
+    name: draft.name === sent.name ? saved.name : draft.name,
+    description:
+      draft.description === sent.description
+        ? saved.description
+        : draft.description,
+    content: draft.content === sent.content ? saved.content : draft.content,
+    files:
+      draft.files === sent.files
+        ? saved.files
+        : draft.files.map((f) => ({
+            ...f,
+            id: savedIdByPath.get(
+              (f.id ? sentPathById.get(f.id) : undefined) ?? f.path,
+            ),
+          })),
+  };
 }
 
 /**
@@ -351,6 +385,7 @@ function UsedByList({ agents }: { agents: Agent[] }) {
 export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { t } = useT("skills");
   const { t: tCommon } = useT("common");
+  const prefersReducedMotion = useReducedMotion();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
@@ -441,34 +476,38 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
    * The draft this page last handed the user, normalized by `toDraft`. Dirty
    * state is measured against THIS, never against the latest server skill.
    *
-   * INVARIANT: `seedFromSkill` is the only writer, and it always writes the
-   * same snapshot it pushes into state. `dirtySummary` is a `useMemo` keyed on
-   * those state values, so every baseline write is paired with the state
-   * change that recomputes it. Assigning this ref anywhere else breaks that
+   * INVARIANT: `seedFromSkill` is the only writer, and it always pushes a new
+   * `files` array into state with it. `dirtySummary` is a `useMemo` keyed on
+   * that state, so every baseline write is paired with the state change that
+   * recomputes it. Assigning this ref anywhere else breaks that
    * pairing and silently re-opens MUL-5645.
    */
   const baselineRef = useRef<SkillDraft | null>(null);
 
-  const seedFromSkill = useCallback((s: Skill) => {
-    const seeded = toDraft(s);
+  const seedFromSkill = useCallback((s: Skill, sent?: SkillDraft) => {
+    const baseline = toDraft(s);
+    const seeded = sent
+      ? draftAfterSave(draftRef.current, sent, baseline)
+      : baseline;
     setName(seeded.name);
     setDescription(seeded.description);
     setContent(seeded.content);
     setFiles(seeded.files);
-    baselineRef.current = seeded;
+    baselineRef.current = baseline;
   }, []);
 
   /**
    * Adopt a server version wholesale: draft, baseline, seeded key and conflict
    * flag all move together. Every path that accepts a server version goes
    * through here — first load, silent refresh, Save, Discard — so the four
-   * pieces can never drift apart.
+   * pieces can never drift apart. Save passes the draft it `sent`, so edits
+   * made while the request was in flight stay in the draft.
    */
   const adoptServerVersion = useCallback(
-    (s: Skill, resetSelection = false) => {
+    (s: Skill, resetSelection = false, sent?: SkillDraft) => {
       seededKeyRef.current = `${wsId}:${s.id}@${s.updated_at}`;
       setConflictPending(false);
-      seedFromSkill(s);
+      seedFromSkill(s, sent);
       if (resetSelection) setSelectedPath(SKILL_MD);
     },
     [wsId, seedFromSkill],
@@ -608,6 +647,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (!skill || !canEdit) return;
     const trimmedName = name.trim();
     const trimmedDesc = description.trim();
+    const sent = { name, description, content, files };
     setSaving(true);
     try {
       const payload: UpdateSkillRequest = {
@@ -618,7 +658,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       };
       const updated = await api.updateSkill(skill.id, payload);
       qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, updated);
-      adoptServerVersion(updated);
+      adoptServerVersion(updated, false, sent);
       qc.invalidateQueries({
         queryKey: workspaceKeys.skills(wsId),
         exact: true,
@@ -1103,48 +1143,60 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
       {/* Dirty-only and floating, matching the skills list batch toolbar;
           anchored to the page root (relative), NOT the viewport. */}
-      {canEdit && isDirty && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 animate-in items-center gap-1 rounded-lg border bg-background px-2 py-1.5 fade-in slide-in-from-bottom-2 shadow-lg max-md:above-chat-launcher"
-        >
-          <div className="mr-1 flex items-center border-r pl-1 pr-2">
-            <span className="whitespace-nowrap text-caption text-muted-foreground">
-              {t(($) => $.detail.save_bar.changed_summary, {
-                parts: changedParts.join(" · "),
-              })}
-            </span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={handleDiscard}
-            disabled={saving}
-          >
-            {t(($) => $.detail.save_bar.discard)}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            onClick={handleSave}
-            disabled={saving || !name.trim()}
-          >
-            {saving ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {t(($) => $.detail.save_bar.saving)}
-              </>
-            ) : (
-              <>
-                <Save className="h-3 w-3" />
-                {t(($) => $.detail.save_bar.save)}
-              </>
-            )}
-          </Button>
-        </div>
-      )}
+      <div className="pointer-events-none absolute bottom-6 left-1/2 z-50 -translate-x-1/2 max-md:above-chat-launcher">
+        <AnimatePresence>
+          {canEdit && isDirty && (
+            <motion.div
+              key="skill-save-bar"
+              role="status"
+              aria-live="polite"
+              initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: prefersReducedMotion ? 0 : 8 }}
+              transition={{
+                duration: prefersReducedMotion ? 0 : UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              }}
+              className="pointer-events-auto flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
+            >
+              <div className="mr-1 flex items-center border-r pl-1 pr-2">
+                <span className="whitespace-nowrap text-caption text-muted-foreground">
+                  {t(($) => $.detail.save_bar.changed_summary, {
+                    parts: changedParts.join(" · "),
+                  })}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={handleDiscard}
+                disabled={saving}
+              >
+                {t(($) => $.detail.save_bar.discard)}
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                onClick={handleSave}
+                disabled={saving || !name.trim()}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t(($) => $.detail.save_bar.saving)}
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-3 w-3" />
+                    {t(($) => $.detail.save_bar.save)}
+                  </>
+                )}
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Delete confirmation */}
       <Dialog

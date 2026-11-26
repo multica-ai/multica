@@ -5,9 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { docTreeOptions } from "@multica/core/docs";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { BUILTIN_VIEW_KEYS, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
+import { useIsGuest } from "@multica/core/permissions";
 import { skillListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import type { IssueView } from "@multica/core/api/schemas";
 import type {
@@ -48,6 +51,13 @@ export interface ObjectHits {
 export interface PaletteDoc {
   doc: DocSummary;
   folder: string | null;
+  /** Excerpt around a content match, from server search. */
+  snippet?: string;
+  /**
+   * A server row answering an earlier query: still painted so the list does
+   * not flicker while the next request is in flight, but not selectable.
+   */
+  stale?: boolean;
 }
 
 const EMPTY_AUTOPILOTS: Autopilot[] = [];
@@ -93,22 +103,33 @@ function viewScore(view: PaletteView, query: string): number {
  * the palette does not otherwise need (views, autopilots, chats, skills) load
  * only once the user types.
  */
-export function useObjectSearch(query: string, open: boolean): ObjectHits & { directory: ReturnType<typeof useActorDirectory> } {
+export function useObjectSearch(
+  query: string,
+  open: boolean,
+): ObjectHits & { directory: ReturnType<typeof useActorDirectory>; docFolders: ReadonlyMap<string, string> } {
   const wsId = useWorkspaceId();
   const directory = useActorDirectory(open);
   const typing = open && query.length > 0;
+  // A guest (MUL-9420) has no autopilots, skills or docs; the server refuses the lists.
+  const guest = useIsGuest(wsId);
   const builtinLabel = useBuiltinViewLabel();
   const { data: savedViews = EMPTY_VIEWS } = useQuery({ ...issueViewEverywhereOptions(wsId), enabled: typing && !!wsId });
-  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing });
+  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing && !guest });
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
-  const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
-  const { data: docTree = EMPTY_DOC_TREE } = useQuery({ ...docTreeOptions(wsId), enabled: typing && !!wsId });
+  const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing && !guest });
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const { data: cachedDocTree = EMPTY_DOC_TREE } = useQuery({
+    ...docTreeOptions(wsId),
+    enabled: typing && !!wsId && docsEnabled && !guest,
+  });
+  const docTree = docsEnabled ? cachedDocTree : EMPTY_DOC_TREE;
+  const docFolders = useMemo(() => new Map(docTree.folders.map((f) => [f.id, f.title])), [docTree]);
   const docs = useMemo<PaletteDoc[]>(() => {
-    const folders = new Map(docTree.folders.map((f) => [f.id, f.title]));
+    const folders = docFolders;
     return docTree.docs
       .filter((doc) => doc.title.trim() !== "")
       .map((doc) => ({ doc, folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null }));
-  }, [docTree]);
+  }, [docFolders, docTree]);
   // Account-level cache entry the sidebar's workspace switcher already
   // holds, so the Workspaces group adds no request of its own.
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
@@ -153,5 +174,5 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
     };
   }, [autopilots, chats, directory, docs, query, skills, views, workspaces, wsId]);
 
-  return { ...hits, directory };
+  return { ...hits, directory, docFolders };
 }

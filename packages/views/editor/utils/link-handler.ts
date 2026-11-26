@@ -10,8 +10,7 @@ import {
   isKnownWorkspacePath,
   workspaceSlugForPath,
 } from "@multica/core/paths";
-import { isIssueIdentifier } from "@multica/ui/markdown";
-import { isLocalFileHref } from "@multica/core/paths/local-file-link";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import type { LinkClickIntent } from "../../navigation/click-intent";
 
 /**
@@ -37,6 +36,7 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
   "my-issues",
   "runtimes",
   "skills",
+  "apps",
   "settings",
 ]);
 

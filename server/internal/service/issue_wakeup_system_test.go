@@ -7,7 +7,7 @@ import (
 )
 
 func sub(stage int32, closed, cancelled bool) subIssue {
-	s := subIssue{Closed: closed, Cancelled: cancelled}
+	s := subIssue{Closed: closed, Cancelled: cancelled, Backlog: !closed}
 	if stage > 0 {
 		s.Stage = pgtype.Int4{Int32: stage, Valid: true}
 	}
