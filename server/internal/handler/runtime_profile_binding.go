@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -49,31 +51,35 @@ func (h *Handler) bindRuntimeProfileMachine(ctx context.Context, params db.Updat
 	if err != nil {
 		return result, err
 	}
+	var retire []pgtype.UUID
 	for _, id := range ids {
 		rt, err := qtx.GetAgentRuntime(ctx, id)
 		if err != nil {
 			return result, err
 		}
-		if rt.DaemonID == params.DaemonID {
-			continue
+		if rt.DaemonID != params.DaemonID {
+			retire = append(retire, id)
 		}
-		agents, err := qtx.ListUserAgentsByRuntimeForUpdate(ctx, id)
-		if err != nil {
-			return result, err
-		}
-		for _, agent := range agents {
+	}
+	targets, err := service.LockRuntimeTeardowns(ctx, qtx, retire)
+	if err != nil {
+		return result, err
+	}
+	for _, target := range targets {
+		rt := target.Runtime
+		for _, agent := range target.UserAgents {
 			if !agent.ArchivedAt.Valid {
 				return result, fmt.Errorf("%w (%s)", errProfileMachineInUse, rt.Name)
 			}
 		}
-		teardown, err := service.TeardownRuntime(ctx, qtx, id, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
+		teardown, err := service.TeardownRuntime(ctx, qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
 		if errors.Is(err, service.ErrRuntimeNotDrained) || errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
 			return result, fmt.Errorf("%w (%s)", errProfileMachineInUse, rt.Name)
 		}
 		if err != nil {
 			return result, err
 		}
-		if err := qtx.DeleteAgentRuntime(ctx, id); err != nil {
+		if err := qtx.DeleteAgentRuntime(ctx, rt.ID); err != nil {
 			return result, err
 		}
 		result.removed = append(result.removed, rt)

@@ -688,7 +688,7 @@ type signalRuntimeLockTx struct {
 
 func (tx signalRuntimeLockTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	row := tx.Tx.QueryRow(ctx, sql, args...)
-	if !strings.Contains(sql, "-- name: LockAgentRuntime") {
+	if !strings.HasPrefix(sql, "-- name: LockAgentRuntime :one\n") {
 		return row
 	}
 	return signalRuntimeLockRow{Row: row, locked: tx.locked, proceed: tx.proceed}
@@ -704,8 +704,7 @@ func (row signalRuntimeLockRow) Scan(dest ...any) error {
 	err := row.Row.Scan(dest...)
 	select {
 	case <-row.locked:
-		// The shared teardown defensively re-acquires the same runtime lock.
-		// Only the first acquisition is the synchronization point for this test.
+		// The test only needs the first acquisition.
 	default:
 		close(row.locked)
 		<-row.proceed

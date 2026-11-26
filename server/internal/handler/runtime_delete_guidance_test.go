@@ -971,15 +971,12 @@ func TestDeleteAgentRuntime_OfflineInstanceMatchesTheRealGCDrainGate(t *testing.
 	}
 	defer tx.Rollback(ctx)
 	q := testHandler.Queries.WithTx(tx)
-	if _, err := q.LockAgentRuntime(ctx, parseUUID(runtimeID)); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := q.ListUserAgentsByRuntimeForUpdate(ctx, parseUUID(runtimeID))
+	target, err := service.LockRuntimeTeardown(ctx, q, parseUUID(runtimeID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := make([]pgtype.UUID, len(agents))
-	for i, a := range agents {
+	ids := make([]pgtype.UUID, len(target.UserAgents))
+	for i, a := range target.UserAgents {
 		ids[i] = a.ID
 	}
 	undrained, err := q.CountUndrainedTasksByRuntimeOrAgent(ctx, db.CountUndrainedTasksByRuntimeOrAgentParams{RuntimeIds: []pgtype.UUID{parseUUID(runtimeID)}, AgentIds: ids})
