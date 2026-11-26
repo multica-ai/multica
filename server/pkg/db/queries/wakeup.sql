@@ -332,3 +332,10 @@ WHERE id= @id AND status='dispatched' AND dispatched_at= @dispatched_at RETURNIN
 -- not finished: the run that made a change still knows about it.
 SELECT count(*) FROM agent_task_queue WHERE id=ANY(@ids::uuid[]) AND agent_id= @agent_id AND issue_id= @issue_id
  AND status IN ('dispatched','running','waiting_local_directory');
+
+-- name: DetachWakeupsFromComments :exec
+-- A wakeup outlives the comment it was scheduled from. Its runs carry that
+-- comment as their trigger, which must exist, so a deleted comment is dropped
+-- from the rule instead.
+UPDATE issue_wakeup SET parent_comment_id=NULL
+WHERE workspace_id= @workspace_id AND parent_comment_id=ANY(@comment_ids::uuid[]);

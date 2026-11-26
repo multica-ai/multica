@@ -4129,6 +4129,15 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 		}
 	}
 
+	// The comment's content is gone whether it was removed or tombstoned, so a
+	// wakeup scheduled from it no longer points at it.
+	if err := qtx.DetachWakeupsFromComments(ctx, db.DetachWakeupsFromCommentsParams{
+		WorkspaceID: target.WorkspaceID,
+		CommentIds:  append([]pgtype.UUID{target.ID}, out.RemovedIDs...),
+	}); err != nil {
+		return out, err
+	}
+
 	out.IssueRevision, err = qtx.TouchIssueForCommentDelete(ctx, db.TouchIssueForCommentDeleteParams{
 		IssueID:     target.IssueID,
 		WorkspaceID: target.WorkspaceID,
