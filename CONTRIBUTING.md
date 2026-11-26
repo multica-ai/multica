@@ -64,6 +64,10 @@ Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections
    and explain why.
 
 End the description with `Closes #<issue>` when the PR resolves an issue.
+The title and description become the squash commit on `main`; credit
+co-authors with `Co-authored-by:` lines at the end of the description. Report
+security vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
+not in a pull request or issue.
 
 **UI or interaction PRs without screenshots or a recording are rejected by
 default.** Reviewers should request changes or close the PR until one is
