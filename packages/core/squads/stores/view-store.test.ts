@@ -75,21 +75,21 @@ describe("useSquadsViewStore", () => {
     expect(useSquadsViewStore.getState().scope).toBe("mine");
   });
 
-  it("resets to 'mine' when switching to a workspace with no persisted value", async () => {
+  it("resets to 'all' when switching to a workspace with no persisted value", async () => {
     localStorage.setItem(
       "multica_squads_view:acme",
-      JSON.stringify({ state: { scope: "all" }, version: 0 }),
+      JSON.stringify({ state: { scope: "mine" }, version: 0 }),
     );
 
     setCurrentWorkspace("acme", "ws_a");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("all");
+    expect(useSquadsViewStore.getState().scope).toBe("mine");
 
     setCurrentWorkspace("beta", "ws_b");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("mine");
+    expect(useSquadsViewStore.getState().scope).toBe("all");
     expect(localStorage.getItem("multica_squads_view:acme")).not.toBeNull();
   });
 });

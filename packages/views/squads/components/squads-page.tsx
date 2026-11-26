@@ -53,12 +53,13 @@ import {
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { useIntentNavigate } from "../../navigation";
+import { useIntentNavigate, useNavigation } from "../../navigation";
 import {
   CollectionCreateButton,
   CollectionFilterButton,
   CollectionNoMatches,
   CollectionPageHeader,
+  CollectionPageState,
   CollectionResetButton,
   CollectionScopeItems,
 } from "../../layout/collection-page";
@@ -303,6 +304,9 @@ function SquadFilterMenu({
             )}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+            {leaderOptions.length === 0 && (
+              <DropdownMenuItem disabled>{t(($) => $.page.no_leader_options)}</DropdownMenuItem>
+            )}
             {leaderOptions.map((o) => (
               <DropdownMenuCheckboxItem
                 key={o.id}
@@ -326,6 +330,9 @@ function SquadFilterMenu({
             )}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+            {creatorOptions.length === 0 && (
+              <DropdownMenuItem disabled>{t(($) => $.page.no_creator_options)}</DropdownMenuItem>
+            )}
             {creatorOptions.map((o) => (
               <DropdownMenuCheckboxItem
                 key={o.id}
@@ -381,8 +388,23 @@ export function SquadsPage() {
     return me?.role === "owner" || me?.role === "admin";
   }, [members, currentUser]);
 
-  const scope = useSquadsViewStore((s) => s.scope);
-  const setScope = useSquadsViewStore((s) => s.setScope);
+  const savedScope = useSquadsViewStore((s) => s.scope);
+  const saveScope = useSquadsViewStore((s) => s.setScope);
+  // `?scope=` (the Team panel links with it) decides this tab's view only:
+  // desktop tabs share the store, so writing it there would change the scope
+  // another tab shows when it is back. Picking a scope on the page saves it
+  // and keeps this tab's URL in step.
+  const navigation = useNavigation();
+  const urlScopeParam = navigation.searchParams.get("scope");
+  const urlScope = SQUAD_SCOPES.find((s) => s === urlScopeParam) ?? null;
+  const scope = urlScope ?? savedScope;
+  const setScope = (next: SquadsScope) => {
+    saveScope(next);
+    if (!urlScope) return;
+    const params = new URLSearchParams(navigation.searchParams);
+    params.set("scope", next);
+    navigation.replace(`${navigation.pathname}?${params.toString()}`);
+  };
   const sortField = useSquadsViewStore((s) => s.sortField);
   const sortDirection = useSquadsViewStore((s) => s.sortDirection);
   const hiddenColumns = useSquadsViewStore((s) => s.hiddenColumns);
@@ -626,12 +648,27 @@ export function SquadsPage() {
           }
           sort={sort}
           empty={
-            <CollectionNoMatches
-              title={t(($) => $.page.no_matches)}
-              description={hasActiveFilters ? t(($) => $.page.empty_no_match) : undefined}
-              onReset={clearFilters}
-              hasFilters={hasActiveFilters}
-            />
+            scope === "mine" && scopeRows.length === 0 ? (
+              // Nothing is hidden by filters: the user simply created no
+              // squad, while the workspace has some.
+              <CollectionPageState
+                size="compact"
+                icon={Users}
+                title={t(($) => $.page.mine_empty)}
+                actions={
+                  <Button type="button" variant="outline" size="sm" onClick={() => setScope("all")}>
+                    {t(($) => $.page.view_all)}
+                  </Button>
+                }
+              />
+            ) : (
+              <CollectionNoMatches
+                title={t(($) => $.page.no_matches)}
+                description={hasActiveFilters ? t(($) => $.page.empty_no_match) : undefined}
+                onReset={clearFilters}
+                hasFilters={hasActiveFilters}
+              />
+            )
           }
         />
       )}

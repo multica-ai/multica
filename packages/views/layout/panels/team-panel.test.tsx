@@ -17,6 +17,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
+import { useSquadsViewStore } from "@multica/core/squads/stores";
 import { TeamPanel } from "./team-panel";
 
 vi.mock("@multica/core/api", async (importOriginal) => ({
@@ -338,5 +339,19 @@ describe("TeamPanel runtime badge", () => {
 
     expect(screen.getByRole("link", { name: "Runtimes" })).toBeInTheDocument();
     expect(screen.queryByText(/online|offline/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TeamPanel squads row", () => {
+  it("links to all squads, which is what its count counts, without touching the saved scope", () => {
+    useSquadsViewStore.setState({ scope: "mine" });
+    renderPanel([runtime()]);
+
+    const link = screen.getByRole("link", { name: /^Squads/ });
+    expect(link).toHaveAttribute("href", "/acme/squads?scope=all");
+    // A modifier click opens another tab; the scope this tab shows stays.
+    fireEvent.click(link, { metaKey: true });
+    fireEvent.click(link, { ctrlKey: true });
+    expect(useSquadsViewStore.getState().scope).toBe("mine");
   });
 });

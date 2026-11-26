@@ -12,7 +12,11 @@
     },
     "no_matches": "Ningún squad coincide",
     "row_menu": "Acciones del squad",
-    "archive_action": "Archivar"
+    "archive_action": "Archivar",
+    "mine_empty": "Aún no has creado ningún squad",
+    "view_all": "Ver todos los squads",
+    "no_leader_options": "No hay líderes para filtrar",
+    "no_creator_options": "No hay creadores para filtrar"
   },
   "member_type": {
     "agent": "Agente",

@@ -12,7 +12,11 @@
     },
     "no_matches": "Нет совпадений",
     "row_menu": "Действия с командой",
-    "archive_action": "Архивировать"
+    "archive_action": "Архивировать",
+    "mine_empty": "Вы ещё не создали ни одного отряда",
+    "view_all": "Показать все отряды",
+    "no_leader_options": "Нет лидеров для фильтра",
+    "no_creator_options": "Нет создателей для фильтра"
   },
   "member_type": {
     "agent": "Агент",

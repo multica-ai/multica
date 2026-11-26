@@ -12,7 +12,11 @@
     },
     "no_matches": "沒有匹配的小隊",
     "row_menu": "小隊操作",
-    "archive_action": "歸檔"
+    "archive_action": "歸檔",
+    "mine_empty": "你還沒有建立小隊",
+    "view_all": "查看全部小隊",
+    "no_leader_options": "沒有可選的隊長",
+    "no_creator_options": "沒有可選的建立者"
   },
   "member_type": {
     "agent": "AI 代理",

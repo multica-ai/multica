@@ -12,7 +12,11 @@
     },
     "no_matches": "該当するスカッドはありません",
     "row_menu": "スカッドの操作",
-    "archive_action": "アーカイブ"
+    "archive_action": "アーカイブ",
+    "mine_empty": "まだスクワッドを作成していません",
+    "view_all": "すべてのスクワッドを表示",
+    "no_leader_options": "絞り込めるリーダーがいません",
+    "no_creator_options": "絞り込める作成者がいません"
   },
   "member_type": {
     "agent": "エージェント",

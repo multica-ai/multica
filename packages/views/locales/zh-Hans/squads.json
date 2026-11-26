@@ -12,7 +12,11 @@
     },
     "no_matches": "没有匹配的小队",
     "row_menu": "小队操作",
-    "archive_action": "归档"
+    "archive_action": "归档",
+    "mine_empty": "你还没有创建小队",
+    "view_all": "查看全部小队",
+    "no_leader_options": "没有可选的队长",
+    "no_creator_options": "没有可选的创建者"
   },
   "member_type": {
     "agent": "智能体",
