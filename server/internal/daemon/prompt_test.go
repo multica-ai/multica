@@ -521,6 +521,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 		execenv.ChannelTypeFeishu,
 		execenv.ChannelTypeWecom,
 		execenv.ChannelTypeDingtalk,
+		execenv.ChannelTypeWeixin,
 	} {
 		t.Run(channelType+" transcript prompt does not contradict itself", func(t *testing.T) {
 			out := buildChatPrompt(Task{
@@ -534,10 +535,36 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			if strings.Contains(out, "NOT in Multica") {
 				t.Errorf("transcript surface told its history is NOT in Multica, then told to read it from Multica\n--- output ---\n%s", out)
 			}
-			// The useful half of the original sentence must survive: the agent
-			// still must not go hunting through issues and comments.
-			if !strings.Contains(out, "Never look in Multica issues or comments") {
-				t.Errorf("lost the issues/comments prohibition\n--- output ---\n%s", out)
+		})
+	}
+}
+
+// TestBuildChatPromptDoesNotRestrictIssueAccess guards MUL-10272. The IM chat
+// prompt used to say "Never look in Multica issues or comments for this
+// conversation"; agents read "for this conversation" as the rule's scope and
+// refused every issue or comment lookup asked from the IM chat. The per-channel
+// history pointer is the only guard against searching issues for the chat's own
+// history, so no channel's prompt may restrict issue or comment access.
+func TestBuildChatPromptDoesNotRestrictIssueAccess(t *testing.T) {
+	for _, channelType := range []string{
+		execenv.ChannelTypeSlack,
+		execenv.ChannelTypeFeishu,
+		execenv.ChannelTypeWecom,
+		execenv.ChannelTypeDingtalk,
+		execenv.ChannelTypeTelegram,
+		execenv.ChannelTypeWeixin,
+	} {
+		t.Run(channelType, func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: channelType,
+				ChatMessage:     "帮我查一下 MUL-123 的进展",
+			})
+			lower := strings.ToLower(out)
+			for _, banned := range []string{"never look in", "issues or comments"} {
+				if strings.Contains(lower, banned) {
+					t.Errorf("chat prompt restricts issue/comment access (%q)\n--- output ---\n%s", banned, out)
+				}
 			}
 		})
 	}
