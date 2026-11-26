@@ -91,6 +91,7 @@ function workspaceScoped(slug: string) {
     // The agent's General settings, scrolled to its conversation starters.
     agentConversationStarters: (id: string) =>
       `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
+    members: () => `${ws}/members`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,

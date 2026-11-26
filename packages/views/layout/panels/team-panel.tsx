@@ -424,8 +424,8 @@ export function TeamPanel() {
   const canChatWith = (agent: Agent) =>
     !agent.archived_at && canAssignAgentToIssue(agent, { userId: userId ?? null, role: myRole ?? null }).allowed;
   const onAgents = pathname === p.agents();
-  // Member pages live under /members/:id; the list itself is a Settings tab.
-  const membersRoot = p.memberDetail("").replace(/\/$/, "");
+  // The list and each member's page live under /members.
+  const membersRoot = p.members();
 
   return (
     <>
@@ -572,7 +572,7 @@ export function TeamPanel() {
               trailing={<PanelCount value={liveSquads.length} />}
             />
             <PanelLink
-              href={`${p.settings()}?tab=members`}
+              href={p.members()}
               label={t(($) => $.panels.team.members, { count: members.length })}
               active={isPathWithin(pathname, membersRoot)}
               icon={

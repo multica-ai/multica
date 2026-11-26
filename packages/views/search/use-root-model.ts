@@ -47,6 +47,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   autopilots: ["autopilot", "autopilots", "automation", "schedule", "cron", "webhook", "自动化", "定时"],
   agents: ["agents", "bots", "ai", "智能体"],
   squads: ["squads", "teams", "小队", "团队"],
+  members: ["members", "people", "users", "teammates", "成员", "同事"],
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
   docs: ["docs", "knowledge", "知识库"],
@@ -206,12 +207,18 @@ export function useRootModel(
   const appsAvailable = useComposioAvailable();
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.filter((key) => (key !== "docs" || docsEnabled) && (key !== "apps" || appsAvailable)).map((key) => ({
+      NAV_PAGE_KEYS.filter(
+        (key) =>
+          (key !== "docs" || docsEnabled) &&
+          (key !== "apps" || appsAvailable) &&
+          // The guest route guard sends /members back to the inbox.
+          (key !== "members" || !guest),
+      ).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [docsEnabled, tNav, appsAvailable],
+    [docsEnabled, guest, tNav, appsAvailable],
   );
 
   return useMemo<RootModel>(() => {

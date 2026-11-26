@@ -2,7 +2,8 @@
   "role": {
     "owner": "オーナー",
     "admin": "管理者",
-    "member": "メンバー"
+    "member": "メンバー",
+    "guest": "ゲスト"
   },
   "card": {
     "unavailable": "メンバーを利用できません",
@@ -19,5 +20,20 @@
     "breadcrumb_fallback": "メンバー",
     "not_found_title": "メンバーが見つかりません",
     "not_found_description": "このメンバーはワークスペースから退出した可能性があります。"
+  },
+  "page": {
+    "title": "メンバー",
+    "search": "メンバーを検索",
+    "manage": "設定でメンバーを管理",
+    "invite": "メンバーを招待",
+    "no_matches": "一致するメンバーはいません",
+    "you": "あなた",
+    "table": {
+      "name": "名前",
+      "role": "ロール",
+      "joined": "参加日"
+    },
+    "load_failed": "メンバーを読み込めませんでした",
+    "retry": "再試行"
   }
 }

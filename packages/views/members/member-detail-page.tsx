@@ -62,7 +62,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
   const member = members.find((m) => m.user_id === userId) ?? null;
   const segments = [
     {
-      href: `${paths.settings()}?tab=members`,
+      href: paths.members(),
       label: t(($) => $.detail.members_breadcrumb),
     },
   ];

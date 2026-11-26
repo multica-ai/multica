@@ -11,6 +11,7 @@ import { AppDetailPage } from "./pages/app-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
+import { MembersPage } from "@multica/views/members";
 import {
   RuntimeDetailPage,
   RuntimeSettingsPage,
@@ -177,6 +178,7 @@ export const appRoutes: RouteObject[] = [
           { path: "agents/new/manual", element: <ManualCreateAgentPage /> },
           { path: "agents/new/ai/:sessionId", element: <AiBuilderSessionPage /> },
           { path: "agents/:id", element: <AgentDetailPage /> },
+          { path: "members", element: <MembersPage /> },
           { path: "members/:id", element: <MemberDetailPage /> },
           { path: "squads", element: <SquadsPage /> },
           { path: "views", element: <AllViewsPage /> },

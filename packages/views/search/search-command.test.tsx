@@ -461,6 +461,15 @@ describe("SearchCommand", () => {
       expect(renderedValues()).not.toContain("hand-to-agent");
     });
 
+    it("offers no Members page, which a guest can't open", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.members);
+
+      await waitFor(() => expect(input().value).toBe(enLayout.nav.members));
+      expect(renderedValues()).not.toContain("page:members");
+    });
+
     it("keeps only the global commands the server allows it (MUL-9883)", async () => {
       const user = userEvent.setup();
       renderSearch();
@@ -522,6 +531,13 @@ describe("SearchCommand", () => {
         await user.type(input(), enLayout.nav[page.navKey]);
         await waitFor(() => expect(renderedValues()).toContain(`page:${key}`));
       }
+    });
+
+    it("offers the Members page to a workspace member", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), enLayout.nav.members);
+      await waitFor(() => expect(renderedValues()).toContain("page:members"));
     });
 
     it("leaves Apps out when the server has no connected apps", async () => {
