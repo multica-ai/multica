@@ -1473,19 +1473,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// call, not ours: it depends on whether this surface's conversation is
 		// still readable, which this package cannot see (MUL-5722).
 		turnPrompt := b.skillTurnPrompt(runCtx, c, prompt, opts)
-		// A fresh thread got the brief as developerInstructions; a resumed one
-		// keeps the brief it started with, so resend it when it has changed.
-		briefHash := HashWarmBrief(opts.SystemPrompt)
-		briefCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-		briefResent := resumed && briefHash != "" && !codexThreadHasBrief(briefCodexHome, threadID, briefHash)
-		if briefResent {
-			turnPrompt = codexBriefRefresh(opts.SystemPrompt) + turnPrompt
-		}
-		if !resumed && briefHash != "" {
-			if err := recordCodexThreadBrief(briefCodexHome, threadID, briefHash); err != nil {
-				b.cfg.Logger.Warn("codex: record thread brief failed; a later resume will resend it", "thread_id", threadID, "error", err)
-			}
-		}
 		turnParams := map[string]any{
 			"threadId": threadID,
 			"input":    codexTurnInput(turnPrompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
@@ -1542,12 +1529,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 		turnNotificationGate.arm()
 		_, err := c.request(runCtx, "turn/start", turnParams)
-		if err == nil && briefResent {
-			b.cfg.Logger.Info("codex: resent changed runtime brief to resumed thread", "thread_id", threadID, "brief_bytes", len(opts.SystemPrompt))
-			if recErr := recordCodexThreadBrief(briefCodexHome, threadID, briefHash); recErr != nil {
-				b.cfg.Logger.Warn("codex: record thread brief failed; a later resume will resend it", "thread_id", threadID, "error", recErr)
-			}
-		}
 		if err != nil {
 			if runCtx.Err() != nil {
 				finishRunContextDone()
@@ -1905,6 +1886,19 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+// codexProjectDocMaxBytes replaces Codex's project_doc_max_bytes (32 KiB by
+// default) for daemon threads. Codex reads AGENTS.md only up to that many bytes
+// and silently drops the rest, which cut the trailing Workflow / Mentions /
+// Output sections off long runtime briefs (GitHub #11480). The cap is not
+// persisted with the thread, so every thread/start and thread/resume sends it.
+const codexProjectDocMaxBytes = 4 << 20
+
+// codexThreadConfig is the per-thread config override the daemon sends with
+// thread/start and thread/resume.
+func codexThreadConfig() map[string]any {
+	return map[string]any{"project_doc_max_bytes": codexProjectDocMaxBytes}
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -1917,13 +1911,13 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
-		// developerInstructions stays nil: Codex keeps the instructions the
-		// thread was started with and ignores this field on resume. A changed
-		// brief is resent in the turn instead (see codex_brief.go).
+		// developerInstructions stays nil for the reason given on thread/start
+		// below.
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
+			"config":                codexThreadConfig(),
 			"developerInstructions": nil,
 			// Only omit history from the response, not the resumed model context.
 			// We need the thread ID, not an unbounded single-line turns payload.
@@ -1973,11 +1967,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
-	// developerInstructions carries the Multica runtime brief. The daemon no
-	// longer writes it into AGENTS.md, where Codex's project_doc_max_bytes cap
-	// (32 KiB by default) silently cut the trailing Workflow / Mentions /
-	// Output sections off long briefs (GitHub #11480). Codex records it once
-	// as a developer message when the thread starts.
+	// developerInstructions is always nil: a thread started with this cwd loads
+	// the per-task AGENTS.md the daemon wrote there, so the runtime brief is
+	// already in context and inlining it would duplicate it on every turn.
+	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
+	// app-server (thread/start -> turn/start) with developerInstructions unset
+	// (MUL-5392).
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -1985,9 +1980,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"cwd":                    opts.Cwd,
 		"approvalPolicy":         nil,
 		"sandbox":                nil,
-		"config":                 nil,
+		"config":                 codexThreadConfig(),
 		"baseInstructions":       nil,
-		"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+		"developerInstructions":  nil,
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,

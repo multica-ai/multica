@@ -11,8 +11,8 @@ import (
 
 func TestWorktreeRuntimeBriefStaysOutOfAgentCommits(t *testing.T) {
 	for _, tc := range []struct{ provider, target string }{
-		{"claude", "CLAUDE.md"}, {"opencode", "AGENTS.md"},
-		{"claude", "AGENTS.md"}, {"opencode", "CLAUDE.md"},
+		{"claude", "CLAUDE.md"}, {"codex", "AGENTS.md"},
+		{"claude", "AGENTS.md"}, {"codex", "CLAUDE.md"},
 	} {
 		provider := tc.provider
 		for _, subdir := range []string{".", "docs [guide]"} {
@@ -95,7 +95,7 @@ func TestWorktreeRuntimeBriefStaysOutOfAgentCommits(t *testing.T) {
 }
 
 func TestWorktreeRuntimeConfigEditsSurviveFinalize(t *testing.T) {
-	for _, provider := range []string{"opencode", "claude"} {
+	for _, provider := range []string{"codex", "claude"} {
 		for _, agentCommit := range []bool{false, true} {
 			t.Run(provider+"/"+map[bool]string{false: "auto commit", true: "leftover ref"}[agentCommit], func(t *testing.T) {
 				repo := newTestRepo(t)
@@ -283,38 +283,6 @@ func TestWorktreeRuntimeConfigProtectionSkipsUntrackedFiles(t *testing.T) {
 		t.Fatal("untracked instruction file recorded as protected")
 	}
 	if err := CleanupRuntimeConfig(wt.WorkDir, "claude"); err != nil {
-		t.Fatal(err)
-	}
-	finalizeOK(t, wt)
-}
-
-// Codex gets no brief in AGENTS.md, so the repository's tracked AGENTS.md is
-// not hidden from the agent's commits.
-func TestWorktreeRuntimeConfigProtectionSkipsInlineOnlyProviders(t *testing.T) {
-	repo := newTestRepo(t)
-	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("Original instructions.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, repo, "add", ".")
-	gitRun(t, repo, "commit", "-m", "add instructions")
-	wt := prepareForTest(t, repo)
-	if _, err := InjectRuntimeConfig(wt.WorkDir, "codex", TaskContextForEnv{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := wt.ProtectRuntimeConfig("codex"); err != nil {
-		t.Fatal(err)
-	}
-	if wt.RuntimeConfigSkipWorktree != "" {
-		t.Fatalf("inline-only provider protected %q", wt.RuntimeConfigSkipWorktree)
-	}
-	if err := os.WriteFile(filepath.Join(wt.WorkDir, "AGENTS.md"), []byte("Updated instructions.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, wt.Path, "commit", "-am", "agent edits instructions")
-	if got := gitRun(t, wt.Path, "show", "HEAD:AGENTS.md"); got != "Updated instructions." {
-		t.Fatalf("agent's AGENTS.md edit was not committed: %q", got)
-	}
-	if err := CleanupRuntimeConfig(wt.WorkDir, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	finalizeOK(t, wt)

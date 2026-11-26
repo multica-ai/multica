@@ -662,11 +662,14 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 		t.Run(tc.provider, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			brief, err := InjectRuntimeConfig(dir, tc.provider, ctx)
-			if err != nil {
+			if _, err := InjectRuntimeConfig(dir, tc.provider, ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig: %v", err)
 			}
-			s := readInjectedBrief(t, dir, tc.provider, brief)
+			content, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(content)
 			for _, want := range []string{
 				"## Project Context",
 				"Project Beta",
@@ -1338,11 +1341,14 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			brief, err := InjectRuntimeConfig(dir, tc.name, TaskContextForEnv{IssueID: "issue-1"})
-			if err != nil {
+			if _, err := InjectRuntimeConfig(dir, tc.name, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
-			s := readInjectedBrief(t, dir, tc.name, brief)
+			data, err := os.ReadFile(filepath.Join(dir, tc.file))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.file, err)
+			}
+			s := string(data)
 			providerPins := []string{
 				"no background-completion wakeup",
 				"whatever a tool response promises",
@@ -1429,12 +1435,16 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	brief, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"})
-	if err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	s := readInjectedBrief(t, dir, "codex", brief)
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
 	for _, want := range []string{
 		"## Available Commands",
 		"core agent loop and common issue create/update tasks",
@@ -1461,9 +1471,13 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	if strings.Contains(s, "### Squad maintenance") {
 		t.Errorf("non-leader brief must not carry the squad maintenance block\n---\n%s", s)
 	}
-	leader, err := InjectRuntimeConfig(t.TempDir(), "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true})
-	if err != nil {
+	leaderDir := t.TempDir()
+	if _, err := InjectRuntimeConfig(leaderDir, "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	leader, err := os.ReadFile(filepath.Join(leaderDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read leader AGENTS.md: %v", err)
 	}
 	for _, want := range []string{
 		"### Squad maintenance",
@@ -1506,24 +1520,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 }
 
-// readInjectedBrief returns the brief as the provider's agent receives it: the
-// instruction file for file-delivered providers, or the returned brief for
-// inline-only ones such as Codex.
-func readInjectedBrief(t *testing.T, dir, provider, returned string) string {
-	t.Helper()
-	if RuntimeBriefInlineOnly(provider) {
-		return returned
-	}
-	path := runtimeConfigPath(dir, provider)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(data)
-}
-
-// Codex truncates AGENTS.md at project_doc_max_bytes, so its brief travels
-// only inline and the workdir gets no AGENTS.md (GitHub #11480).
 func TestInjectRuntimeConfigCodex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1533,50 +1529,22 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	brief, err := InjectRuntimeConfig(dir, "codex", ctx)
-	if err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	if !strings.Contains(brief, "Multica Agent Runtime") {
-		t.Error("brief missing meta skill header")
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
 	}
 	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(brief, "coding") {
-		t.Error("brief missing skill name")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Fatalf("codex must not get an AGENTS.md brief, stat err = %v", err)
-	}
-}
-
-// A repository AGENTS.md is left to the repository, and a brief block an older
-// daemon left in it is removed so Codex does not load a stale second copy.
-func TestInjectRuntimeConfigCodexLeavesRepositoryAgentsMD(t *testing.T) {
-	t.Parallel()
-
-	const userContent = "# Repository instructions\n\nkeep me\n"
-	for name, seed := range map[string]string{
-		"untouched":   userContent,
-		"stale block": userContent + runtimeManagedSeparator + runtimeMarkerBegin + "\nold brief\n" + runtimeMarkerEnd + "\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			path := filepath.Join(dir, "AGENTS.md")
-			if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
-				t.Fatalf("InjectRuntimeConfig: %v", err)
-			}
-			got, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != userContent {
-				t.Fatalf("AGENTS.md = %q, want repository content %q", got, userContent)
-			}
-		})
+	if !strings.Contains(s, "coding") {
+		t.Error("AGENTS.md missing skill name")
 	}
 }
 
@@ -2487,14 +2455,21 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 	for _, provider := range []string{"codex", "claude", "opencode"} {
 		t.Run(provider, func(t *testing.T) {
 			dir := t.TempDir()
-			brief, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{
+			if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{
 				IssueID:          "issue-1",
 				TriggerCommentID: "comment-1",
-			})
-			if err != nil {
+			}); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
-			s := readInjectedBrief(t, dir, provider, brief)
+			fileName := "CLAUDE.md"
+			if provider != "claude" {
+				fileName = "AGENTS.md"
+			}
+			data, err := os.ReadFile(filepath.Join(dir, fileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", fileName, err)
+			}
+			s := string(data)
 
 			// Assert inside the section slice: "#4182" also appears in
 			// Available Commands, so a whole-file Contains would stay green
@@ -2503,7 +2478,7 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 			// "## Comment Formatting" inline earlier in the file.
 			cfStart := strings.Index(s, "\n## Comment Formatting\n")
 			if cfStart < 0 {
-				t.Fatalf("%s missing ## Comment Formatting section\n---\n%s", provider, s)
+				t.Fatalf("%s missing ## Comment Formatting section\n---\n%s", fileName, s)
 			}
 			cf := s[cfStart+1:]
 			if next := strings.Index(cf[3:], "\n## "); next >= 0 {
@@ -2520,7 +2495,7 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 				"do not rely on `\\n` escapes",
 			} {
 				if !strings.Contains(cf, want) {
-					t.Errorf("%s Comment Formatting section missing %q\n---\n%s", provider, want, cf)
+					t.Errorf("%s Comment Formatting section missing %q\n---\n%s", fileName, want, cf)
 				}
 			}
 
@@ -2531,7 +2506,7 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 				"Codex-Specific Comment Formatting",
 			} {
 				if strings.Contains(s, banned) {
-					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s", provider, banned, s)
+					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s", fileName, banned, s)
 				}
 			}
 		})
@@ -2551,11 +2526,14 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 	runtimeGOOS = "windows"
 
 	dir := t.TempDir()
-	brief, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"})
-	if err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	s := readInjectedBrief(t, dir, "codex", brief)
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
 	for _, want := range []string{
 		"On Windows, **always write the comment body to a UTF-8 file",
 		"$OutputEncoding",
@@ -2580,11 +2558,14 @@ func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{QuickCreatePrompt: "create a task"}
-	brief, err := InjectRuntimeConfig(dir, "codex", ctx)
-	if err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	s := readInjectedBrief(t, dir, "codex", brief)
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
 
 	for _, want := range []string{
 		"quick-create task",
@@ -2619,11 +2600,14 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	brief, err := InjectRuntimeConfig(dir, "codex", ctx)
-	if err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	s := readInjectedBrief(t, dir, "codex", brief)
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
@@ -6194,11 +6178,14 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			brief, err := InjectRuntimeConfig(dir, tc.provider, tc.ctx)
-			if err != nil {
+			if _, err := InjectRuntimeConfig(dir, tc.provider, tc.ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
-			s := readInjectedBrief(t, dir, tc.provider, brief)
+			data, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(data)
 
 			for _, b := range banned {
 				if strings.Contains(s, b) {
@@ -6241,11 +6228,14 @@ func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 			IssueID:          "issue-md-codex",
 			TriggerCommentID: "comment-md-codex",
 		}
-		brief, err := InjectRuntimeConfig(dir, "codex", ctx)
-		if err != nil {
+		if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 			t.Fatalf("InjectRuntimeConfig failed: %v", err)
 		}
-		s := readInjectedBrief(t, dir, "codex", brief)
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if err != nil {
+			t.Fatalf("read AGENTS.md: %v", err)
+		}
+		s := string(data)
 
 		// The post-#4182 file-first rule is still emitted on Linux...
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
@@ -6265,11 +6255,14 @@ func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 			IssueID:          "issue-md-codex-win",
 			TriggerCommentID: "comment-md-codex-win",
 		}
-		brief, err := InjectRuntimeConfig(dir, "codex", ctx)
-		if err != nil {
+		if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 			t.Fatalf("InjectRuntimeConfig failed: %v", err)
 		}
-		s := readInjectedBrief(t, dir, "codex", brief)
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if err != nil {
+			t.Fatalf("read AGENTS.md: %v", err)
+		}
+		s := string(data)
 
 		if !strings.Contains(s, "always write the comment body to a UTF-8 file") {
 			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
