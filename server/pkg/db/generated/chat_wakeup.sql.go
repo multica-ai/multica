@@ -986,6 +986,29 @@ func (q *Queries) SetChatWakeupEvaluation(ctx context.Context, arg SetChatWakeup
 	return err
 }
 
+const taskCreatedActiveChatWakeup = `-- name: TaskCreatedActiveChatWakeup :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_wakeup
+    WHERE chat_session_id = $1
+      AND source_task_id = $2
+      AND status = 'active'
+)
+`
+
+type TaskCreatedActiveChatWakeupParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	SourceTaskID  pgtype.UUID `json:"source_task_id"`
+}
+
+// Whether a chat turn left a wakeup that will report back later. Scoped by
+// session so idx_chat_wakeup_session serves it.
+func (q *Queries) TaskCreatedActiveChatWakeup(ctx context.Context, arg TaskCreatedActiveChatWakeupParams) (bool, error) {
+	row := q.db.QueryRow(ctx, taskCreatedActiveChatWakeup, arg.ChatSessionID, arg.SourceTaskID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const updateChatWakeupConfig = `-- name: UpdateChatWakeupConfig :one
 UPDATE chat_wakeup
 SET title = $1,

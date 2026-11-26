@@ -31,6 +31,16 @@ FOR UPDATE;
 SELECT count(*) FROM chat_wakeup
 WHERE chat_session_id = $1 AND status = 'active';
 
+-- name: TaskCreatedActiveChatWakeup :one
+-- Whether a chat turn left a wakeup that will report back later. Scoped by
+-- session so idx_chat_wakeup_session serves it.
+SELECT EXISTS (
+    SELECT 1 FROM chat_wakeup
+    WHERE chat_session_id = @chat_session_id
+      AND source_task_id = @source_task_id
+      AND status = 'active'
+);
+
 -- name: CountActiveChatWakeupsForRequester :one
 SELECT count(*) FROM chat_wakeup
 WHERE workspace_id = @workspace_id AND requester_id = @requester_id AND status = 'active';

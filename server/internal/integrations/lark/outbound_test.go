@@ -40,6 +40,11 @@ type fakePatcherQueries struct {
 	deliveriesByTask map[string]db.ChannelTaskDelivery
 	// tasksByID overrides `task` per task_id; empty falls back to `task`.
 	tasksByID map[string]db.AgentTaskQueue
+	// wakeupPending answers TaskCreatedActiveChatWakeup and wakeupErr fails
+	// it; wakeupLookups records what was asked.
+	wakeupPending bool
+	wakeupErr     error
+	wakeupLookups []db.TaskCreatedActiveChatWakeupParams
 	// attachments is what the assistant message's files resolve to, and
 	// attachmentsErr forces the lookup to fail. attachmentLookups records
 	// every lookup so a test can assert what the delivery path asked for
@@ -71,6 +76,12 @@ func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (
 }
 func (f *fakePatcherQueries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
 	return f.taskChannelIngested, nil
+}
+func (f *fakePatcherQueries) TaskCreatedActiveChatWakeup(_ context.Context, arg db.TaskCreatedActiveChatWakeupParams) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.wakeupLookups = append(f.wakeupLookups, arg)
+	return f.wakeupPending, f.wakeupErr
 }
 func (f *fakePatcherQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
 	if f.bindingErr != nil {
@@ -1241,6 +1252,62 @@ func TestPatcherDoesNotMentionInP2P(t *testing.T) {
 	defer api.mu.Unlock()
 	if got := api.textSent[0].Text; got != "plain reply" {
 		t.Errorf("p2p reply must carry no mention; got %q", got)
+	}
+}
+
+// TestPatcherHoldsMentionWhileTurnReportsBackLater is #11447: a turn that
+// hands work off and leaves a chat wakeup replies with an acknowledgement.
+// Mentioning the asker on it tells the group the work is done; the mention
+// belongs on the wakeup's report instead.
+func TestPatcherHoldsMentionWhileTurnReportsBackLater(t *testing.T) {
+	p, q, api := groupPatcherWithSender(t, "ou_member_7")
+	q.wakeupPending = true
+	taskID := uuidFromString(t, "ee997777-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "Created MUL-1, I'll report back when it's done."},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got, want := api.textSent[0].Text, "Created MUL-1, I'll report back when it's done."; got != want {
+		t.Errorf("text = %q, want %q (no mention on the acknowledgement)", got, want)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	want := db.TaskCreatedActiveChatWakeupParams{ChatSessionID: q.binding.ChatSessionID, SourceTaskID: taskID}
+	if len(q.wakeupLookups) != 1 || q.wakeupLookups[0] != want {
+		t.Errorf("wakeup lookups = %+v, want [%+v]", q.wakeupLookups, want)
+	}
+}
+
+// TestPatcherMentionsWhenWakeupLookupFails keeps the old behavior when the
+// lookup errors: an early mention is better than a lost one.
+func TestPatcherMentionsWhenWakeupLookupFails(t *testing.T) {
+	p, q, api := groupPatcherWithSender(t, "ou_member_8")
+	q.wakeupErr = errors.New("db down")
+	taskID := uuidFromString(t, "ee998888-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got, want := api.textSent[0].Text, `<at user_id="ou_member_8"></at> plain reply`; got != want {
+		t.Errorf("text = %q, want %q", got, want)
 	}
 }
 
