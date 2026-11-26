@@ -3321,13 +3321,27 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
-		// A private project the caller cannot see (MUL-8472) is answered like
-		// one with nobody working, so its agents and run count stay hidden.
-		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
-		if !ok {
+	}
+
+	// A project, or a parent issue's project, that is private and that the
+	// caller cannot see (MUL-8472) is answered like one with nobody working,
+	// so its agents and run count stay hidden.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if projectID.Valid && !hidden.CanSeeProject(projectID) {
+		writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+		return
+	}
+	if parentIssueID.Valid && !hidden.Empty() {
+		parentProjectID, err := h.Queries.GetIssueProjectID(r.Context(), parentIssueID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			writeProjectAccessError(w, r, workspaceID, err)
 			return
 		}
-		if !hidden.CanSeeProject(projectID) {
+		// A missing parent is not hidden; the query below finds nothing.
+		if err == nil && !hidden.CanSeeProject(parentProjectID) {
 			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
 			return
 		}
@@ -3359,10 +3373,6 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 	// Issues in private projects the caller cannot see (MUL-8472) are left
 	// out of issue_ids; the agent and its running count stay, as on the
 	// redacted run list.
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
-	if !ok {
-		return
-	}
 	var issueIDs []pgtype.UUID
 	for _, row := range rows {
 		issueIDs = append(issueIDs, row.IssueIds...)
