@@ -75,7 +75,7 @@ func TestQoderIssueLifecycle(t *testing.T) {
 				}
 			}
 			for range 2 {
-				if _, _, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, parseUUID(taskID), []byte(`{"output":"Ready for review"}`), "", "", "", false, "", ""); err != nil {
+				if _, _, _, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, parseUUID(taskID), []byte(`{"output":"Ready for review"}`), "", "", "", false, "", ""); err != nil {
 					t.Fatal(err)
 				}
 			}

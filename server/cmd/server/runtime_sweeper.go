@@ -204,13 +204,13 @@ func sweepPendingDelegatedFailureRecoveries(ctx context.Context, taskSvc *servic
 			"exhausted", result.Exhausted,
 			"error", err,
 		)
-		return
-	}
-	if result.Replayed > 0 {
-		slog.Info("delegated failure recovery sweeper: replayed pending recoveries", "count", result.Replayed)
-	}
-	if result.Exhausted > 0 {
-		slog.Warn("delegated failure recovery sweeper: automatic attempts exhausted", "count", result.Exhausted)
+	} else {
+		if result.Replayed > 0 {
+			slog.Info("delegated failure recovery sweeper: replayed pending recoveries", "count", result.Replayed)
+		}
+		if result.Exhausted > 0 {
+			slog.Warn("delegated failure recovery sweeper: automatic attempts exhausted", "count", result.Exhausted)
+		}
 	}
 	return
 }
