@@ -3177,12 +3177,18 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // context consumers only re-render when the owning issue changes identity.
   const resolvedIssueId = issue?.id;
   const resolvedIssueIdentifier = issue?.identifier;
+  const resolvedProjectId = issue?.project_id;
   const currentIssueRenderContext = useMemo(
     () =>
       resolvedIssueId && resolvedIssueIdentifier
-        ? { id: resolvedIssueId, identifier: resolvedIssueIdentifier }
+        ? {
+            id: resolvedIssueId,
+            identifier: resolvedIssueIdentifier,
+            workspaceId: wsId,
+            projectId: resolvedProjectId,
+          }
         : null,
-    [resolvedIssueId, resolvedIssueIdentifier],
+    [resolvedIssueId, resolvedIssueIdentifier, resolvedProjectId, wsId],
   );
 
   if (issueReadState.loadFailed) {

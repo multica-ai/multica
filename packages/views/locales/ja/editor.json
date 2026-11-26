@@ -93,6 +93,16 @@
     "address_hint": "?パラメータ",
     "reload": "再読み込み"
   },
+  "local_file": {
+    "desktop_required": "ローカルドキュメントのリンクは Multica Desktop で開けます。",
+    "project_required": "ローカルプロジェクトに接続されたタスクからこのリンクを開いてください。",
+    "not_found": "このローカルファイルが見つかりません。",
+    "outside_project": "このファイルは接続されたプロジェクトのフォルダ外にあります。",
+    "unsupported_type": "開けるのは Markdown とプレーンテキストのドキュメントのみです。",
+    "unavailable": "プロジェクトをこのコンピュータのランタイムに接続する必要があります。",
+    "too_large": "このローカルファイルは大きすぎるためプレビューできません（上限 2 MiB）。",
+    "failed": "このローカルファイルをプレビューできませんでした。"
+  },
   "link_hover": {
     "copy_link": "リンクをコピー",
     "open_link": "リンクを開く",

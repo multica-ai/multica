@@ -62,6 +62,7 @@ import {
 } from "./daemon-auth-probe";
 import { daemonSpawnEnv } from "./daemon-spawn-env";
 import { focusEnvironmentAt, type FocusEnvironmentResult } from "./environment-focus";
+import type { LocalFileAccessContext } from "./local-file";
 
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
@@ -236,6 +237,25 @@ async function fetchProfileHealth(
   return probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
+}
+
+/** Read-only access: never initializes a profile or starts a daemon to open a document. */
+export async function getLocalFileAccessContext(): Promise<LocalFileAccessContext | null> {
+  const active = activeProfile;
+  const apiUrl = targetApiBaseUrl;
+  if (!active || !apiUrl) return null;
+  const [config, health] = await Promise.all([
+    readProfileConfig(active.name),
+    fetchProfileHealth(active),
+  ]);
+  if (
+    activeProfile !== active || targetApiBaseUrl !== apiUrl
+    || config.server_url !== apiUrl || typeof config.token !== "string" || !config.token
+    || health?.status !== "running" || typeof health.daemon_id !== "string" || !health.daemon_id
+    || health.os !== normalizeHostOS(process.platform)
+    || typeof health.server_url !== "string" || !urlsMatch(health.server_url, apiUrl)
+  ) return null;
+  return { apiUrl, token: config.token, daemonId: health.daemon_id };
 }
 
 /** Brings forward a desktop app this profile's daemon detected. */

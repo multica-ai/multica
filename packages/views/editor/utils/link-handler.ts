@@ -242,6 +242,9 @@ export function openLink(
   appOrigin?: string | null,
   intent: LinkClickIntent = "push",
 ): void {
+  // Local document links need the owning project and the native permission
+  // checks. They must never become a workspace route or a browser URL.
+  if (isLocalFileHref(href) && !isGlobalPath(href) && !isKnownWorkspacePath(href)) return;
   const internalPath = href.startsWith("/")
     ? href
     : toInternalAppPath(href, appOrigin);

@@ -19,8 +19,10 @@ import {
   prepareDaemonForUpdateInstall,
   resumeDaemonAfterAbortedUpdateInstall,
   setupDaemonManager,
+  getLocalFileAccessContext,
 } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupLocalFileReading } from "./local-file";
 import { setupThemeFolder } from "./theme-folder";
 import { setupVoiceInput } from "./voice";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
@@ -1113,6 +1115,11 @@ if (!gotTheLock) {
       () => mainWindows.all(),
     );
     setupLocalDirectory(() => mainWindows.mostRecent());
+    setupLocalFileReading(getLocalFileAccessContext, (window) =>
+      mainWindows.has(window)
+        ? authSessionCoordinator.hasActiveMainSession(window)
+        : issueWindows.has(window) && authSessionCoordinator.isCurrentIssueSession(window),
+    );
     setupThemeFolder();
     setupVoiceInput();
 

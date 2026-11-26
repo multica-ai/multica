@@ -97,6 +97,16 @@
     "address_hint": "?paramètres",
     "reload": "Actualiser"
   },
+  "local_file": {
+    "desktop_required": "Les liens vers des documents locaux s'ouvrent dans Multica Desktop.",
+    "project_required": "Ouvrez ce lien depuis une tâche associée à un projet local connecté.",
+    "not_found": "Ce fichier local est introuvable.",
+    "outside_project": "Ce fichier se trouve en dehors du dossier du projet connecté.",
+    "unsupported_type": "Seuls les documents Markdown et texte brut peuvent être ouverts.",
+    "unavailable": "Le projet doit être connecté à un runtime sur cet ordinateur.",
+    "too_large": "Ce fichier local est trop volumineux pour être prévisualisé (maximum 2 MiB).",
+    "failed": "Impossible de prévisualiser ce fichier local."
+  },
   "link_hover": {
     "copy_link": "Copier le lien",
     "open_link": "Ouvrir le lien",

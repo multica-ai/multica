@@ -124,8 +124,8 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 // ReadonlyContent has a heavy import surface (lowlight + KaTeX + Mermaid).
 // Stub it so the markdown dispatch test only verifies wiring.
 vi.mock("./readonly-content", () => ({
-  ReadonlyContent: ({ content }: { content: string }) => (
-    <div data-testid="readonly-content">{content}</div>
+  ReadonlyContent: ({ content, allowRemoteContent }: { content: string; allowRemoteContent?: boolean }) => (
+    <div data-testid="readonly-content" data-allow-remote-content={allowRemoteContent}>{content}</div>
   ),
 }));
 
@@ -259,6 +259,82 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("AttachmentPreviewModal — local documents", () => {
+  const source = {
+    kind: "local" as const,
+    filename: "proposal.md",
+    text: "# Local proposal\n\n**Synthetic content only.**\n",
+    contentType: "text/markdown" as const,
+    sizeBytes: 48,
+  };
+
+  function expectNoRemoteActions() {
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+    expect(downloadMock).not.toHaveBeenCalled();
+    expect(openExternalMock).not.toHaveBeenCalled();
+    expect(openInNewTabMock).not.toHaveBeenCalled();
+  }
+
+  it("renders local Markdown in the existing viewer without remote attachment actions", () => {
+    render(<AttachmentPreviewModal source={source} open onClose={() => {}} />);
+
+    expect(screen.getByRole("dialog", { name: "proposal.md" })).toBeInTheDocument();
+    expect(screen.getByTestId("readonly-content")).toHaveTextContent("# Local proposal");
+    expect(screen.getByTestId("readonly-content")).toHaveAttribute("data-allow-remote-content", "false");
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in new tab" })).toBeNull();
+    expectNoRemoteActions();
+  });
+
+  it("shows local plain text with the existing wrapping control", async () => {
+    render(
+      <AttachmentPreviewModal
+        source={{ ...source, filename: "notes.txt", contentType: "text/plain", text: "first line\nsecond line\n" }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelectorAll(".code-line")).toHaveLength(2));
+    expect(document.querySelector("pre.code-lines")).toHaveClass("code-lines-wrap");
+    fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
+    expect(document.querySelector("pre.code-lines")).not.toHaveClass("code-lines-wrap");
+    expectNoRemoteActions();
+  });
+
+  it.each([source.text, ""])("copies the exact local body, including an empty file", async (text) => {
+    render(<AttachmentPreviewModal source={{ ...source, text }} open onClose={() => {}} />);
+    const copy = screen.getByRole("button", { name: "Copy contents" });
+    expect(copy).toBeEnabled();
+    fireEvent.click(copy);
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith(text));
+    expectNoRemoteActions();
+  });
+
+  it.each(["Escape", "Close"])("closes the local viewer with %s", async (action) => {
+    function ClosableLocalPreview() {
+      const [open, setOpen] = useState(true);
+      return <AttachmentPreviewModal source={source} open={open} onClose={() => setOpen(false)} />;
+    }
+    render(<ClosableLocalPreview />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    if (action === "Escape") fireEvent.keyDown(document, { key: "Escape" });
+    else fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expectNoRemoteActions();
+  });
+
+  it("accepts a local text source through the shared preview hook", () => {
+    const { result } = renderHook(() => useAttachmentPreview());
+    let opened = false;
+    hookAct(() => { opened = result.current.tryOpen(source); });
+    expect(opened).toBe(true);
+  });
 });
 
 describe("AttachmentPreviewModal — dispatch", () => {

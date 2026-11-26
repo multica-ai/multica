@@ -75,6 +75,7 @@ import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { useOpenAttachmentLink } from "./use-open-attachment-link";
+import { useOpenLocalFileLink } from "./use-open-local-file-link";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -552,6 +553,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const attachmentLink = useOpenAttachmentLink(providerAttachments);
     const openAttachmentLinkRef = useRef(attachmentLink.open);
     openAttachmentLinkRef.current = attachmentLink.open;
+    const localFileLink = useOpenLocalFileLink();
+    const openLocalFileLinkRef = useRef(localFileLink.open);
+    openLocalFileLinkRef.current = localFileLink.open;
     // `openInNewTab` present means Desktop, which has no browser tab to give a
     // modified or middle click; on web those still open the link in one.
     const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
@@ -679,6 +683,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             ) {
               return true;
             }
+            if (openLocalFileLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -698,6 +703,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
             if (desktopTabsRef.current && openAttachmentLinkRef.current(href)) return true;
+            if (openLocalFileLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -1127,6 +1133,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           )}
           <LinkHoverCard {...hover} />
           {attachmentLink.modal}
+          {localFileLink.modal}
         </div>
       </AttachmentDownloadProvider>
     );

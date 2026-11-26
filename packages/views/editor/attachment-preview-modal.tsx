@@ -133,7 +133,7 @@ import {
 } from "./html-viewport-frame";
 import { withWidthBridge } from "./utils/iframe-width-bridge";
 
-// Preview source — full attachment, or URL-only (media types only)
+// Preview source — full attachment, local text, or URL-only media
 //
 // `full` carries the resolved Attachment record and supports every PreviewKind
 // (text types require the attachment id to call /api/attachments/{id}/content).
@@ -147,6 +147,13 @@ import { withWidthBridge } from "./utils/iframe-width-bridge";
 
 export type PreviewSource =
   | { kind: "full"; attachment: Attachment }
+  | {
+      kind: "local";
+      filename: string;
+      text: string;
+      contentType: "text/markdown" | "text/plain";
+      sizeBytes: number;
+    }
   | {
       kind: "url";
       url: string;
@@ -165,8 +172,8 @@ export type PreviewSource =
     };
 
 // Normalized view used everywhere downstream of `useAttachmentPreview`.
-// `attachmentId === null` signals URL-only mode (download falls back to
-// `openExternal`, text rendering branches are unreachable by the gate).
+// Local text and URL-only sources have no attachment id. Local bodies stay
+// in memory; URL-only sources render media directly from their URL.
 interface PreviewState {
   filename: string;
   contentType: string;
@@ -196,6 +203,17 @@ function resolvePreviewMediaUrl(attachment: Attachment): string {
 }
 
 function normalize(source: PreviewSource): PreviewState {
+  if (source.kind === "local") {
+    return {
+      filename: source.filename,
+      contentType: source.contentType,
+      mediaUrl: "",
+      attachmentId: null,
+      workspaceId: null,
+      sizeBytes: source.sizeBytes,
+      kind: source.contentType === "text/markdown" ? "markdown" : "text",
+    };
+  }
   // Resolve any server-relative URL (e.g. `/api/attachments/{id}/download`
   // returned by the unified-endpoint metadata path when no CloudFront
   // signer is configured) against the configured API base. Web with the
@@ -330,8 +348,8 @@ export function useAttachmentPreview(): AttachmentPreviewHandle {
   }, []);
   const tryOpen = useCallback((source: PreviewSource) => {
     const { kind } = normalize(source);
-    // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
-    if (!canOpenPreview(kind, source.kind === "full")) return false;
+    // Text needs either an attachment record or a local body already read by Desktop.
+    if (!canOpenPreview(kind, source.kind !== "url")) return false;
     setCurrent(source);
     setPreviewOpen(true);
     return true;
@@ -563,6 +581,7 @@ export function AttachmentPreviewModal({
   // (possibly stale) URL externally — same tradeoff as the file-card
   // NodeView's download path.
   const handleDownload = () => {
+    if (source.kind === "local") return;
     const attachmentId =
       state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
     if (attachmentId) {
@@ -893,9 +912,12 @@ function PreviewPanel({
     canCopyText ? state.attachmentId : null,
     state.workspaceId,
   );
+  const copyTextContent = source.kind === "local"
+    ? source.text
+    : copyContent.isError ? undefined : copyContent.data?.text;
   const handleCopyText = async () => {
-    if (!copyContent.data || copyContent.isError) return;
-    if (await copyText(copyContent.data.text)) {
+    if (copyTextContent === undefined) return;
+    if (await copyText(copyTextContent)) {
       toast.success(t(($) => $.attachment.contents_copied));
     } else {
       toast.error(t(($) => $.attachment.copy_failed));
@@ -1110,7 +1132,7 @@ function PreviewPanel({
               {canCopyText && (
                 <ChromeButton
                   label={t(($) => $.attachment.copy_contents)}
-                  disabled={!copyContent.data || copyContent.isError}
+                  disabled={copyTextContent === undefined}
                   onClick={() => void handleCopyText()}
                 >
                   <Copy className="size-4" />
@@ -1141,18 +1163,20 @@ function PreviewPanel({
               <Copy className="size-4" />
             </ChromeButton>
           )}
-          <ChromeButton
-            label={t(($) => $.image.download)}
-            onClick={handleDownload}
-            disabled={downloading}
-            busy={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Download className="size-4" />
-            )}
-          </ChromeButton>
+          {source.kind !== "local" && (
+            <ChromeButton
+              label={t(($) => $.image.download)}
+              onClick={handleDownload}
+              disabled={downloading}
+              busy={downloading}
+            >
+              {downloading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+            </ChromeButton>
+          )}
           {hasOverflowActions && (
             <div className="@3xl:hidden">
               <DropdownMenu
@@ -1696,12 +1720,8 @@ function PreviewContent({
     );
   }
 
-  // Text kinds need the attachment id for the /content proxy. The tryOpen
-  // gate prevents URL-only sources from reaching here for text kinds, but
-  // be defensive — a direct mount of <AttachmentPreviewModal> with a URL
-  // source whose filename later resolves to a text kind would otherwise
-  // crash on a null id.
-  if (TEXT_BACKED_KINDS.has(kind) && !state.attachmentId) {
+  // Remote text needs the ID-keyed content proxy; local text is already in memory.
+  if (TEXT_BACKED_KINDS.has(kind) && !state.attachmentId && source.kind !== "local") {
     return (
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
@@ -1756,8 +1776,9 @@ function PreviewContent({
     case "markdown":
       return (
         <TextBackedPreview
-          attachmentId={state.attachmentId!}
+          attachmentId={state.attachmentId}
           workspaceId={state.workspaceId}
+          text={source.kind === "local" ? source.text : undefined}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => (
@@ -1766,6 +1787,7 @@ function PreviewContent({
                 content={text}
                 className="px-10 py-8"
                 attachments={source.kind === "full" ? [source.attachment] : []}
+                allowRemoteContent={source.kind !== "local"}
               />
             </DocumentSheet>
           )}
@@ -1850,8 +1872,9 @@ function PreviewContent({
     case "text":
       return (
         <TextBackedPreview
-          attachmentId={state.attachmentId!}
+          attachmentId={state.attachmentId}
           workspaceId={state.workspaceId}
+          text={source.kind === "local" ? source.text : undefined}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => code(text, extensionToLanguage(state.filename))}
@@ -1887,7 +1910,7 @@ function DocumentSheet({
   );
 }
 
-// Text-backed preview — fetches body once, then hands to the render prop
+// Text-backed preview — fetches an attachment or uses a local body already in memory
 
 // React Query owns server state per the project convention; re-opening the
 // same attachment hits the cache instead of re-fetching. Query is keyed on
@@ -1896,19 +1919,22 @@ function DocumentSheet({
 function TextBackedPreview({
   attachmentId,
   workspaceId,
+  text,
   onDownload,
   downloading,
   render,
 }: {
-  attachmentId: string;
+  attachmentId: string | null;
   workspaceId: string | null;
+  text?: string;
   onDownload: () => void;
   downloading: boolean;
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
-  const query = useAttachmentHtmlText(attachmentId, workspaceId);
+  const query = useAttachmentHtmlText(text === undefined ? attachmentId : null, workspaceId);
 
+  if (text !== undefined) return <>{render(text)}</>;
   if (query.isLoading) return <PreviewLoading />;
   if (query.error) {
     if (query.error instanceof PreviewTooLargeError) {
