@@ -1615,6 +1615,26 @@ type MaintenanceJob struct {
 	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 }
 
+type McpActionAudit struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
+	Provider         pgtype.Text        `json:"provider"`
+	Source           string             `json:"source"`
+	McpServer        pgtype.Text        `json:"mcp_server"`
+	ToolName         string             `json:"tool_name"`
+	CallID           pgtype.Text        `json:"call_id"`
+	Arguments        []byte             `json:"arguments"`
+	Outcome          string             `json:"outcome"`
+	Error            pgtype.Text        `json:"error"`
+	DurationMs       pgtype.Int4        `json:"duration_ms"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
