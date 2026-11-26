@@ -7,4 +7,5 @@ package ee
 
 import (
 	_ "github.com/multica-ai/multica/server/ee/projectfolder"
+	_ "github.com/multica-ai/multica/server/ee/secretscan"
 )

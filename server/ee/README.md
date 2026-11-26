@@ -17,3 +17,4 @@ by [LICENSE](./LICENSE), not by the Multica License.
 | Package | Feature |
 | --- | --- |
 | `projectfolder` | Project folders (MUL-9390) |
+| `secretscan` | Secret scanning in comments (MUL-10283) |
