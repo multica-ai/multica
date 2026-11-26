@@ -203,6 +203,16 @@ type Overrides struct {
 	DisableAutoReload bool
 }
 
+// DefaultHostname is the host name the daemon uses for its default device
+// name, falling back to "local-machine" when the OS cannot report one.
+func DefaultHostname() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "local-machine"
+	}
+	return host
+}
+
 // LoadConfig builds the daemon configuration from environment variables
 // and optional CLI flag overrides.
 func LoadConfig(overrides Overrides) (Config, error) {
@@ -301,10 +311,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	// Host info
-	host, err := os.Hostname()
-	if err != nil || strings.TrimSpace(host) == "" {
-		host = "local-machine"
-	}
+	host := DefaultHostname()
 
 	// Durations: override > env > default
 	pollInterval, err := durationFromEnv("MULTICA_DAEMON_POLL_INTERVAL", DefaultPollInterval)

@@ -173,6 +173,8 @@ INBOX_READ_STATEMENT_TIMEOUT_MS      undecided: inbox read budget
 INBOX_READ_TIMEOUT_MS                undecided: inbox read budget
 RATE_LIMIT_AUTH                      undecided: auth rate limit
 RATE_LIMIT_AUTH_VERIFY               undecided: auth rate limit
+RATE_LIMIT_DEVICE_POLL               undecided: auth rate limit
+RATE_LIMIT_DEVICE_START              undecided: auth rate limit
 RATE_LIMIT_INVITATION_ACTOR_10M      undecided: invitation rate limit
 RATE_LIMIT_INVITATION_RECIPIENT_24H  undecided: invitation rate limit
 RATE_LIMIT_INVITATION_WORKSPACE_24H  undecided: invitation rate limit

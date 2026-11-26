@@ -61,6 +61,7 @@ func init() {
 	// consume the value normally.
 	loginCmd.Flags().Lookup("token").NoOptDefVal = tokenPromptSentinel
 	loginCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	loginCmd.Flags().Bool("device", false, "Use the device authorization flow: shows a short code to enter in the web app on any signed-in device (no browser needed on this machine; works over SSH).")
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {

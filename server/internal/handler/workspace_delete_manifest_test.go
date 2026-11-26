@@ -64,6 +64,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"daemon_connection":                  workspaceDelete,
 	"daemon_token":                       workspaceDelete,
 	"dashboard_range_view":               workspaceDelete,
+	"device_authorization":               workspaceDeleteKeep, // User-scoped like verification_code; an in-flight CLI login survives workspace teardown.
 	"dingtalk_group_presence":            workspaceDelete,
 	"dingtalk_bot_identity":              workspaceDelete,
 	"dingtalk_group_route":               workspaceDelete,

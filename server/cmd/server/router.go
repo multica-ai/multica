@@ -1701,6 +1701,29 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
+	// Device authorization flow budgets (per IP). Start is one call per
+	// login attempt; the token poll runs at the advertised interval (5s =
+	// 12/min per CLI), so 600/min leaves room for many CLIs behind one NAT.
+	// Without Redis, RateLimit is a no-op, so fall back to the in-process
+	// limiter: these endpoints are unauthenticated.
+	deviceStartLimit := envPositiveInt("RATE_LIMIT_DEVICE_START", 30)
+	devicePollLimit := envPositiveInt("RATE_LIMIT_DEVICE_POLL", 600)
+	deviceStartRL := middleware.RateLimit(rdb, deviceStartLimit, time.Minute, trustedProxies)
+	devicePollRL := middleware.RateLimit(rdb, devicePollLimit, time.Minute, trustedProxies)
+	if rdb == nil {
+		startLimiter := handler.NewMemoryWebhookRateLimiter(handler.WebhookRateLimit{Limit: deviceStartLimit, Window: time.Minute})
+		pollLimiter := handler.NewMemoryWebhookRateLimiter(handler.WebhookRateLimit{Limit: devicePollLimit, Window: time.Minute})
+		deviceStartRL = middleware.LocalRateLimit(startLimiter.Allow, trustedProxies)
+		devicePollRL = middleware.LocalRateLimit(pollLimiter.Allow, trustedProxies)
+	}
+	// Inspect/approve are authenticated, so they are limited per user rather
+	// than per IP (Redis-backed when available, in-process otherwise).
+	deviceApprovalBudget := handler.WebhookRateLimit{Limit: envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), Window: time.Minute}
+	deviceApprovalLimiter := handler.NewMemoryWebhookRateLimiter(deviceApprovalBudget)
+	if rdb != nil {
+		deviceApprovalLimiter = handler.NewRedisWebhookRateLimiter(rdb, deviceApprovalBudget)
+	}
+	deviceApprovalRL := middleware.UserRateLimit(deviceApprovalLimiter.Allow)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
 	siteStarReadRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SITE_STAR_READ", 30), time.Minute, trustedProxies)
 	siteStarSpinRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SITE_STAR_SPIN", 40), time.Minute, trustedProxies)
@@ -1708,6 +1731,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
+	// Device authorization flow (RFC 8628 adapted).
+	r.With(deviceStartRL).Post("/auth/device/start", h.StartDeviceAuthorization)
+	r.With(devicePollRL).Post("/auth/device/token", h.DeviceToken)
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
@@ -1871,6 +1897,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		// Device authorization approval: the /activate page first inspects
+		// the typed user code (to show the requesting machine), then binds
+		// it to this session. Codes are 31^8, so the per-user limit caps
+		// volume rather than guarding against brute force. Approval hands the
+		// approving user's login to the requesting machine, so like
+		// /api/cli-token it is human-only (MUL-8154).
+		r.With(handler.RequireHumanActor, deviceApprovalRL).Post("/api/device/inspect", h.InspectDeviceAuthorization)
+		r.With(handler.RequireHumanActor, deviceApprovalRL).Post("/api/device/approve", h.ApproveDeviceAuthorization)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)

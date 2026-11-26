@@ -171,6 +171,8 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
+| `RATE_LIMIT_DEVICE_START` | `30` | Per-IP device login starts (`multica login --device`) per minute |
+| `RATE_LIMIT_DEVICE_POLL` | `600` | Per-IP device login token polls per minute (the CLI polls every 5 seconds) |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Workspace invitations each inviter may create per 10-minute sliding window; `0` disables this gate |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Workspace invitations all admins may create per workspace per 24-hour sliding window; `0` disables this gate |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations one normalized recipient email may receive across workspaces per 24-hour sliding window; `0` disables this gate |

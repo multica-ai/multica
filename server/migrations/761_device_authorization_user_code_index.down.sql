@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_device_authorization_user_code;

@@ -171,6 +171,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | マネージド Redis が `CLIENT SETNAME` を禁止している場合に `true` を設定 |
 | `RATE_LIMIT_AUTH` | `5` | 認証コード送信または Google ログイン開始の、IP あたり毎分の回数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 認証コード検証の、IP あたり毎分の回数 |
+| `RATE_LIMIT_DEVICE_START` | `30` | デバイスログイン（`multica login --device`）開始の、IP あたり毎分の回数 |
+| `RATE_LIMIT_DEVICE_POLL` | `600` | デバイスログインのトークン確認の、IP あたり毎分の回数（CLI は 5 秒ごとに確認） |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 招待者ごとの 10 分間スライディングウィンドウ内のワークスペース招待数。`0` でこの制限を無効化 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | ワークスペース内の全管理者による 24 時間スライディングウィンドウ内の招待総数。`0` でこの制限を無効化 |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 正規化された同一受信メールアドレスがワークスペースをまたいで 24 時間スライディングウィンドウ内に受け取れる招待数。`0` でこの制限を無効化 |
