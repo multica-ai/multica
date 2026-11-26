@@ -53,6 +53,43 @@ No public API token or kubectl port-forward is required. Container exec is a
 privileged operational capability. Keep the attached exec session open until
 the command returns; this is not a background service.
 
+## Account suspension
+
+The same listener serves account suspension under `/maintenance/accounts/`.
+Every action names the account by `--email` or `--user-id`; all but `status`
+also require `--actor` (who is acting) and `--reason`, both recorded on the
+account.
+
+```bash
+/app/maintenance account suspend --email EMAIL --actor NAME --reason TEXT
+/app/maintenance account incident-response --email EMAIL --actor NAME --reason TEXT          # dry run
+/app/maintenance account incident-response --email EMAIL --actor NAME --reason TEXT --apply
+/app/maintenance account unsuspend --email EMAIL --actor NAME --reason TEXT
+/app/maintenance account status --email EMAIL
+```
+
+- `suspend` refuses every credential the account holds (session cookies and
+  tokens, personal access tokens, daemon tokens, task tokens, Cloud node
+  tokens) and stops what runs on its behalf: its daemons' runtimes drop out,
+  its autopilots and wakeups stop firing, and it cannot invoke agents from
+  chat integrations. Memberships and data are kept, and nothing is revoked:
+  `unsuspend` restores the account as it was, credentials included.
+- `incident-response` suspends the account, ends every session, revokes its
+  personal access tokens, deletes its daemon tokens, and in each workspace it
+  belongs to takes its runtimes offline, cancels their tasks, archives its
+  agents, pauses its autopilots and disables its wakeups, as removing the
+  member would, but keeps the membership. It prints a report and records it
+  on the account. Without `--apply` it runs every step and rolls it back, and
+  reports what it would change. Each workspace commits on its own, so if the
+  command fails or times out, run it again: it resumes where it stopped.
+  Cloud node tokens are refused while suspended but can only be revoked in
+  Multica Cloud.
+- `unsuspend` lets the account sign in again. After an incident response the
+  revoked credentials stay revoked, and stopped agents and autopilots stay
+  stopped; restore what is still wanted from the report. It refuses while an
+  incident response has not finished.
+- `status` shows the suspension and the latest actions with their reports.
+
 ## Category backfill prerequisites
 
 1. Deploy PR1's matching migration runner through 478. Inspect the actual CHECKs

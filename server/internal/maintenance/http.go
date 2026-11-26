@@ -19,7 +19,9 @@ import (
 
 // NewServer is a separate listener; never mount its handler on the public router.
 // Empty port disables it. Only the port is configurable, never the bind address.
-func NewServer(port string, service *Service) (*http.Server, error) {
+// accounts, when non-nil, serves the account suspension actions under
+// /maintenance/accounts/.
+func NewServer(port string, service *Service, accounts http.Handler) (*http.Server, error) {
 	if port == "" {
 		return nil, nil
 	}
@@ -27,11 +29,14 @@ func NewServer(port string, service *Service) (*http.Server, error) {
 	if err != nil || n < 1 || n > 65535 {
 		return nil, fmt.Errorf("MAINTENANCE_PORT must be 1..65535")
 	}
-	return &http.Server{Addr: net.JoinHostPort("127.0.0.1", port), Handler: NewHandler(service),
+	return &http.Server{Addr: net.JoinHostPort("127.0.0.1", port), Handler: NewHandler(service, accounts),
 		ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 15 * time.Second}, nil
 }
-func NewHandler(s *Service) http.Handler {
+func NewHandler(s *Service, accounts http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	if accounts != nil {
+		mux.Handle("/maintenance/accounts/", accounts)
+	}
 	mux.HandleFunc("POST /maintenance/jobs", func(w http.ResponseWriter, r *http.Request) {
 		var request CreateRequest
 		if !readRequest(w, r, &request) {

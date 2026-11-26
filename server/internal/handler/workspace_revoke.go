@@ -103,85 +103,7 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		return empty, err
 	}
 
-	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
-		WorkspaceID: workspaceID,
-		OwnerID:     userID,
-	})
-	if err != nil {
-		return empty, err
-	}
-
-	result := revocationResult{Runtimes: runtimes}
-
-	if len(runtimes) > 0 {
-		runtimeIDs := make([]pgtype.UUID, len(runtimes))
-		daemonIDs := make([]string, 0, len(runtimes))
-		for i, rt := range runtimes {
-			runtimeIDs[i] = rt.ID
-			if rt.DaemonID.Valid && rt.DaemonID.String != "" {
-				daemonIDs = append(daemonIDs, rt.DaemonID.String)
-			}
-		}
-
-		result.ArchivedAgents, err = qtx.ArchiveAgentsByRuntime(ctx, db.ArchiveAgentsByRuntimeParams{
-			ArchivedBy: archivedBy,
-			RuntimeIds: runtimeIDs,
-		})
-		if err != nil {
-			return empty, err
-		}
-
-		// Cancel by runtime AND by archived agent. agent.runtime_id can be
-		// reassigned via UpdateAgent without rewriting the runtime_id on
-		// historical agent_task_queue rows, so an archived agent may still
-		// have queued/running tasks pinned to a different runtime — and
-		// ClaimAgentTask does not gate on agent.archived_at, so those tasks
-		// would otherwise stay claimable after the agent is gone.
-		archivedAgentIDs := make([]pgtype.UUID, len(result.ArchivedAgents))
-		for i, a := range result.ArchivedAgents {
-			archivedAgentIDs[i] = a.ID
-		}
-		result.CancelledTasks, err = qtx.CancelAgentTasksByRuntimeOrAgent(ctx, db.CancelAgentTasksByRuntimeOrAgentParams{
-			RuntimeIds: runtimeIDs,
-			AgentIds:   archivedAgentIDs,
-		})
-		if err != nil {
-			return empty, err
-		}
-		cancelledIDs := make([]pgtype.UUID, 0, len(result.CancelledTasks))
-		for _, task := range result.CancelledTasks {
-			cancelledIDs = append(cancelledIDs, task.ID)
-		}
-		if err = qtx.WithdrawChatTaskSupplementsByTasks(ctx, cancelledIDs); err != nil {
-			return empty, err
-		}
-		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
-			return empty, err
-		}
-
-		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
-		if err != nil {
-			return empty, err
-		}
-
-		if len(daemonIDs) > 0 {
-			result.RevokedTokenHashes, err = qtx.DeleteDaemonTokensByWorkspaceAndDaemons(ctx, db.DeleteDaemonTokensByWorkspaceAndDaemonsParams{
-				WorkspaceID: workspaceID,
-				DaemonIds:   daemonIDs,
-			})
-			if err != nil {
-				return empty, err
-			}
-		}
-	}
-
-	// The runtime block above only reaches the member's own runtimes. What they
-	// own or started elsewhere in the workspace stops here too (MUL-10284).
-	heir, err := service.MemberAssetHeir(ctx, qtx, workspaceID, userID, archivedBy)
-	if err != nil {
-		return empty, err
-	}
-	result.Retired, err = service.RetireMemberAssets(ctx, qtx, workspaceID, userID, archivedBy, heir)
+	result, err := stopMemberAssets(ctx, qtx, workspaceID, userID, archivedBy)
 	if err != nil {
 		return empty, err
 	}
@@ -388,6 +310,99 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	return result, nil
 }
 
+// stopMemberAssets stops everything a member runs in a workspace, inside the
+// caller's transaction: their runtimes go offline with their daemon tokens
+// deleted, the agents on those runtimes are archived and their tasks
+// cancelled, and RetireMemberAssets stops what they own or started elsewhere.
+// Member removal follows it with the membership cleanup; account incident
+// response (MUL-10296) stops here and keeps the membership.
+func stopMemberAssets(ctx context.Context, qtx *db.Queries, workspaceID, userID, archivedBy pgtype.UUID) (revocationResult, error) {
+	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	})
+	if err != nil {
+		return revocationResult{}, err
+	}
+
+	result := revocationResult{Runtimes: runtimes}
+
+	if len(runtimes) > 0 {
+		runtimeIDs := make([]pgtype.UUID, len(runtimes))
+		daemonIDs := make([]string, 0, len(runtimes))
+		for i, rt := range runtimes {
+			runtimeIDs[i] = rt.ID
+			if rt.DaemonID.Valid && rt.DaemonID.String != "" {
+				daemonIDs = append(daemonIDs, rt.DaemonID.String)
+			}
+		}
+
+		result.ArchivedAgents, err = qtx.ArchiveAgentsByRuntime(ctx, db.ArchiveAgentsByRuntimeParams{
+			ArchivedBy: archivedBy,
+			RuntimeIds: runtimeIDs,
+		})
+		if err != nil {
+			return revocationResult{}, err
+		}
+
+		// Cancel by runtime AND by archived agent. agent.runtime_id can be
+		// reassigned via UpdateAgent without rewriting the runtime_id on
+		// historical agent_task_queue rows, so an archived agent may still
+		// have queued/running tasks pinned to a different runtime — and
+		// ClaimAgentTask does not gate on agent.archived_at, so those tasks
+		// would otherwise stay claimable after the agent is gone.
+		archivedAgentIDs := make([]pgtype.UUID, len(result.ArchivedAgents))
+		for i, a := range result.ArchivedAgents {
+			archivedAgentIDs[i] = a.ID
+		}
+		result.CancelledTasks, err = qtx.CancelAgentTasksByRuntimeOrAgent(ctx, db.CancelAgentTasksByRuntimeOrAgentParams{
+			RuntimeIds: runtimeIDs,
+			AgentIds:   archivedAgentIDs,
+		})
+		if err != nil {
+			return revocationResult{}, err
+		}
+		cancelledIDs := make([]pgtype.UUID, 0, len(result.CancelledTasks))
+		for _, task := range result.CancelledTasks {
+			cancelledIDs = append(cancelledIDs, task.ID)
+		}
+		if err = qtx.WithdrawChatTaskSupplementsByTasks(ctx, cancelledIDs); err != nil {
+			return revocationResult{}, err
+		}
+		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
+			return revocationResult{}, err
+		}
+
+		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
+		if err != nil {
+			return revocationResult{}, err
+		}
+
+		if len(daemonIDs) > 0 {
+			result.RevokedTokenHashes, err = qtx.DeleteDaemonTokensByWorkspaceAndDaemons(ctx, db.DeleteDaemonTokensByWorkspaceAndDaemonsParams{
+				WorkspaceID: workspaceID,
+				DaemonIds:   daemonIDs,
+			})
+			if err != nil {
+				return revocationResult{}, err
+			}
+		}
+	}
+
+	// The runtime block above only reaches the member's own runtimes. What they
+	// own or started elsewhere in the workspace stops here too (MUL-10284).
+	heir, err := service.MemberAssetHeir(ctx, qtx, workspaceID, userID, archivedBy)
+	if err != nil {
+		return revocationResult{}, err
+	}
+	result.Heir = heir
+	result.Retired, err = service.RetireMemberAssets(ctx, qtx, workspaceID, userID, archivedBy, heir)
+	if err != nil {
+		return revocationResult{}, err
+	}
+	return result, nil
+}
+
 // revocationResult captures everything revokeMemberRuntimes touched so the
 // caller can fan out events and analytics after the transaction commits.
 // Publishing inside the transaction would let subscribers observe a state the
@@ -402,6 +417,9 @@ type revocationResult struct {
 	SharedTeardown     service.RuntimeTeardownResult
 	ReadyChats         []pgtype.UUID
 	Retired            service.RetiredMemberAssets
+	// Heir received the member's product agents; invalid when the workspace
+	// has no other owner, and the product agents stayed where they were.
+	Heir pgtype.UUID
 }
 
 func (r revocationResult) isEmpty() bool {

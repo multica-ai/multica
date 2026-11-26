@@ -157,9 +157,12 @@ func (c client) drive(ctx context.Context, path string, batches, retries int, re
 
 func run(ctx context.Context, args []string, envPort string, out, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: maintenance {create|status|run|pause|resume|cancel|configure} [flags]; use COMMAND --help")
+		return errors.New("usage: maintenance {create|status|run|pause|resume|cancel|configure|account} [flags]; use COMMAND --help")
 	}
 	action := args[0]
+	if action == "account" {
+		return runAccount(ctx, args[1:], envPort, out, stderr)
+	}
 	f := flag.NewFlagSet("maintenance "+action, flag.ContinueOnError)
 	f.SetOutput(stderr)
 	port := f.String("port", envPort, "loopback API port (default MAINTENANCE_PORT)")

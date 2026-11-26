@@ -722,7 +722,7 @@ func main() {
 
 	srv := newMainHTTPServer(":"+port, r)
 	profilingServer := profiling.NewServer()
-	maintenanceServer, maintenanceErr := maintenance.NewServer(os.Getenv("MAINTENANCE_PORT"), maintenance.NewService(pool, maintenance.StatusCategory{}))
+	maintenanceServer, maintenanceErr := maintenance.NewServer(os.Getenv("MAINTENANCE_PORT"), maintenance.NewService(pool, maintenance.StatusCategory{}), h.AccountAdminHandler())
 	if maintenanceErr != nil {
 		slog.Error("maintenance listener disabled", "error", maintenanceErr)
 	}

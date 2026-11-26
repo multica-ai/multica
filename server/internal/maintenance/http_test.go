@@ -18,15 +18,15 @@ import (
 
 func TestInternalListenerConfiguration(t *testing.T) {
 	s := NewService(nil, StatusCategory{})
-	if server, err := NewServer("", s); err != nil || server != nil {
+	if server, err := NewServer("", s, nil); err != nil || server != nil {
 		t.Fatal("empty port must disable listener")
 	}
 	for _, port := range []string{"0", "-1", "65536", "0.0.0.0:6061", "localhost:6061", ":6061"} {
-		if _, err := NewServer(port, s); err == nil {
+		if _, err := NewServer(port, s, nil); err == nil {
 			t.Fatalf("accepted %q", port)
 		}
 	}
-	server, err := NewServer("6061", s)
+	server, err := NewServer("6061", s, nil)
 	if err != nil || server.Addr != "127.0.0.1:6061" {
 		t.Fatalf("listener=%+v err=%v", server, err)
 	}
@@ -50,7 +50,7 @@ func TestInternalHTTPUnexpectedErrorIsNotRetryable(t *testing.T) {
 }
 
 func TestInternalHTTPRejectsMalformedRequestsWithoutDatabase(t *testing.T) {
-	h := NewHandler(NewService(nil, StatusCategory{}))
+	h := NewHandler(NewService(nil, StatusCategory{}), nil)
 	for _, body := range []string{"null", "[]", "{} {}", "{} garbage", `{"unknown":true}`, string(bytes.Repeat([]byte("x"), 17000))} {
 		t.Run(body[:min(len(body), 30)], func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/maintenance/jobs", bytes.NewBufferString(body))
@@ -81,7 +81,7 @@ func TestInternalHTTPRejectsMalformedRequestsWithoutDatabase(t *testing.T) {
 func TestInternalHTTPCreateAdvanceReplayAndConfigure(t *testing.T) {
 	pool, s := fixture(t)
 	seed(t, pool, "old")
-	server, err := NewServer("6061", s)
+	server, err := NewServer("6061", s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
