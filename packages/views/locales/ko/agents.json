@@ -191,7 +191,9 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "cancel": "취소"
+    "cancel": "취소",
+    "prop_wait_timeout": "대기 시간 초과",
+    "save": "저장"
   },
   "overview": {
     "attention_title": "확인이 필요한 실행",
@@ -253,7 +255,12 @@
     "service_tier_standard_description": "기본 속도 및 표준 사용량",
     "service_tier_tooltip": "속도 · {{value}}",
     "service_tier_clear": "런타임 기본값",
-    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
+    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다",
+    "wait_timeout_global": "전역",
+    "wait_timeout_minutes_value": "{{value}}분",
+    "wait_timeout_tooltip": "대기 시간 초과 · {{value}}",
+    "wait_timeout_input_label": "큐 대기 시간 초과(분)",
+    "wait_timeout_helper": "작업이 큐에 들어간 시점부터 시간이 흐릅니다. 이 제한 안에 런타임이 작업을 가져가 실행을 시작하지 못하면 작업은 자동으로 실패합니다. 실행이 시작된 뒤의 시간 제한에는 영향을 주지 않습니다. 비워 두거나 0으로 두면 시스템 기본값을 사용합니다."
   },
   "model_dropdown": {
     "label": "모델",

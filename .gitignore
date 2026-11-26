@@ -59,6 +59,7 @@ apps/web/test-results/
 .agent_context/
 .multica/*
 !.multica/environments.toml
+.worktrees/
 
 # local settings
 .claude/

@@ -191,7 +191,9 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
-    "cancel": "取消"
+    "cancel": "取消",
+    "prop_wait_timeout": "等待超时",
+    "save": "保存"
   },
   "overview": {
     "attention_title": "需要处理的运行",
@@ -253,7 +255,12 @@
     "service_tier_standard_description": "明确使用标准速度和标准用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "运行时默认",
-    "service_tier_clear_title": "清除速度覆盖，交由本地 Codex 配置决定"
+    "service_tier_clear_title": "清除速度覆盖，交由本地 Codex 配置决定",
+    "wait_timeout_global": "全局",
+    "wait_timeout_minutes_value": "{{value}} 分钟",
+    "wait_timeout_tooltip": "等待超时 · {{value}}",
+    "wait_timeout_input_label": "排队超时（分钟）",
+    "wait_timeout_helper": "任务在队列中的最长等待时间。超时未执行则自动失败，不影响任务开始后的运行时长。留空或设为 0 时，使用系统默认值。"
   },
   "model_dropdown": {
     "label": "模型",

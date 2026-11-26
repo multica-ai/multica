@@ -200,7 +200,9 @@
     "rename_required": "Le nom est obligatoire",
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "prop_wait_timeout": "Délai d'attente",
+    "save": "Enregistrer"
   },
   "overview": {
     "attention_title": "Des exécutions demandent votre attention",
@@ -267,7 +269,12 @@
     "service_tier_standard_description": "Vitesse et consommation standard",
     "service_tier_tooltip": "Vitesse · {{value}}",
     "service_tier_clear": "Valeur par défaut du runtime",
-    "service_tier_clear_title": "Effacer la surcharge de vitesse et laisser la configuration locale de Codex décider"
+    "service_tier_clear_title": "Effacer la surcharge de vitesse et laisser la configuration locale de Codex décider",
+    "wait_timeout_global": "Global",
+    "wait_timeout_minutes_value": "{{value}} min",
+    "wait_timeout_tooltip": "Délai d'attente · {{value}}",
+    "wait_timeout_input_label": "Délai d'attente dans la file (minutes)",
+    "wait_timeout_helper": "Le délai commence lorsque la tâche entre dans la file. Si un runtime ne l'a pas réclamée et démarrée avant cette limite, la tâche échoue automatiquement. Cela concerne uniquement l'attente dans la file, pas le délai après le démarrage de l'exécution. Laissez le champ vide ou saisissez 0 pour utiliser la valeur par défaut du système."
   },
   "model_dropdown": {
     "label": "Modèle",

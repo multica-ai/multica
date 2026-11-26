@@ -191,7 +191,9 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "cancel": "取消"
+    "cancel": "取消",
+    "prop_wait_timeout": "等待超時",
+    "save": "儲存"
   },
   "overview": {
     "attention_title": "需要處理的執行",
@@ -253,7 +255,12 @@
     "service_tier_standard_description": "明確使用標準速度和標準用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "執行時預設",
-    "service_tier_clear_title": "清除速度覆蓋，交由本地 Codex 配置決定"
+    "service_tier_clear_title": "清除速度覆蓋，交由本地 Codex 配置決定",
+    "wait_timeout_global": "全域",
+    "wait_timeout_minutes_value": "{{value}} 分鐘",
+    "wait_timeout_tooltip": "佇列等待超時 · {{value}}",
+    "wait_timeout_input_label": "佇列等待超時（分鐘）",
+    "wait_timeout_helper": "任務在失敗前最多可在佇列中等待的時間。留空表示使用工作區預設值。"
   },
   "model_dropdown": {
     "label": "模型",
