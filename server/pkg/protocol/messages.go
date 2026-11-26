@@ -126,6 +126,10 @@ const (
 	AppCapabilityWorkspaceGuestsV1 = "workspace-guests-v1"
 )
 
+// DaemonTaskClaimGenerationMismatchCode identifies a terminal report rejected
+// because a later claim owns the task row.
+const DaemonTaskClaimGenerationMismatchCode = "task_claim_generation_mismatch"
+
 // ChatQuickAction is a server-validated follow-up attached to one assistant
 // reply. Label is the concise chip text; Prompt is the full next user turn.
 type ChatQuickAction struct {
@@ -250,6 +254,9 @@ type TaskFailRequest struct {
 	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
 	// A known unresumable session must also be retired for subsequent tasks.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// ExpectedDispatchedAt fences terminal reports to the claim generation that
+	// produced them. Older daemons omit it and retain the legacy behavior.
+	ExpectedDispatchedAt string `json:"expected_dispatched_at,omitempty"`
 	// Older daemons and incomplete transcripts leave this proof unset.
 	NoToolCallsStarted bool `json:"no_tool_calls_started,omitempty"`
 }

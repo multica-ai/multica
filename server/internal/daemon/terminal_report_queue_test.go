@@ -28,6 +28,7 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 	report := terminalTaskReport{
 		kind:                  terminalTaskReportComplete,
 		taskID:                "task-private",
+		claimDispatchedAt:     "2026-10-27T00:00:00.123456Z",
 		output:                "private final answer",
 		branchName:            "agent/private",
 		sessionID:             "session-private",
