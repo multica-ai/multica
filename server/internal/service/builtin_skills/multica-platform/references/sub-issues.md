@@ -39,9 +39,9 @@ not need to restate every decision made on the parent.
 ## Sub-issues: todo starts once unblocked, backlog parks it
 
 On an agent-assigned issue, create status decides whether the assignee fires.
-A non-backlog status (e.g. `todo`) enqueues the agent as soon as nothing it
-waits on is unfinished: no earlier stage and no `--blocked-by` issue. `backlog`
-sets the assignee without triggering, even after those waits end.
+A non-backlog status (e.g. `todo`) enqueues the agent as soon as no earlier
+stage or `--blocked-by` issue it waits on is still unfinished. `backlog` sets
+the assignee without triggering, even after those waits end.
 
 | Need | Create the child with |
 |---|---|
