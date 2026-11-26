@@ -3,12 +3,14 @@ package service
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
 	"mime/quotedprintable"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"os"
 	"strings"
 	"time"
@@ -93,19 +95,44 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 	}
 }
 
+func supportsAuthMechanism(authLine, mechanism string) bool {
+	for _, field := range strings.Fields(authLine) {
+		if strings.EqualFold(field, mechanism) {
+			return true
+		}
+	}
+	return false
+}
+
+func isUnsupportedAuthMechanismError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var tpErr *textproto.Error
+	if errors.As(err, &tpErr) && tpErr.Code == 504 {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unrecognized authentication type") ||
+		strings.Contains(msg, "authentication mechanism not supported") ||
+		strings.Contains(msg, "mechanism not supported") ||
+		strings.Contains(msg, "unsupported authentication") ||
+		strings.HasPrefix(msg, "504 ") ||
+		strings.Contains(msg, ": 504 ")
+}
+
 func smtpAuthWithFallback(c smtpAuthClient, host, username, password string) (bool, error) {
 	plainErr := c.Auth(smtp.PlainAuth("", username, password, host))
 	if plainErr == nil {
 		return false, nil
 	}
 
-	msg := strings.ToLower(plainErr.Error())
-	if !strings.Contains(msg, "unrecognized authentication type") && !strings.Contains(msg, "504 5.7.4") {
+	if !isUnsupportedAuthMechanismError(plainErr) {
 		return false, plainErr
 	}
 
 	ok, authLine := c.Extension("AUTH")
-	if !ok || !strings.Contains(strings.ToUpper(authLine), "LOGIN") {
+	if !ok || !supportsAuthMechanism(authLine, "LOGIN") {
 		return false, plainErr
 	}
 	return true, plainErr
@@ -266,21 +293,28 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	defer c.Close()
 
 	if s.smtpUsername != "" {
-		fallbackToLogin, authErr := smtpAuthWithFallback(smtpClientAdapter{client: c}, s.smtpHost, s.smtpUsername, s.smtpPassword)
-		if authErr != nil {
-			if !fallbackToLogin {
-				return fmt.Errorf("smtp auth: %w", authErr)
-			}
-
-			c.Close()
-			c, err = s.openSMTPClient()
-			if err != nil {
-				return fmt.Errorf("smtp auth: plain auth failed (%v); login reconnect failed: %w", authErr, err)
-			}
-			defer c.Close()
-
+		authOK, authLine := c.Extension("AUTH")
+		if authOK && supportsAuthMechanism(authLine, "LOGIN") && !supportsAuthMechanism(authLine, "PLAIN") {
 			if err = c.Auth(&loginAuth{username: s.smtpUsername, password: s.smtpPassword, host: s.smtpHost}); err != nil {
-				return fmt.Errorf("smtp auth: plain auth failed (%v); login auth fallback failed: %w", authErr, err)
+				return fmt.Errorf("smtp auth (LOGIN): %w", err)
+			}
+		} else {
+			fallbackToLogin, authErr := smtpAuthWithFallback(smtpClientAdapter{client: c}, s.smtpHost, s.smtpUsername, s.smtpPassword)
+			if authErr != nil {
+				if !fallbackToLogin {
+					return fmt.Errorf("smtp auth: %w", authErr)
+				}
+
+				c.Close()
+				c, err = s.openSMTPClient()
+				if err != nil {
+					return fmt.Errorf("smtp auth: plain auth failed (%v); login reconnect failed: %w", authErr, err)
+				}
+				defer c.Close()
+
+				if err = c.Auth(&loginAuth{username: s.smtpUsername, password: s.smtpPassword, host: s.smtpHost}); err != nil {
+					return fmt.Errorf("smtp auth: plain auth failed (%v); login auth fallback failed: %w", authErr, err)
+				}
 			}
 		}
 	}
