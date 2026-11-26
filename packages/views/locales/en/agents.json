@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Cancel all runs",
     "archive_dialog_title": "Archive \"{{name}}\"?",
     "archive_dialog_description": "The agent won't be assignable or mentionable, and any active runs will be cancelled. All history is preserved and you can restore it later.",
+    "archive_dialog_mika_note": " The \"Start with Mika\" prompt won't appear again until Mika is restored.",
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive",
     "set_access_applies_to_one": "Applies to {{count}} agent.",
@@ -1139,5 +1140,9 @@
     "new_app": "New app for this agent",
     "adds_app_note": "Answering adds {{app}} to {{agent}} for future runs.",
     "add_to_agent": "Add {{app}} to {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Danger zone",
+    "restore_label": "Restore agent"
   }
 }

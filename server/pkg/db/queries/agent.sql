@@ -2831,9 +2831,13 @@ RETURNING a.*;
 -- Resolves a workspace's built-in agent by its stable system_key. This is the
 -- identity lookup for system agents: their display name is owner-editable, so
 -- nothing server-side may key off it.
+--
+-- Archived rows are included (an active row wins): an archived Mika still holds
+-- the workspace's slot and her name, so callers must see it to refuse a second
+-- one rather than insert past it.
 SELECT * FROM agent
-WHERE workspace_id = $1 AND system_key = $2 AND archived_at IS NULL
-ORDER BY created_at ASC, id ASC
+WHERE workspace_id = $1 AND system_key = $2
+ORDER BY (archived_at IS NOT NULL) ASC, created_at ASC, id ASC
 LIMIT 1;
 
 -- name: CreateSystemUserAgent :one

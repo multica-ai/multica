@@ -2955,12 +2955,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A system agent belongs to the product, not to the workspace, and the
-	// workspace's whole entry point runs through it. Archiving it would hide
-	// it from every list while leaving the row in place — which also strands
-	// the bootstrap endpoint, since its lookup skips archived rows but the
-	// unique index does not.
-	if agent.SystemKey.Valid && agent.SystemKey.String != "" {
+	// Mika is the one product-defined agent a workspace may archive; the Mika
+	// bootstrap refuses to provision past an archived one. Other system agents
+	// are runtime infrastructure with no lifecycle of their own.
+	if agent.SystemKey.Valid && agent.SystemKey.String != "" && agent.SystemKey.String != service.MikaSystemKey {
 		writeError(w, http.StatusBadRequest, "this agent is built into Multica and cannot be archived")
 		return
 	}

@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "すべての実行をキャンセル",
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな実行はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
+    "archive_dialog_mika_note": "Mika を復元するまで「Mika と始める」は表示されなくなります。",
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ",
     "set_access_applies_to_other": "{{count}} 件の agent に適用します。"
@@ -1107,5 +1108,9 @@
     "new_app": "このエージェントの新しいアプリ",
     "adds_app_note": "応答すると、今後の実行で {{agent}} が {{app}} を使えるようになります。",
     "add_to_agent": "{{app}} を {{agent}} に追加"
+  },
+  "lifecycle": {
+    "danger_zone": "危険な操作",
+    "restore_label": "エージェントを復元"
   }
 }

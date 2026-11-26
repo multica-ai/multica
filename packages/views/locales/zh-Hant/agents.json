@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "取消全部執行",
     "archive_dialog_title": "歸檔\"{{name}}\"？",
     "archive_dialog_description": "歸檔後這個 AI 代理將無法被分配或提及，進行中的執行會被取消。所有歷史會被保留，可以稍後恢復。",
+    "archive_dialog_mika_note": "恢復 Mika 之前，不會再出現「和 Mika 開始」的提示。",
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "歸檔",
     "set_access_applies_to_other": "將應用於 {{count}} 個 AI 代理。"
@@ -1107,5 +1108,9 @@
     "new_app": "此 AI 代理的新應用",
     "adds_app_note": "回應後，{{agent}} 之後的執行都可以使用 {{app}}。",
     "add_to_agent": "將 {{app}} 新增至 {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "危險操作",
+    "restore_label": "恢復 AI 代理"
   }
 }
