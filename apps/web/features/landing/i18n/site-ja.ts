@@ -42,6 +42,12 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       ogTitle: "ライセンス — Multica",
       ogDescription: "組織内でのセルフホストは無料です。Multica をホスティングサービスとして他者に提供するには商用ライセンスが必要です。",
     },
+    pricing: {
+      title: "料金",
+      description: "小さなチームは無料。Pro と Business はメンバー単位、Enterprise はセキュリティとセルフホスト向け。エージェントはどのプランでも無制限です。",
+      ogTitle: "料金 — Multica",
+      ogDescription: "支払うのはチームの人数分。エージェントは使い放題。",
+    },
     privacy: {
       title: "プライバシーポリシー",
       description: "Multica が multica.ai と Multica Cloud で個人情報をどのように収集、利用、保護するか。",

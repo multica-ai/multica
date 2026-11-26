@@ -1,10 +1,12 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 import { zhSiteCopy } from "./site-zh";
+import { zhPricingCopy } from "./pricing-zh";
 
 export function createZhDict(): LandingDict {
   return {
   ...zhSiteCopy,
+  pricing: zhPricingCopy,
   faq: {
     label: "\u5e38\u89c1\u95ee\u9898",
     headline: "\u95ee\u4e0e\u7b54\u3002",

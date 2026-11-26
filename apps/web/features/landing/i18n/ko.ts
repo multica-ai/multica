@@ -2,6 +2,7 @@ import { githubUrl, discordUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
 import { koSiteCopy } from "./site-ko";
+import { koPricingCopy } from "./pricing-ko";
 
 export function createKoDict(): LandingDict {
   const base = createEnDict();
@@ -9,6 +10,7 @@ export function createKoDict(): LandingDict {
   return {
     ...base,
     ...koSiteCopy,
+  pricing: koPricingCopy,
     faq: {
       label: "FAQ",
       headline: "자주 묻는 질문.",
