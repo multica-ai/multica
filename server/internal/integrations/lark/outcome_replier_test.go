@@ -241,6 +241,31 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 	}
 }
 
+// A denied invocation must be explained to the sender instead of looking like
+// a dropped message. The authorization decision itself is unchanged.
+func TestLarkOutcomeReplierInvokeDeniedSendsNotice(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://multica.test",
+		Logger:      log,
+	})
+	msg := InboundMessage{ChatID: "oc_chat_denied", SenderOpenID: "ou_user_denied"}
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, msg, DispatchResult{Outcome: Outcome(engine.OutcomeInvokeDenied)})
+
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one SendInteractiveCard call for invoke_denied, got %d", len(stub.interactiveOut))
+	}
+	if !contains(stub.interactiveOut[0].CardJSON, "权限") {
+		t.Errorf("CardJSON should explain the permission denial: %s", stub.interactiveOut[0].CardJSON)
+	}
+}
+
 func TestLarkOutcomeReplierCommandOutcomesSendGuidance(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
