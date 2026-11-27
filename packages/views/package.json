@@ -92,7 +92,8 @@
     "./locales/es": "./locales/es.ts",
     "./locales/ru": "./locales/ru.ts",
     "./locales/*": "./locales/*",
-    "./docs": "./docs/index.ts"
+    "./docs": "./docs/index.ts",
+    "./oneshot": "./oneshot/one-shot-run-page.tsx"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

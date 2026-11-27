@@ -144,5 +144,12 @@
     "unknown": "Este servidor no ha confirmado sus ajustes de conexión. Pide a tu administrador que actualice el servidor.",
     "incomplete": "Los ajustes de conexión están incompletos. Pide a tu administrador que configure las URL públicas de este servidor."
   },
-  "more_actions": "Más acciones"
+  "more_actions": "Más acciones",
+  "oneshot": {
+    "title": "Ejecución única",
+    "loading": "Cargando ejecución…",
+    "load_failed": "No se pudo cargar esta ejecución.",
+    "retry": "Reintentar",
+    "open_log": "Ver registro de ejecución"
+  }
 }

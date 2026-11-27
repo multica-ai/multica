@@ -2361,6 +2361,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			r.With(handler.RequireHumanActor).Post("/api/tasks/oneshot", h.CreateOneShotTask)
+			r.Get("/api/tasks/oneshot/{taskId}", h.GetOneShotRun)
+
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
 			r.With(handler.RequireHumanActor).Delete("/api/tasks/{taskId}/messages", h.PurgeTaskTranscript)

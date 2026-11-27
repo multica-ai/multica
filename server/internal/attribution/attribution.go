@@ -118,7 +118,8 @@ const (
 	// triggered the run — the chat analogue of autopilot_run/issue_assignment.
 	// The dedicated chat_session_id column still exists for its own consumers;
 	// this makes the attribution UI's jump-to-evidence path uniform (MUL-4302 §2).
-	EvidenceChat EvidenceKind = "chat"
+	EvidenceChat       EvidenceKind = "chat"
+	EvidenceOneShotRun EvidenceKind = "oneshot_run"
 	// EvidenceDocComment points at the doc discussion comment that started
 	// the run (MUL-9933).
 	EvidenceDocComment EvidenceKind = "doc_comment"
@@ -139,6 +140,7 @@ const (
 	KindSubIssueCreate    TriggerKind = "sub_issue_create"
 	KindStageWakeup       TriggerKind = "stage_wakeup"
 	KindQuickCreate       TriggerKind = "quick_create"
+	KindOneShotRun        TriggerKind = "oneshot_run"
 	KindChat              TriggerKind = "chat"
 	KindDocComment        TriggerKind = "doc_comment"
 	KindAutopilotSchedule TriggerKind = "autopilot_schedule"

@@ -129,3 +129,20 @@ provider アダプター層は AI コーディングツールごとの起動、�
 
 - [開発に参加する](/developers/contributing) — ローカル環境、worktree、テストの配置。
 - [開発規約](/developers/conventions) — 命名、用語、中国語文言に関するリポジトリの契約。
+
+## 単発実行
+
+メンバー認証情報で `X-Workspace-ID` を指定し、`POST /api/tasks/oneshot` に送信すると、Issue、Chat、Autopilot、再利用する Agent を作らずに実行できます。ゲストとタスク認証情報は利用できません。ランタイムはオンラインで同じワークスペースに属し、呼び出し元に利用権限が必要です。スキルも同じワークスペースに属する必要があります。モデルと推論強度は通常のランタイム検証に従います。
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+HTTP 202 応答は `task_id`、`status_uri`（`/api/tasks/oneshot/{task_id}`）、`logs_uri`（`/{workspaceSlug}/runs/{task_id}`）を返します。Web またはデスクトップでログを開けます。閲覧とキャンセルは送信者のみ可能です。キャンセルは `POST /api/tasks/{task_id}/cancel` です。毎回新しいセッションで一度だけ試行します。デーモンは `oneshot-runs-v1` 対応が必要です。旧版ではキューに残ります。`system_prompt` はテンプレート名ではなく指示テキストの配列です。省略した設定はランタイムの既定値を使います。

@@ -32,7 +32,8 @@
     "my_agents": "我的 AI 代理在做",
     "unknown": "未知頁面",
     "doc": "文件",
-    "docFolder": "資料夾"
+    "docFolder": "資料夾",
+    "run": "單次執行"
   },
   "help": {
     "trigger": "幫助",

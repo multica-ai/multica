@@ -94,6 +94,20 @@ INSERT INTO agent (
 )
 RETURNING *;
 
+-- name: CreateOneShotAgent :one
+-- A private, immutable execution carrier for one API run, excluded from the
+-- normal agent catalog by kind. The task retains its submitted input.
+INSERT INTO agent (
+    workspace_id, name, runtime_mode, runtime_id, visibility, permission_mode,
+    max_concurrent_tasks, owner_id, instructions, model, thinking_level,
+    kind, system_key
+) VALUES (
+    @workspace_id, @name, @runtime_mode, @runtime_id, 'private', 'private',
+    1, @owner_id, @instructions, sqlc.narg(model), sqlc.narg(thinking_level),
+    'system', @system_key
+)
+RETURNING *;
+
 -- name: DeleteSystemAgentByID :exec
 -- Builder sessions own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup
@@ -539,6 +553,36 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+FROM enqueue_agent
+RETURNING *;
+
+-- name: CreateOneShotTask :one
+-- Uses the normal task-owner fence and queue, without creating an issue,
+-- chat session or autopilot. The caller owns the carrier row in this transaction.
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, usage_squad_id, originator_user_id,
+    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    id, max_attempts, force_fresh_session
+)
+SELECT
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(context),
+    sqlc.narg(usage_squad_id),
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), 1, true
 FROM enqueue_agent
 RETURNING *;
 

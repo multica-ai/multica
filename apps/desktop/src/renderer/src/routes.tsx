@@ -5,6 +5,7 @@ import { createMemoryRouter, Outlet, useLocation } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { OneShotRunPage } from "./pages/one-shot-run-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AppDetailPage } from "./pages/app-detail-page";
@@ -125,6 +126,7 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
+          { path: "runs/:id", element: <OneShotRunPage /> },
           // A bare `/{slug}` URL is normalized to `/{slug}/issues` by
           // sanitizeTabPath before it ever becomes a session, so the index
           // route is unreachable in practice; null keeps it a harmless

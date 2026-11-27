@@ -359,6 +359,8 @@ export function AgentTranscriptDialog({
   onTranscriptPurged,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
+  const popupRef = useRef<HTMLDivElement>(null);
+  const isOneShot = task.kind === "oneshot";
   const formatSpend = useFormatSpend();
   const locale = useLocale();
   const wsId = useWorkspaceId();
@@ -665,7 +667,7 @@ export function AgentTranscriptDialog({
     if (!open) return;
     let cancelled = false;
 
-    if (task.agent_id) {
+    if (task.agent_id && !isOneShot) {
       api.getAgent(task.agent_id).then((agent) => {
         if (!cancelled) setAgentInfo(agent);
       }).catch(() => {});
@@ -680,7 +682,7 @@ export function AgentTranscriptDialog({
     }
 
     return () => { cancelled = true; };
-  }, [open, task.agent_id, task.runtime_id]);
+  }, [open, task.agent_id, task.runtime_id, isOneShot]);
 
   const reduceMotion = useReducedMotion();
   const isMobile = useIsMobile();
@@ -925,6 +927,8 @@ export function AgentTranscriptDialog({
         ? t(($) => $.transcript.trigger_autopilot)
         : task.kind === "chat" || task.chat_session_id
           ? t(($) => $.transcript.trigger_chat)
+          : task.kind === "oneshot"
+            ? t(($) => $.transcript.trigger_oneshot)
           : task.kind === "quick_create"
             ? t(($) => $.transcript.trigger_quick_create)
             : task.kind === "doc_comment" || task.doc_id
@@ -975,6 +979,8 @@ export function AgentTranscriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={popupRef}
+        initialFocus={isOneShot ? popupRef : undefined}
         className="!max-w-5xl !w-[calc(100%-4rem)] !max-h-[calc(100%-4rem)] !h-[calc(100%-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
         finalFocus={finalFocus}
@@ -991,7 +997,7 @@ export function AgentTranscriptDialog({
             {/* Primary identity: the agent that ran this. It is the one
                 foreground entity — avatar + medium weight. */}
             <div className="flex min-w-0 items-center gap-2">
-              {task.agent_id ? (
+              {task.agent_id && !isOneShot ? (
                 <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
               ) : (
                 <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">

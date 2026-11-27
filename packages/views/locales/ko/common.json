@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "새 탭에서 열기"
+  },
+  "oneshot": {
+    "title": "일회성 실행",
+    "loading": "실행 로드 중…",
+    "load_failed": "실행을 불러올 수 없습니다.",
+    "retry": "다시 시도",
+    "open_log": "실행 로그 보기"
   }
 }

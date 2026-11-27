@@ -32,7 +32,8 @@
     "my_agents": "내 에이전트의 작업",
     "unknown": "알 수 없는 페이지",
     "doc": "문서",
-    "docFolder": "폴더"
+    "docFolder": "폴더",
+    "run": "일회성 실행"
   },
   "help": {
     "trigger": "도움말",

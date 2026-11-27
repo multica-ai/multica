@@ -7927,6 +7927,7 @@ func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...m
 		payload["chat_session_id"] = chatSessionID
 		e.ChatSessionID = chatSessionID
 	}
+	e.MemberPrivateUserID = OneShotOwner(task)
 	// doc_id lets an open doc refresh its discussions' run status.
 	if task.DocID.Valid {
 		payload["doc_id"] = util.UUIDToString(task.DocID)
@@ -8016,7 +8017,8 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 
 // TaskScope is where a task's realtime events belong.
 type TaskScope struct {
-	WorkspaceID string
+	WorkspaceID         string
+	MemberPrivateUserID string
 	// ChatSessionOwnerID is the chat session creator when the workspace was
 	// resolved through the task's chat session, and "" otherwise.
 	ChatSessionOwnerID string
@@ -8069,6 +8071,12 @@ func (s *TaskService) ResolveTaskScopeChecked(ctx context.Context, task db.Agent
 			note(apErr)
 		}
 		note(err)
+	}
+	if ctx, ok := ParseOneShotContext(task); ok {
+		if !task.OriginatorUserID.Valid {
+			return TaskScope{}, fmt.Errorf("one-shot run has no originator")
+		}
+		return TaskScope{WorkspaceID: ctx.WorkspaceID, MemberPrivateUserID: util.UUIDToString(task.OriginatorUserID)}, nil
 	}
 	// Quick-create tasks have no issue / chat / autopilot link — workspace
 	// lives in the context JSONB. Returning "" here is what blocked

@@ -154,24 +154,25 @@ type Task struct {
 	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`         // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                       // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"`     // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
-	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`                 // non-empty for autopilot run_only tasks
-	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                     // autopilot that spawned this run
-	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`                  // autopilot title used as task context
-	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
-	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
-	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
-	DocID                         string                 `json:"doc_id,omitempty"`                           // non-empty for doc discussion tasks (MUL-9933)
-	DocThreadID                   string                 `json:"doc_thread_id,omitempty"`                    // the discussion's first comment; replies go under it
-	DocCommentID                  string                 `json:"doc_comment_id,omitempty"`                   // the comment that triggered the run
-	DocTitle                      string                 `json:"doc_title,omitempty"`                        // the doc's title
-	DocThreadQuote                string                 `json:"doc_thread_quote,omitempty"`                 // the doc text the discussion is about
-	DocCommentContent             string                 `json:"doc_comment_content,omitempty"`              // the triggering comment; empty when it was deleted before the claim
-	DocCommentAuthorName          string                 `json:"doc_comment_author_name,omitempty"`          // who wrote the triggering comment
-	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
-	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
-	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
-	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
-	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
+	OneShotPrompt                 string                 `json:"oneshot_prompt,omitempty"`
+	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
+	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                // autopilot that spawned this run
+	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`             // autopilot title used as task context
+	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
+	AutopilotSource               string                 `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
+	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	DocID                         string                 `json:"doc_id,omitempty"`                      // non-empty for doc discussion tasks (MUL-9933)
+	DocThreadID                   string                 `json:"doc_thread_id,omitempty"`               // the discussion's first comment; replies go under it
+	DocCommentID                  string                 `json:"doc_comment_id,omitempty"`              // the comment that triggered the run
+	DocTitle                      string                 `json:"doc_title,omitempty"`                   // the doc's title
+	DocThreadQuote                string                 `json:"doc_thread_quote,omitempty"`            // the doc text the discussion is about
+	DocCommentContent             string                 `json:"doc_comment_content,omitempty"`         // the triggering comment; empty when it was deleted before the claim
+	DocCommentAuthorName          string                 `json:"doc_comment_author_name,omitempty"`     // who wrote the triggering comment
+	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
+	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
+	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
+	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"` // immutable historical context, separate from the new instruction
 	WakeupID                      string                 `json:"wakeup_id,omitempty"`
 	WakeupSystemRule              string                 `json:"wakeup_system_rule,omitempty"` // a platform rule (e.g. child_done) started the run
 	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own

@@ -3,6 +3,8 @@ package protocol
 import "encoding/json"
 
 const (
+	// DaemonCapabilityOneShotRunsV1 accepts explicit API run prompts without an issue.
+	DaemonCapabilityOneShotRunsV1       = "oneshot-runs-v1"
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
 	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements

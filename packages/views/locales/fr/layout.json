@@ -32,7 +32,8 @@
     "my_agents": "Travail de mes agents",
     "unknown": "Page inconnue",
     "doc": "Document",
-    "docFolder": "Dossier"
+    "docFolder": "Dossier",
+    "run": "Exécution ponctuelle"
   },
   "help": {
     "trigger": "Aide",

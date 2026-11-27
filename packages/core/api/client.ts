@@ -424,6 +424,7 @@ import {
   CreateIssueResponseSchema,
   IssueSchema,
   AgentTaskSchema,
+  OneShotRunSchema,
   SourceContextPreviewSchema,
   CommentSubIssueTaskResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -3468,6 +3469,15 @@ export class ApiClient {
   // Per-agent 30-day total run count for the Agents-list RUNS column.
   async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
     return this.fetch(`/api/agent-run-counts`);
+  }
+
+  async getOneShotRun(taskId: string) {
+    const raw = await this.fetch<unknown>(`/api/tasks/oneshot/${encodeURIComponent(taskId)}`);
+    const run = parseWithFallback<(Omit<ReturnType<typeof OneShotRunSchema.parse>, "task"> & { task: AgentTask }) | null>(raw, OneShotRunSchema, null, {
+      endpoint: "GET /api/tasks/oneshot/:taskId",
+    });
+    if (!run) throw new Error("Invalid one-shot run response");
+    return run;
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {

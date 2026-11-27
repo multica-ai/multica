@@ -129,3 +129,20 @@ L'assigné d'une tâche est polymorphe et peut désigner un membre, un agent ou 
 
 - [Contribuer](/developers/contributing) — environnements locaux, worktrees et emplacement des tests.
 - [Conventions de développement](/developers/conventions) — les contrats du dépôt en matière de nommage, de terminologie et de textes en chinois.
+
+## Exécutions ponctuelles
+
+Un identifiant de membre peut appeler `POST /api/tasks/oneshot` avec `X-Workspace-ID`, sans créer d’Issue, de Chat, d’Autopilot ni d’Agent réutilisable. Les invités et les identifiants de tâche sont exclus. Le runtime doit être en ligne, appartenir à l’espace et être accessible à l’appelant. Les skills doivent appartenir au même espace. Le modèle et l’effort suivent la validation habituelle du runtime.
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+La réponse HTTP 202 contient `task_id`, `status_uri` (`/api/tasks/oneshot/{task_id}`) et `logs_uri` (`/{workspaceSlug}/runs/{task_id}`). Le journal s’ouvre sur le Web ou le bureau. Seul le membre ayant soumis l’exécution peut la lire ou l’annuler avec `POST /api/tasks/{task_id}/cancel`. Chaque exécution démarre une nouvelle session avec une seule tentative. Le daemon doit annoncer `oneshot-runs-v1` ; un ancien daemon laisse la tâche en attente. Les éléments de `system_prompt` sont des instructions littérales, pas des noms de modèles de texte. Les paramètres omis utilisent les valeurs par défaut du runtime.

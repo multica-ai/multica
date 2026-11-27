@@ -2953,6 +2953,215 @@ func (q *Queries) CreateManualQuickCreateRetryTask(ctx context.Context, arg Crea
 	return i, err
 }
 
+const createOneShotAgent = `-- name: CreateOneShotAgent :one
+INSERT INTO agent (
+    workspace_id, name, runtime_mode, runtime_id, visibility, permission_mode,
+    max_concurrent_tasks, owner_id, instructions, model, thinking_level,
+    kind, system_key
+) VALUES (
+    $1, $2, $3, $4, 'private', 'private',
+    1, $5, $6, $7, $8,
+    'system', $9
+)
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
+`
+
+type CreateOneShotAgentParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Name          string      `json:"name"`
+	RuntimeMode   string      `json:"runtime_mode"`
+	RuntimeID     pgtype.UUID `json:"runtime_id"`
+	OwnerID       pgtype.UUID `json:"owner_id"`
+	Instructions  string      `json:"instructions"`
+	Model         pgtype.Text `json:"model"`
+	ThinkingLevel pgtype.Text `json:"thinking_level"`
+	SystemKey     pgtype.Text `json:"system_key"`
+}
+
+// A private, immutable execution carrier for one API run, excluded from the
+// normal agent catalog by kind. The task retains its submitted input.
+func (q *Queries) CreateOneShotAgent(ctx context.Context, arg CreateOneShotAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, createOneShotAgent,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.RuntimeMode,
+		arg.RuntimeID,
+		arg.OwnerID,
+		arg.Instructions,
+		arg.Model,
+		arg.ThinkingLevel,
+		arg.SystemKey,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+		&i.ConversationStarters,
+	)
+	return i, err
+}
+
+const createOneShotTask = `-- name: CreateOneShotTask :one
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, $13::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = $1
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $13::uuid))
+    FOR KEY SHARE OF a
+)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, usage_squad_id, originator_user_id,
+    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    id, max_attempts, force_fresh_session
+)
+SELECT
+    $1, enqueue_agent.runtime_id, NULL, 'queued', $2, $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    COALESCE($12::uuid, gen_random_uuid()), 1, true
+FROM enqueue_agent
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by
+`
+
+type CreateOneShotTaskParams struct {
+	AgentID              pgtype.UUID `json:"agent_id"`
+	Priority             int32       `json:"priority"`
+	Context              []byte      `json:"context"`
+	UsageSquadID         pgtype.UUID `json:"usage_squad_id"`
+	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
+	AccountableUserID    pgtype.UUID `json:"accountable_user_id"`
+	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
+	OriginatorSource     pgtype.Text `json:"originator_source"`
+	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
+	ID                   pgtype.UUID `json:"id"`
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
+}
+
+// Uses the normal task-owner fence and queue, without creating an issue,
+// chat session or autopilot. The caller owns the carrier row in this transaction.
+func (q *Queries) CreateOneShotTask(ctx context.Context, arg CreateOneShotTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createOneShotTask,
+		arg.AgentID,
+		arg.Priority,
+		arg.Context,
+		arg.UsageSquadID,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.ID,
+		arg.RuntimeID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+		&i.IssueSnapshot,
+		&i.WorkflowStep,
+		&i.UsageSquadID,
+		&i.DocID,
+		&i.DocThreadID,
+		&i.DocCommentID,
+		&i.TranscriptPurgedAt,
+		&i.TranscriptPurgedBy,
+	)
+	return i, err
+}
+
 const createQuickCreateTask = `-- name: CreateQuickCreateTask :one
 WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, COALESCE(a.runtime_id, $13::uuid) AS runtime_id

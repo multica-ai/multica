@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "新しいタブで開く"
+  },
+  "oneshot": {
+    "title": "単発実行",
+    "loading": "実行を読み込み中…",
+    "load_failed": "実行を読み込めませんでした。",
+    "retry": "再試行",
+    "open_log": "実行ログを表示"
   }
 }

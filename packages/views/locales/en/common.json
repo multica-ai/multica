@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "Open in new tab"
+  },
+  "oneshot": {
+    "title": "One-shot run",
+    "loading": "Loading run...",
+    "load_failed": "Could not load this run.",
+    "retry": "Retry",
+    "open_log": "View run log"
   }
 }

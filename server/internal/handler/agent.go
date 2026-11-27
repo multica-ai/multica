@@ -569,12 +569,13 @@ type AgentTaskResponse struct {
 	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
 	ChatNoticeLocale         string               `json:"chat_notice_locale,omitempty"`          // locale for bridge-generated delivery notices; optional and ignored by installed daemons
 	ChatSource               *protocol.ChatSource `json:"chat_source,omitempty"`
-	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
-	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatSkillMessage         *string              `json:"chat_skill_message,omitempty"`          // verified member-authored input eligible for explicit skill selection
-	ChatResumeMessage        *string              `json:"chat_resume_message,omitempty"`         // excludes guidance already delivered to the resumed session
-	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`           // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
+	ChatMessage              string               `json:"chat_message,omitempty"`             // user message for chat tasks
+	ChatSkillMessage         *string              `json:"chat_skill_message,omitempty"`       // verified member-authored input eligible for explicit skill selection
+	ChatResumeMessage        *string              `json:"chat_resume_message,omitempty"`      // excludes guidance already delivered to the resumed session
+	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro                bool                 `json:"chat_intro,omitempty"`               // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	OneShotPrompt            string               `json:"oneshot_prompt,omitempty"`
 	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
 	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
 	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
@@ -625,7 +626,7 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // originator user UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // originator display name
 	InitiatorEmail string `json:"initiator_email,omitempty"` // originator email
-	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "doc_comment" | "direct" — quick-create remains stable after its result issue is linked
+	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "oneshot" | "doc_comment" | "direct" — quick-create remains stable after its result issue is linked
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
@@ -1150,6 +1151,9 @@ func basename(p string) string {
 // because completion links the newly created issue back onto the task. The
 // remaining issue tasks split into comment-triggered and direct runs.
 func computeTaskKind(t db.AgentTaskQueue) string {
+	if _, ok := service.ParseOneShotContext(t); ok {
+		return "oneshot"
+	}
 	if uuidToString(t.ChatSessionID) != "" {
 		return "chat"
 	}

@@ -1969,7 +1969,12 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		queuedOnly = true
 	}
 
-	if task.ChatSessionID.Valid {
+	if _, oneShot := service.ParseOneShotContext(task); oneShot {
+		if service.OneShotOwner(task) != userID || isMachineCredentialActor(r) {
+			writeError(w, http.StatusForbidden, "not your task")
+			return
+		}
+	} else if task.ChatSessionID.Valid {
 		// Chat privacy: only the member who opened the conversation may
 		// cancel its task, even though the workspace is shared.
 		if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {

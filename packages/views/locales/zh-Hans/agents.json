@@ -1003,7 +1003,8 @@
     "context_receipt_package": "包总量",
     "context_receipt_instruction_file_bytes": "指令文件：{{size}}",
     "context_receipt_skill_package_bytes": "skill 包：{{size}}",
-    "context_receipt_other_file_bytes": "其他文件：{{size}}"
+    "context_receipt_other_file_bytes": "其他文件：{{size}}",
+    "trigger_oneshot": "API 请求"
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",

@@ -282,6 +282,15 @@ function codeBlock(text: string) {
 }
 
 describe("AgentTranscriptDialog", () => {
+  it.each([["oneshot", false], ["direct", true]] as const)("offers an agent profile only for reusable agents (%s)", async (kind, reusable) => {
+    vi.mocked(api.getAgent).mockClear();
+    await act(async () => {
+      renderDialog([], { task: { ...baseTask, agent_id: "execution-agent", kind } });
+    });
+    expect(api.getAgent).toHaveBeenCalledTimes(reusable ? 1 : 0);
+    expect(screen.queryByTestId("actor-avatar") !== null).toBe(reusable);
+  });
+
   it.each([
     { type: "text", label: "Agent", icon: ".icon-bot" },
     { type: "thinking", label: "Thinking", icon: ".icon-brain" },
