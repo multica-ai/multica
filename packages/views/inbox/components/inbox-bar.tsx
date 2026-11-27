@@ -13,16 +13,14 @@ import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 
 /**
- * The floating group over an issue the Inbox page has open: the one place its
+ * The footer toolbar for an issue the Inbox page has open: the one place its
  * notification lives, whatever state that is in. Open, it offers what resolves
  * it, the issue's own actions first, then the notification's. Settled
  * (archived, snoozed), it says so, with the way back and the way on, in the
  * same place.
  *
- * It floats centred above the composer and takes no layout, so the reading
- * column never shifts when it appears, settles or goes. Its host is the
- * `@container/inbox-bar` (the reading column's width, not the window), so
- * labels give way by the room the group actually has: the issue's values and
+ * Its host is the `@container/inbox-bar`, so labels give way by the room
+ * the group actually has: the issue's values and
  * the notification's keycaps first, then the notification's names. The
  * tooltips keep both.
  */
@@ -35,7 +33,7 @@ export function InboxBar({ settled = false, children }: { settled?: boolean; chi
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT }}
-      className="pointer-events-auto flex min-w-0 max-w-full items-center rounded-lg border bg-background px-2 py-1.5 shadow-lg"
+      className="flex min-w-0 max-w-full items-center rounded-lg border bg-background px-2 py-1.5 shadow-lg"
     >
       <motion.div
         key={settled ? "settled" : "open"}

@@ -9,35 +9,19 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 
-/** The gap between the dock and the composer's top edge, in px. */
-export const COMPOSER_DOCK_GAP = 12;
 const JUMP_COUNT_CAP = 9;
 
-/**
- * What floats over the end of the timeline, just above the composer: the
- * Inbox's group centred (`inboxBar`) and Jump to latest at the right edge,
- * on one line. Neither takes layout. The row is the `@container/inbox-bar`
- * the group's labels give way to, so they collapse before the two can meet.
- */
+/** Holds Jump to latest at the right edge above the composer. */
 export function ComposerDock({
-  inboxBar,
   jump,
   className,
 }: {
-  inboxBar?: ReactNode;
   jump: ReactNode;
   /** Where the row sits: over the sticky composer, or pinned to the viewport bottom. */
   className: string;
 }) {
   return (
-    <div
-      data-composer-dock=""
-      className={cn(
-        "@container/inbox-bar pointer-events-none absolute inset-x-0 flex min-h-10 items-center justify-center",
-        className,
-      )}
-    >
-      {inboxBar && <div className="flex min-w-0 max-w-[calc(100%-6rem)] justify-center">{inboxBar}</div>}
+    <div data-composer-dock="" className={cn("pointer-events-none absolute inset-x-0 min-h-10", className)}>
       <AnimatePresence initial={false}>{jump}</AnimatePresence>
     </div>
   );

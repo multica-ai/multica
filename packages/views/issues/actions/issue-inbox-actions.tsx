@@ -38,7 +38,7 @@ import {
 import { useLocale, useT } from "../../i18n";
 
 /**
- * The Inbox page's floating group over an open issue notification:
+ * The Inbox page's footer toolbar for an open issue notification:
  * `issueActions` (its status, assignee and quick actions), then the
  * notification's own. Snoozing, archiving or unsubscribing opens the next
  * notification the Work panel's Inbox section lists, so the Inbox can be

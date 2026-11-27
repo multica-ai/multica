@@ -28,7 +28,7 @@ type IssueBarActionsProps = {
 /**
  * The issue's own actions as a row of chips: its status and assignee, set as
  * the Properties panel sets them, and its quick actions. Each shows its current
- * value. Used by the Inbox's floating group above the composer, whose menus
+ * value. Used by the Inbox's footer toolbar, whose menus
  * open upward, and by the issue page header while the properties sidebar is
  * closed, whose menus open downward.
  */
