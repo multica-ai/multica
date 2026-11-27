@@ -78,7 +78,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
+import { ComposerDock, JumpToLatestButton } from "./composer-dock";
 import { InboxIssueActions, IssueBarActions } from "./inbox-issue-actions";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -2276,12 +2276,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     let cancelled = false;
     const scrollEnd = () => {
       if (cancelled) return;
-      const composer = composerRef.current;
-      // The Inbox's group floats above the composer and covers the row too.
-      const group = composer?.parentElement?.querySelector("[data-inbox-bar]");
-      const offset =
-        (composer?.getBoundingClientRect().height ?? 0) +
-        (group ? group.getBoundingClientRect().height + COMPOSER_DOCK_GAP : 0);
+      const offset = composerRef.current?.getBoundingClientRect().height ?? 0;
       virtuosoRef.current?.scrollToIndex({ index, align: "end", offset });
     };
     const container = scrollContainerElRef.current;
@@ -4583,28 +4578,21 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               card at the end of the scroll too — any padding left under a
               sticky box lifts it off its pinned spot over the last stretch
               of scroll. */}
-          {/* The composer dock: the Inbox's group and "Jump to latest"
-              (MUL-8324, MUL-8951) float just above the composer's top edge.
-              With the sticky composer the dock rides the composer itself;
-              without it, it rides a zero-height sticky anchor just above the
-              composer, which holds it off the viewport bottom (clear of a
-              phone's chat launcher) until the composer scrolls in. Either way
-              the Inbox's group gets its own room at the end of the timeline
-              (the anchor's or the composer's margin), so it never covers the
-              last comment for good. */}
+          {/* Jump to latest follows the pinned composer or sits above
+              the chat launcher until the in-flow composer scrolls in. */}
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           {stickyComposer ? (
             <div aria-hidden className="grow" />
           ) : (
-            <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
-              <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
+            <div className="sticky bottom-6 z-10 h-0 max-md:above-chat-launcher">
+              <ComposerDock className="bottom-0" jump={jumpToLatestButton} />
             </div>
           )}
           <div
             ref={composerRef}
             data-comment-images={commentImageLayout}
             className={cn(
-              !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
+              "mt-4",
               stickyComposer &&
                 "sticky bottom-0 z-10 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
               // Mirrors the column's bottom padding; the composer is never sticky below `md`.
@@ -4617,7 +4605,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 next keystroke would flush it into the new issue's
                 draft key. */}
             {stickyComposer && (
-              <ComposerDock className="bottom-full mb-3" inboxBar={inboxBar} jump={jumpToLatestButton} />
+              <ComposerDock className="bottom-full mb-3" jump={jumpToLatestButton} />
             )}
             {!landingChromeHeld && (
               <CommentInput
@@ -4632,6 +4620,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           </div>
         </div>
         </div>
+
+        {/* Issue content and keyboard focus stay in the reading area above the Inbox actions. */}
+        {inboxBar && (
+          <div className={cn(READING_COLUMN, "@container/inbox-bar shrink-0", hideUnalignedLanding && "invisible")}>
+            <div className="flex justify-center px-3 py-2 empty:hidden max-md:pe-chat-launcher">
+              {inboxBar}
+            </div>
+          </div>
+        )}
 
         {/* Thread quick-jump rail — rides the scroll container's right edge,
             next to the scrollbar, where the pointer already is while

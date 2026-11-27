@@ -33,29 +33,13 @@ describe("JumpToLatestButton", () => {
 });
 
 describe("ComposerDock", () => {
-  it("centres the Inbox's group and keeps Jump to latest in the same row", () => {
-    const { container } = render(
-      <ComposerDock
-        className="bottom-full"
-        inboxBar={<div role="toolbar">group</div>}
-        jump={<JumpToLatestButton key="jump" onClick={() => {}} label="Jump to latest" />}
-      />,
-    );
-
-    const dock = container.querySelector<HTMLElement>("[data-composer-dock]")!;
-    expect(dock).toHaveClass("@container/inbox-bar", "justify-center", "bottom-full");
-    expect(dock).toContainElement(screen.getByRole("toolbar"));
-    expect(dock).toContainElement(screen.getByRole("button", { name: "Jump to latest" }));
-  });
-
-  it("holds only Jump to latest outside the Inbox", () => {
+  it("holds Jump to latest above the composer", () => {
     const { container } = render(
       <ComposerDock className="bottom-full" jump={<JumpToLatestButton key="jump" onClick={() => {}} label="Jump to latest" />} />,
     );
 
-    expect(screen.queryByRole("toolbar")).toBeNull();
-    expect(container.querySelector("[data-composer-dock]")).toContainElement(
-      screen.getByRole("button", { name: "Jump to latest" }),
-    );
+    const dock = container.querySelector("[data-composer-dock]");
+    expect(dock).toHaveClass("bottom-full");
+    expect(dock).toContainElement(screen.getByRole("button", { name: "Jump to latest" }));
   });
 });
