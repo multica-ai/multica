@@ -1,12 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -24,17 +25,16 @@ func TestTrajectoryRoutesWithFeatureEnabled(t *testing.T) {
 	flags.Set(featureflags.TrajectoryV1, featureflag.Rule{Default: true})
 	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil,
 		RouterOptions{FeatureFlags: featureflag.NewService(flags)})
-	request := func(method, path string, body any) *http.Response {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := httptest.NewRequest(method, path, bytes.NewReader(payload))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+testToken)
+	newRequest := func(t *testing.T, token, method, path string, body any) *http.Request {
+		t.Helper()
+		req := testutil.JSONRequest(method, path, body)
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Workspace-ID", testWorkspaceID)
+		return req
+	}
+	request := func(method, path string, body any) *http.Response {
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		router.ServeHTTP(w, newRequest(t, testToken, method, path, body))
 		return w.Result()
 	}
 
@@ -88,4 +88,25 @@ func TestTrajectoryRoutesWithFeatureEnabled(t *testing.T) {
 			}
 		}
 	}
+
+	t.Run("guest capability is disabled even when Trajectory is enabled", func(t *testing.T) {
+		email := "trajectory-guest-" + uuid.NewString() + "@example.test"
+		guestID := f.User(t, "Trajectory guest", email)
+		f.Member(t, testWorkspaceID, guestID, "guest")
+		token, err := generateTestJWT(guestID, email, "Trajectory guest")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var capability map[string]bool
+		testutil.Call(t, router.ServeHTTP, newRequest(t, token, http.MethodGet, "/api/trajectory/capability", nil)).
+			Want(http.StatusOK).JSON(&capability)
+		if enabled, ok := capability["enabled"]; !ok || enabled {
+			t.Fatalf("guest capability = %v, want enabled: false", capability)
+		}
+		testutil.Call(t, router.ServeHTTP, newRequest(t, token, http.MethodGet, "/api/issues/"+child+"/trajectory", nil)).
+			Want(http.StatusForbidden)
+		testutil.Call(t, router.ServeHTTP, newRequest(t, token, http.MethodPost, "/api/issues/trajectory", map[string]any{"issue_ids": []string{child}})).
+			Want(http.StatusForbidden)
+	})
 }
