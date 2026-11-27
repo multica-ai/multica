@@ -25,9 +25,12 @@ Connected Apps, and VCS. `MULTICA_PLUGIN_SECRET_KEY` is not covered.
    interrupt and rerun. A value that opens under neither key is logged with
    its row key and left untouched.
 4. Remove `MULTICA_<NAME>_SECRET_KEY_PREVIOUS` and redeploy only after the
-   verify run exits 0 and at least 10 minutes have passed since the last
-   server whose current `MULTICA_APPS_SECRET_KEY` is the key being retired
-   stopped, whether or not it also had a previous key. Connected Apps OAuth
-   state is sealed with the current key, travels in the browser rather than
-   the database, and stays valid for 10 minutes; an authorization started on
-   such a server fails its callback once the retired key is gone.
+   verify run for that integration exits 0.
+
+   When rotating `apps`, also wait at least 10 minutes after the last server
+   whose current `MULTICA_APPS_SECRET_KEY` is the key being retired stopped,
+   whether or not it also had a previous key, before removing
+   `MULTICA_APPS_SECRET_KEY_PREVIOUS`. Connected Apps OAuth state is sealed
+   with the current key, travels in the browser rather than the database, and
+   stays valid for 10 minutes; an authorization started on such a server fails
+   its callback once the retired key is gone.

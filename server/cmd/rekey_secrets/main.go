@@ -44,7 +44,8 @@ func run() error {
 
 	// No local default: a report against the wrong database would pass the
 	// verify gate for a deployment it never scanned.
-	dbURL := os.Getenv("DATABASE_URL")
+	// A blank value would let pgx fall back to PGHOST/PGDATABASE.
+	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dbURL == "" {
 		return fmt.Errorf("DATABASE_URL must be set to the target deployment's database")
 	}
