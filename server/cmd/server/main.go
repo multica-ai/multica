@@ -686,12 +686,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	accessAllowlist, err := auth.ParseAccessAllowlist(os.Getenv("ACCESS_ALLOWED_EMAILS"))
+	accessAllowlist, err := auth.ParseAccessAllowlist(os.Getenv("ACCESS_ALLOWED_EMAILS"), accessAllowlistEmailLookup(queries))
 	if err != nil {
 		slog.Error("invalid ACCESS_ALLOWED_EMAILS", "error", err)
 		os.Exit(1)
 	}
-	auth.SetAccessAllowlist(accessAllowlist, accessAllowlistEmailLookup(queries))
+	auth.SetAccessAllowlist(accessAllowlist)
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		InboxReadMetrics:    inboxReadMetrics,

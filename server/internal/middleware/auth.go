@@ -40,7 +40,9 @@ func rejectDeniedUser(w http.ResponseWriter, r *http.Request, userID, email, aut
 				"user_id", userID,
 				"auth_path", authPath,
 			)
-			writeError(w, http.StatusForbidden, auth.AccessNotAllowedError)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(auth.AccessNotAllowedBody))
 			return true
 		}
 		slog.Error("auth: access allowlist check failed", "path", r.URL.Path, "user_id", userID, "error", err)

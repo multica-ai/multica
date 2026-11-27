@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,12 +13,12 @@ import (
 
 func setAccessAllowlist(t *testing.T, raw string, lookup auth.UserEmailLookup) {
 	t.Helper()
-	a, err := auth.ParseAccessAllowlist(raw)
+	a, err := auth.ParseAccessAllowlist(raw, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth.SetAccessAllowlist(a, lookup)
-	t.Cleanup(func() { auth.SetAccessAllowlist(nil, nil) })
+	auth.SetAccessAllowlist(a)
+	t.Cleanup(func() { auth.SetAccessAllowlist(nil) })
 }
 
 func TestAuth_AccessAllowlistJWT(t *testing.T) {
@@ -39,6 +40,12 @@ func TestAuth_AccessAllowlistJWT(t *testing.T) {
 			handler.ServeHTTP(w, req)
 			if w.Code != want {
 				t.Fatalf("expected %d, got %d: %s", want, w.Code, w.Body.String())
+			}
+			if want == http.StatusForbidden {
+				var body map[string]string
+				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["code"] != auth.AccessNotAllowedCode {
+					t.Fatalf("denial must carry code %q for clients to end the session, got %s", auth.AccessNotAllowedCode, w.Body.String())
+				}
 			}
 		})
 	}

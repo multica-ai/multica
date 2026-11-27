@@ -7,19 +7,30 @@ import (
 )
 
 func TestParseAccessAllowlist(t *testing.T) {
-	empty, err := ParseAccessAllowlist(" , ")
+	empty, err := ParseAccessAllowlist(" , ", nil)
 	if err != nil || empty != nil {
 		t.Fatalf("blank list must disable the gate, got %v, %v", empty, err)
 	}
-	for _, bad := range []string{"devv.ai", "@devv.ai", "*@", "a*@devv.ai", "*@*.devv.ai", "a@b@c.com", "*"} {
-		if _, err := ParseAccessAllowlist("ok@devv.ai," + bad); err == nil {
+	for _, bad := range []string{
+		"devv.ai", "@devv.ai", "*@", "a*@devv.ai", "*@*.devv.ai", "a@b@c.com", "*",
+		// Typos inside an otherwise well-formed entry must not start an
+		// instance that then refuses everyone.
+		"*@dev v.ai", "*@devv..ai", "*@.devv.ai", "*@devv.ai.", "*@-devv.ai", "*@devv_ai.com",
+		"al ice@devv.ai", "alice@dev v.ai", "alice@devv,ai", "Alice <alice@devv.ai>", `"a b"@devv.ai`,
+	} {
+		if _, err := ParseAccessAllowlist("ok@devv.ai,"+bad, nil); err == nil {
 			t.Errorf("expected %q to be rejected", bad)
+		}
+	}
+	for _, good := range []string{"*@devv.ai", "*@sub.devv.ai", "*@xn--bcher-kva.example", "first.last+tag@devv.ai", "o'brien@devv.ai", "admin@localhost"} {
+		if _, err := ParseAccessAllowlist(good, nil); err != nil {
+			t.Errorf("expected %q to be accepted, got %v", good, err)
 		}
 	}
 }
 
 func TestAccessAllowlistAllowsEmail(t *testing.T) {
-	a, err := ParseAccessAllowlist(" *@Devv.ai , xxx@google.com ")
+	a, err := ParseAccessAllowlist(" *@Devv.ai , xxx@google.com ", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,20 +57,16 @@ func TestAccessAllowlistAllowsEmail(t *testing.T) {
 }
 
 func TestCheckUserAccess(t *testing.T) {
-	t.Cleanup(func() { SetAccessAllowlist(nil, nil) })
+	t.Cleanup(func() { SetAccessAllowlist(nil) })
 
 	if err := CheckUserAccess(context.Background(), "u1", ""); err != nil {
 		t.Fatalf("no allowlist must allow everyone, got %v", err)
 	}
 
-	a, err := ParseAccessAllowlist("*@devv.ai")
-	if err != nil {
-		t.Fatal(err)
-	}
 	lookups := map[string]int{}
 	lookupErr := errors.New("db down")
 	failing := true
-	SetAccessAllowlist(a, func(_ context.Context, userID string) (string, error) {
+	a, err := ParseAccessAllowlist("*@devv.ai", func(_ context.Context, userID string) (string, error) {
 		lookups[userID]++
 		switch userID {
 		case "flaky":
@@ -74,6 +81,10 @@ func TestCheckUserAccess(t *testing.T) {
 		}
 		return "", nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetAccessAllowlist(a)
 	ctx := context.Background()
 
 	if err := CheckUserAccess(ctx, "jwt-user", "member@devv.ai"); err != nil {

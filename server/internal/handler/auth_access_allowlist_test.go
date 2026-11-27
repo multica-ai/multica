@@ -14,12 +14,12 @@ import (
 func TestLoginAccessAllowlist(t *testing.T) {
 	t.Setenv("RESEND_API_KEY", "")
 	t.Setenv("SMTP_HOST", "")
-	a, err := auth.ParseAccessAllowlist("*@allowed.example,solo@other.example")
+	a, err := auth.ParseAccessAllowlist("*@allowed.example,solo@other.example", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth.SetAccessAllowlist(a, nil)
-	t.Cleanup(func() { auth.SetAccessAllowlist(nil, nil) })
+	auth.SetAccessAllowlist(a)
+	t.Cleanup(func() { auth.SetAccessAllowlist(nil) })
 
 	h := *testHandler
 	// Signup itself is open: only the access allowlist decides.

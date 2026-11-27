@@ -657,3 +657,47 @@ func TestReadPump_AcceptsFrameUnderReadLimit(t *testing.T) {
 		t.Fatalf("got %s, want a pong frame", raw)
 	}
 }
+
+// A cookie handshake refused by ACCESS_ALLOWED_EMAILS is 403, like a
+// disabled account: the credential is valid, so it must not read as a 401.
+func TestHandleWebSocket_CookieHandshakeOutsideAccessAllowlist(t *testing.T) {
+	a, err := auth.ParseAccessAllowlist("*@allowed.example", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.SetAccessAllowlist(a)
+	t.Cleanup(func() { auth.SetAccessAllowlist(nil) })
+
+	hub := NewHub()
+	for email, want := range map[string]int{
+		"member@other.example": http.StatusForbidden,
+		// No email claim and no lookup to resolve one: denied.
+		"": http.StatusForbidden,
+	} {
+		t.Run(email, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ws?workspace_id="+testWorkspaceID, nil)
+			req.AddCookie(&http.Cookie{Name: auth.AuthCookieName, Value: makeTestTokenForUser(t, "", email)})
+			w := httptest.NewRecorder()
+			HandleWebSocket(hub, &mockMembershipChecker{}, nil, nil, w, req)
+			if w.Code != want {
+				t.Fatalf("status = %d, want %d: %s", w.Code, want, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), auth.AccessNotAllowedCode) {
+				t.Fatalf("body must carry %q: %s", auth.AccessNotAllowedCode, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandshakeAuthStatus(t *testing.T) {
+	for msg, want := range map[string]int{
+		auth.AccessNotAllowedBody:   http.StatusForbidden,
+		wsAccountDisabledMessage:    http.StatusForbidden,
+		wsAccessCheckFailedMessage:  http.StatusServiceUnavailable,
+		`{"error":"invalid token"}`: http.StatusUnauthorized,
+	} {
+		if got := handshakeAuthStatus(msg); got != want {
+			t.Errorf("handshakeAuthStatus(%s) = %d, want %d", msg, got, want)
+		}
+	}
+}
