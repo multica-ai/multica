@@ -39,7 +39,7 @@ export function ProjectTabs({
     <Tabs
       value={tab}
       onValueChange={(value) => onTabChange(value as ProjectTab)}
-      className="shrink-0 self-stretch"
+      className="min-w-0 self-stretch overflow-x-auto"
     >
       <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
         <TabsTrigger value="overview" className={TAB_TRIGGER_CLASS}>
