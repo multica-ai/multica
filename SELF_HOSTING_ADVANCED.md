@@ -76,6 +76,7 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
 | `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
 | `WORKSPACE_CREATION_ALLOWED_EMAILS` | Optional comma-separated list of exact email addresses allowed to create workspaces. When set, everyone else gets 403 from `POST /api/workspaces`. Ignored when `DISABLE_WORKSPACE_CREATION=true` |
+| `ACCESS_ALLOWED_EMAILS` | Optional comma-separated list of accounts allowed to sign in and call the API: exact addresses or `*@domain` wildcards. When set, everyone else gets 403 on every API call |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
 
@@ -102,6 +103,20 @@ WORKSPACE_CREATION_ALLOWED_EMAILS=alice@example.com,bob@example.com
 2. `WORKSPACE_CREATION_ALLOWED_EMAILS` empty → allowed for every signed-in user (default).
 3. The caller's account email matches an entry (case-insensitive) → allowed.
 4. Otherwise → 403.
+
+#### Restricting the whole instance to selected accounts
+
+To let only certain people use the instance at all, set `ACCESS_ALLOWED_EMAILS`. Each entry is either an exact address or `*@domain` for every address on that domain:
+
+```dotenv
+ACCESS_ALLOWED_EMAILS=*@example.com,contractor@partner.com
+```
+
+- Empty (the default) → no restriction.
+- Otherwise, sign-in (verification code and Google) is refused for any other email, and every authenticated API and WebSocket request from any other account returns 403. This covers browser sessions, personal access tokens, daemon tokens, and agent task tokens started by that account.
+- Unlike `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, it applies to existing accounts too, and an invitation does not bypass it. Removing someone from the list cuts off their existing sessions and tokens after a restart.
+- `*@example.com` does not match subdomains such as `dev.example.com`; list them separately.
+- A malformed entry (for example `example.com` without `*@`) stops the backend from starting.
 
 Things to know:
 
