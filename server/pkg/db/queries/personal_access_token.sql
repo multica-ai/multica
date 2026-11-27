@@ -3,11 +3,41 @@ INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expi
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
+-- name: CreateWorkspaceToken :one
+-- A workspace token is a personal access token confined to one workspace.
+-- The membership check is part of the insert: no row comes back when the
+-- user is not a member of the workspace, or the workspace is gone.
+INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at, workspace_id)
+SELECT m.user_id, sqlc.arg(name), sqlc.arg(token_hash), sqlc.arg(token_prefix), sqlc.narg(expires_at), m.workspace_id
+FROM member m
+WHERE m.user_id = sqlc.arg(user_id)
+  AND m.workspace_id = sqlc.arg(workspace_id)
+RETURNING *;
+
 -- name: GetPersonalAccessTokenByHash :one
+-- Account-wide tokens only. A workspace token is resolved by
+-- GetWorkspaceTokenByHash, so no caller of this query can treat one as an
+-- account-wide token.
 SELECT * FROM personal_access_token
 WHERE token_hash = $1
+  AND workspace_id IS NULL
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now());
+
+-- name: GetWorkspaceTokenByHash :one
+SELECT * FROM personal_access_token
+WHERE token_hash = $1
+  AND workspace_id IS NOT NULL
+  AND revoked = FALSE
+  AND (expires_at IS NULL OR expires_at > now());
+
+-- name: DeleteWorkspaceTokensByMember :many
+-- A member who leaves a workspace takes their tokens for it with them, so a
+-- later return to the workspace does not bring an old token back to life.
+DELETE FROM personal_access_token
+WHERE user_id = $1
+  AND workspace_id = $2
+RETURNING token_hash;
 
 -- name: ListPersonalAccessTokensByUser :many
 SELECT * FROM personal_access_token

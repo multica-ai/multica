@@ -122,7 +122,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_mcp_server":                   workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
-	"personal_access_token":              workspaceDeleteKeep,
+	"personal_access_token":              workspaceDelete, // Only tokens bound to the workspace; account-wide tokens have no workspace_id.
 	"pinned_item":                        workspaceDelete,
 	"plugin_installation":                workspaceDelete,
 	"plugin_hook_schedule":               workspaceDelete,

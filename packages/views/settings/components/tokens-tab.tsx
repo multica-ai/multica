@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Trash2, Info } from "@multica/ui/icons";
 import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -38,10 +39,14 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useLocale, useT } from "../../i18n";
 import { SettingsSection, SettingsTab } from "./settings-layout";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
+// The scope picker's value for an account-wide token; every other value is a
+// workspace id.
+const ALL_WORKSPACES = "all";
 
 export function TokensTab() {
   const { t } = useT("settings");
@@ -50,8 +55,14 @@ export function TokensTab() {
     value,
     label: t(($) => $.tokens.expiry[value]),
   }));
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  const scopeItems = [
+    { value: ALL_WORKSPACES, label: t(($) => $.tokens.scope.all) },
+    ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
+  ];
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
+  const [tokenScope, setTokenScope] = useState(ALL_WORKSPACES);
   const [tokenExpiry, setTokenExpiry] = useState("90");
   const [tokenCreating, setTokenCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -82,9 +93,14 @@ export function TokensTab() {
     setTokenCreating(true);
     try {
       const expiresInDays = tokenExpiry === "never" ? undefined : Number(tokenExpiry);
-      const result = await api.createPersonalAccessToken({ name: tokenName, expires_in_days: expiresInDays });
+      const result = await api.createPersonalAccessToken({
+        name: tokenName,
+        expires_in_days: expiresInDays,
+        workspace_id: tokenScope === ALL_WORKSPACES ? undefined : tokenScope,
+      });
       setNewToken(result.token);
       setTokenName("");
+      setTokenScope(ALL_WORKSPACES);
       setTokenExpiry("90");
       await loadTokens();
     } catch (e) {
@@ -123,6 +139,16 @@ export function TokensTab() {
     }
   };
 
+  // A workspace token names its workspace. One whose workspace is not in the
+  // list (the list has not loaded, or an older client state) still says that
+  // it is confined, so it is never mistaken for an account-wide token.
+  const tokenScopeLabel = (workspaceId: string) => {
+    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+    return workspace
+      ? t(($) => $.tokens.scope.metadata, { workspace: workspace.name })
+      : t(($) => $.tokens.scope.metadata_unknown);
+  };
+
   const closeCreatedDialog = () => {
     setNewToken(null);
     setTokenCopied(false);
@@ -143,7 +169,7 @@ export function TokensTab() {
         </details>
         <Card>
           <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+            <div className="grid gap-3 sm:grid-cols-[1fr_180px_120px_auto]">
               <Input
                 type="text"
                 name="token-name"
@@ -153,6 +179,22 @@ export function TokensTab() {
                 onChange={(e) => setTokenName(e.target.value)}
                 placeholder={t(($) => $.tokens.name_placeholder)}
               />
+              <Select
+                items={scopeItems}
+                value={tokenScope}
+                onValueChange={(v) => { if (v) setTokenScope(v); }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full"
+                  aria-label={t(($) => $.tokens.scope.label)}
+                ><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {scopeItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select
                 items={expiryItems}
                 value={tokenExpiry}
@@ -217,6 +259,7 @@ export function TokensTab() {
                       {token.expires_at && t(($) => $.tokens.expires_with_date, {
                         date: new Date(token.expires_at!).toLocaleDateString(locale),
                       })}
+                      {typeof token.workspace_id === "string" && tokenScopeLabel(token.workspace_id)}
                     </div>
                   </div>
                   <Tooltip>

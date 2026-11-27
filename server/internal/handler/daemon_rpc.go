@@ -69,6 +69,12 @@ func (h *Handler) rpcClaimTasks(ctx context.Context, identity daemonws.ClientIde
 		reqCtx = middleware.WithDaemonTokenHash(reqCtx, identity.DaemonTokenHash)
 		reqCtx = middleware.WithDaemonTokenOwnerID(reqCtx, identity.DaemonTokenOwnerID)
 	}
+	// A workspace-token connection stays confined to its workspace: without
+	// the mark the replayed request would authorize as the token's owner in
+	// every workspace the owner belongs to.
+	if identity.WorkspaceTokenWorkspaceID != "" {
+		reqCtx = middleware.WithWorkspaceToken(reqCtx, identity.WorkspaceTokenWorkspaceID)
+	}
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, "/api/daemon/tasks/claim", bytes.NewReader(body))
 	if err != nil {
 		return http.StatusInternalServerError, nil, err

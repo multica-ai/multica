@@ -88,6 +88,10 @@ deleted_pins AS (
 deleted_daemon_tokens AS (
     DELETE FROM daemon_token WHERE daemon_token.workspace_id = $1
 ),
+deleted_workspace_tokens AS (
+    DELETE FROM personal_access_token
+    WHERE personal_access_token.workspace_id = $1
+),
 detached_feedback AS (
     UPDATE feedback
     SET workspace_id = NULL

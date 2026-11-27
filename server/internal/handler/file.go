@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -940,14 +941,14 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	// A task token acts only in the workspace it is bound to; Auth stamps
-	// that workspace into X-Workspace-ID. Membership alone is not enough:
-	// the task's user may belong to the attachment's other workspace too.
-	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Workspace-ID") != workspaceID {
+	// A task token or a workspace token acts only in the workspace it is
+	// bound to. Membership alone is not enough: the token's user may belong
+	// to the attachment's other workspace too.
+	if bound, ok := middleware.BoundWorkspace(r); ok && bound != workspaceID {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+	if h.membershipCached(r.Context(), userID, workspaceID) {
 		if !h.requireAttachmentVisible(w, r, workspaceID, att) {
 			return db.Attachment{}, false
 		}

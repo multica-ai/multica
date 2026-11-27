@@ -66,6 +66,22 @@ func GeneratePATToken() (string, error) {
 	return "mul_" + hex.EncodeToString(b), nil
 }
 
+// WorkspaceTokenPrefix identifies a workspace token: a personal access token
+// confined to one workspace. It has its own prefix so that every entry point
+// routes it to the branch that enforces the confinement, and so that a server
+// which predates workspace tokens rejects it instead of reading it as an
+// account-wide mul_ token.
+const WorkspaceTokenPrefix = "mwt_"
+
+// GenerateWorkspaceToken creates a new workspace token: "mwt_" + 40 random hex chars.
+func GenerateWorkspaceToken() (string, error) {
+	b := make([]byte, 20) // 20 bytes = 40 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate workspace token: %w", err)
+	}
+	return WorkspaceTokenPrefix + hex.EncodeToString(b), nil
+}
+
 // GenerateDaemonToken creates a new daemon auth token: "mdt_" + 40 random hex chars.
 func GenerateDaemonToken() (string, error) {
 	b := make([]byte, 20) // 20 bytes = 40 hex chars

@@ -91,6 +91,19 @@ func TestAuthenticateTokenRejectsTemporarilyDisabledPATUser(t *testing.T) {
 	}
 }
 
+// A workspace token is never resolved to its owner for a realtime connection,
+// even when a resolver would recognize the string.
+func TestAuthenticateTokenRejectsWorkspaceToken(t *testing.T) {
+	token := auth.WorkspaceTokenPrefix + "abc123"
+	uid, errMsg := authenticateToken(token, staticPATResolver{token: "11111111-0000-4000-8000-000000000001"}, context.Background())
+	if uid != "" {
+		t.Fatalf("expected no user ID, got %q", uid)
+	}
+	if !strings.Contains(errMsg, "workspace tokens cannot open a realtime connection") {
+		t.Fatalf("expected the workspace token refusal, got %q", errMsg)
+	}
+}
+
 func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	t.Helper()
 	hub := NewHub()

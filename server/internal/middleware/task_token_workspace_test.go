@@ -16,10 +16,11 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Fixtures for the GitHub #9403 regression tests. The token is bound to
-// workspace A; B is a different workspace the agent's user can see.
+// Fixtures for the GitHub #9403 regression tests. Each token is bound to
+// workspace A; B is a different workspace the token's user can see.
 const (
 	ttTestToken   = "mat_test_9403_token"
+	wtTestToken   = "mwt_test_workspace_token"
 	ttWorkspaceA  = "0a0a0a0a-0000-4000-8000-00000000000a"
 	ttWorkspaceB  = "0b0b0b0b-0000-4000-8000-00000000000b"
 	ttUserID      = "11111111-0000-4000-8000-000000000001"
@@ -30,16 +31,22 @@ const (
 	ttSlugDBError = "ws-db-error"
 )
 
-// fakeTaskTokenDB is a minimal db.DBTX that answers the two queries the
-// task-token auth path issues: GetTaskTokenByHash and GetWorkspaceBySlug.
-// Anything else fails the test, so an unexpected query on this path is
-// caught rather than silently returning zero values.
+// fakeTaskTokenDB is a minimal db.DBTX that answers the queries the
+// bound-credential auth paths issue: GetTaskTokenByHash,
+// GetWorkspaceTokenByHash and GetWorkspaceBySlug. Anything else fails the
+// test, so an unexpected query on these paths is caught rather than silently
+// returning zero values.
 type fakeTaskTokenDB struct {
 	t *testing.T
 }
 
-func (f *fakeTaskTokenDB) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
-	f.t.Errorf("unexpected Exec on task-token auth path")
+func (f *fakeTaskTokenDB) Exec(_ context.Context, sql string, _ ...interface{}) (pgconn.CommandTag, error) {
+	// The workspace-token path refreshes last_used_at from a goroutine that
+	// can outlive the test, so it must not touch t.
+	if strings.Contains(sql, "name: UpdatePersonalAccessTokenLastUsed") {
+		return pgconn.CommandTag{}, nil
+	}
+	f.t.Errorf("unexpected Exec on bound-credential auth path")
 	return pgconn.CommandTag{}, errors.New("unexpected Exec")
 }
 
@@ -60,6 +67,15 @@ func (f *fakeTaskTokenDB) QueryRow(_ context.Context, sql string, args ...interf
 			*dest[3].(*pgtype.UUID) = util.MustParseUUID(ttAgentID)
 			*dest[4].(*pgtype.UUID) = util.MustParseUUID(ttWorkspaceA)
 			*dest[5].(*pgtype.UUID) = util.MustParseUUID(ttUserID)
+		}}
+	case strings.Contains(sql, "name: GetWorkspaceTokenByHash"):
+		if len(args) != 1 || args[0] != auth.HashToken(wtTestToken) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{scan: func(dest ...any) {
+			*dest[0].(*pgtype.UUID) = util.MustParseUUID("55555555-0000-4000-8000-000000000005")
+			*dest[1].(*pgtype.UUID) = util.MustParseUUID(ttUserID)
+			*dest[9].(*pgtype.UUID) = util.MustParseUUID(ttWorkspaceA)
 		}}
 	case strings.Contains(sql, "name: GetWorkspaceBySlug"):
 		var id string
@@ -94,11 +110,25 @@ func (r fakeRow) Scan(dest ...any) error {
 	return nil
 }
 
-// TestAuth_TaskTokenWorkspaceSelectors drives the real Auth middleware with a
-// mat_ token bound to workspace A and asserts that an explicit selector for
-// any other workspace is refused before the handler runs, instead of being
-// silently replaced by A (GitHub #9403).
-func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
+// boundCredentialsUnderTest are the two workspace-bound credentials. Both are
+// bound to workspace A and both go through the same selector check.
+var boundCredentialsUnderTest = []struct {
+	name       string
+	token      string
+	credential boundCredential
+	// wantSource is the X-Actor-Source a handler sees: a task token is a
+	// machine credential, a workspace token is its owner's.
+	wantSource string
+}{
+	{name: "task token", token: ttTestToken, credential: boundTaskToken, wantSource: "task_token"},
+	{name: "workspace token", token: wtTestToken, credential: boundWorkspaceToken, wantSource: ""},
+}
+
+// TestAuth_BoundCredentialWorkspaceSelectors drives the real Auth middleware
+// with a mat_ token and with an mwt_ token, each bound to workspace A, and
+// asserts that an explicit selector for any other workspace is refused before
+// the handler runs, instead of being silently replaced by A (GitHub #9403).
+func TestAuth_BoundCredentialWorkspaceSelectors(t *testing.T) {
 	cases := []struct {
 		name       string
 		method     string
@@ -178,57 +208,59 @@ func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
 			headers: map[string][]string{"X-Workspace-ID": {ttWorkspaceA}}, wantStatus: http.StatusOK},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			queries := db.New(&fakeTaskTokenDB{t: t})
-			var called bool
-			var gotWorkspace, gotSource string
-			handler := Auth(queries, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called = true
-				gotWorkspace = r.Header.Get("X-Workspace-ID")
-				gotSource = r.Header.Get("X-Actor-Source")
-				w.WriteHeader(http.StatusOK)
-			}))
+	for _, cred := range boundCredentialsUnderTest {
+		for _, tc := range cases {
+			t.Run(cred.name+"/"+tc.name, func(t *testing.T) {
+				queries := db.New(&fakeTaskTokenDB{t: t})
+				var called bool
+				var gotWorkspace, gotSource string
+				handler := Auth(queries, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = true
+					gotWorkspace = r.Header.Get("X-Workspace-ID")
+					gotSource = r.Header.Get("X-Actor-Source")
+					w.WriteHeader(http.StatusOK)
+				}))
 
-			req := httptest.NewRequest(tc.method, tc.target, nil)
-			req.Header.Set("Authorization", "Bearer "+ttTestToken)
-			for k, vs := range tc.headers {
-				for _, v := range vs {
-					req.Header.Add(k, v)
+				req := httptest.NewRequest(tc.method, tc.target, nil)
+				req.Header.Set("Authorization", "Bearer "+cred.token)
+				for k, vs := range tc.headers {
+					for _, v := range vs {
+						req.Header.Add(k, v)
+					}
 				}
-			}
-			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, req)
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, req)
 
-			if w.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d (body %s)", w.Code, tc.wantStatus, w.Body.String())
-			}
-			if tc.wantStatus != http.StatusOK {
-				if called {
-					t.Fatalf("handler must not run when the selector is rejected")
+				if w.Code != tc.wantStatus {
+					t.Fatalf("status = %d, want %d (body %s)", w.Code, tc.wantStatus, w.Body.String())
 				}
-				if tc.wantStatus == http.StatusForbidden && !strings.Contains(w.Body.String(), errTaskTokenWorkspaceMismatch) {
-					t.Fatalf("403 body = %s, want %q", w.Body.String(), errTaskTokenWorkspaceMismatch)
+				if tc.wantStatus != http.StatusOK {
+					if called {
+						t.Fatalf("handler must not run when the selector is rejected")
+					}
+					if tc.wantStatus == http.StatusForbidden && !strings.Contains(w.Body.String(), cred.credential.mismatch()) {
+						t.Fatalf("403 body = %s, want %q", w.Body.String(), cred.credential.mismatch())
+					}
+					return
 				}
-				return
-			}
-			if !called {
-				t.Fatalf("handler was not called")
-			}
-			// Accepted requests still carry the token's binding, in
-			// canonical form, as the single X-Workspace-ID value.
-			if gotWorkspace != ttWorkspaceA {
-				t.Fatalf("X-Workspace-ID = %q, want bound workspace %q", gotWorkspace, ttWorkspaceA)
-			}
-			if gotSource != "task_token" {
-				t.Fatalf("X-Actor-Source = %q, want task_token", gotSource)
-			}
-		})
+				if !called {
+					t.Fatalf("handler was not called")
+				}
+				// Accepted requests still carry the token's binding, in
+				// canonical form, as the single X-Workspace-ID value.
+				if gotWorkspace != ttWorkspaceA {
+					t.Fatalf("X-Workspace-ID = %q, want bound workspace %q", gotWorkspace, ttWorkspaceA)
+				}
+				if gotSource != cred.wantSource {
+					t.Fatalf("X-Actor-Source = %q, want %q", gotSource, cred.wantSource)
+				}
+			})
+		}
 	}
 }
 
-// TestAuth_JWTWorkspaceSelectorUntouched is the control for the task-token
-// check: human JWT sessions keep choosing their workspace through headers,
+// TestAuth_JWTWorkspaceSelectorUntouched is the control for the
+// bound-credential check: human JWT sessions keep choosing their workspace through headers,
 // and Auth must neither validate nor rewrite that choice.
 func TestAuth_JWTWorkspaceSelectorUntouched(t *testing.T) {
 	var gotWorkspace string

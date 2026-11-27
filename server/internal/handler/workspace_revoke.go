@@ -363,6 +363,7 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	}); err != nil {
 		return empty, err
 	}
+	var workspaceTokenHashes []string
 	if demote {
 		if _, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: memberID, Role: projectaccess.RoleGuest}); err != nil {
 			return empty, err
@@ -372,12 +373,26 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		if err := markSearchAccessChanged(ctx, qtx, workspaceID, userID); err != nil {
 			return empty, err
 		}
-	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {
-		return empty, err
+	} else {
+		// No FK cascade (repo rule): the tokens this member issued for the
+		// workspace go with the membership, so rejoining later does not
+		// bring one back to life. A new guest keeps theirs; the guest role
+		// limits what they reach.
+		if workspaceTokenHashes, err = qtx.DeleteWorkspaceTokensByMember(ctx, db.DeleteWorkspaceTokensByMemberParams{
+			UserID: userID, WorkspaceID: workspaceID,
+		}); err != nil {
+			return empty, err
+		}
+		if err := qtx.DeleteMember(ctx, memberID); err != nil {
+			return empty, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err
+	}
+	for _, hash := range workspaceTokenHashes {
+		h.PATCache.Invalidate(ctx, hash)
 	}
 	// After commit, like publishRevocation: admins are told about what is
 	// still waiting only once the cancellations are final.

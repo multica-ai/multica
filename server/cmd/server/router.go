@@ -1845,6 +1845,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// /v1 prevents the Public API from accepting session cookies.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
+		// The bridge serves the browser session of a signed-in user.
+		r.Use(middleware.RefuseWorkspaceToken)
 		r.Route(pluginBridgePrefix, func(r chi.Router) {
 			registerPluginActionRoutes(r, h)
 			// ui / manual only. `event` is dispatched by the host off the event
@@ -1856,6 +1858,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+
+		// A workspace token (mwt_) is confined to one workspace, so from here
+		// on `r` refuses it: the routes registered on `r` act on the account
+		// (other credentials, user settings, invitations, billing), and that
+		// is what a newly added route gets by default. A route that holds
+		// its caller to one workspace, through the workspace middleware or
+		// in its handler, registers on `workspaceScoped` instead.
+		// TestWorkspaceTokenRoutes keeps the two sets honest.
+		workspaceScoped := r
+		r = r.With(middleware.RefuseWorkspaceToken)
 
 		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
 		// session after a surface asks for something over the postMessage
@@ -1869,7 +1881,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/theme-store/themes", h.ListStoreThemes)
 		r.Get("/api/theme-store/themes/{themeId}/package", h.GetStoreThemePackage)
 		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
-		r.Get("/api/me", h.GetMe)
+		// Who the token belongs to, which the CLI reads to confirm a login.
+		workspaceScoped.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
@@ -1886,7 +1899,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// string (Desktop, mobile). Browsers get theirs re-issued inline by
 		// middleware.Auth and never call this (MUL-7436).
 		r.Post("/api/auth/refresh", h.RefreshSession)
-		r.Post("/api/upload-file", h.UploadFile)
+		// Resolves the workspace like the workspace middleware does, then
+		// checks membership in the handler.
+		workspaceScoped.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
 
@@ -1908,19 +1923,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// metadata / delete endpoints below stay workspace-scoped
 		// because they are JSON-API consumers that always have
 		// workspace context.
-		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+		workspaceScoped.Get("/api/attachments/{id}/download", h.DownloadAttachment)
 		// Same access shape as /download, for grid tiles' native <img> src.
-		r.Get("/api/attachments/{id}/thumbnail", h.GetAttachmentThumbnail)
+		workspaceScoped.Get("/api/attachments/{id}/thumbnail", h.GetAttachmentThumbnail)
 		// The original of a thumbnailed image, for copying it from a tile.
-		r.Get("/api/attachments/{id}/original", h.GetAttachmentOriginal)
+		workspaceScoped.Get("/api/attachments/{id}/original", h.GetAttachmentOriginal)
 		// Markdown links may point to an attachment in a different workspace.
 		// Resolve that workspace from the row and check membership before minting
 		// a fresh URL; the workspace-scoped metadata route stays unchanged.
-		r.Get("/api/attachments/{id}/download-metadata", h.GetAttachmentForDownload)
+		workspaceScoped.Get("/api/attachments/{id}/download-metadata", h.GetAttachmentForDownload)
 
-		r.Route("/api/workspaces", func(r chi.Router) {
+		workspaceScoped.Route("/api/workspaces", func(r chi.Router) {
+			// Lists only the bound workspace for a workspace-bound credential.
 			r.Get("/", h.ListWorkspaces)
-			r.Post("/", h.CreateWorkspace)
+			r.With(middleware.RefuseWorkspaceToken).Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
 				// Member-level access
 				r.Group(func(r chi.Router) {
@@ -2253,7 +2269,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
-		r.Group(func(r chi.Router) {
+		workspaceScoped.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
 			// Assignee frequency
@@ -2743,6 +2759,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Cloud Runtime fleet proxy. The remote service URL is configured
 			// on SaaS API nodes only; self-hosted deployments return 503.
 			r.Route("/api/cloud-runtime", func(r chi.Router) {
+				// Cloud nodes belong to the account, not to one workspace.
+				r.Use(middleware.RefuseWorkspaceToken)
 				r.Get("/", h.GetCloudRuntimeService)
 				r.Get("/healthz", h.GetCloudRuntimeHealth)
 				r.Get("/readyz", h.GetCloudRuntimeReady)
@@ -2904,7 +2922,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Patch("/", h.PatchNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
-				r.Post("/auto-archive-prompt", h.ResolveAutoArchivePrompt)
+				// The answer applies to the account, across workspaces.
+				r.With(middleware.RefuseWorkspaceToken).Post("/auto-archive-prompt", h.ResolveAutoArchivePrompt)
 			})
 		})
 	})

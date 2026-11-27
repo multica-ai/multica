@@ -84,7 +84,7 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 	// PAT/JWT fallback: check membership cache before hitting DB.
 	userID := requestUserID(r)
 	if userID != "" {
-		if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+		if h.membershipCached(r.Context(), userID, workspaceID) {
 			return true
 		}
 	}
@@ -314,7 +314,7 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if userID == "" {
 		return false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+	if h.membershipCached(r.Context(), userID, workspaceID) {
 		return true
 	}
 	// The same rule as requireWorkspaceMember: a guest reaches only the

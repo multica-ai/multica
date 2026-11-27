@@ -32,6 +32,10 @@ type ClientIdentity struct {
 	// so the per-runtime owner binding holds over WS as well (MUL-8154).
 	DaemonTokenOwnerID string
 	UserID             string
+	// WorkspaceTokenWorkspaceID is the workspace a workspace-token (mwt_)
+	// connection is confined to (empty for every other credential). RPCs
+	// replay it, so the confinement holds over WS as it does over HTTP.
+	WorkspaceTokenWorkspaceID string
 	// WorkspaceID is the legacy single-workspace scope used by older callers
 	// and daemon-token auth. New code should populate WorkspaceIDs from the
 	// runtime rows authorized for this connection.

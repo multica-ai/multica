@@ -19,7 +19,7 @@ Browser cookies are not meant to be copied into scripts or the CLI; use a person
 
 A personal access token (PAT) starts with `mul_` and represents your account. It can access every workspace and API you have access to, so guard it like a password.
 
-When creating a token under **Settings → API Token**, you provide a name and pick an expiry of 30 days, 90 days, 1 year, or never; 90 days is preselected. The full token is shown exactly once; after the dialog closes, Multica keeps only:
+When creating a token under **Settings → API Token**, you provide a name, choose **All workspaces** or a single workspace, and pick an expiry of 30 days, 90 days, 1 year, or never; 90 days is preselected. The full token is shown exactly once; after the dialog closes, Multica keeps only:
 
 - the token's hash;
 - the first few characters, for identification;
@@ -30,6 +30,16 @@ The full value cannot be recovered. If you lose it, revoke the old token and cre
 <Callout type="warning">
 Don't put a PAT in repositories, issues, comments, screenshots, or logs, and don't pass it directly in shell commands that get saved.
 </Callout>
+
+### Workspace tokens
+
+Choosing a single workspace creates a workspace token. It starts with `mwt_` and acts as you, with your role, in that workspace only:
+
+- a request that names another workspace is refused, and lists that span your account show only this workspace;
+- operations on your account are refused, such as managing tokens, changing your profile, and creating workspaces;
+- a daemon started with it registers runtimes in that workspace only.
+
+A workspace token does not renew: it stops working on its expiry date, when you leave the workspace, or when the workspace is deleted. Use one wherever a single workspace is enough, such as a CI job, a script, a third-party integration, or a dedicated execution host.
 
 ## The CLI and PATs
 
@@ -92,7 +102,7 @@ The server also recognizes two credentials used in internal or managed scenarios
 | `mcn_` | Multica Cloud Node connections | Multica Cloud Fleet |
 | `mdt_` | Workspace-scoped daemon authentication protocol | Internal server flows |
 
-Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
+Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon use only `mul_` and `mwt_` tokens; don't construct tokens with other prefixes yourself.
 
 ## Next steps
 

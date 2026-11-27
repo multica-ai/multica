@@ -19,7 +19,7 @@ Les cookies du navigateur ne sont pas faits pour être copiés dans des scripts 
 
 Un jeton d'accès personnel (PAT) commence par `mul_` et représente votre compte. Il peut accéder à tous les espaces de travail et à toutes les API auxquels vous avez accès : protégez-le comme un mot de passe.
 
-Lorsque vous créez un jeton dans **Paramètres → Jetons d'API**, vous indiquez un nom et choisissez une expiration de 30 jours, 90 jours ou 1 an, ou « Sans expiration » ; 90 jours est présélectionné. Le jeton complet n'est affiché qu'une seule fois ; une fois la boîte de dialogue fermée, Multica ne conserve que :
+Lorsque vous créez un jeton dans **Paramètres → Jetons d'API**, vous indiquez un nom, choisissez **Tous les espaces de travail** ou un seul espace de travail, puis une expiration de 30 jours, 90 jours ou 1 an, ou « Sans expiration » ; 90 jours est présélectionné. Le jeton complet n'est affiché qu'une seule fois ; une fois la boîte de dialogue fermée, Multica ne conserve que :
 
 - le hachage du jeton ;
 - les premiers caractères, pour l'identifier ;
@@ -30,6 +30,16 @@ La valeur complète ne peut pas être récupérée. Si vous la perdez, révoquez
 <Callout type="warning">
 Ne mettez pas de PAT dans des dépôts, des tâches, des commentaires, des captures d'écran ou des journaux, et ne le passez pas directement dans des commandes shell qui sont conservées.
 </Callout>
+
+### Jetons d'espace de travail
+
+Choisir un seul espace de travail crée un jeton d'espace de travail. Il commence par `mwt_` et agit en votre nom, avec votre rôle, dans cet espace de travail uniquement :
+
+- une requête qui désigne un autre espace de travail est refusée, et les listes qui couvrent tout votre compte n'affichent que cet espace de travail ;
+- les opérations sur votre compte sont refusées, par exemple gérer les jetons, modifier votre profil ou créer un espace de travail ;
+- un daemon démarré avec ce jeton n'enregistre des runtimes que dans cet espace de travail.
+
+Un jeton d'espace de travail n'est pas renouvelé : il cesse de fonctionner à sa date d'expiration, lorsque vous quittez l'espace de travail ou lorsque celui-ci est supprimé. Utilisez-le partout où un seul espace de travail suffit : une tâche de CI, un script, une intégration tierce ou un hôte d'exécution dédié.
 
 ## Le CLI et les PAT
 
@@ -92,7 +102,7 @@ Le serveur reconnaît également deux identifiants utilisés dans des scénarios
 | `mcn_` | Connexions Multica Cloud Node | Multica Cloud Fleet |
 | `mdt_` | Protocole d'authentification du daemon limité à un espace de travail | Flux internes du serveur |
 
-Les installations Cloud, auto-hébergées et Desktop classiques n'ont jamais besoin de les créer manuellement. Le CLI et le daemon côté utilisateur utilisent toujours des PAT `mul_` ; ne construisez pas vous-même de jetons avec d'autres préfixes.
+Les installations Cloud, auto-hébergées et Desktop classiques n'ont jamais besoin de les créer manuellement. Le CLI et le daemon côté utilisateur n'utilisent que des jetons `mul_` et `mwt_` ; ne construisez pas vous-même de jetons avec d'autres préfixes.
 
 ## Étapes suivantes
 

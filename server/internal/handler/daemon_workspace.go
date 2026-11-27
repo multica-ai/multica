@@ -40,9 +40,15 @@ func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to list daemon workspaces")
 			return
 		}
-		resp = make([]DaemonWorkspaceResponse, len(rows))
-		for i, row := range rows {
-			resp[i] = daemonWorkspaceToResponse(row.ID, row.Name)
+		// A workspace token lists its own workspace only, so a daemon started
+		// with one registers runtimes there and nowhere else.
+		boundWorkspaceID, bound := middleware.WorkspaceTokenWorkspaceID(r.Context())
+		resp = make([]DaemonWorkspaceResponse, 0, len(rows))
+		for _, row := range rows {
+			if bound && uuidToString(row.ID) != boundWorkspaceID {
+				continue
+			}
+			resp = append(resp, daemonWorkspaceToResponse(row.ID, row.Name))
 		}
 	} else {
 		workspaceID := middleware.DaemonWorkspaceIDFromContext(r.Context())

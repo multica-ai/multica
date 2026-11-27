@@ -700,6 +700,12 @@ func (h *Hub) Snapshot() map[string]any {
 
 // authenticateToken validates a JWT or PAT string and returns the user ID.
 func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (string, string) {
+	// A workspace token is confined to one workspace, and a realtime
+	// connection subscribes across its user's account, so the token is
+	// refused here rather than resolved to its owner.
+	if strings.HasPrefix(tokenStr, auth.WorkspaceTokenPrefix) {
+		return "", `{"error":"workspace tokens cannot open a realtime connection"}`
+	}
 	if strings.HasPrefix(tokenStr, "mul_") {
 		if pr == nil {
 			return "", `{"error":"invalid token"}`

@@ -45,6 +45,7 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 		ClientVersion:      r.Header.Get("X-Client-Version"),
 		Capabilities:       r.Header.Get("X-Client-Capabilities"),
 	}
+	identity.WorkspaceTokenWorkspaceID, _ = middleware.WorkspaceTokenWorkspaceID(r.Context())
 	if len(runtimeIDs) == 0 {
 		return identity, true
 	}

@@ -733,11 +733,18 @@ export interface PersonalAccessToken {
   expires_at: string | null;
   last_used_at: string | null;
   created_at: string;
+  /**
+   * The one workspace a workspace token (`mwt_`) works in. Null, or absent
+   * from a server that predates workspace tokens, for an account-wide token.
+   */
+  workspace_id?: string | null;
 }
 
 export interface CreatePersonalAccessTokenRequest {
   name: string;
   expires_in_days?: number;
+  /** Confines the token to one workspace the caller is a member of. */
+  workspace_id?: string;
 }
 
 export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {

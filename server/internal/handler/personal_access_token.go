@@ -34,6 +34,9 @@ type PersonalAccessTokenResponse struct {
 	ExpiresAt  *string `json:"expires_at"`
 	LastUsedAt *string `json:"last_used_at"`
 	CreatedAt  string  `json:"created_at"`
+	// WorkspaceID is the one workspace a workspace token works in. Null for
+	// an account-wide token.
+	WorkspaceID *string `json:"workspace_id"`
 }
 
 type CreatePATResponse struct {
@@ -43,18 +46,22 @@ type CreatePATResponse struct {
 
 func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
 	return PersonalAccessTokenResponse{
-		ID:         uuidToString(pat.ID),
-		Name:       pat.Name,
-		Prefix:     pat.TokenPrefix,
-		ExpiresAt:  timestampToPtr(pat.ExpiresAt),
-		LastUsedAt: timestampToPtr(pat.LastUsedAt),
-		CreatedAt:  timestampToString(pat.CreatedAt),
+		ID:          uuidToString(pat.ID),
+		Name:        pat.Name,
+		Prefix:      pat.TokenPrefix,
+		ExpiresAt:   timestampToPtr(pat.ExpiresAt),
+		LastUsedAt:  timestampToPtr(pat.LastUsedAt),
+		CreatedAt:   timestampToString(pat.CreatedAt),
+		WorkspaceID: uuidToPtr(pat.WorkspaceID),
 	}
 }
 
 type CreatePATRequest struct {
 	Name          string `json:"name"`
 	ExpiresInDays *int   `json:"expires_in_days"`
+	// WorkspaceID confines the token to one workspace the caller is a member
+	// of. Empty mints an account-wide token.
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // CreatePersonalAccessToken mints a PAT for the caller. Machine credentials
@@ -81,7 +88,16 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rawToken, err := auth.GeneratePATToken()
+	var workspaceID pgtype.UUID
+	generate := auth.GeneratePATToken
+	if req.WorkspaceID != "" {
+		if workspaceID, ok = parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id"); !ok {
+			return
+		}
+		generate = auth.GenerateWorkspaceToken
+	}
+
+	rawToken, err := generate()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
@@ -100,13 +116,31 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		prefix = prefix[:12]
 	}
 
-	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
-		UserID:      parseUUID(userID),
-		Name:        req.Name,
-		TokenHash:   auth.HashToken(rawToken),
-		TokenPrefix: prefix,
-		ExpiresAt:   expiresAt,
-	})
+	var pat db.PersonalAccessToken
+	if workspaceID.Valid {
+		// The insert itself requires the caller to be a member of the
+		// workspace, so there is no window between checking and minting.
+		pat, err = h.Queries.CreateWorkspaceToken(r.Context(), db.CreateWorkspaceTokenParams{
+			UserID:      parseUUID(userID),
+			WorkspaceID: workspaceID,
+			Name:        req.Name,
+			TokenHash:   auth.HashToken(rawToken),
+			TokenPrefix: prefix,
+			ExpiresAt:   expiresAt,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+	} else {
+		pat, err = h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
+			UserID:      parseUUID(userID),
+			Name:        req.Name,
+			TokenHash:   auth.HashToken(rawToken),
+			TokenPrefix: prefix,
+			ExpiresAt:   expiresAt,
+		})
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create token")
 		return
