@@ -9,6 +9,7 @@ export {
   type WindowTitleBar,
 } from "./window-title-bar";
 export { openExternal } from "./open-external";
+export { isStandalonePwa, useIsStandalonePwa } from "./standalone";
 export {
   isDesktopShell,
   pickDirectory,

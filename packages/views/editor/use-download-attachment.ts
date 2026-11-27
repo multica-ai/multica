@@ -5,7 +5,9 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import type { Attachment } from "@multica/core/types";
 import { useT } from "../i18n";
+import { isStandalonePwa } from "../platform/standalone";
 
 interface DesktopBridge {
   downloadURL?: (u: string) => Promise<void> | void;
@@ -79,6 +81,72 @@ function triggerBrowserDownload(url: string): void {
   anchor.remove();
 }
 
+// The URL a plain browser navigation should use to fetch the file, in order of
+// how much the server vouches for it (see the notes on each helper above). Null
+// when there is nothing to navigate to: no slug for the endpoint fallback.
+function webDownloadUrl(
+  fresh: Attachment,
+  attachmentId: string,
+  workspaceSlug: string | null,
+): string | null {
+  // Prefer the forced-attachment URL when the server minted one: it is
+  // credential-free and carries Content-Disposition: attachment in every
+  // storage mode, so a bare `<a download>` navigation both authenticates
+  // and downloads — instead of previewing media inline or 401ing in
+  // token-mode.
+  const forced = forcedAttachmentUrl(fresh.attachment_download_url);
+  if (forced) return forced;
+  // Older server without the forced-attachment field: fall back to the
+  // #6092 proxy capability (#6713). A top-level `<a download>` navigation
+  // sends no `Authorization` header, so in token-mode the cookie-gated
+  // slug endpoint 401s; the capability URL carries its own credential in
+  // the query string, so it authenticates that bare navigation itself.
+  const capability = capabilityDownloadUrl(fresh.download_url);
+  if (capability) return capability;
+  // No capability (CloudFront / S3 signing, or a server that predates
+  // #6092): fall back to the cookie-authenticated unified endpoint, which
+  // still works wherever the session cookie applies.
+  if (!workspaceSlug) return null;
+  return attachmentDownloadEndpoint(attachmentId, workspaceSlug);
+}
+
+type ShareOutcome = "shared" | "cancelled" | "unavailable";
+
+// Hands the file to the system share sheet ("Save to Files", "Open in…").
+//
+// An installed PWA has no browser chrome, and iOS ignores `download` there for
+// PDFs and images: the navigation replaces the whole window with the file and
+// the reader cannot get back. The share sheet is the one exit that keeps the
+// app on screen. It needs the bytes in JS, so this goes through the
+// authenticated byte fetch; where that fetch is blocked (storage that 302s to a
+// host without CORS) or the browser cannot share files, the caller falls back.
+async function shareAttachmentFile(
+  attachmentId: string,
+  fresh: Attachment,
+): Promise<ShareOutcome> {
+  if (typeof navigator.share !== "function" || typeof navigator.canShare !== "function") {
+    return "unavailable";
+  }
+  let file: File;
+  try {
+    const blob = await api.getAttachmentBlob(attachmentId);
+    file = new File([blob], fresh.filename, {
+      type: fresh.content_type || blob.type,
+    });
+  } catch {
+    return "unavailable";
+  }
+  if (!navigator.canShare({ files: [file] })) return "unavailable";
+  try {
+    await navigator.share({ files: [file], title: fresh.filename });
+    return "shared";
+  } catch (err) {
+    // Dismissing the sheet is the reader's answer, not a failure.
+    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+    return "unavailable";
+  }
+}
+
 // Detected at call time, not module load — the bridge is injected by the
 // Electron preload after `window` exists, and reading it lazily lets the
 // same hook work in both renderers without a build-time fork.
@@ -104,6 +172,10 @@ function hasDesktopDownloadBridge(): boolean {
  *   that predates both. Either way the backend owns CloudFront / S3 presign /
  *   proxy selection, so large files stay in the browser's native download
  *   pipeline.
+ *
+ * - **Installed PWA** (home-screen web app, no browser chrome): fetches the
+ *   bytes and opens the system share sheet instead, so the app stays on
+ *   screen; when sharing is unavailable the file opens in a new window.
  *
  * - **Desktop**: uses `desktopAPI.downloadURL()` which invokes Electron's
  *   native `webContents.downloadURL()`, showing a save dialog and saving
@@ -167,36 +239,20 @@ export function useDownloadAttachment(
           failed();
           return;
         }
-        // Prefer the forced-attachment URL when the server minted one: it is
-        // credential-free and carries Content-Disposition: attachment in every
-        // storage mode, so a bare `<a download>` navigation both authenticates
-        // and downloads — instead of previewing media inline or 401ing in
-        // token-mode.
-        const forced = forcedAttachmentUrl(fresh.attachment_download_url);
-        if (forced) {
-          triggerBrowserDownload(forced);
-          return;
-        }
-        // Older server without the forced-attachment field: fall back to the
-        // #6092 proxy capability (#6713). A top-level `<a download>` navigation
-        // sends no `Authorization` header, so in token-mode the cookie-gated
-        // slug endpoint 401s; the capability URL carries its own credential in
-        // the query string, so it authenticates that bare navigation itself.
-        const capability = capabilityDownloadUrl(fresh.download_url);
-        if (capability) {
-          triggerBrowserDownload(capability);
-          return;
-        }
-        // No capability (CloudFront / S3 signing, or a server that predates
-        // #6092): fall back to the cookie-authenticated unified endpoint, which
-        // still works wherever the session cookie applies.
-        if (!workspaceSlug) {
+        const url = webDownloadUrl(fresh, attachmentId, workspaceSlug);
+        if (!url) {
           failed();
           return;
         }
-        triggerBrowserDownload(
-          attachmentDownloadEndpoint(attachmentId, workspaceSlug),
-        );
+        if (isStandalonePwa()) {
+          const outcome = await shareAttachmentFile(attachmentId, fresh);
+          if (outcome !== "unavailable") return;
+          // Cannot share: hand the file to a separate browsing context rather
+          // than navigating this one, which is the only window the app has.
+          window.open(url, "_blank", "noopener,noreferrer");
+          return;
+        }
+        triggerBrowserDownload(url);
       } catch {
         failed();
       }

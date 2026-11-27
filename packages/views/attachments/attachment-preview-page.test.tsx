@@ -5,6 +5,8 @@ import type { ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 import type { ScrollRestorationAdapter } from "../platform";
 import { ScrollRestorationProvider } from "../platform";
+import { NavigationProvider } from "../navigation";
+import type { NavigationAdapter } from "../navigation";
 import { renderWithI18n } from "../test/i18n";
 import { AttachmentPreviewPage, HTML_PREVIEW_ADDRESS_KEY } from "./attachment-preview-page";
 import { hashString } from "../editor/utils/hash-string";
@@ -15,9 +17,21 @@ import { withLocationBridge } from "../editor/utils/iframe-location-bridge";
 
 const htmlText = "<html><body><h1>Report</h1></body></html>";
 
-const { getAttachmentMock, getAttachmentTextContentMock } = vi.hoisted(() => ({
-  getAttachmentMock: vi.fn(),
-  getAttachmentTextContentMock: vi.fn(),
+const { getAttachmentMock, getAttachmentTextContentMock, standaloneMock } =
+  vi.hoisted(() => ({
+    getAttachmentMock: vi.fn(),
+    getAttachmentTextContentMock: vi.fn(),
+    standaloneMock: vi.fn(() => false),
+  }));
+
+vi.mock("../platform/standalone", () => ({
+  useIsStandalonePwa: standaloneMock,
+  isStandalonePwa: standaloneMock,
+}));
+
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspaceSlug: () => "acme",
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -70,12 +84,30 @@ function makeAttachment(overrides: Partial<Attachment>): Attachment {
   };
 }
 
-function renderPage(ui: ReactElement) {
+function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdapter {
+  return {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/acme/attachments/att-1/preview",
+    searchParams: new URLSearchParams(),
+    hash: "",
+    getShareableUrl: (path) => path,
+    ...overrides,
+  };
+}
+
+function renderPage(ui: ReactElement, adapter: NavigationAdapter = makeAdapter()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return renderWithI18n(
+    <NavigationProvider value={adapter}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </NavigationProvider>,
+  );
 }
 
 beforeEach(() => {
+  standaloneMock.mockReturnValue(false);
   getAttachmentMock.mockReset();
   getAttachmentTextContentMock.mockReset();
   getAttachmentMock.mockResolvedValue(makeAttachment({}));
@@ -86,6 +118,40 @@ beforeEach(() => {
 });
 
 describe("AttachmentPreviewPage", () => {
+  it("has no back button in a browser tab, which has its own", async () => {
+    renderPage(<AttachmentPreviewPage attachmentId="att-1" />);
+    await screen.findByTitle("report.html");
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  describe("as an installed PWA", () => {
+    beforeEach(() => standaloneMock.mockReturnValue(true));
+
+    it("goes back through history when there is somewhere to go", async () => {
+      const adapter = makeAdapter({ canGoBack: () => true });
+      renderPage(<AttachmentPreviewPage attachmentId="att-1" />, adapter);
+      fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+      expect(adapter.back).toHaveBeenCalledTimes(1);
+      expect(adapter.replace).not.toHaveBeenCalled();
+    });
+
+    it("lands on the attachment's issue when opened cold", async () => {
+      getAttachmentMock.mockResolvedValue(makeAttachment({ issue_id: "issue-9" }));
+      const adapter = makeAdapter({ canGoBack: () => false });
+      renderPage(<AttachmentPreviewPage attachmentId="att-1" />, adapter);
+      fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+      expect(adapter.replace).toHaveBeenCalledWith("/acme/issues/issue-9");
+      expect(adapter.back).not.toHaveBeenCalled();
+    });
+
+    it("lands on the issue list when the file belongs to no issue", async () => {
+      const adapter = makeAdapter();
+      renderPage(<AttachmentPreviewPage attachmentId="att-1" />, adapter);
+      fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+      expect(adapter.replace).toHaveBeenCalledWith("/acme/issues");
+    });
+  });
+
   it("shows the viewer's bar and stage — without a close button, since the tab is the frame", async () => {
     renderPage(<AttachmentPreviewPage attachmentId="att-1" filename="report.html" />);
 
@@ -217,9 +283,11 @@ it("refreshes an image once when reopening the actual page from cache", async ()
   });
   getAttachmentMock.mockResolvedValueOnce(image);
   const first = renderWithI18n(
-    <QueryClientProvider client={client}>
-      <AttachmentPreviewPage attachmentId="att-1" />
-    </QueryClientProvider>,
+    <NavigationProvider value={makeAdapter()}>
+      <QueryClientProvider client={client}>
+        <AttachmentPreviewPage attachmentId="att-1" />
+      </QueryClientProvider>
+    </NavigationProvider>,
   );
   await screen.findByAltText("shot.png");
   first.unmount();
@@ -232,9 +300,11 @@ it("refreshes an image once when reopening the actual page from cache", async ()
       }),
   );
   renderWithI18n(
-    <QueryClientProvider client={client}>
-      <AttachmentPreviewPage attachmentId="att-1" />
-    </QueryClientProvider>,
+    <NavigationProvider value={makeAdapter()}>
+      <QueryClientProvider client={client}>
+        <AttachmentPreviewPage attachmentId="att-1" />
+      </QueryClientProvider>
+    </NavigationProvider>,
   );
   expect(screen.queryByAltText("shot.png")).toBeNull();
   await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledTimes(1));

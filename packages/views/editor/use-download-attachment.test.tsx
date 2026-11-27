@@ -6,6 +6,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 const getAttachmentMock = vi.hoisted(() => vi.fn());
 const getAttachmentForDownloadMock = vi.hoisted(() => vi.fn());
 const getBaseUrlMock = vi.hoisted(() => vi.fn(() => ""));
+const getAttachmentBlobMock = vi.hoisted(() => vi.fn());
 const useWorkspaceSlugMock = vi.hoisted(() =>
   vi.fn<() => string | null>(() => "acme"),
 );
@@ -14,6 +15,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAttachment: getAttachmentMock,
     getAttachmentForDownload: getAttachmentForDownloadMock,
+    getAttachmentBlob: getAttachmentBlobMock,
     getBaseUrl: getBaseUrlMock,
   },
 }));
@@ -548,5 +550,121 @@ describe("useDownloadAttachment (desktop)", () => {
 
     // The forced-attachment URL wins over the load-intent download_url.
     expect(downloadURL).toHaveBeenCalledWith(forced);
+  });
+});
+
+describe("useDownloadAttachment (installed PWA)", () => {
+  const record = {
+    id: "att-1",
+    url: "https://static.example.test/report.pdf",
+    download_url: SIGNED_URL,
+    attachment_download_url: "https://static.example.test/report.pdf?dl=1",
+    filename: "report.pdf",
+    content_type: "application/pdf",
+  };
+  const shareMock = vi.fn();
+  const canShareMock = vi.fn(() => true);
+
+  beforeEach(() => {
+    Object.defineProperty(navigator, "standalone", {
+      value: true,
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "share", {
+      value: shareMock,
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "canShare", {
+      value: canShareMock,
+      configurable: true,
+    });
+    shareMock.mockReset().mockResolvedValue(undefined);
+    canShareMock.mockReset().mockReturnValue(true);
+    getAttachmentMock.mockResolvedValue(record);
+    getAttachmentBlobMock.mockReset().mockResolvedValue(
+      new Blob(["%PDF"], { type: "application/pdf" }),
+    );
+  });
+
+  afterEach(() => {
+    for (const key of ["standalone", "share", "canShare"]) {
+      delete (navigator as unknown as Record<string, unknown>)[key];
+    }
+  });
+
+  async function run() {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+    return { openSpy, clickSpy };
+  }
+
+  it("hands the file to the share sheet instead of navigating the window", async () => {
+    const { openSpy, clickSpy } = await run();
+
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith("att-1");
+    expect(shareMock).toHaveBeenCalledOnce();
+    const shared = (shareMock.mock.calls[0]![0] as { files: File[] }).files;
+    expect(shared).toHaveLength(1);
+    expect(shared[0]!.name).toBe("report.pdf");
+    expect(shared[0]!.type).toBe("application/pdf");
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats dismissing the share sheet as an answer, not a failure", async () => {
+    shareMock.mockRejectedValueOnce(new DOMException("cancelled", "AbortError"));
+    const { openSpy, clickSpy } = await run();
+
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("opens a separate window, never the app's own, when files cannot be shared", async () => {
+    canShareMock.mockReturnValue(false);
+    const { openSpy, clickSpy } = await run();
+
+    expect(shareMock).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://static.example.test/report.pdf?dl=1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("opens a separate window when the bytes cannot be fetched", async () => {
+    getAttachmentBlobMock.mockRejectedValueOnce(new Error("cors"));
+    const { openSpy, clickSpy } = await run();
+
+    expect(shareMock).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledOnce();
+  });
+
+  it("opens a separate window when the browser has no share API", async () => {
+    delete (navigator as unknown as Record<string, unknown>).share;
+    const { openSpy } = await run();
+
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the anchor download in a plain browser tab", async () => {
+    Object.defineProperty(navigator, "standalone", {
+      value: false,
+      configurable: true,
+    });
+    const { openSpy, clickSpy } = await run();
+
+    expect(shareMock).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalledOnce();
   });
 });
