@@ -19,8 +19,7 @@ func startClaimFixture(t *testing.T, status string) (string, string, time.Time) 
 	if testHandler == nil {
 		t.Fatal("PostgreSQL is required for start claim tests")
 	}
-	var agentID string
-	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id=$1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	agentID := dbfx.Agent(t, t.Name(), testRuntimeID)
 	issueID := dbfx.Issue(t, "start claim ownership")
 	generation := time.Date(2026, 9, 17, 9, 0, 0, 123456000, time.UTC)
 	taskID := dbfx.Task(t, agentID, testutil.Cols{

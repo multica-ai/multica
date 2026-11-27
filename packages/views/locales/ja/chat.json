@@ -262,6 +262,11 @@
     "wakeup_active": "報告待ち"
   },
   "header": {
+    "fork": "チャットを分岐",
+    "fork_pending": "分岐を作成中…",
+    "fork_failed": "チャットを分岐できませんでした。実行中の処理がなく、Codex ランタイムが利用可能か確認してください。",
+    "fork_ready": "チャットの分岐ができました",
+    "open_fork": "分岐を開く",
     "agent_settings": "エージェント設定",
     "rename": "名前を変更",
     "delete": "チャットを削除",

@@ -30,6 +30,7 @@ import {
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
+  ChatForkSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
@@ -141,6 +142,18 @@ const baseIssue = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+describe("ChatForkSchema", () => {
+  it("falls back for a malformed task ID", () => {
+    expect(parseWithFallback({ task_id: 42, status: "queued" }, ChatForkSchema.nullable(), null, {
+      endpoint: "POST /api/chat/sessions/:id/forks",
+    })).toBeNull();
+  });
+
+  it("uses an unknown state for a future status", () => {
+    expect(ChatForkSchema.parse({ task_id: "task", status: "future" }).status).toBe("unknown");
+  });
+});
 
 describe("ChatSessionSchema", () => {
   const baseSession = {

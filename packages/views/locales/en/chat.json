@@ -267,6 +267,11 @@
     "wakeup_active": "Waiting to report back"
   },
   "header": {
+    "fork": "Fork chat",
+    "fork_pending": "Creating branch...",
+    "fork_failed": "Could not fork the chat. Check that the chat is idle and its Codex runtime is available.",
+    "fork_ready": "Chat branch is ready",
+    "open_fork": "Open branch",
     "agent_settings": "Agent settings",
     "rename": "Rename chat",
     "archive": "Archive chat",

@@ -475,7 +475,7 @@ func (q *Queries) GetChatWakeupInSession(ctx context.Context, arg GetChatWakeupI
 }
 
 const getChatWakeupInputForTask = `-- name: GetChatWakeupInputForTask :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, channel_typing_settled, wakeup_id FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, channel_typing_settled, wakeup_id, fork_attachment_ids FROM chat_message
 WHERE task_id = $1 AND role = 'user' AND message_kind = 'wakeup'
 LIMIT 1
 `
@@ -505,6 +505,7 @@ func (q *Queries) GetChatWakeupInputForTask(ctx context.Context, taskID pgtype.U
 		&i.ChannelOutboundMessageIds,
 		&i.ChannelTypingSettled,
 		&i.WakeupID,
+		&i.ForkAttachmentIds,
 	)
 	return i, err
 }

@@ -640,6 +640,7 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 	WakeupID                      pgtype.UUID        `json:"wakeup_id"`
+	ForkAttachmentIds             []pgtype.UUID      `json:"fork_attachment_ids"`
 }
 
 type ChatPinnedAgent struct {
@@ -652,23 +653,26 @@ type ChatPinnedAgent struct {
 }
 
 type ChatSession struct {
-	ID                  pgtype.UUID        `json:"id"`
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	AgentID             pgtype.UUID        `json:"agent_id"`
-	CreatorID           pgtype.UUID        `json:"creator_id"`
-	Title               string             `json:"title"`
-	SessionID           pgtype.Text        `json:"session_id"`
-	WorkDir             pgtype.Text        `json:"work_dir"`
-	Status              string             `json:"status"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	UnreadSince         pgtype.Timestamptz `json:"unread_since"`
-	RuntimeID           pgtype.UUID        `json:"runtime_id"`
-	LastReadAt          pgtype.Timestamptz `json:"last_read_at"`
-	IsAgentIntro        bool               `json:"is_agent_intro"`
-	PinnedAt            pgtype.Timestamptz `json:"pinned_at"`
-	ProjectID           pgtype.UUID        `json:"project_id"`
-	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	Title                    string             `json:"title"`
+	SessionID                pgtype.Text        `json:"session_id"`
+	WorkDir                  pgtype.Text        `json:"work_dir"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince              pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID                pgtype.UUID        `json:"runtime_id"`
+	LastReadAt               pgtype.Timestamptz `json:"last_read_at"`
+	IsAgentIntro             bool               `json:"is_agent_intro"`
+	PinnedAt                 pgtype.Timestamptz `json:"pinned_at"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	ExplicitlyCreatedAt      pgtype.Timestamptz `json:"explicitly_created_at"`
+	ForkedFromChatID         pgtype.UUID        `json:"forked_from_chat_id"`
+	ForkInitializationTaskID pgtype.UUID        `json:"fork_initialization_task_id"`
+	ForkSnapshotTaskID       pgtype.UUID        `json:"fork_snapshot_task_id"`
 }
 
 type ChatSubmissionReceipt struct {

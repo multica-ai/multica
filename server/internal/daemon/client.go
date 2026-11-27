@@ -209,6 +209,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
+		protocol.DaemonCapabilityCodexChatForkV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
