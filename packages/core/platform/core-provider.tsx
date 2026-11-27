@@ -87,8 +87,8 @@ function initCore({
     //
     // `authStore` is assigned a few lines below, synchronously, and this
     // callback can only run from a request — never before boot finishes.
-    onUnauthorized: () => {
-      authStore.getState().sessionExpired();
+    onUnauthorized: (reason) => {
+      authStore.getState().sessionExpired(reason);
     },
     // Token mode only. Desktop runs one ApiClient per window over one shared
     // localStorage, so the credential has to be read through to storage rather

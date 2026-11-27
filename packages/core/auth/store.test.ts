@@ -127,6 +127,37 @@ describe("authStore", () => {
     expect(storage.snapshot().multica_token).toBeUndefined();
   });
 
+  // Cookie mode at boot has nothing stored client-side, yet a 403 from the
+  // access allowlist is about a credential the server accepted, so the login
+  // page must still say why, and the refused cookie is cleared.
+  it("says the account is not allowed when the access allowlist ends a cookie session at boot", () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      logout: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    store.getState().sessionExpired("access_not_allowed");
+
+    expect(store.getState().status).toBe("unauthenticated");
+    expect(store.getState().expired).toBe(true);
+    expect(store.getState().accessNotAllowed).toBe(true);
+    expect(api.logout).toHaveBeenCalledOnce();
+  });
+
+  it("does not flag an ordinary expiry as an access refusal", () => {
+    const storage = makeStorage({ multica_token: "t" });
+    const api = makeApi();
+    const store = createAuthStore({ api, storage });
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+
+    store.getState().sessionExpired();
+
+    expect(store.getState().expired).toBe(true);
+    expect(store.getState().accessNotAllowed).toBe(false);
+  });
+
   it("runs the expiry handler instead of the logout one when given both", () => {
     const storage = makeStorage({ multica_token: "t" });
     const api = makeApi();

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { User, StorageAdapter } from "../types";
 import { identify as identifyAnalytics, resetAnalytics } from "../analytics";
-import type { ApiClient } from "../api/client";
+import type { ApiClient, SessionEndReason } from "../api/client";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
 
 export interface AuthStoreOptions {
@@ -37,6 +37,13 @@ export interface AuthState {
    * successful login and by an explicit logout.
    */
   expired: boolean;
+  /**
+   * The server ended the session because the instance's access allowlist
+   * excludes this account. Presentational like `expired`, which it refines:
+   * the login page says the account is not allowed rather than that the
+   * session expired. Cleared together with `expired`.
+   */
+  accessNotAllowed: boolean;
 
   retryAuthentication: () => void;
   sendCode: (email: string) => Promise<void>;
@@ -44,7 +51,7 @@ export interface AuthState {
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
-  sessionExpired: () => void;
+  sessionExpired: (reason?: SessionEndReason) => void;
   setUser: (user: User) => void;
   refreshMe: () => Promise<void>;
 }
@@ -59,6 +66,7 @@ export function createAuthStore(options: AuthStoreOptions) {
     status: "authenticating",
     retryGeneration: 0,
     expired: false,
+    accessNotAllowed: false,
 
     retryAuthentication: () => {
       set((state) => ({
@@ -81,7 +89,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user, isLoading: false, status: "authenticated", expired: false });
+      set({ user, isLoading: false, status: "authenticated", expired: false, accessNotAllowed: false });
       return user;
     },
 
@@ -93,7 +101,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user, isLoading: false, status: "authenticated", expired: false });
+      set({ user, isLoading: false, status: "authenticated", expired: false, accessNotAllowed: false });
       return user;
     },
 
@@ -103,7 +111,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       const user = await api.getMe();
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user, isLoading: false, status: "authenticated", expired: false });
+      set({ user, isLoading: false, status: "authenticated", expired: false, accessNotAllowed: false });
       return user;
     },
 
@@ -122,6 +130,7 @@ export function createAuthStore(options: AuthStoreOptions) {
         isLoading: false,
         status: "unauthenticated",
         expired: false,
+        accessNotAllowed: false,
       });
     },
 
@@ -137,7 +146,7 @@ export function createAuthStore(options: AuthStoreOptions) {
      * session dies once but a screen full of in-flight requests all learn
      * about it separately.
      */
-    sessionExpired: () => {
+    sessionExpired: (reason?: SessionEndReason) => {
       // "Expired" is a claim about the user's own history, so only make it
       // when this client really did present a credential the server then
       // rejected: a live session, or a stored token left by an earlier one.
@@ -162,6 +171,13 @@ export function createAuthStore(options: AuthStoreOptions) {
       // happen at all when there was no session to end.
       if (get().status === "unauthenticated") return;
 
+      const accessNotAllowed = reason === "access_not_allowed";
+      // The refused cookie is still a valid credential, so a reload would
+      // present it again only to be refused again. Clearing it is safe here
+      // where it would not be for an expiry: the server answered, and
+      // `/auth/logout` needs no authentication.
+      if (cookieAuth && accessNotAllowed) api.logout().catch(() => {});
+
       // Cookie mode leaves the workspace singleton alone: there the URL owns
       // workspace identity and the login route overwrites it on the next
       // entry. Mirrors AuthInitializer's boot-time rejection.
@@ -172,17 +188,21 @@ export function createAuthStore(options: AuthStoreOptions) {
         user: null,
         isLoading: false,
         status: "unauthenticated",
-        expired: hadCredential,
+        // The server only says "not allowed" about a credential it accepted,
+        // so that answer is about this user even when nothing was stored
+        // client-side (a cookie session at boot).
+        expired: hadCredential || accessNotAllowed,
+        accessNotAllowed,
       });
     },
 
     setUser: (user: User) => {
-      set({ user, isLoading: false, status: "authenticated", expired: false });
+      set({ user, isLoading: false, status: "authenticated", expired: false, accessNotAllowed: false });
     },
 
     refreshMe: async () => {
       const user = await api.getMe();
-      set({ user, isLoading: false, status: "authenticated", expired: false });
+      set({ user, isLoading: false, status: "authenticated", expired: false, accessNotAllowed: false });
     },
   }));
 }

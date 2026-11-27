@@ -36,7 +36,7 @@ const mockApiGetMe = vi.hoisted(() => vi.fn());
 const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 // Mutable slice of auth state the component subscribes to.
-const mockAuthState = vi.hoisted(() => ({ expired: false }));
+const mockAuthState = vi.hoisted(() => ({ expired: false, accessNotAllowed: false }));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -53,6 +53,7 @@ vi.mock("@multica/core/auth", () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
         expired: mockAuthState.expired,
+        accessNotAllowed: mockAuthState.accessNotAllowed,
       };
       return selector ? selector(state) : state;
     },
@@ -103,6 +104,7 @@ describe("LoginPage", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     mockAuthState.expired = false;
+    mockAuthState.accessNotAllowed = false;
     // Default: no existing session (getMe rejects when no auth)
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
@@ -127,6 +129,14 @@ describe("LoginPage", () => {
     expect(
       screen.getByText(/your session expired/i),
     ).toBeInTheDocument();
+  });
+
+  it("says the account is not allowed when the access allowlist ended the session", () => {
+    mockAuthState.expired = true;
+    mockAuthState.accessNotAllowed = true;
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(screen.getByText(/this account is not allowed to use this instance/i)).toBeInTheDocument();
+    expect(screen.queryByText(/your session expired/i)).not.toBeInTheDocument();
   });
 
   it("stays quiet on an ordinary visit to the login page", () => {

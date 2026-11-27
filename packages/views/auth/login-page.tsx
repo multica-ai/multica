@@ -118,6 +118,7 @@ export function LoginPage({
   // because the user asked to leave. Without saying so, landing here reads as
   // the app having lost their work for no reason.
   const sessionExpired = useAuthStore((state) => state.expired);
+  const accessNotAllowed = useAuthStore((state) => state.accessNotAllowed);
 
   // Check for existing session when CLI callback is present.
   // Prioritises cookie auth (= current browser session) to avoid authorising
@@ -423,7 +424,9 @@ export function LoginPage({
           {sessionExpired && (
             <Alert>
               <AlertDescription>
-                {t(($) => $.errors.session_expired)}
+                {accessNotAllowed
+                  ? t(($) => $.errors.access_not_allowed)
+                  : t(($) => $.errors.session_expired)}
               </AlertDescription>
             </Alert>
           )}

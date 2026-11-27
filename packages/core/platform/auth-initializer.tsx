@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getApi } from "../api";
-import { ApiError } from "../api/client";
+import {
+  ACCESS_NOT_ALLOWED_CODE,
+  ApiError,
+  isAccessNotAllowedError,
+  type SessionEndReason,
+} from "../api/client";
 import { useAuthStore } from "../auth";
 import {
   captureSignupSource,
@@ -238,6 +243,7 @@ export function AuthInitializer({
         isLoading: false,
         status: "authenticated",
         expired: false,
+        accessNotAllowed: false,
       });
       identifyAnalytics(user.id, { email: user.email, name: user.name });
       if (authRecoveryPendingRef.current) {
@@ -248,14 +254,14 @@ export function AuthInitializer({
       }
     };
 
-    const rejectSession = () => {
+    const rejectSession = (reason?: SessionEndReason) => {
       settled = true;
       window.removeEventListener("online", retryNow);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       // One teardown for every dead session, whether it died at boot or
       // under a running shell. The api client's 401 hook has normally run
       // this already by the time we get here; the action is idempotent.
-      useAuthStore.getState().sessionExpired();
+      useAuthStore.getState().sessionExpired(reason);
     };
 
     const scheduleRetry = (attempt: () => Promise<void>) => {
@@ -276,6 +282,12 @@ export function AuthInitializer({
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
           rejectSession();
+          return;
+        }
+        // A valid credential the instance's access allowlist refuses will be
+        // refused on every retry; end the session instead of recovering.
+        if (isAccessNotAllowedError(err)) {
+          rejectSession(ACCESS_NOT_ALLOWED_CODE);
           return;
         }
         // Workspace consumers observe this query directly. React Query owns
@@ -307,6 +319,12 @@ export function AuthInitializer({
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
           rejectSession();
+          return;
+        }
+        // A valid credential the instance's access allowlist refuses will be
+        // refused on every retry; end the session instead of recovering.
+        if (isAccessNotAllowedError(err)) {
+          rejectSession(ACCESS_NOT_ALLOWED_CODE);
           return;
         }
 
