@@ -1300,17 +1300,19 @@ type IssuePrAutomation struct {
 }
 
 type IssueProperty struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Type        string             `json:"type"`
-	Description string             `json:"description"`
-	Config      []byte             `json:"config"`
-	Position    float64            `json:"position"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Icon        string             `json:"icon"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Description   string             `json:"description"`
+	Config        []byte             `json:"config"`
+	Position      float64            `json:"position"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Icon          string             `json:"icon"`
+	Required      bool               `json:"required"`
+	AlwaysVisible bool               `json:"always_visible"`
 }
 
 type IssuePullRequest struct {

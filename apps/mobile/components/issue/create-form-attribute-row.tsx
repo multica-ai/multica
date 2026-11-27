@@ -12,6 +12,7 @@
  */
 import { View } from "react-native";
 import { router } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { AttributeChip } from "@/components/issue/attribute-chip";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
@@ -21,6 +22,8 @@ import { StatusIcon } from "@/components/ui/status-icon";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorLookup } from "@/data/use-actor-name";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
+import { propertyListOptions } from "@/data/queries/properties";
+import { newIssueFormProperties } from "@/lib/new-issue-properties";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
@@ -46,6 +49,8 @@ const NEW_ISSUE_PICKER_PATHNAMES = {
   "due-date": "/[workspace]/new-issue-picker/due-date",
 } as const satisfies Record<NewIssuePickerField, string>;
 
+const NEW_ISSUE_PROPERTY_PICKER_PATHNAME = "/[workspace]/new-issue-picker/property";
+
 export function CreateFormAttributeRow() {
   const { t } = useT("issues");
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -54,6 +59,10 @@ export function CreateFormAttributeRow() {
   const assignee = useNewIssueDraftStore((s) => s.assignee);
   const dueDate = useNewIssueDraftStore((s) => s.dueDate);
   const project = useNewIssueDraftStore((s) => s.project);
+  const propertyValues = useNewIssueDraftStore((s) => s.properties);
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: properties = [] } = useQuery(propertyListOptions(wsId));
+  const formProperties = newIssueFormProperties(properties);
 
   const { getName } = useActorLookup();
   // The draft can hold a custom status the user picked in the sheet. (MUL-6243)
@@ -143,6 +152,32 @@ export function CreateFormAttributeRow() {
           variant={project ? "filled" : "dimmed"}
           onPress={() => open("project")}
         />
+        {formProperties.map((property) => {
+          const option = property.config.options?.find(
+            (o) => o.id === propertyValues[property.id],
+          );
+          return (
+            <AttributeChip
+              key={property.id}
+              icon={
+                option ? (
+                  <View className="size-2 rounded-full" style={{ backgroundColor: option.color }} />
+                ) : (
+                  <Ionicons name="options-outline" size={14} color="#a1a1aa" />
+                )
+              }
+              label={option ? option.name : property.required === true ? `${property.name} *` : property.name}
+              variant={option ? "filled" : "dimmed"}
+              onPress={() => {
+                if (!wsSlug) return;
+                router.push({
+                  pathname: NEW_ISSUE_PROPERTY_PICKER_PATHNAME,
+                  params: { workspace: wsSlug, propertyId: property.id },
+                });
+              }}
+            />
+          );
+        })}
       </View>
     </View>
   );

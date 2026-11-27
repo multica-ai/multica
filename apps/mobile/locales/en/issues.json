@@ -74,7 +74,9 @@
     "title_placeholder": "Issue title",
     "create": "Create issue",
     "creating": "Creating...",
-    "description_placeholder": "Description... (type @ to mention)"
+    "description_placeholder": "Description... (type @ to mention)",
+    "property_required": "Choose {{name}} to create this issue.",
+    "property_none": "No value"
   },
   "edit": {
     "title": "Edit issue",

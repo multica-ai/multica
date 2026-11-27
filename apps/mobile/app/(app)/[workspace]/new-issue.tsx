@@ -15,6 +15,7 @@
  * recognised by util.ParseMentions on the server.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -30,6 +31,8 @@ import { DescriptionField } from "@/components/issue/description-field";
 import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";
 import { useCreateIssue } from "@/data/mutations/issues";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
+import { propertyListOptions } from "@/data/queries/properties";
+import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMentionInput } from "@/lib/use-mention-input";
 import { useT } from "@/lib/i18n";
 
@@ -47,7 +50,10 @@ export default function NewIssueModal() {
   const assignee = useNewIssueDraftStore((s) => s.assignee);
   const dueDate = useNewIssueDraftStore((s) => s.dueDate);
   const project = useNewIssueDraftStore((s) => s.project);
+  const propertyValues = useNewIssueDraftStore((s) => s.properties);
   const resetDraft = useNewIssueDraftStore((s) => s.reset);
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: properties = [] } = useQuery(propertyListOptions(wsId));
 
   useEffect(() => {
     resetDraft();
@@ -64,6 +70,14 @@ export default function NewIssueModal() {
   const onSubmit = useCallback(async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) return;
+    // The server refuses a create that leaves a required property empty.
+    const missing = properties.find(
+      (p) => p.required === true && !p.archived && propertyValues[p.id] === undefined,
+    );
+    if (missing) {
+      Alert.alert(t("new.property_required", { name: missing.name }));
+      return;
+    }
     const finalDescription = description.serialize().trim();
     try {
       await createIssue.mutateAsync({
@@ -76,6 +90,7 @@ export default function NewIssueModal() {
           : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
         ...(project ? { project_id: project.id } : {}),
+        ...(Object.keys(propertyValues).length > 0 ? { properties: propertyValues } : {}),
       });
       router.back();
     } catch (err) {
@@ -92,6 +107,8 @@ export default function NewIssueModal() {
     assignee,
     dueDate,
     project,
+    properties,
+    propertyValues,
     createIssue,
     t,
   ]);

@@ -230,6 +230,10 @@ func (h *Handler) resolveBatchPropertyPlan(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("property %q cannot be both set and unset", def.Name))
 			return nil, false
 		}
+		if requiredPropertyLocksValue(def) {
+			writeError(w, http.StatusBadRequest, requiredPropertyClearMessage(def))
+			return nil, false
+		}
 		if unsetIDs[def.ID] {
 			continue
 		}

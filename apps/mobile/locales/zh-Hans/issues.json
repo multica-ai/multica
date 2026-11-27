@@ -74,7 +74,9 @@
     "title_placeholder": "任务标题",
     "create": "创建任务",
     "creating": "创建中...",
-    "description_placeholder": "描述...（输入 @ 提及）"
+    "description_placeholder": "描述...（输入 @ 提及）",
+    "property_required": "请选择{{name}}后再创建任务。",
+    "property_none": "无"
   },
   "edit": {
     "title": "编辑任务",

@@ -175,6 +175,7 @@
     "description_placeholder": "新增描述...",
     "more_options_aria": "更多選項",
     "title_required": "請輸入標題後再建立",
+    "property_required": "請選擇{{name}}後再建立",
     "submit": "建立任務",
     "submitting": "建立中...",
     "toast_created": "已建立任務",

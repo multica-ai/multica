@@ -105,12 +105,16 @@ type PropertyResponse struct {
 	Description string         `json:"description"`
 	Icon        string         `json:"icon"`
 	Config      PropertyConfig `json:"config"`
-	Position    float64        `json:"position"`
-	Archived    bool           `json:"archived"`
-	ArchivedAt  *string        `json:"archived_at"`
-	UsageCount  int64          `json:"usage_count"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	// Required makes creating an issue without a value fail (select only);
+	// AlwaysVisible keeps the property's row on every issue even while empty.
+	Required      bool    `json:"required"`
+	AlwaysVisible bool    `json:"always_visible"`
+	Position      float64 `json:"position"`
+	Archived      bool    `json:"archived"`
+	ArchivedAt    *string `json:"archived_at"`
+	UsageCount    int64   `json:"usage_count"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 func parsePropertyConfig(raw []byte) PropertyConfig {
@@ -132,8 +136,10 @@ func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
 		Type:        p.Type,
 		Description: p.Description,
 		Icon:        p.Icon,
-		Config:      parsePropertyConfig(p.Config),
-		Position:    p.Position,
+		Config:        parsePropertyConfig(p.Config),
+		Required:      p.Required,
+		AlwaysVisible: p.AlwaysVisible,
+		Position:      p.Position,
 		Archived:    p.ArchivedAt.Valid,
 		UsageCount:  usageCount,
 		CreatedAt:   timestampToString(p.CreatedAt),
@@ -152,6 +158,8 @@ type CreatePropertyRequest struct {
 	Description string          `json:"description"`
 	Icon        string          `json:"icon"`
 	Config      *PropertyConfig `json:"config"`
+	Required      bool `json:"required"`
+	AlwaysVisible bool `json:"always_visible"`
 }
 
 type UpdatePropertyRequest struct {
@@ -160,6 +168,8 @@ type UpdatePropertyRequest struct {
 	Icon        *string         `json:"icon"`
 	Config      *PropertyConfig `json:"config"`
 	Archived    *bool           `json:"archived"`
+	Required      *bool `json:"required"`
+	AlwaysVisible *bool `json:"always_visible"`
 }
 
 // Validation
@@ -213,6 +223,21 @@ func validatePropertyType(t string) error {
 		}
 	}
 	return fmt.Errorf("invalid type %q; valid types: %s", t, strings.Join(validPropertyTypes, ", "))
+}
+
+// errRequiredNeedsSelect rejects required on a non-select property: create
+// surfaces only offer a value picker for single select.
+var errRequiredNeedsSelect = errors.New("only select properties can be required")
+
+// requiredPropertyLocksValue reports whether an issue's value for def may not
+// be cleared: a required property can only change to another option. Archived
+// definitions stay clearable, since cleanup must never be blocked.
+func requiredPropertyLocksValue(def db.IssueProperty) bool {
+	return def.Required && !def.ArchivedAt.Valid
+}
+
+func requiredPropertyClearMessage(def db.IssueProperty) string {
+	return fmt.Sprintf("property %q is required and cannot be cleared; choose another option instead", def.Name)
 }
 
 func propertyTypeHasOptions(t string) bool {
@@ -566,6 +591,10 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if req.Required && req.Type != "select" {
+		writeError(w, http.StatusBadRequest, errRequiredNeedsSelect.Error())
+		return
+	}
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
@@ -589,6 +618,8 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 			Description: sanitizeNullBytes(strings.TrimSpace(req.Description)),
 			Icon:        icon,
 			Config:      configJSON,
+			Required:      req.Required,
+			AlwaysVisible: req.AlwaysVisible,
 		})
 		return err
 	})
@@ -691,6 +722,15 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			params.Config = configJSON
+		}
+		if req.Required != nil {
+			if *req.Required && existing.Type != "select" {
+				return fail(http.StatusBadRequest, errRequiredNeedsSelect.Error())
+			}
+			params.Required = pgtype.Bool{Bool: *req.Required, Valid: true}
+		}
+		if req.AlwaysVisible != nil {
+			params.AlwaysVisible = pgtype.Bool{Bool: *req.AlwaysVisible, Valid: true}
 		}
 		if req.Archived != nil {
 			params.ArchivedSet = true
@@ -854,13 +894,18 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	// Deleting a value is allowed even for archived definitions — cleanup
 	// must never be blocked. Unknown property ids only need to belong to the
 	// workspace; `properties - key` is a no-op when the key is absent.
-	if _, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID}); err != nil {
+	def, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "property not found")
 			return
 		}
 		slog.Warn("GetIssueProperty in DeleteIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to unset property")
+		return
+	}
+	if requiredPropertyLocksValue(def) {
+		writeError(w, http.StatusBadRequest, requiredPropertyClearMessage(def))
 		return
 	}
 

@@ -283,6 +283,10 @@ export default function WorkspaceLayout() {
           name="new-issue-picker/due-date"
           options={SHEET_OPTIONS}
         />
+        <Stack.Screen
+          name="new-issue-picker/property"
+          options={SHEET_OPTIONS}
+        />
         {/* New-project draft formSheet pickers — same pattern as
             new-issue-picker/*. Stacked on top of `project/new` (a modal). */}
         <Stack.Screen

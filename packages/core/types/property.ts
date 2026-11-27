@@ -193,6 +193,11 @@ export interface IssueProperty {
   /** Optional catalog icon key; absent on backends predating icon support. */
   icon?: string;
   config: IssuePropertyConfig;
+  /** Creating an issue without a value fails. Select properties only.
+   *  The schema defaults it to false for servers predating it. */
+  required?: boolean;
+  /** The property's row shows on every issue, even while empty. */
+  always_visible?: boolean;
   position: number;
   archived: boolean;
   archived_at?: string | null;
@@ -302,6 +307,8 @@ export interface CreatePropertyRequest {
   description?: string;
   icon?: string;
   config?: IssuePropertyConfig;
+  required?: boolean;
+  always_visible?: boolean;
 }
 
 export interface UpdatePropertyRequest {
@@ -311,6 +318,8 @@ export interface UpdatePropertyRequest {
   icon?: string;
   config?: IssuePropertyConfig;
   archived?: boolean;
+  required?: boolean;
+  always_visible?: boolean;
 }
 
 export interface ListPropertiesResponse {

@@ -80,3 +80,21 @@ describe("select property picker", () => {
     expect(screen.getByRole("button", { name: "Service 1" })).toBeInTheDocument();
   });
 });
+
+describe("required select property", () => {
+  it("offers no empty row, so its value can change but not be cleared", async () => {
+    render(
+      <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
+        <CustomPropertyValueInput
+          property={{ ...property, type: "select", required: true, config: { options: options.slice(0, 2) } }}
+          value="option-1"
+          defaultOpen
+          trigger="Services"
+          onChange={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Service 2" })).toBeTruthy();
+    expect(screen.queryByText(enIssues.pickers.custom_property.none)).toBeNull();
+  });
+});

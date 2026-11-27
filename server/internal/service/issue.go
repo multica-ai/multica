@@ -137,6 +137,12 @@ type IssueCreateOpts struct {
 	// still resolving, then promotes the returned task after attachment binding.
 	// Zero preserves the ordinary immediate enqueue path.
 	AssignedAgentRunFireAt time.Time
+
+	// EnforceRequiredProperties rejects the create when a required custom
+	// property has no value. Set by surfaces whose caller can choose one
+	// (the issue API and its clients); chat /issue commands and autopilot
+	// runs leave it off and file the issue without the value.
+	EnforceRequiredProperties bool
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -298,6 +304,11 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	properties, err := validateIssueCreateProperties(ctx, tx, qtx, p.WorkspaceID, p.Properties)
 	if err != nil {
 		return IssueCreateResult{}, err
+	}
+	if opts.EnforceRequiredProperties {
+		if err := CheckRequiredIssueProperties(ctx, qtx, p.WorkspaceID, p.Properties); err != nil {
+			return IssueCreateResult{}, err
+		}
 	}
 
 	if p.SourceContext != nil {
@@ -721,6 +732,21 @@ func validateIssueCreateProperties(ctx context.Context, tx pgx.Tx, qtx *db.Queri
 		return nil, fmt.Errorf("encode issue properties: %w", err)
 	}
 	return encoded, nil
+}
+
+// CheckRequiredIssueProperties returns an *IssuePropertyValidationError for
+// the first active required property that values leaves unset.
+func CheckRequiredIssueProperties(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, values map[pgtype.UUID]json.RawMessage) error {
+	required, err := q.ListRequiredIssueProperties(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list required issue properties: %w", err)
+	}
+	for _, def := range required {
+		if _, ok := values[def.ID]; !ok {
+			return &IssuePropertyValidationError{PropertyID: util.UUIDToString(def.ID), Message: issueproperty.MissingRequiredMessage(def)}
+		}
+	}
+	return nil
 }
 
 // validateIssueLabels checks that every requested label exists in the
