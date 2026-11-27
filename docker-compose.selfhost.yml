@@ -264,6 +264,7 @@ services:
       FF_ISSUE_DESCRIPTION_LIVE:
       FF_LOCAL_SEARCH_INDEX:
       FF_DASHBOARD_HISTORY_365D:
+      FF_SETTINGS_BULK_MEMBER_PROVISIONING:
       # Live co-editing for Workspace Docs, served by the optional collab
       # service below. Setting COLLAB_SECRET turns it on and points the API at
       # that service; enable the service with COMPOSE_PROFILES=collab.

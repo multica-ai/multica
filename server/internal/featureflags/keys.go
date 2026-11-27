@@ -7,6 +7,9 @@ import (
 )
 
 const (
+	// BulkMemberProvisioning permits owner-only provisioning without invitation
+	// emails. It is default-off because it bypasses invitation acceptance.
+	BulkMemberProvisioning = "settings_bulk_member_provisioning"
 	// BillingWorkspaceSubscriptions gates the workspace-scoped entitlement,
 	// Stripe Checkout, seat reconcile, and Billing Portal proxy surface. It is
 	// deliberately off by default so the main repository can ship before the
@@ -78,6 +81,7 @@ const (
 )
 
 var frontendPublicFlags = []string{
+	BulkMemberProvisioning,
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
@@ -86,6 +90,10 @@ var frontendPublicFlags = []string{
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, BillingWorkspaceSubscriptions, false)
+}
+
+func BulkMemberProvisioningEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, BulkMemberProvisioning, false)
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {

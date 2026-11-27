@@ -55,6 +55,8 @@ import type {
   SearchIndexChanges,
   UpdateMeRequest,
   CreateMemberRequest,
+  ProvisionMembersRequest,
+  ProvisionMembersResponse,
   UpdateMemberRequest,
   ListIssuesParams,
   IssueTableFacetsRequest,
@@ -379,6 +381,8 @@ import {
   DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
+  EMPTY_PROVISION_MEMBERS_RESPONSE,
+  ProvisionMembersResponseSchema,
   EMPTY_ATTACHMENT,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
@@ -4173,6 +4177,16 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/members`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async provisionMembers(workspaceId: string, data: ProvisionMembersRequest): Promise<ProvisionMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members/provision`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ProvisionMembersResponseSchema, EMPTY_PROVISION_MEMBERS_RESPONSE, {
+      endpoint: "POST /api/workspaces/{id}/members/provision",
     });
   }
 
