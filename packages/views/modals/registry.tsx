@@ -16,6 +16,7 @@ import { RenameIssueModal } from "./rename-issue";
 import { RenameProjectModal } from "./rename-project";
 import { getProjectFoldersExtension } from "../extensions";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
+import { IssueShareDialog } from "../issues/actions/issue-share-dialog";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
 import { LimitRecoveryDialog } from "./limit-recovery-dialog";
@@ -234,6 +235,17 @@ export function ModalRegistry() {
       case "issue-delete-confirm":
         activeModal = (
           <DeleteIssueConfirmModal
+            key={sessionKey}
+            open={isOpen}
+            onClose={close}
+            onOpenChangeComplete={handleOpenChangeComplete}
+            data={currentData}
+          />
+        );
+        break;
+      case "issue-share":
+        activeModal = (
+          <IssueShareDialog
             key={sessionKey}
             open={isOpen}
             onClose={close}

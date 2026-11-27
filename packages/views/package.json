@@ -15,6 +15,7 @@
     "./common/appearance-sync": "./common/appearance-sync.tsx",
     "./common/cli-install-command": "./common/cli-install-command.tsx",
     "./common/context-menu-scope": "./common/context-menu-scope.tsx",
+    "./common/format-bytes": "./common/format-bytes.ts",
     "./common/menu-primitives": "./common/menu-primitives.ts",
     "./common/motion-provider": "./common/motion-provider.tsx",
     "./common/shortcut-keycaps": "./common/shortcut-keycaps.tsx",

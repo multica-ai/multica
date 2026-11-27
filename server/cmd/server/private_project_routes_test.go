@@ -44,6 +44,7 @@ var projectScopedRouteParams = map[string]privateRouteResolver{
 	"comments/{commentId}":             func(f *privateRouteFixture, _ string) string { return f.comment() },
 	"supplements/{commentId}":          func(f *privateRouteFixture, _ string) string { return f.supplement() },
 	"attachments/{id}":                 func(f *privateRouteFixture, _ string) string { return f.attachment() },
+	"deliverables/{attachmentId}":      func(f *privateRouteFixture, _ string) string { return f.attachment() },
 	"wakeups/{wakeupID}":               func(f *privateRouteFixture, _ string) string { return f.issueWakeup() },
 	"environments/{environmentId}":     func(f *privateRouteFixture, _ string) string { return f.environment() },
 	"environment-commands/{commandId}": func(f *privateRouteFixture, _ string) string { return f.environmentCommand() },
@@ -147,8 +148,10 @@ var routePrefixesNotProbed = map[string]string{
 // privateProjectRoutesNotProbed lists routes ("METHOD pattern") declaring a
 // project-scoped parameter that the probe cannot judge, each with the reason.
 var privateProjectRoutesNotProbed = map[string]string{
-	"GET /api/attachments/{id}/signed-download": "the signed URL is the credential, not a session; it is minted only by the attachment routes probed here",
-	"POST /api/projects/{id}/join":              "the workspace owner's way into a private project they cannot see; TestWorkspaceOwnerJoinsPrivateProject covers who may call it",
+	"GET /api/attachments/{id}/signed-download":        "the signed URL is the credential, not a session; it is minted only by the attachment routes probed here",
+	"GET /api/share/issue/runs/{runId}/messages":       "access requires a share token scoped to the issue; TestIssueShareRunMessagesAndDeliverables covers it",
+	"GET /api/share/issue/deliverables/{attachmentId}": "access requires a share token scoped to the issue; TestIssueShareRunMessagesAndDeliverables covers it",
+	"POST /api/projects/{id}/join":                     "the workspace owner's way into a private project they cannot see; TestWorkspaceOwnerJoinsPrivateProject covers who may call it",
 }
 
 // privateRouteRequest shapes the probe for a route an empty request cannot

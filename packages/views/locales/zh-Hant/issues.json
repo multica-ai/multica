@@ -1,4 +1,25 @@
 {
+  "sharing": {
+    "generate": "產生唯讀連結",
+    "copy": "複製唯讀連結",
+    "revoke": "撤回唯讀連結",
+    "generate_description": "持有連結的人登入 Multica 後即可查看任務詳情、動態、執行記錄與產出，包括工作區外的使用者。",
+    "no_activity": "目前沒有動態。",
+    "no_runs": "目前沒有執行記錄。",
+    "no_deliverables": "目前沒有產出。",
+    "load_more": "載入更多",
+    "revoke_description": "撤回後，持有此連結的人將無法再存取。重新產生會取得新連結。",
+    "generate_confirm": "產生連結",
+    "revoke_confirm": "撤回連結",
+    "generated": "已產生唯讀連結",
+    "revoked": "已撤回唯讀連結",
+    "changed": "分享狀態已變更。請重新開啟任務選單後再試。",
+    "save_failed": "無法儲存分享設定，請再試一次。",
+    "read_only": "任務分享 · 唯讀",
+    "unavailable": "此分享連結無法使用",
+    "load_failed": "無法載入分享的任務。",
+    "retry": "重試"
+  },
   "web": {
     "open_in_desktop": "在桌面版開啟"
   },

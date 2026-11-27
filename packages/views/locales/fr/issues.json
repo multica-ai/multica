@@ -1,4 +1,25 @@
 {
+  "sharing": {
+    "generate": "Générer un lien en lecture seule",
+    "copy": "Copier le lien en lecture seule",
+    "revoke": "Révoquer le lien en lecture seule",
+    "generate_description": "Toute personne disposant du lien peut consulter les détails, l’activité, les journaux d’exécution et les livrables de cette tâche après connexion à Multica, même en dehors de l’espace de travail.",
+    "no_activity": "Aucune activité pour le moment.",
+    "no_runs": "Aucune exécution pour le moment.",
+    "no_deliverables": "Aucun livrable pour le moment.",
+    "load_more": "Charger plus",
+    "revoke_description": "Les personnes qui utilisent ce lien perdront leur accès. Tout nouveau lien aura une adresse différente.",
+    "generate_confirm": "Générer le lien",
+    "revoke_confirm": "Révoquer le lien",
+    "generated": "Lien en lecture seule généré",
+    "revoked": "Lien en lecture seule révoqué",
+    "changed": "Le partage a changé. Rouvrez le menu de la tâche et réessayez.",
+    "save_failed": "Impossible d’enregistrer les changements de partage. Réessayez.",
+    "read_only": "Tâche partagée · Lecture seule",
+    "unavailable": "Ce lien de partage est indisponible",
+    "load_failed": "Impossible de charger la tâche partagée.",
+    "retry": "Réessayer"
+  },
   "web": {
     "open_in_desktop": "Ouvrir dans l’application de bureau"
   },

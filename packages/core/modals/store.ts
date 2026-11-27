@@ -17,6 +17,7 @@ type ModalType =
   | "project-rename"
   | "issue-rename"
   | "issue-delete-confirm"
+  | "issue-share"
   | "issue-run-confirm"
   | "issue-workflow-handoff"
   | "keyboard-shortcuts"

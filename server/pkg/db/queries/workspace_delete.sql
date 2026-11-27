@@ -633,6 +633,9 @@ deleted_description_collab_state AS (
 deleted_description_revisions AS (
  DELETE FROM issue_description_revision WHERE workspace_id=$1
 ),
+deleted_issue_shares AS (
+    DELETE FROM issue_share WHERE workspace_id = $1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),

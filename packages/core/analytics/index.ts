@@ -13,6 +13,7 @@
 // backend returns an empty key and this module stays inert.
 
 import posthog from "posthog-js";
+import { paths } from "../paths/paths";
 import { redactExceptionProperties } from "./redact-exception";
 import { shouldDropException } from "./exception-dedupe";
 import { isBenignException } from "./benign-exceptions";
@@ -146,6 +147,14 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // Order matters: redact first, then fingerprint the redacted shape.
     capture_exceptions: true,
     before_send: (event) => {
+      if (event?.properties) {
+        for (const key of ["$current_url", "$referrer", "$initial_current_url", "$initial_referrer"]) {
+          const url = event.properties[key];
+          if (typeof url === "string" && url.includes("#") && url.split(/[?#]/, 1)[0]?.endsWith(paths.sharedIssue())) {
+            event.properties[key] = url.split("#", 1)[0];
+          }
+        }
+      }
       if (event && event.event === "$exception") {
         // Drop known-benign browser noise (e.g. ResizeObserver loop) entirely
         // — checked on the raw message before redaction. These dominate the

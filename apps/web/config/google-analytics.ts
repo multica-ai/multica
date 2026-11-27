@@ -1,4 +1,4 @@
-import { RESERVED_SLUGS } from "@multica/core/paths";
+import { paths, RESERVED_SLUGS } from "@multica/core/paths";
 
 type RuntimeEnv = Record<string, string | undefined>;
 
@@ -141,7 +141,7 @@ function analyticsUrlParts(
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
 
-  let sensitive = false;
+  let sensitive = url.pathname === paths.sharedIssue();
   let pathname = url.pathname;
   for (const [pattern, replacement] of REDACTED_PATH_PATTERNS) {
     if (pattern.test(pathname)) {
