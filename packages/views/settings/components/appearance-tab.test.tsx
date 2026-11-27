@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -478,6 +478,32 @@ describe("AppearanceTab", () => {
     await user.type(leading, "1.8");
     await user.tab();
     expect(state().themeOptions.paper?.leading).toBe(1.8);
+  });
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 13 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not commit a theme font on Enter with the %s", (_name, eventInit) => {
+    useInstalledThemesStore.setState({
+      themes: [
+        {
+          ...PAPER,
+          css: PAPER_CSS,
+          options: [
+            { id: "h1-font", type: "font", label: "Heading font", default: "Georgia, serif" },
+          ],
+        },
+      ],
+    });
+    useAppearanceStore.setState({ theme: "paper" });
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    const font = screen.getByRole("textbox", { name: "Heading font" });
+    fireEvent.change(font, { target: { value: '"Source Han Serif", serif' } });
+    fireEvent.keyDown(font, { key: "Enter", ...eventInit });
+
+    expect(state().themeOptions.paper?.["h1-font"]).toBeUndefined();
+    expect(font).toHaveValue('"Source Han Serif", serif');
   });
 
   it("resets to the defaults, and only once something changed", async () => {

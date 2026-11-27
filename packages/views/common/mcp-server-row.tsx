@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { isImeComposing } from "@multica/core/utils";
 import {
   Check,
   Globe2,
@@ -166,6 +167,7 @@ export function McpServerRow({
                   value={rename.draft}
                   onChange={(event) => rename.onChange(event.target.value)}
                   onKeyDown={(event) => {
+                    if (isImeComposing(event)) return;
                     if (event.key === "Escape") {
                       event.preventDefault();
                       rename.onCancel();

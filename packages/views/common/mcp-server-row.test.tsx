@@ -2,7 +2,7 @@
 
 import type { ReactElement, ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
@@ -129,6 +129,49 @@ describe("McpServerRow", () => {
     await user.keyboard("{Escape}");
 
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 27 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not cancel rename Escape with the %s", (_name, eventInit) => {
+    const onCancel = vi.fn();
+    render(
+      <ul>
+        <McpServerRow
+          name="linear"
+          transport="http"
+          canManage
+          rename={{
+            draft: "yanjiu",
+            error: "",
+            pending: false,
+            onChange: vi.fn(),
+            onCancel,
+            onSubmit: vi.fn(),
+          }}
+          labels={{
+            rename: "Rename",
+            renameAria: "Rename server",
+            renameSave: "Save name",
+            renameCancel: "Cancel rename",
+            configure: "Edit configuration",
+            configureAria: "Edit configuration",
+            remove: "Delete",
+            removeAria: "Delete MCP server",
+          }}
+          onRenameStart={vi.fn()}
+          onConfigure={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      </ul>,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Rename server" });
+    fireEvent.keyDown(input, { key: "Escape", ...eventInit });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(input).toHaveValue("yanjiu");
   });
 });
 

@@ -87,6 +87,7 @@ import {
 } from "@multica/core/appearance";
 import { storeThemeState, storeThemesOptions } from "@multica/core/appearance/theme-store";
 import { useConfigStore } from "@multica/core/config";
+import { isImeComposing } from "@multica/core/utils";
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { docsLocalePrefix } from "../../common/docs-locale";
@@ -756,6 +757,7 @@ function ThemeOptionRow({
             key={String(value)}
             spellCheck={false}
             onKeyDown={(event) => {
+              if (isImeComposing(event)) return;
               if (event.key === "Enter") event.currentTarget.blur();
             }}
             onBlur={(event) => {
