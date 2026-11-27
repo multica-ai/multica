@@ -161,6 +161,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				hash := auth.HashToken(tokenString)
 
 				if id, ok := daemonCache.Get(r.Context(), hash); ok {
+					if rejectDeniedDaemonTokenOwner(w, r, id.OwnerID) {
+						return
+					}
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
@@ -211,6 +214,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				if cacheable {
 					daemonCache.Set(r.Context(), hash, identity, auth.TTLForExpiry(time.Now(), expiresAt))
 				}
+				if rejectDeniedDaemonTokenOwner(w, r, identity.OwnerID) {
+					return
+				}
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
@@ -246,7 +252,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					writeError(w, http.StatusServiceUnavailable, "cloud pat verifier unavailable")
 					return
 				}
-				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", DaemonAuthPathCloudPAT) {
+				if rejectDeniedUser(w, r, identity.OwnerID, "", DaemonAuthPathCloudPAT) {
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
@@ -270,7 +276,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				hash := auth.HashToken(tokenString)
 
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+					if rejectDeniedUser(w, r, userID, "", DaemonAuthPathPAT) {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
@@ -295,7 +301,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+				if rejectDeniedUser(w, r, userID, "", DaemonAuthPathPAT) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -339,7 +345,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				return
 			}
 			email, _ := claims["email"].(string)
-			if rejectTemporarilyDisabledUser(w, r, sub, email, DaemonAuthPathJWT) {
+			if rejectDeniedUser(w, r, sub, email, DaemonAuthPathJWT) {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)
@@ -347,6 +353,17 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// rejectDeniedDaemonTokenOwner applies the user gates to the human a daemon
+// token was issued for. Ownerless tokens (managed runtimes, unresolved legacy
+// tokens) carry no user identity and are refused by the runtime binding check
+// instead.
+func rejectDeniedDaemonTokenOwner(w http.ResponseWriter, r *http.Request, ownerID string) bool {
+	if ownerID == "" {
+		return false
+	}
+	return rejectDeniedUser(w, r, ownerID, "", DaemonAuthPathDaemonToken)
 }
 
 // legacyDaemonTokenOwner recovers the issuing runtime owner of a daemon token

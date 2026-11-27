@@ -158,6 +158,10 @@ backend:
     # create workspaces. Empty = every signed-in user may create one.
     # disableWorkspaceCreation=true still blocks everyone.
     workspaceCreationAllowedEmails: ""
+    # Comma-separated accounts allowed to sign in and call the API: exact
+    # addresses (alice@example.com) or whole domains (*@example.com).
+    # Empty = no restriction. Anyone else gets 403 on every API call.
+    accessAllowedEmails: ""
     # Set to "1" or "true" to disable first-party anonymous self-host
     # telemetry collection and delivery.
     doNotTrack: ""

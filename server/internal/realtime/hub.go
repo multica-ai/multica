@@ -711,6 +711,9 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 		if auth.IsTemporarilyDisabledUserID(uid) {
 			return "", `{"error":"account disabled"}`
 		}
+		if msg := accessDeniedMessage(ctx, uid, ""); msg != "" {
+			return "", msg
+		}
 		return uid, ""
 	}
 
@@ -737,7 +740,24 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	if auth.IsTemporarilyDisabledUser(uid, email) {
 		return "", `{"error":"account disabled"}`
 	}
+	if msg := accessDeniedMessage(ctx, uid, email); msg != "" {
+		return "", msg
+	}
 	return uid, ""
+}
+
+// accessDeniedMessage applies ACCESS_ALLOWED_EMAILS to a WebSocket caller.
+func accessDeniedMessage(ctx context.Context, userID, email string) string {
+	err := auth.CheckUserAccess(ctx, userID, email)
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, auth.ErrAccessNotAllowed):
+		return `{"error":"` + auth.AccessNotAllowedError + `"}`
+	default:
+		slog.Error("realtime: access allowlist check failed", "user_id", userID, "error", err)
+		return `{"error":"failed to verify account access"}`
+	}
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
