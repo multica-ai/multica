@@ -1,0 +1,61 @@
+---
+title: Multica vs OpenHands, Devin, dan Factory
+description: OpenHands, Devin, dan Factory membangun coding agent. Multica adalah ruang kerja tempat tim menugaskan, menjalankan, dan meninjau pekerjaan untuk banyak agent, termasuk Devin CLI dan Factory Droid.
+---
+
+OpenHands, Devin, dan Factory masing-masing membangun sebuah coding agent beserta platform di sekitarnya. Multica tidak membangun agent. Multica memberi tim satu ruang kerja tempat tugas ditugaskan ke agent yang dibangun di atas [31 AI coding tool](/providers), menjalankan agent tersebut di komputer yang dihubungkan tim, dan menyimpan setiap eksekusi pada tugas. Devin CLI dan Factory Droid adalah dua di antara tool tersebut, sehingga pilihannya tidak selalu salah satu atau yang lain.
+
+Pernyataan tentang OpenHands, Devin, dan Factory di halaman ini bersumber dari dokumentasi publik dan halaman harga mereka per November 2026: [OpenHands](https://docs.openhands.dev/enterprise), [Devin](https://docs.devin.ai/admin/billing/self-serve), dan [Factory](https://docs.factory.com/remote-control). Periksa sumber tersebut untuk detail terbaru.
+
+## Jawaban singkat
+
+- **Pilih Devin atau Factory** jika Anda menginginkan agent dari satu vendor dengan lingkungan cloud terkelola, dan Anda bersedia menstandarkan pada vendor tersebut.
+- **Pilih OpenHands** jika Anda menginginkan agent berlisensi MIT yang dapat Anda modifikasi, host sendiri, atau kembangkan dengan SDK-nya.
+- **Pilih Multica** jika tim Anda memakai beberapa coding tool, seperti Claude Code, Codex, Cursor Agent, Copilot CLI, Devin CLI, atau Factory Droid, dan ingin mengelolanya sebagai rekan tim di satu board, di mesin Anda sendiri, dengan akses per agent dan langkah review. Multica dapat di-hosting sendiri.
+
+## Perbandingan
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| Apa itu | Ruang kerja yang menugaskan, menjalankan, dan melacak pekerjaan untuk coding agent | Coding agent dan SDK open-source, dengan edisi Cloud dan Enterprise | AI software engineer dari Cognition, dengan sesi cloud, CLI, dan aplikasi desktop | Platform untuk agent Droid miliknya, dengan CLI, desktop, dan web |
+| Memiliki coding agent sendiri | Tidak; agent berjalan di tool yang Anda pilih | Ya | Ya | Ya |
+| Tool dalam satu ruang kerja | 31, termasuk Devin CLI dan Factory Droid; agent berbeda dapat memakai tool berbeda | Agent miliknya sendiri; halaman harganya juga mencantumkan menjalankan agent lain seperti Codex dan Claude | Devin | Droid |
+| Tempat agent berjalan | Komputer yang Anda hubungkan: laptop, server, VM | Lokal, di Docker atau Kubernetes, di OpenHands Cloud, atau Enterprise hosting mandiri | VM cloud Devin, atau mesin Anda melalui Devin CLI | Mesin Anda melalui Remote Control, atau Droid Computer yang dikelola Factory |
+| Asal pekerjaan | Tugas, komentar, chat, autopilot, dan channel chat sendiri seperti Slack dan Feishu | Integrasi dengan Git host, Jira, dan Slack | Integrasi seperti Slack dan Linear; Jira pada Enterprise | Aplikasi Factory, CLI, dan integrasi |
+| Kontrol akses tim | Access per agent, role ruang kerja, guest, proyek privat | RBAC multi-user di Teams dan Enterprise | Paket tim dengan SSO dan kontrol biaya | Kontrol admin di Business dan Enterprise |
+| Hosting mandiri | Ya, dengan Docker Compose atau Helm | Ya | Layanan hosted; Devin CLI berjalan lokal | Opsi on-premise di Enterprise |
+| Lisensi | Source-available, gratis di dalam organisasi Anda | MIT | Proprietary | Proprietary |
+| Cara pembayaran | Gratis untuk hosting mandiri untuk penggunaan internal; setiap tool ditagih melalui langganan atau API key-nya sendiri | Open source gratis; Teams dan Enterprise berbayar | Paket langganan dengan kuota penggunaan; Enterprise ditagih dalam ACU | Paket per seat; Enterprise kustom |
+
+## Apakah Multica alternatif open-source untuk Devin?
+
+Sebagian, dan perbedaannya penting:
+
+- **Multica adalah source-available, bukan open source OSI.** Multica dirilis di bawah [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE), yaitu Apache License 2.0 dengan ketentuan tambahan. Menggunakannya di dalam organisasi Anda gratis, termasuk hosting mandiri untuk seluruh tim; menawarkannya sebagai layanan hosted kepada pihak lain atau menanamkannya dalam produk yang Anda jual memerlukan lisensi komersial. Jika Anda membutuhkan agent berlisensi OSI, OpenHands berlisensi MIT.
+- **Multica bukan agent otonom dengan sendirinya.** Multica mencakup sisi tim dari apa yang ditawarkan Devin, seperti menugaskan pekerjaan, memantau progres, meninjau, dan menjalankan pekerjaan berulang, dan memakai agent yang sudah Anda miliki, seperti Claude Code atau Codex, untuk pekerjaan coding itu sendiri.
+
+## Kapan OpenHands, Devin, atau Factory lebih cocok
+
+- Anda menginginkan lingkungan cloud terkelola per tugas dan tidak ingin menjaga mesin tetap online untuk agent.
+- Anda ingin menstandarkan pada agent, model, dan kontrak dukungan dari satu vendor.
+- Anda ingin membangun produk agent sendiri di atas SDK; itulah fungsi OpenHands Software Agent SDK.
+- Engineer Anda umumnya bekerja dengan satu agent dalam satu waktu, dari aplikasinya sendiri.
+
+## Kapan Multica lebih cocok
+
+- **Tim Anda memakai berbagai tool.** Sebagian developer lebih suka Claude Code, yang lain Codex, Cursor, atau Copilot. Setiap agent di Multica memilih tool dan modelnya, dan semuanya berbagi satu board, satu [inbox](/inbox), dan satu tampilan [Analytics](/analytics).
+- **Anda ingin memakai langganan yang sudah dimiliki.** Multica menjalankan tool dengan login-nya sendiri; Multica tidak menjual ulang model atau mengukur komputasi agent.
+- **Agent harus berjalan di tempat kode dan rahasia Anda berada.** Runtime adalah laptop, build server, atau VM Anda, dan Multica yang di-hosting sendiri juga menyimpan data ruang kerja di server Anda.
+- **Beberapa orang berbagi agent.** [Access](/agents#izin-dan-akses) menentukan siapa yang dapat menjalankan setiap agent, [squad](/squads) merutekan pekerjaan ke agent yang tepat, dan [workflow](/workflows) menambahkan langkah review. Lihat [Berbagi pool agent dalam tim](/team-agent-pool).
+- **Pekerjaan berulang.** [Autopilot](/autopilots) membuat dan menugaskan tugas berdasarkan schedule atau dari webhook.
+
+## Menggunakan Devin atau Factory di dalam Multica
+
+Devin CLI (`devin`) dan Factory Droid (`droid`) adalah tool bawaan Multica. Pasang dan login ke CLI di komputer yang terhubung ke Multica, lalu buat agent di runtime tersebut: agent itu mengambil tugas, komentar, dan review seperti agent lainnya, sementara paket milik tool tersebut menanggung penggunaannya. Detailnya, seperti alias model Devin dan path skill Droid, ada di [AI coding tool yang didukung](/providers). OpenHands saat ini bukan tool bawaan.
+
+## Terkait
+
+- [Multica vs Linear dan Jira](/compare/linear-jira)
+- [Multica vs worktree manager lokal](/compare/worktree-managers)
+- [Berbagi pool agent dalam tim](/team-agent-pool)
+- [Model keamanan](/security-model) — apa yang dapat dijangkau agent pada sebuah runtime.

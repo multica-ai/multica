@@ -1,0 +1,141 @@
+---
+title: Obrolan dengan agent
+description: Percakapan satu-ke-satu dengan agent yang hanya dapat Anda lihat. Agent memulai tanpa konteks tugas dan tidak membuat tugas dengan sendirinya; saat Anda secara eksplisit memintanya, agent bertindak dengan akses ruang kerja Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { ChatDemo } from "@/components/demos/chat-demo";
+
+Obrolan cocok untuk pekerjaan yang belum terbentuk menjadi tugas yang jelas: menyusun ide, memeriksa ruang kerja, mendiskusikan sebuah pendekatan, mengajukan pertanyaan yang tidak terkait dengan tugas mana pun, atau meminta agent menyelesaikan tugas kecil lebih dulu.
+
+Obrolan adalah percakapan satu-ke-satu antara Anda dan seorang [agent](/agents), di luar board [tugas](/issues). Seluruh percakapan **sepenuhnya privat**: tidak ada orang lain di [ruang kerja](/workspaces), termasuk admin, yang dapat melihatnya.
+
+Sebuah obrolan **tidak terikat pada tugas mana pun**. Agent tidak memantau board Anda, tidak otomatis menerima deskripsi dan komentar dari sebuah tugas, dan tidak akan mengubah percakapan menjadi tugas dengan sendirinya. Agent masih dapat menggunakan Multica CLI untuk menanyakan ruang kerja, proyek, tugas, dan skill sesuai izinnya, dan saat Anda secara eksplisit memintanya, agent bertindak dengan akses ruang kerja Anda, misalnya untuk membuat tugas.
+
+Sebuah obrolan juga dapat membawa latar belakang. Klik **+** di kiri bawah kolom input dan pilih **Konteks proyek** untuk melampirkan sebuah [proyek](/projects) ke percakapan; saat agent berjalan, agent menerima deskripsi, repositori, dan resource lain dari proyek tersebut.
+
+## Memulai percakapan
+
+<Steps>
+<Step>
+
+Buka **Obrolan** di sidebar.
+
+</Step>
+<Step>
+
+Klik baru dan pilih agent yang Anda memiliki izin untuk menjalankannya.
+
+</Step>
+<Step>
+
+Ketik pesan; Anda juga dapat melampirkan gambar atau file.
+
+</Step>
+<Step>
+
+Setelah Anda mengirim, Multica membuat eksekusi untuk pesan tersebut, dan balasannya kembali ke percakapan saat ini.
+
+</Step>
+</Steps>
+
+Jika runtime sedang offline, pesan menunggu sampai runtime kembali online. Setelah agent diarsipkan, atau Anda kehilangan izin untuk menjalankannya, Anda tidak dapat mengirim pesan baru.
+
+Sebelum pesan pertama, Obrolan menampilkan hingga tiga saran yang dikonfigurasi untuk agent terpilih. Memilih salah satu hanya mengisi kolom input dengan prompt lengkapnya; tidak ada yang dikirim, sehingga Anda dapat mengeditnya dulu. Agent tanpa saran yang dikonfigurasi menampilkan contoh umum.
+
+Setelah agent membalas, terkadang agent menawarkan **Pertanyaan lanjutan** di bawah balasan. Mengkliknya langsung mengirimkannya.
+
+<ChatDemo />
+
+## Obrolan dari halaman mana pun
+
+Anda tidak perlu meninggalkan halaman yang sedang dibuka untuk mengobrol. Halaman ruang kerja dapat membuka obrolan di jendela mengambang. Jendela ini dan halaman **Obrolan** berbagi percakapan yang sama, sehingga Anda dapat melanjutkan obrolan dari mana pun.
+
+Di jendela yang lebar, obrolan cepat berada di ujung kanan status bar di bagian bawah aplikasi:
+
+- **Tanya Multica** memulai obrolan baru.
+- Sebuah obrolan mendapat chip di bar saat agent sedang mengerjakannya, saat ada balasan yang belum Anda baca, dan setelah Anda membukanya di jendela mengambang. Spinner pada chip berarti agent sedang membalas, dan titik berwarna berarti ada balasan yang belum dibaca; arahkan kursor ke chip untuk melihat judul dan status obrolan. Klik chip untuk membuka obrolan tersebut, dan klik lagi untuk menutup jendela. Chip yang tidak muat masuk ke menu **+N**.
+- Untuk menutup sebuah chip, arahkan kursor ke chip lalu klik **×**. Chip kembali saat obrolan mendapat pesan baru atau saat Anda membuka obrolan itu lagi.
+- **Riwayat obrolan**, tombol terakhir di bar, menampilkan obrolan terbaru Anda dengan tanda berjalan dan belum dibaca yang sama. Pilih salah satu untuk membukanya, atau klik **Semua obrolan** untuk menuju halaman **Obrolan**.
+- Jendela terbuka di atas tombol atau chip yang Anda klik.
+
+Jendela yang sempit tidak memiliki status bar. Sebagai gantinya, tombol obrolan bulat di pojok kanan bawah membuka jendela. Tombol berdenyut pelan saat agent sedang membalas, dan tooltip-nya menyebutkan jika ada obrolan yang sedang berjalan atau memiliki balasan yang belum dibaca.
+
+- Tekan `⌘J` (`Ctrl+J` di Windows dan Linux) untuk membuka atau menutup jendela mengambang; saat dibuka, kursor berada di kolom pesan. Tombol ini juga berfungsi saat Anda sedang mengetik di kolom tersebut. Anda dapat mengubahnya di **Settings → Shortcuts**; lihat [Pencarian, pintasan, dan preferensi](/shortcuts).
+- Tekan `⇧⌘J` (`Ctrl+Shift+J` di Windows dan Linux) untuk memulai obrolan baru, sama seperti **Tanya Multica**; `⌘J` membuka kembali obrolan yang terakhir Anda buka. Tekan lagi pada obrolan baru untuk menutup jendela.
+- Seret tepi jendela untuk mengubah ukurannya, atau perluas atau minimalkan jendela.
+- Di halaman **Obrolan** itu sendiri, obrolan cepat tidak muncul di status bar dan tombol bulat tidak ditampilkan. `⌘J` maupun `⇧⌘J` tidak melakukan apa pun di sana: halaman tersebut sudah menampilkan percakapan yang sama.
+
+Jika Anda tidak menginginkan jendela mengambang, matikan **Jendela chat mengambang** di **Settings → Preferences → Comments & chat**. Obrolan cepat kemudian hilang dari status bar, tombol bulat tidak muncul lagi, dan Obrolan hanya dapat dijangkau dari sidebar. Pengaturan ini hanya berlaku untuk perangkat saat ini.
+
+## Obrolan vs. tugas
+
+| Kebutuhan | Lebih cocok |
+|---|---|
+| Pertanyaan cepat, mengeksplorasi sebuah pendekatan, atau draf privat | **Obrolan** |
+| Penerima tugas, status, prioritas, dan hasil kerja yang jelas | **Tugas** |
+| Membiarkan rekan kerja melihat latar belakang dan melanjutkan diskusi | **Tugas** |
+| Melihat sekilas informasi ruang kerja tanpa perlu catatan kerja | **Obrolan** |
+
+Obrolan langsung yang dibuat di Multica hanya dapat dibaca oleh pembuatnya, bukan oleh anggota lain atau admin. Tuliskan kesimpulan yang perlu dilihat tim ke dalam sebuah tugas, deskripsi proyek, atau skill.
+
+## Konteks multi-giliran
+
+Sebuah percakapan mencoba melanjutkan sesi asli di alat pengkodean AI, sehingga pesan selanjutnya tidak perlu mengulang konten sebelumnya. Multica menyimpan ID sesi dan merutekan eksekusi berikutnya ke runtime yang dapat mengakses sesi tersebut.
+
+Jika sesi lokal sudah tidak ada lagi, konteksnya tidak dapat dilanjutkan, atau error sebelumnya tidak seharusnya digunakan ulang, runtime mulai dari sesi baru. Riwayat pesan percakapan tetap tersimpan dalam kedua kasus.
+
+## Memantau dan menghentikan eksekusi
+
+Selama agent berjalan, UI menampilkan fase saat ini dan aktivitas tool. Perluas **Lihat detail** untuk memeriksa eksekusi secara lengkap.
+
+Untuk menghentikan, klik tombol stop di samping kolom input (ditampilkan saat input kosong). Konten yang sudah dikembalikan ke percakapan tetap disimpan.
+
+Jika agent belum menghasilkan apa pun, pesan yang baru Anda kirim diambil kembali dari percakapan dan dikembalikan ke kolom input, termasuk lampirannya, sehingga Anda dapat mengedit dan mengirim ulang. Proses penghentian terkadang butuh waktu untuk selesai; me-refresh halaman atau menutup jendela selama itu tidak menghilangkan pesan, dan pesan kembali ke kolom input saat Anda membuka percakapan itu lagi. Jika kolom input sudah berisi draf lain, pesan menunggu sampai Anda mengosongkannya.
+
+## Mengirim pesan saat balasan sedang berjalan
+
+Anda dapat terus mengetik saat agent sedang membalas. **Kirim** menambahkan pesan teks biasa tanpa tautan skill ke balasan yang sedang berjalan tanpa menghentikannya, jika runtime mendukung steering. Agent membacanya di batas aman berikutnya dan melanjutkan tugas semula. Upgrade daemon Anda untuk mengaktifkan ini.
+
+Di web dan desktop, **Tambahkan ke eksekusi saat ini** di atas draf Anda berarti teks Anda akan bergabung ke balasan yang sedang berjalan. **Mulai setelah eksekusi ini** berarti pesan akan diantrekan, misalnya saat berisi file atau tautan skill, atau eksekusi saat ini tidak mendukung steering.
+
+Pesan dengan lampiran atau tautan skill, serta pesan yang dikirim sebelum balasan dimulai atau ke runtime tanpa dukungan steering, masuk ke antrean. Jika panduan tidak terkirim sebelum balasan berakhir, panduan itu otomatis menjadi pesan antrean; Anda tidak perlu mengirim ulang. Jika Anda menghentikan saat pengiriman sedang berlangsung, Obrolan menunggu hasilnya sebelum mengantrekan panduan yang belum terkirim. Jika balasan dicoba ulang secara otomatis, panduan tetap menyertai permintaan aslinya sehingga keduanya diproses bersama. Saat melanjutkan sesi yang sama, panduan yang sudah terkirim di sana tidak dikirim lagi.
+
+Pesan antrean muncul di atas kolom input dan berjalan secara berurutan. Anda dapat menghapusnya, memakai **⋯ → Edit pesan antrean** untuk mengembalikannya ke kolom input, atau **⋯ → Hapus semua** untuk menariknya. **Kirim sekarang (menghentikan balasan saat ini)** memindahkan pesan antrean ke depan dan menghentikan balasan saat ini. Ini membutuhkan balasan yang sedang aktif dan izin untuk menjalankan agent.
+
+Steering berlaku untuk sesi Obrolan langsung di klien web, desktop, dan mobile yang sudah diperbarui. Di mobile, pesan antrean muncul di akhir percakapan; hapus atau edit di web atau desktop. Klien lama serta percakapan channel Slack dan Lark tetap memakai perilaku antrean yang ada.
+
+## Tindak lanjut nanti [#follow-up-later]
+
+Minta agent untuk melapor kembali saat sesuatu terjadi, misalnya, "Beri tahu saya saat tugas ini siap di-review" atau "Ingatkan saya dua jam lagi." Agent dapat membuat wakeup yang memulai eksekusi lain di percakapan ini saat sebuah tugas mencapai suatu status, sub-tugas selesai, PR GitHub di-merge atau ditutup, check-nya selesai, sebuah eksekusi berakhir, atau seorang anggota berkomentar pada sebuah tugas. Agent juga dapat kembali pada waktu tertentu atau memeriksa secara berkala.
+
+Di web dan desktop, sebuah kartu di bawah balasan mencatat tindak lanjut tersebut. Strip di atas kolom input menunjukkan apa yang ditunggu agent dan tenggatnya. Buka strip atau tombol jam di header percakapan untuk melihat **Wakeup**, termasuk yang berakhir dalam 7 hari terakhir. Gunakan **Batalkan wakeup** untuk berhenti menunggu; jika eksekusi laporan gagal atau dibatalkan, gunakan **Coba lagi** untuk memintanya lagi.
+
+Kondisi dan pemeriksaan berkala menunggu 24 jam secara default, maksimal 7 hari. Jika tenggat tiba lebih dulu, agent mendapat satu giliran terakhir untuk melaporkan perkembangannya. Pengingat satu kali dapat dijadwalkan hingga 30 hari ke depan. Sebuah percakapan dapat memiliki paling banyak 10 wakeup aktif. Mengarsipkan percakapan membatalkan wakeup aktifnya; kehilangan akses ke agent atau pekerjaan yang dipantau juga dapat mengakhirinya.
+
+Untuk jadwal berkelanjutan seperti laporan harian, gunakan [autopilot](/autopilots). Agent mengelola tindak lanjut dengan [`chat wakeup`](/cli#chat-wakeups).
+
+## Mengatur daftar percakapan
+
+Percakapan dapat diganti nama, disematkan, diarsipkan, dan dihapus:
+
+- **Sematkan** menjaga percakapan yang sering digunakan tetap di atas daftar;
+- **Arsipkan** memindahkan percakapan ke Diarsipkan dan membuatnya hanya-baca;
+- **Batalkan pengarsipan** memungkinkan Anda mengirim pesan lagi;
+- **Hapus** menghapus percakapan dan pesannya secara permanen.
+
+Jika sebuah percakapan terikat ke channel eksternal (seperti Slack), mengarsipkannya memutus ikatan tersebut; membuka arsip kembali tidak mengembalikannya — ikat ulang.
+
+Jumlah balasan yang belum dibaca di seluruh percakapan Anda ditampilkan sebagai badge pada **Obrolan** di app rail. Di aplikasi desktop, klik kanan **Obrolan** untuk **Tandai semua sudah dibaca**.
+
+<Callout type="warning">
+Menghapus sebuah percakapan tidak dapat dibatalkan dan menghentikan eksekusi apa pun di dalamnya yang belum selesai. Arsipkan saja jika Anda hanya belum membutuhkannya untuk saat ini.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Tugaskan tugas ke agent](/assigning-issues) — ubah diskusi menjadi pekerjaan yang dapat dilacak.
+- [Kotak masuk dan subscription](/inbox) — ikuti aktivitas tim yang membutuhkan Anda.
+- [Pencarian, pintasan, dan preferensi](/shortcuts) — buka obrolan, cari, dan berpindah halaman dari keyboard.
+- [Matriks provider](/providers) — kemampuan sesi dan model per alat pengkodean AI.

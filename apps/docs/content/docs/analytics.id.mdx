@@ -1,0 +1,136 @@
+---
+title: Analitik
+description: Lihat berapa biaya agent, berapa banyak token yang digunakan, berapa lama mereka berjalan, serta eksekusi mana yang gagal dan mengapa.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { UsageDemo } from "@/components/demos/usage-demo";
+
+Halaman **Analytics** di sidebar merangkum penggunaan agent di seluruh ruang kerja: biaya, token, waktu eksekusi, jumlah eksekusi, dan eksekusi yang gagal. Setiap anggota ruang kerja dapat membukanya. Penggunaan masing-masing runtime ada di halaman detail runtime tersebut, dan biaya sebuah tugas ada di dialog **Runs**-nya; keduanya dibahas di bawah.
+
+## Tata letak halaman
+
+Halaman ini memiliki dua tab, **Usage** dan **Errors**, yang berbagi filter di kanan atas:
+
+- **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` berarti hari ini, dimulai dari tengah malam di zona waktu Anda, bukan 24 jam terakhir.
+- **Project**: **All projects** secara default. Jika sebuah proyek dipilih, hanya eksekusi pada tugas-tugas proyek tersebut yang dihitung; eksekusi yang tidak terkait tugas apa pun, seperti eksekusi chat, tidak ikut dihitung.
+- **Attribution** (tampil setelah ruang kerja memiliki squad): **All attribution** secara default. Pilih **Standalone agents only** untuk memeriksa eksekusi yang tidak dipicu melalui squad mana pun, atau pilih squad tertentu untuk membatasi setiap grafik, KPI, dan daftar di kedua tab ke squad tersebut — termasuk eksekusi leader-nya, eksekusi anggota yang didelegasikan, dan eksekusi pada sub-tugas yang dibuat squad.
+
+Hari dipotong menurut zona waktu Anda: yang diatur di **Settings → Preferences → Time zone**, atau zona waktu browser jika Anda belum mengaturnya. Header menampilkan zona waktu tersebut dan kapan data terakhir diperbarui. Server merangkum angka-angka setiap 5 menit dan halaman yang terbuka memuat ulang pada interval yang sama, sehingga eksekusi yang baru selesai dapat memerlukan beberapa menit untuk muncul; tombol refresh langsung mengambil angka terbaru.
+
+Berpindah ke tab Errors menambahkan `?tab=errors` pada alamat, sehingga tautan yang Anda kirim ke rekan tim langsung terbuka di tab tersebut.
+
+## Tab Usage
+
+Empat angka berada di bagian atas:
+
+| Kartu | Yang ditampilkan |
+| --- | --- |
+| **Cost** | Perkiraan biaya dalam USD; lihat [Cara biaya dihitung](#cara-biaya-dihitung). Pada **All attribution**, mencatat porsi yang dipicu squad jika squad memiliki penggunaan; saat difilter ke sebuah squad, mencatat bahwa anggota yang didelegasikan ikut dihitung |
+| **Tokens** | Token input, output, cache-read, dan cache-write digabung, dengan rincian input dan output di bawahnya |
+| **Run time** | Total waktu eksekusi dari eksekusi yang selesai, dihitung dari saat tiap eksekusi mulai hingga berakhir |
+| **Runs** | Eksekusi yang selesai dalam rentang waktu, dan berapa banyak di antaranya yang gagal |
+
+Run time dan Runs hanya menghitung eksekusi yang benar-benar mulai berjalan (selesai, gagal, atau dibatalkan di tengah jalan); eksekusi yang dibatalkan saat masih mengantre tidak dihitung.
+
+Kartu tren menggambarkan Tokens, Cost, Time, atau Runs pada satu sumbu waktu, dengan granularitas **Daily** atau **Weekly**. `30d` dan `90d` menawarkan keduanya; `1d` dan `7d` hanya harian, `180d` dan `365d` hanya mingguan. Minggu dimulai pada hari Senin, dan minggu berjalan yang belum selesai digambar lebih pudar; saat di-hover, bar ditandai sebagai parsial dan menunjukkan berapa dari 7 harinya yang sudah berlalu.
+
+**Leaderboard** mencantumkan token, biaya, waktu eksekusi, dan jumlah eksekusi, diurutkan menurut salah satu dari keempatnya yang Anda pilih. Leaderboard menampilkan 10 teratas; **Show all** menampilkan sisanya. Jika ruang kerja memiliki squad dan Attribution diatur ke **All attribution**, Anda dapat beralih antara **Agents** dan **Squads**:
+
+- Pada **Agents**, dua baris agregat menjaga daftar tetap sesuai dengan total di atas:
+  - **Deleted agents**: penggunaan agent yang sudah dihapus, digabung ke satu baris.
+  - **Other agents**: agent yang tidak dapat Anda lihat, digabung ke satu baris. Owner dan admin ruang kerja melihat setiap agent yang dibuat anggota; anggota biasa tidak melihat agent privat milik orang lain, yang penggunaannya hanya muncul di sini, tanpa nama.
+- Pada **Squads**, setiap squad menggabungkan eksekusi leader dan anggota yang didelegasikan; perluas baris squad untuk melihat rincian per anggota (leader ditandai). Dua baris tambahan menjaga total tetap sesuai: **Standalone agents (non-Squad)** — disematkan di bagian bawah untuk `@`-mention langsung dan penugasan langsung — dan **Deleted squads**.
+- Saat difilter ke satu squad di **Attribution**, leaderboard langsung beralih ke rincian anggota squad tersebut.
+
+Jika sebagian eksekusi sebuah agent atau squad tidak melaporkan token, Tokens dan Cost miliknya diawali `≥` dan sebuah baris di bawah namanya menyebutkan berapa eksekusi yang tidak melaporkan penggunaan.
+
+Pada demo di bawah, sebuah tim operasional memiliki tiga agent. Periksa dulu tren biaya, lalu siapa yang paling banyak menghabiskan biaya, dan terakhir cari penyebab kegagalan di tab Errors.
+
+<UsageDemo />
+
+## Tab Errors
+
+Di bagian atas ada **Failed runs**, **Failure rate**, dan **Agents affected**. Rasio dihitung dari setiap eksekusi yang selesai dalam rentang waktu, dan kartunya menuliskan kedua angka tersebut di bawahnya.
+
+Di bawahnya:
+
+- **Daily errors** (atau Weekly errors): setiap warna dalam sebuah bar adalah satu kelas kegagalan.
+- **Failure mix**: setiap kegagalan dalam rentang waktu, dibagi menurut kelas. **Show error codes** menggantinya dengan kode alasan kegagalan mentah, yang dapat Anda cari di log atau tempelkan ke sebuah tugas.
+- **Errors by agent** (atau **Errors by squad**): diurutkan menurut jumlah kegagalan secara default, dengan semua yang melewati 8 teratas disembunyikan di balik sebuah toggle. Saat diurutkan menurut **Rate**, entri dengan kurang dari 10 eksekusi diurutkan paling akhir, karena rasio dari eksekusi sesedikit itu kurang bermakna. Jika ruang kerja memiliki squad dan Attribution diatur ke **All attribution**, beralihlah antara **Agents** dan **Squads** untuk melihat kegagalan per squad bersama **Standalone agents (non-Squad)** dan **Deleted squads**. Mengklik nama agent atau squad membuka halaman detailnya.
+
+Kode alasan kegagalan terbagi menjadi tujuh kelas:
+
+| Kelas | Mencakup | Perbaikan umum |
+| --- | --- | --- |
+| Auth | Autentikasi provider atau akses ditolak, konfigurasi yang hilang seperti API key | Masuk kembali di AI coding tool, atau isi konfigurasinya |
+| Rate limit | Rate limit, kapasitas tidak mencukupi, kuota atau saldo habis | Coba lagi nanti, atau naikkan batasnya |
+| Timeout | Timeout eksekusi, tool tidak merespons, Codex macet | Persempit tugasnya, atau sesuaikan timeout |
+| Provider | Error server provider, kegagalan jaringan, model tidak tersedia, request ditolak | Coba lagi nanti, atau beralih ke model yang tersedia |
+| Runtime | Runtime offline, restart daemon, antrean kedaluwarsa, gagal mengunduh bundle skill, tool hilang atau usang, gagal menyiapkan environment | Periksa komputer yang menjalankannya |
+| Agent | Proses tool crash, output tidak dapat diparsing, konteks meluap, batas iterasi, agent melaporkan tidak dapat melanjutkan | Baca transcript, sesuaikan tugasnya, lalu coba lagi |
+| Other | Kegagalan yang tidak dapat diklasifikasikan | Periksa kode error mentah dan transcript |
+
+Untuk arti setiap kode dan cara menanganinya, lihat [Eksekusi · Referensi alasan kegagalan](/tasks#referensi-alasan-kegagalan).
+
+## Cara biaya dihitung
+
+Setiap biaya di Analytics adalah perkiraan dalam USD, bukan tagihan dari AI coding tool atau penyedia model:
+
+- Multica menyertakan tabel tarif model yang dipublikasikan, dengan harga per juta token secara terpisah untuk input, output, cache read, dan cache write, lalu mengalikan token yang dilaporkan dengan tabel tersebut.
+- Ketika AI coding tool melaporkan biayanya sendiri (Grok Build melakukannya, misalnya), angka itu digunakan apa adanya sebagai ganti perkiraan.
+- Token dari model yang tidak ada di tabel tetap dihitung, tetapi biayanya dihitung sebagai $0. Anda dapat [mengatur harga kustom](#harga-kustom) untuk model-model tersebut dari penggunaan sebuah runtime.
+- Beberapa model mengenakan tarif lebih tinggi setelah prompt melewati panjang tertentu. Data yang dirangkum tidak dapat mengetahui panjang setiap request, sehingga semuanya dihargai dengan tarif standar, dan eksekusi semacam itu dapat tertaksir terlalu rendah.
+
+Token dilaporkan oleh AI coding tool. Ketika sebuah tool tidak melaporkan apa pun, eksekusi tetap dihitung dalam waktu eksekusi dan jumlah eksekusi, tetapi tidak menambah token atau biaya. GitHub Copilot CLI saat ini, misalnya, tidak menyertakan jumlah token dalam outputnya, sehingga agent yang menggunakannya menampilkan `≥` dan jumlah yang tidak dilaporkan di leaderboard.
+
+## Penggunaan runtime
+
+Buka **Runtimes** dan masuk ke halaman detail sebuah runtime untuk melihat penggunaannya. Penggunaan runtime privat hanya terlihat oleh pemiliknya; penggunaan runtime publik terlihat oleh setiap anggota.
+
+- Di bagian atas ada **Cost**, **Cache savings**, dan **Tokens**. Cost dibandingkan dengan periode sebelumnya yang sama panjang. Cache savings memperkirakan berapa lebih mahal cache read tersebut jika dihitung dengan tarif input penuh, dengan cache hit rate di bawahnya.
+- **When this runtime spent**: biaya atau token per hari atau per minggu. Tampilan **Heatmap** mewarnai satu kotak untuk setiap hari dalam 26 minggu terakhir menurut biayanya, terlepas dari rentang waktu di atas.
+- **Cost by agent** dan **Cost by model**: agent dan model mana yang menyerap biaya periode tersebut.
+- **Daily breakdown table**: dapat dibuka menjadi setiap jenis token per tanggal dan model.
+
+Halaman runtime menawarkan `7d`, `30d`, `90d`, dan `180d`.
+
+## Harga kustom
+
+Ketika rentang yang dipilih mencakup model yang tidak ada di tabel harga, penggunaan runtime menampilkan pemberitahuan di atas angka-angka yang menyebutkan berapa model yang tidak memiliki harga terpelihara dan bahwa token-nya tidak dimasukkan ke biaya. Klik **Set custom prices**, masukkan tarif input, output, cache-read, dan cache-write setiap model dalam USD per juta token, lalu simpan. Setelah setiap model memiliki harga, tombol **Edit custom prices** tetap tersedia agar Anda dapat mengubahnya nanti. Untuk menghapus harga sebuah model, kosongkan semua field-nya lalu simpan, atau klik tombol hapus di sebelahnya.
+
+<Callout type="info">
+Harga kustom hanya disimpan di browser atau aplikasi desktop pada perangkat ini. Harga tersebut tidak disinkronkan ke akun Anda atau dibagikan dengan anggota ruang kerja lain, dan berlaku untuk setiap ruang kerja di perangkat ini. Anggota lain tetap melihat $0 untuk model-model tersebut.
+</Callout>
+
+Harga kustom hanya berlaku untuk model yang tidak ada di tabel harga; harga ini tidak dapat menimpa tarif bawaan, dan tidak pernah menggantikan biaya yang dilaporkan sendiri oleh AI coding tool. Setelah Anda menyimpan, Analytics, penggunaan runtime, dan dialog Runs tugas di perangkat ini dihitung ulang dengan tarif baru.
+
+## Biaya tugas
+
+**Execution log** di sidebar setiap tugas menampilkan biaya yang telah dihabiskan tugas tersebut di headernya. Klik **Open timeline** untuk membuka dialog **Runs**:
+
+- Ringkasan di bagian atas menampilkan **Spent**, **Tokens** (dan berapa yang berasal dari cache), **Output**, **Agent time**, dan **Runs**. Agent time adalah jumlah durasi seluruh eksekusi; angka "elapsed" di sebelahnya adalah waktu dari awal eksekusi pertama hingga akhir eksekusi terakhir. Di sebelah Runs terdapat jumlah yang gagal, dibatalkan, dan aktif.
+- Tampilan **Per run** pada grafik menggambar satu bar per eksekusi untuk biaya, token, atau agent time; **Cumulative** menggambar biaya kumulatif yang bertambah dari waktu ke waktu.
+- Pita **By agent** dan **By model** menunjukkan siapa dan model mana yang menyerap biaya.
+- Di bawahnya, eksekusi dicantumkan per hari; **Run details** menampilkan rincian biaya sebuah eksekusi dan berapa yang dihemat oleh cache hit-nya.
+
+Bagian bawah dialog mencatat bahwa biaya merupakan perkiraan dan menyebutkan model mana pun yang tidak memiliki harga.
+
+## Dari CLI
+
+```bash
+multica issue usage <issue-id>
+multica runtime usage <runtime-id> --days 30
+```
+
+`issue usage` mencetak total token sebuah tugas (input, output, cache read, cache write) dan jumlah eksekusi. `RUNS` adalah jumlah eksekusi yang selesai, `METERED_RUNS` berapa yang melaporkan penggunaan, dan `UNREPORTED` berapa yang tidak; ketika ada eksekusi yang tidak melaporkan, total token diawali `>=` karena angka sebenarnya hanya dapat lebih tinggi.
+
+`runtime usage` mencantumkan token sebuah runtime per tanggal, provider, dan model. `--days` secara default 90, hingga 365.
+
+Kedua tabel tidak menyertakan perkiraan biaya; tambahkan `--output json` untuk data mentah yang dikembalikan API.
+
+## Langkah selanjutnya
+
+- [Eksekusi](/tasks) — execution log, alasan kegagalan, dan percobaan ulang.
+- [Daemon dan runtime](/daemon-runtimes) — komputer mana yang menjalankan sebuah eksekusi.
+- [Anggota dan peran](/members-roles) — siapa yang dapat melihat agent mana.

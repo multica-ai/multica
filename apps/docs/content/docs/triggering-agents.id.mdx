@@ -1,0 +1,26 @@
+---
+title: Memulai pekerjaan agent
+description: Pilih cara memulai pekerjaan, menyerahkannya, atau meminta bantuan.
+---
+
+import { TriggerChooserDemo } from "@/components/demos/trigger-chooser-demo";
+
+Mulailah dari apa yang Anda inginkan dilakukan agent. Anda dapat memberinya kepemilikan atas sebuah tugas, meminta bantuan untuk satu permintaan, atau mengatur pekerjaan yang berulang.
+
+<TriggerChooserDemo />
+
+| Yang Anda butuhkan | Yang digunakan |
+|---|---|
+| Menjadikan agent pemilik sebuah tugas | [Tugaskan tugas](/assigning-issues) ke agent atau squad. |
+| Meminta bantuan tanpa mengubah penerima tugas | [@mention agent](/mentioning-agents) di komentar, atau balas komentarnya untuk melanjutkan. |
+| Sering mengirim jenis permintaan yang sama | Simpan sebuah [quick action](/quick-actions), seperti Code Review, dan gunakan dari tugas. |
+| Meneruskan pekerjaan melalui rangkaian langkah yang berulang | Pilih [workflow](/workflows) proyek dan siapa yang mengambil alih di setiap langkah. |
+| Mengajukan pertanyaan tanpa membuat tugas | Mulai [obrolan](/chat) dengan agent. |
+| Memulai pekerjaan berulang berdasarkan waktu atau peristiwa eksternal | Buat [autopilot](/autopilots). |
+| Membuat agent kembali ke sebuah tugas nanti | Tambahkan [wakeup](/issue-wakeups) ke tugas dengan waktu atau peristiwa yang ditunggu. |
+
+Anda hanya dapat meminta agent yang Anda miliki izin untuk menjalankannya. Untuk komentar, periksa pratinjau pemicu sebelum mengirim; gunakan `/note` saat Anda ingin meninggalkan pesan tanpa membangkitkan agent. Tugas dengan status `backlog` menunggu sampai Anda siap memulainya.
+
+## Memantau progres
+
+Ikuti balasan di tempat Anda memulai pekerjaan: di tugas atau di obrolan. Buka [log eksekusi](/tasks) untuk melihat progres agent, menghentikannya, atau mencoba ulang. Jika pekerjaan belum dimulai, periksa apakah komputer agent online; [Pemecahan masalah](/troubleshooting) memuat langkah berikutnya.

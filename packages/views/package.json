@@ -91,6 +91,7 @@
     "./locales/fr": "./locales/fr.ts",
     "./locales/es": "./locales/es.ts",
     "./locales/ru": "./locales/ru.ts",
+    "./locales/id": "./locales/id.ts",
     "./locales/*": "./locales/*",
     "./docs": "./docs/index.ts"
   },

@@ -1,0 +1,101 @@
+---
+title: Autentikasi dan token
+description: Pahami sesi masuk browser, token akses pribadi, dan kredensial sementara yang digunakan agent selama eksekusi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Dalam penggunaan Multica sehari-hari, Anda terutama berurusan dengan dua jenis kredensial: sesi masuk browser dan token akses pribadi. Sesi browser melayani web dan Desktop; token akses pribadi melayani CLI, daemon, script, dan API.
+
+## Sesi masuk browser
+
+Setelah masuk dengan kode verifikasi email atau Google, Multica menyimpan JWT dalam cookie HttpOnly bernama `multica_auth`. Browser mengirimkannya secara otomatis; JavaScript tidak dapat membacanya secara langsung.
+
+Secara default, sesi berlaku selama 30 hari, tetapi ini bukan hitungan mundur dari waktu masuk: sesi yang terus digunakan akan diperbarui (re-issue) sebelum kedaluwarsa, sehingga tetap masuk tidak memerlukan login ulang secara berkala. Pembaruan hanya terjadi setelah melewati separuh masa berlakunya, sehingga sesi yang tidak digunakan bisa kedaluwarsa kurang dari 30 hari setelah penggunaan terakhirnya. Admin self-hosted dapat menyesuaikan masa berlaku dengan `AUTH_TOKEN_TTL`; lihat [Konfigurasi masuk dan pendaftaran](/auth-setup#masa-berlaku-session). Keluar (logout) akan menghapus cookie auth dan CSRF pada browser yang sedang digunakan.
+
+Cookie browser tidak dimaksudkan untuk disalin ke script atau CLI; gunakan token akses pribadi untuk mengakses Multica dari terminal.
+
+## Token akses pribadi
+
+Token akses pribadi (PAT) dimulai dengan `mul_` dan merepresentasikan akun Anda. Token ini dapat mengakses setiap ruang kerja dan API yang Anda punya aksesnya, jadi jaga token ini seperti menjaga password.
+
+Saat membuat token di **Pengaturan → API Token**, Anda memberikan nama dan memilih masa berlaku 30 hari, 90 hari, 1 tahun, atau tidak pernah kedaluwarsa; 90 hari dipilih secara default. Nilai lengkap token hanya ditampilkan satu kali; setelah dialog ditutup, Multica hanya menyimpan:
+
+- hash dari token;
+- beberapa karakter awal, untuk identifikasi;
+- nama, waktu pembuatan, masa berlaku, dan waktu terakhir digunakan.
+
+Nilai lengkapnya tidak dapat dikembalikan lagi. Jika Anda kehilangannya, cabut token lama dan buat token baru.
+
+<Callout type="warning">
+Jangan menaruh PAT di repository, tugas, komentar, screenshot, atau log, dan jangan meneruskannya langsung dalam shell command yang tersimpan.
+</Callout>
+
+## CLI dan PAT
+
+Saat Anda menjalankan `multica login`, CLI menyelesaikan proses masuk melalui browser, lalu membuat PAT yang berlaku 90 hari dan menyimpannya ke file konfigurasi profil saat ini:
+
+```text
+~/.multica/config.json
+~/.multica/profiles/<name>/config.json
+```
+
+Daemon terhubung ke Multica menggunakan PAT yang sama. PAT `mul_` dengan masa berlaku akan diperpanjang secara otomatis ketika sisa waktunya kurang dari 7 hari, memperpanjangnya menjadi 90 hari dari saat itu. Perpanjangan yang gagal tidak mengubah token yang ada; setelah token kedaluwarsa atau dicabut, jalankan `multica login` lagi.
+
+Pada komputer tanpa browser, buat PAT di web terlebih dahulu dan biarkan CLI memintanya secara aman:
+
+```bash
+multica login --token
+```
+
+## Menggunakan PAT dalam request API
+
+Masukkan PAT ke dalam header `Authorization`:
+
+```bash
+export MULTICA_TOKEN='mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+curl https://api.multica.ai/api/me \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+Panggilan API di level ruang kerja juga memerlukan informasi ruang kerja, sesuai kebutuhan endpoint tersebut:
+
+```bash
+curl https://api.multica.ai/api/issues \
+  -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
+```
+
+Dalam script, ambil token dari secret manager atau environment variable yang terlindungi — jangan pernah menuliskannya secara hardcode. Pada instance self-hosted, ganti domain dengan alamat API publik milik Anda sendiri.
+
+## Keluar dan pencabutan
+
+`multica auth logout` hanya menghapus PAT yang tersimpan di profil CLI saat ini; keluar di web hanya menghapus cookie browser yang sedang digunakan. Tidak satu pun dari keduanya mencabut token akses pribadi di server.
+
+Jika token diduga bocor, segera cabut di **Pengaturan → API Token**. Setelah dicabut, PAT tersebut tidak dapat digunakan lagi, dan komputer serta script lain yang menyimpannya juga akan kehilangan akses.
+
+## Token sementara untuk eksekusi agent
+
+Saat daemon mengambil sebuah eksekusi, server membuat token sementara untuk eksekusi tersebut, dengan prefix `mat_`. Token ini terikat pada pengguna, ruang kerja, agent, dan eksekusi saat ini, berlaku paling lama 24 jam, dan dibersihkan setelah eksekusi selesai.
+
+Daemon menyuntikkan token sementara ini ke dalam AI coding tool, bukan memberikan PAT milik pengguna kepada agent. Karena itu, request yang dibuat oleh agent tercatat sebagai aksi agent, dan token ini tidak dapat digunakan untuk mengakses operasi sensitif yang dibatasi hanya untuk pengguna atau owner.
+
+Token semacam ini dibuat secara otomatis oleh server; pengguna tidak pernah perlu menyimpan atau mengelolanya.
+
+## Kredensial mesin lainnya
+
+Server juga mengenali dua kredensial lain yang digunakan dalam skenario internal atau terkelola:
+
+| Prefix | Tujuan | Dikelola oleh |
+| --- | --- | --- |
+| `mcn_` | Koneksi Multica Cloud Node | Multica Cloud Fleet |
+| `mdt_` | Protokol autentikasi daemon yang dibatasi pada satu ruang kerja | Proses internal server |
+
+Instalasi Cloud biasa, self-hosted, dan Desktop tidak pernah perlu membuatnya secara manual. CLI dan daemon di sisi pengguna selalu menggunakan PAT `mul_`; jangan membuat sendiri token dengan prefix lain.
+
+## Langkah selanjutnya
+
+- [Menggunakan CLI](/cli) — `login`, `auth status`, dan konfigurasi profil.
+- [Daemon dan runtime](/daemon-runtimes) — tempat perpanjangan PAT terjadi.
+- [Konfigurasi masuk dan pendaftaran](/auth-setup) — konfigurasi sisi server untuk masa berlaku sesi dan pembatasan pendaftaran.

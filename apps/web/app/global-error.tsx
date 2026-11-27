@@ -115,4 +115,9 @@ const EMERGENCY_COPY = {
     description: "На странице произошла непредвиденная ошибка. Попробуйте перезагрузить.",
     reload: "Перезагрузить",
   },
+  id: {
+    title: "Terjadi kesalahan",
+    description: "Halaman mengalami error yang tidak terduga. Coba muat ulang.",
+    reload: "Muat ulang",
+  },
 } as const;

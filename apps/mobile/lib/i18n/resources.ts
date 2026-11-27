@@ -28,6 +28,16 @@ import navigationZhHant from "@/locales/zh-Hant/navigation.json";
 import projectsZhHant from "@/locales/zh-Hant/projects.json";
 import settingsZhHant from "@/locales/zh-Hant/settings.json";
 import workspaceZhHant from "@/locales/zh-Hant/workspace.json";
+import authId from "@/locales/id/auth.json";
+import chatId from "@/locales/id/chat.json";
+import commonId from "@/locales/id/common.json";
+import editorId from "@/locales/id/editor.json";
+import inboxId from "@/locales/id/inbox.json";
+import issuesId from "@/locales/id/issues.json";
+import navigationId from "@/locales/id/navigation.json";
+import projectsId from "@/locales/id/projects.json";
+import settingsId from "@/locales/id/settings.json";
+import workspaceId from "@/locales/id/workspace.json";
 
 export const resources = {
   en: {
@@ -65,5 +75,17 @@ export const resources = {
     projects: projectsZhHant,
     settings: settingsZhHant,
     workspace: workspaceZhHant,
+  },
+  id: {
+    auth: authId,
+    chat: chatId,
+    common: commonId,
+    editor: editorId,
+    inbox: inboxId,
+    issues: issuesId,
+    navigation: navigationId,
+    projects: projectsId,
+    settings: settingsId,
+    workspace: workspaceId,
   },
 } as const;

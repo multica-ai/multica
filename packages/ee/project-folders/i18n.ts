@@ -5,6 +5,7 @@ import type { SupportedLocale } from "@multica/core/i18n";
 import en from "./locales/en.json";
 import es from "./locales/es.json";
 import fr from "./locales/fr.json";
+import id from "./locales/id.json";
 import ja from "./locales/ja.json";
 import ko from "./locales/ko.json";
 import ru from "./locales/ru.json";
@@ -19,6 +20,7 @@ export const FOLDER_LOCALES: Record<SupportedLocale, Record<FolderMessage, strin
   en,
   es,
   fr,
+  id,
   ja,
   ko,
   ru,

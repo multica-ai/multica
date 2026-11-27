@@ -1,0 +1,23 @@
+{
+  "role": {
+    "owner": "Owner",
+    "admin": "Admin",
+    "member": "Anggota"
+  },
+  "card": {
+    "unavailable": "Anggota tidak tersedia",
+    "agents_section": "Agent ({{count}})",
+    "detail_link": "Detail →",
+    "more_agents_other": "dan {{count}} agent lainnya"
+  },
+  "detail": {
+    "members_breadcrumb": "Anggota",
+    "role": "Peran",
+    "email": "Email",
+    "joined": "Bergabung",
+    "relation": "Hubungan",
+    "breadcrumb_fallback": "Anggota",
+    "not_found_title": "Anggota tidak ditemukan",
+    "not_found_description": "Anggota ini mungkin telah keluar dari ruang kerja."
+  }
+}

@@ -1,0 +1,71 @@
+---
+title: Anggota dan role
+description: Undang anggota dan guest, lalu pilih tingkat akses yang tepat untuk setiap orang.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
+
+Di sebuah [ruang kerja](/workspaces), `owner`, `admin`, dan `member` dapat membuat Tugas dan memposting komentar. Izin mereka berbeda dalam mengelola pengaturan dan orang. Seorang [guest](#guests) hanya dapat membaca dan mengomentari Tugas di proyek yang dibagikan kepadanya.
+
+## Izin untuk owner, admin, dan member [#the-three-roles]
+
+| Tindakan | owner | admin | member |
+|---|:---:|:---:|:---:|
+| Melihat ruang kerja dan berkolaborasi sehari-hari | ✓ | ✓ | ✓ |
+| Mengubah pengaturan ruang kerja | ✓ | ✓ | — |
+| Mengundang `admin` atau `member` | ✓ | ✓ | — |
+| Mengubah atau menghapus `admin` atau `member` | ✓ | ✓ | — |
+| Memberikan, mencabut, atau menghapus `owner` | ✓ | — | — |
+| Menghapus ruang kerja | ✓ | — | — |
+
+Sebuah ruang kerja harus selalu memiliki setidaknya satu `owner`: `owner` terakhir tidak dapat diturunkan role-nya, dihapus, atau keluar.
+
+<RolesDemo />
+
+<Callout type="info">
+Guest tidak dapat menjalankan agent. Setiap agent memiliki Access scope-nya sendiri, dan `owner` maupun `admin` tidak dapat melewatinya untuk menjalankan agent yang tidak diberikan kepada mereka. Lihat [Agent](/agents#izin-dan-akses).
+</Callout>
+
+<Callout type="info">
+Role juga tidak membuka proyek privat. Seorang `owner` atau `admin` hanya melihat proyek privat jika mereka ada di daftar anggotanya. Lihat [Proyek privat](/projects#proyek-privat).
+</Callout>
+
+## Mengundang anggota
+
+`owner` dan `admin` membuka **Settings → Members**, mengklik **Invite member**, memasukkan email, memilih role, lalu mengirim. Undangan dapat memberikan akses `admin`, `member`, atau [guest](#guests); seorang `owner` harus bergabung ke ruang kerja terlebih dahulu lalu dipromosikan oleh `owner` yang sudah ada.
+
+![Manajemen anggota: formulir undangan dan daftar anggota dengan role](/images/docs/members-roster.webp)
+
+Pihak yang diundang menerima undangan dengan login menggunakan email tersebut — tidak perlu signup terlebih dahulu. Undangan berlaku selama 7 hari; kirim ulang setelah kedaluwarsa. Pada instance self-hosted yang membatasi signup, undangan yang masih pending (live) memungkinkan email tersebut untuk membuat akun tanpa entri allowlist yang terpisah — lihat [Pengaturan Auth](/auth-setup#undangan-dan-pembatasan-pendaftaran).
+
+Link undangan hanya muncul di email; tidak ada tempat di produk untuk melihat atau menyalinnya. Jika email gagal terkirim, record undangan tetap ada — cabut undangan tersebut dan kirim yang baru.
+
+Saat Anda memerlukan link yang dapat Anda teruskan sendiri, buat satu di bawah **Share links** pada **Settings → Members** dengan memilih role dan masa berlaku. Siapa pun yang memiliki link dapat bergabung dengan role tersebut sampai link kedaluwarsa atau dicabut.
+
+## Guest [#guests]
+
+Seorang guest hanya melihat proyek yang dibagikan kepadanya. Di proyek-proyek itu, guest dapat membaca Tugas, berkomentar, memberi reaksi, dan mengikutinya; guest tidak dapat membuat atau mengedit Tugas, menjalankan atau me-mention agent, atau membuka pengaturan ruang kerja, dan tidak melihat proyek, agent, autopilot, atau runtime lain.
+
+`owner` dan `admin` mengundang guest dengan memilih **Guest** di dialog undangan dan memilih proyek yang dapat dilihatnya. Dari menu tindakan seorang anggota, mereka dapat menjadikan anggota sebagai guest, yang menarik kembali agent, autopilot, dan akses runtime-nya; menjadikan guest sebagai anggota; atau mengubah proyek seorang guest dengan **Manage accessible projects**. Seperti hal lain tentang proyek privat, akses guest ke proyek privat hanya ditampilkan dan diubah oleh orang yang ada di daftar anggota proyek itu; mengubah proyek seorang guest tidak mengubah aksesnya ke proyek privat yang tidak Anda ikuti.
+
+## Mengubah role
+
+Di daftar anggota, buka menu tindakan di sisi kanan baris seorang anggota dan pilih **Change role**. Role baru berlaku langsung.
+
+Seorang `admin` dapat memindahkan role antara `admin` dan `member`, serta dapat menghapus anggota yang memegang kedua role tersebut. Setiap perubahan yang melibatkan `owner` — mempromosikan, mengubah, atau menghapus — hanya dapat dilakukan oleh seorang `owner`.
+
+## Menghapus anggota
+
+Anggota yang dihapus langsung kehilangan akses ke ruang kerja. Tugas, komentar, dan record kolaborasi lain yang mereka buat tetap berada di ruang kerja.
+
+<Callout type="warning">
+Menghapus anggota juga menonaktifkan runtime yang mereka miliki, mengarsipkan agent yang terikat padanya, dan membatalkan Eksekusi yang belum selesai. Grant yang diterima anggota tersebut dalam Access scope agent juga akan dihapus, dan tidak akan dipulihkan secara otomatis jika mereka bergabung kembali.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Tugas](/issues) — pekerjaan yang ditangani bersama oleh anggota dan agent.
+- [Agent](/agents) — bagaimana role ruang kerja berbeda dari Access agent.
+- [Daemon dan runtime](/daemon-runtimes) — siapa yang memiliki runtime dan di mana mereka berjalan.
+- [Berbagi kumpulan agent untuk tim](/team-agent-pool) — role dan Access agent bersama-sama, dalam contoh tim 10 orang.

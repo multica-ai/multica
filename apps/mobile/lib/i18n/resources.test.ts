@@ -40,6 +40,14 @@ function placeholdersOf(text: string): string[] {
   return [...new Set([...text.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1]!))].sort();
 }
 
+const TRANSLATED_LOCALES = fs
+  .readdirSync(LOCALES_ROOT)
+  .filter((entry) => entry !== "en")
+  .filter((entry) =>
+    fs.statSync(path.join(LOCALES_ROOT, entry)).isDirectory(),
+  )
+  .sort();
+
 describe("mobile i18n resources", () => {
   describe.each(["zh-Hans", "zh-Hant"])("%s", (locale) => {
     it("has the same namespaces as English", () => {

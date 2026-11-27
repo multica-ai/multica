@@ -1,0 +1,53 @@
+{
+  "actions": {
+    "add": "Tambah",
+    "back": "Kembali",
+    "cancel": "Batal",
+    "close": "Tutup",
+    "confirm": "Konfirmasi",
+    "continue": "Lanjutkan",
+    "copy": "Salin",
+    "create": "Buat",
+    "delete": "Hapus",
+    "discard": "Buang",
+    "done": "Selesai",
+    "download": "Unduh",
+    "edit": "Edit",
+    "more": "Lainnya",
+    "open": "Buka",
+    "remove": "Hapus",
+    "retry": "Coba lagi",
+    "save": "Simpan",
+    "search": "Cari",
+    "send": "Kirim",
+    "share": "Bagikan",
+    "upload": "Unggah"
+  },
+  "fields": {
+    "assignee": "Penerima Tugas",
+    "description": "Deskripsi",
+    "due_date": "Tanggal tenggat",
+    "email": "Email",
+    "label": "Label",
+    "name": "Nama",
+    "priority": "Prioritas",
+    "project": "Proyek",
+    "status": "Status",
+    "title": "Judul"
+  },
+  "states": {
+    "loading": "Memuat...",
+    "saving": "Menyimpan...",
+    "sending": "Mengirim...",
+    "offline": "Offline",
+    "empty": "Belum ada apa pun di sini",
+    "error": "Terjadi kesalahan"
+  },
+  "time": {
+    "just_now": "Baru saja",
+    "minutes_ago_other": "{{count}}m lalu",
+    "hours_ago_other": "{{count}}j lalu",
+    "days_ago_other": "{{count}}h lalu",
+    "weeks_ago_other": "{{count}}mg lalu"
+  }
+}

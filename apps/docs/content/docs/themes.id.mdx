@@ -1,0 +1,119 @@
+---
+title: Tema dan tampilan
+description: Pilih mode terang atau gelap dan sebuah tema, pasang tema komunitas dari theme store, perbarui, impor tema Anda sendiri, dan kembali ke default saat sebuah tema merusak sesuatu.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+**Settings → Appearance** mengatur tampilan Multica di perangkat ini: mode, tema, teks, dan tata letak. Setiap perubahan langsung berlaku.
+
+<Callout type="info">
+  Tema dan theme store masih dalam beta. Tema yang tampak benar hari ini mungkin perlu diperbarui oleh pembuatnya setelah rilis Multica.
+</Callout>
+
+## Mode dan tema
+
+**Mode** adalah Light, Dark, atau System (mengikuti sistem operasi Anda). Anda juga bisa mengetik "theme" di kotak pencarian (`⌘K`) untuk mengganti mode.
+
+**Theme** mengatur warna, border, bayangan, dan sudut di seluruh aplikasi. Multica menyertakan Default, Pop, GitHub, Blueprint, dan Notion; pilih salah satu dari dropdown. **Manage**, di sebelahnya, adalah tempat Anda memasang, memperbarui, dan menghapus tema lain. Sebuah tema mendukung mode terang, mode gelap, atau keduanya, dan mengikuti mode yang Anda pilih.
+
+Beberapa tema dilengkapi opsi, seperti warna aksen atau lebar halaman. Opsi ini muncul di bawah **Theme options** selama tema itu digunakan; **Reset options** mengembalikannya ke default tema.
+
+Bagian lain pada halaman ini tidak bergantung pada tema:
+
+| Grup | Yang diatur |
+|---|---|
+| **Interface text** | Font dan ukuran untuk menu, tombol, daftar, sidebar, dan judul. |
+| **Content text** | Font, ukuran, dan tinggi baris untuk deskripsi issue, komentar, chat, dan dokumen, ditambah font kode. |
+| **Layout and accessibility** | Kepadatan baris dalam daftar, Reduce motion, dan Increase contrast. |
+
+Teks konten secara default mengikuti ukuran antarmuka. Menggeser slider ukuran font konten menetapkan ukuran tersendiri; aktifkan **Match interface size** untuk kembali mengikuti antarmuka. Slider ini mengubah ukuran teks, bukan jarak atau tata letak.
+
+Saat Anda memilih font selain default, atau mengaktifkan Increase contrast, pilihan Anda mengalahkan pilihan tema. Tema menetapkan warna; untuk mengubah warna yang tidak ditawarkan sebagai opsi, pilih tema lain atau [buat sendiri](/developers/themes).
+
+## Theme store
+
+**Manage** membuka satu jendela berisi tema yang Anda pasang dan theme store komunitas. Tema bawaan tidak tercantum di sana; tema tersebut selalu ada di dropdown. Cari berdasarkan nama atau pembuat, dan aktifkan **Show installed only** untuk menyembunyikan yang belum Anda pasang.
+
+Setiap tema di store memiliki kartu dengan screenshot (beralih antara screenshot terang dan gelap di pojok), pembuatnya, deskripsi, berapa kali diunduh, dan tautan ke repositori GitHub-nya. Tema yang belum Anda pasang diurutkan dari yang paling banyak diunduh.
+
+<Steps>
+<Step>
+
+### Pasang
+
+Klik **Install** pada sebuah kartu. Tema diunduh, diperiksa, disimpan di perangkat ini, dan langsung digunakan.
+
+</Step>
+<Step>
+
+### Ganti
+
+Klik **Use** pada tema yang terpasang, atau pilih tema apa pun dari dropdown. Tema yang sedang digunakan ditandai **In use**.
+
+</Step>
+<Step>
+
+### Hapus
+
+Klik **Remove** pada tema yang terpasang. Jika tema itu sedang digunakan, Multica kembali ke Default.
+
+</Step>
+</Steps>
+
+Tema di store ditulis oleh komunitas dan diperiksa secara otomatis sebelum dicantumkan: tema tidak dapat menjalankan kode, memuat apa pun dari internet, atau menggunakan file di luar tema. Meski begitu, sebuah tema tetap dapat mengubah gaya setiap halaman, termasuk dialog dan peringatan.
+
+Jumlah unduhan mencakup setiap pemasangan dan setiap pembaruan, dari semua orang yang menggunakan server Multica yang sama.
+
+## Pembaruan
+
+Setelah Anda memasang tema dari store, halaman Appearance menampilkan baris **Store themes**. Klik **Check for updates** untuk mencari rilis baru, lalu **Update all**, atau perbarui satu tema dari kartunya dengan **Update to …**. Pembaruan mempertahankan nilai opsi tema dan tidak mengubah tema yang sedang Anda gunakan.
+
+Tema tidak pernah diperbarui tanpa permintaan Anda.
+
+## Mengimpor tema
+
+Tema yang Anda dapatkan sebagai file, atau yang Anda buat sendiri, dipasang dari **Make your own → Import theme**:
+
+- **Theme file (.zip)** memasang tema yang di-zip.
+- **Theme folder** memasang tema yang belum di-zip.
+
+Multica menampilkan nama, pembuat, dan versi tema sebelum memasangnya. Pasang tema hanya dari orang yang Anda percaya. Mengimpor tema dengan id yang sama dengan tema yang sudah terpasang akan menggantikannya.
+
+Untuk memulai tema Anda sendiri, lihat [Membuat tema](/developers/themes).
+
+## Minta agent membuatnya
+
+Agent mana pun dapat membuat tema dari sebuah deskripsi. Mintalah di chat, issue, atau komentar, misalnya "buatkan saya tema gelap yang tenang dengan langit malam yang bergerak perlahan". Agent mengetahui format tema dan harus lolos pemeriksaan tema sebelum menyerahkan hasilnya.
+
+- **Di aplikasi desktop**, agent yang berjalan di komputer yang sama menulis tema ke folder tema. Setelah lolos pemeriksaan, tema muncul di **Theme**: pilih sekali di sana, dan setiap perubahan yang Anda minta setelahnya tampil dalam satu detik.
+- **Di web, atau dengan agent di mesin lain**, agent melampirkan tema sebagai `.zip`. Unduh dan pasang dengan **Make your own → Import theme → Theme file (.zip)**.
+
+## Saat tema merusak sesuatu
+
+Sebuah tema dapat menyembunyikan atau merusak sebagian antarmuka. Untuk kembali ke Default, lakukan salah satu:
+
+- buka Multica dengan `?theme=default` di akhir alamat, atau
+- tahan **Shift** sebentar tepat setelah halaman dimuat. Di aplikasi desktop, muat ulang dengan `⌘R` (`Ctrl+R` di Windows dan Linux) lalu tahan **Shift**.
+
+Tema dijeda sampai Anda menutup jendela. Halaman Appearance menampilkan pemberitahuan dengan **Use my theme** untuk mengaktifkannya kembali; dari sana Anda juga dapat memilih tema lain atau menghapus tema yang rusak.
+
+## Tempat penyimpanan
+
+Mode, tema, opsi tema, dan tema yang terpasang disimpan di perangkat ini dan tidak disinkronkan ke akun Anda. Setiap browser dan setiap aplikasi desktop memiliki pengaturannya sendiri. Pengaturan ini sama di setiap workspace pada perangkat tersebut.
+
+## Self-hosting
+
+Server self-hosted secara default mencantumkan registry resmi, [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes). Server mengambil tema dan screenshot dari GitHub lalu menyimpannya di cache, sehingga aplikasi mengunduhnya dari server Anda. Jumlah unduhan dihitung per server.
+
+| Variabel | Efek |
+|---|---|
+| `MULTICA_THEME_REGISTRY_URL` | Mengarahkan store ke `index.json` registry lain, misalnya fork dari registry resmi. |
+
+Lihat [Variabel environment](/environment-variables) untuk konfigurasi server lainnya.
+
+## Langkah selanjutnya
+
+- [Membuat tema](/developers/themes) — format tema, pemeriksaan, dan publikasi ke store.
+- [Pencarian, pintasan, dan preferensi](/shortcuts) — pengaturan pribadi lainnya.

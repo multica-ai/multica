@@ -1,0 +1,180 @@
+---
+title: Kotak masuk dan subscription
+description: Satu tempat untuk penugasan, mention, komentar, dan kegagalan agent yang memerlukan tindak lanjut Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { InboxDemo } from "@/components/demos/inbox-demo";
+
+Kotak masuk mengumpulkan aktivitas pekerjaan yang berkaitan dengan Anda dan menandai tempat terjadinya perubahan yang memerlukan perhatian Anda. Ini bukan log aktivitas lengkap; cerita lengkapnya tetap ada di issue yang bersangkutan.
+
+## Di mana menemukannya
+
+Kotak masuk adalah sebuah bagian di panel **Work**, di bawah Pinned dan di atas Views dan Projects; bila tidak ada yang disematkan, kotak masuk menjadi bagian pertama. Header-nya memiliki tiga tab: **Kotak Masuk**, **Ditunda**, dan **Diarsipkan**. Hanya tab yang sedang terbuka yang menampilkan namanya; dua lainnya berupa ikon, yang namanya muncul saat Anda mengarahkan kursor. Pilih lagi tab yang terbuka untuk menciutkan bagian tersebut. Jumlah belum dibaca muncul di samping **Kotak Masuk** dan sebagai lencana pada **Work** di app rail; klik kanan **Work** untuk **Tandai semua sudah dibaca**.
+
+Tab **Kotak Masuk** menampilkan satu baris per issue, yang terbaru di atas, baik yang sudah maupun belum dibaca. Sebuah baris menampilkan status issue, judulnya, dan waktunya; titik menandai bahwa baris itu belum dibaca. Matikan **Baris ringkas** di pengaturan tampilan untuk menambahkan siapa melakukan apa pada baris kedua. Arahkan kursor ke sebuah baris untuk melihat kartu berisi judul lengkap, komentar, serta **Buka**, **Tandai sudah dibaca** (atau **Tandai belum dibaca** bila sudah dibaca), **Tunda**, dan **Arsipkan**. Klik kanan sebuah baris untuk **Buka di tab baru**, **Tandai sudah dibaca** / **Tandai belum dibaca**, **Arsipkan** (atau **Batalkan pengarsipan** di tab Diarsipkan), **Berhenti berlangganan & arsipkan**, dan **Hapus**.
+
+Di ponsel, panel Work berada di drawer. Bagian Inbox-nya diakhiri dengan **Semua notifikasi**, yang membuka halaman Kotak Masuk dengan daftarnya sendiri, tiga tab yang sama, dan filter.
+
+## Apa yang masuk ke kotak masuk
+
+Notifikasi yang umum meliputi:
+
+- sebuah issue ditugaskan kepada Anda, atau dipindahkan dari Anda;
+- sebuah issue yang Anda ikuti mendapat komentar baru, atau penerima tugas, prioritas, atau tanggalnya berubah (pada issue milik orang lain, secara default hanya pembaruan penting; lihat di bawah);
+- sebuah issue yang Anda ikuti berubah status, setelah Anda mengaktifkan **Perubahan status**, yang nonaktif secara default;
+- seseorang @-mention Anda di deskripsi atau komentar sebuah issue;
+- sebuah issue atau komentar yang Anda buat mendapat reaksi;
+- sebuah eksekusi agent gagal pada issue yang Anda ikuti;
+- sebuah issue dibuat di project yang Anda ikuti;
+- [membuat issue lewat agent](/issues#create-with-agent) selesai atau gagal;
+- sebuah autopilot yang Anda ikuti membuat issue baru, atau dihentikan sementara setelah gagal berturut-turut.
+
+Tindakan Anda sendiri tidak memberi notifikasi kepada Anda. Beberapa notifikasi pada issue yang sama digabung menjadi satu baris; buka untuk melihat perubahan terbaru pada issue tersebut.
+
+## Sumber subscription otomatis
+
+Partisipan berikut otomatis berlangganan sebuah issue:
+
+- pembuat issue tersebut;
+- penerima tugas yang baru;
+- siapa pun yang berkomentar;
+- siapa pun yang baru di-@-mention di deskripsi issue;
+- subscriber yang sudah dikonfigurasi sebelumnya pada sebuah autopilot.
+
+Mengubah penerima tugas tidak menghapus subscription yang sudah ada. Berlangganan atau berhenti berlangganan kapan saja di halaman issue; setelah berhenti berlangganan, update biasa tidak lagi masuk ke kotak masuk Anda, sementara @-mention langsung tetap memberi notifikasi kepada Anda secara individual.
+
+<Callout type="info">
+Dengan **Perubahan status** aktif, perubahan status sebuah sub-issue juga memberi notifikasi kepada subscriber issue induknya. Komentar, prioritas, dan perubahan tanggal pada sub-issue tidak menyebar ke issue induk.
+</Callout>
+
+## Issue milik orang lain
+
+Pada issue yang ditugaskan ke orang lain atau agent-nya, subscription yang Anda peroleh karena membuat, berkomentar, atau di-mention di dalamnya secara default hanya membawa pembaruan penting: @-mention, balasan di thread yang Anda ikuti, dan, dengan **Perubahan status** aktif, status yang memerlukan seseorang, seperti `in_review`, `blocked`, atau `done`. Komentar rutin dan perubahan lain tetap berada di issue. Issue yang Anda ikuti sendiri, issue yang Anda ikuti lewat project-nya, dan issue yang ditugaskan kepada Anda atau agent Anda tetap membawa semua jenis notifikasi yang Anda aktifkan.
+
+Halaman issue menandai subscription semacam itu dengan **Hanya pembaruan penting**. Menunya menawarkan **Dapatkan semua aktivitas**, yang mengubahnya menjadi subscription eksplisit ke issue ini; setelah itu tidak ada jalan kembali ke pembaruan penting untuk issue tersebut, hanya berhenti berlangganan. **Ubah default** membuka **Pengaturan → Notifikasi**, tempat **Tugas milik orang lain**, di bagian atas **Tugas yang Anda ikuti**, mengalihkan semua issue semacam itu ke **Semua aktivitas**.
+
+## Agent dan kotak masuk
+
+Notifikasi kotak masuk adalah milik anggota workspace. Sebuah agent boleh membaca dan mengubah notifikasi pemilik runtime hanya bila server memverifikasi bahwa pemilik tersebut adalah manusia hulu (upstream) yang memicu eksekusi. Identitas ini mengikuti rantai delegasi agent. Aturan ini mencakup setiap tindakan kotak masuk: daftar aktif, diarsipkan, dan ditunda, jumlah belum dibaca, dan setiap perubahan. Eksekusi yang dipicu orang lain atau tanpa manusia yang dapat diverifikasi, serta kredensial cloud-node tanpa task binding, ditolak. Jumlah belum dibaca milik agent hanya mencakup workspace tempat eksekusinya berada, tidak pernah workspace lain milik pemilik. Hanya manusia yang dapat menghapus notifikasi. Server mencatat setiap perubahan yang dilakukan agent, beserta agent, eksekusi, dan orang yang diwakilinya.
+
+@-mention seorang agent di komentar, menugaskan sebuah issue kepadanya, atau memicu sebuah autopilot langsung membuat eksekusi; tidak ada notifikasi yang ditinggalkan untuk agent. `@all` hanya memberi notifikasi kepada anggota.
+
+## Mengelola dari CLI
+
+Gunakan login CLI Anda yang sudah ada untuk membaca dan menangani notifikasi Anda. Menampilkan daftar tidak pernah menandai apa pun sebagai sudah dibaca:
+
+```sh
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # or --snoozed
+```
+
+Setiap baris menampilkan ID notifikasi, issue key, jenis, dari siapa, judul, dan ringkasan singkat komentar atau perubahan. `--unread`, `--issue` (issue key atau UUID), `--since` (waktu RFC 3339 atau durasi seperti `2h`, `1d`, `1w`), `--project`, dan `--type` memfilter daftar. `--archived` membaca seluruh arsip halaman demi halaman, sehingga issue yang diarsipkan lama masih dapat ditemukan dan dipulihkan. `--project` menerima UUID lengkap atau prefix ID yang unik, termasuk ID pendek dari `multica project list`; tidak ada yang cocok atau prefix yang ambigu menghasilkan error. Tabel juga menyimpan ID issue, komentar, dan project serta memotong ringkasan; `--output json` memuat ringkasan lengkap.
+
+Tangani notifikasi berdasarkan ID yang ditampilkan daftar:
+
+```sh
+multica inbox read <id>...                      # unread <id>... reverses it
+multica inbox read --issue MUL-123              # every notification on one issue
+multica inbox archive <id>...                   # unarchive <id>... restores
+multica inbox snooze <id>... --until tomorrow   # RFC 3339, 30m, 3h, 1d, 1w; unsnooze <id>... ends it
+```
+
+Seperti di aplikasi, membaca, mengarsipkan, atau menunda sebuah notifikasi pada sebuah issue berlaku untuk seluruh issue, sedangkan menandai belum dibaca hanya mengubah notifikasi itu. Kegagalan pada satu ID tidak menghentikan yang lain; command melaporkan mana yang gagal dan keluar dengan kode non-nol.
+
+Aksi massal sesuai dengan menu kotak masuk: `multica inbox read --all`, dan `multica inbox archive` dengan `--all`, `--read` (issue yang notifikasi terbarunya sudah dibaca), atau `--completed` (issue berstatus `done` atau `closed`). Aksi ini memerlukan `--yes`, atau konfirmasi yang diketik saat dijalankan manual, dan membiarkan issue yang ditunda, kecuali `--completed`: seperti di aplikasi, aksi ini juga mengarsipkan issue yang selesai atau closed saat sedang ditunda, sehingga penundaan berakhir. Setiap perubahan melaporkan berapa banyak notifikasi yang benar-benar berubah, termasuk seluruh issue; yang sudah dalam keadaan itu dihitung 0. `--output json` mengembalikan hitungan yang sama, beserta hasil untuk setiap ID. Notifikasi tidak dapat dihapus dari CLI.
+
+Eksekusi agent yang diotorisasi menggunakan kredensial task-nya untuk semua ini; tidak pernah fallback ke login seseorang.
+
+## Menangani notifikasi
+
+Klik sebuah baris untuk membuka notifikasi di halaman Kotak Masuk, tepat pada komentar yang dimaksud. Setiap notifikasi terbuka di sana, termasuk yang tanpa issue, seperti penghentian sementara autopilot dan hasil quick-create. Baris tetap menyala selama terbuka, dan mengkliknya lagi membawa Anda kembali ke titik itu. Membukanya menandai notifikasi sebagai sudah dibaca, dan baris tetap berada di daftar. Di header issue, **Buka halaman issue** (↗) membuka issue di halamannya sendiri, tanpa aksi kotak masuk; di ponsel, panah kembali membawa Anda ke daftar.
+
+<InboxDemo />
+
+Sekelompok aksi melayang di atas kotak komentar, terpusat pada issue. Kelompok ini menawarkan apa yang biasanya menyelesaikan notifikasi, aksi milik issue lebih dulu, lalu milik notifikasi, masing-masing dengan pintasannya di sampingnya:
+
+- **Status**, **Assignee**, dan **Quick actions** mengubah issue itu sendiri, seperti yang dilakukan propertinya. Quick actions muncul setelah workspace Anda memilikinya.
+- **⋯** berisi yang lebih jarang digunakan:
+  - **Tandai belum dibaca / Tandai sudah dibaca** (`U`) mengalihkan status dibaca notifikasi yang terbuka di tempat tanpa menutupnya.
+  - **Berhenti berlangganan & arsipkan** (`⇧E`) ditawarkan pada issue yang bukan milik Anda: tidak ditugaskan kepada Anda atau agent milik Anda. Aksi ini berhenti berlangganan dari issue, mengarsipkan notifikasi, dan membuka yang berikutnya. Update biasa tidak lagi masuk ke kotak masuk Anda, sementara @mention tetap masuk. Pada issue yang memiliki sub-issue, menu menampilkan dua pilihan, issue ini saja atau issue ini beserta semua sub-issue-nya, dan `⇧E` membukanya. Untuk issue ini saja, konfirmasi menawarkan **Urungkan**, yang memulihkan subscription seperti semula. Berhenti dari sub-issue juga tidak dapat diurungkan di sana; berlangganan lagi di halaman issue. Aksi yang sama ada di kartu hover dan di menu klik kanan sebuah baris.
+- **Tunda** (`H`) mengeluarkan issue dari kotak masuk Anda sampai waktu yang Anda pilih, dan membuka yang berikutnya. Lihat [Menunda sebuah issue](#menunda-sebuah-issue) di bawah.
+- **Arsipkan** (`E`), tombol berwarna penuh di ujung, mengarsipkan notifikasi dan membuka yang berikutnya. Mengarsipkan tidak mengubah atau menghapus issue. Untuk menyelesaikan issue, ubah statusnya; secara default itu juga mengarsipkan notifikasinya (lihat [Saat sebuah notifikasi keluar dari kotak masuk](#saat-sebuah-notifikasi-keluar-dari-kotak-masuk)).
+
+Saat jendela sempit, pintasan mengalah lebih dulu, lalu nama; arahkan kursor ke sebuah tombol untuk melihat keduanya.
+
+Yang berikutnya adalah baris berikutnya yang dicantumkan bagian ini di bawah filternya saat ini, sehingga Anda dapat menelusuri kotak masuk tanpa kembali ke daftar. Tekan `J` dan `K` untuk berpindah ke notifikasi berikutnya atau sebelumnya di tab saat ini tanpa mengarsipkan.
+
+**Filter**, di menu ⋯ bagian ini pada tab **Kotak Masuk** dan **Diarsipkan**, menyaring daftar berdasarkan jenis notifikasi, kapan diterima, dan dari siapa, atau berdasarkan status dan prioritas issue. Selama filter diatur, tombol filter dengan jumlahnya muncul di header bagian dan membukanya kembali; **Hapus filter** mengatur ulangnya.
+
+Pada tab **Kotak Masuk**, menu ⋯ bagian ini berisi aksi massal:
+
+- **Tandai semua sudah dibaca**;
+- **Arsipkan semua yang sudah dibaca**;
+- **Arsipkan yang selesai**, untuk issue dalam kategori `done` atau `closed`;
+- **Arsipkan semua** (meminta konfirmasi sebelum mengarsipkan semua notifikasi aktif; issue yang ditunda dibiarkan).
+
+Tab **Diarsipkan** menampilkan notifikasi yang diarsipkan. Lebih banyak data dimuat saat Anda menggulir, dan filter berlaku untuk seluruh arsip, termasuk data yang belum dimuat. Notifikasi yang diarsipkan mempertahankan status dibacanya, sehingga **Kembalikan ke Kotak Masuk**, di baris atau di kelompok aksi di atas yang terbuka (atau `E`), mengembalikannya tepat seperti saat Anda meninggalkannya.
+
+## Menunda sebuah issue
+
+Tunda mengeluarkan issue dari kotak masuk Anda sampai waktu yang Anda pilih, lalu mengembalikannya di atas, belum dibaca. Tunda dari **Tunda** di kelompok aksi di atas issue (atau tekan `H`), dari tombol di samping Arsipkan saat Anda mengarahkan kursor ke sebuah baris, atau dari kartu hover sebuah baris. Pilih **1 jam**, **3 jam**, **1 hari**, **3 hari**, atau **1 minggu**, atau **Pilih tanggal dan waktu...** untuk waktu mana pun dalam satu tahun. Satu hari atau lebih mempertahankan waktu hari saat ini, kecuali yang dipilih antara pukul 22:00 dan 6:00, yang kembali pukul 9:00. Konfirmasi memungkinkan Anda mengurungkan (`Z`); mengurungkan perubahan waktu mengembalikan waktu sebelumnya.
+
+Selama sebuah issue ditunda:
+
+- notifikasi baru padanya menunggu bersamanya dan tidak dihitung ke lencana belum dibaca. Saat kembali, baris menampilkan **Penundaan berakhir** dan berapa banyak pembaruan yang masuk selama itu;
+- issue kembali lebih awal bila seseorang me-mention Anda secara langsung, issue ditugaskan kepada Anda, sebuah eksekusi gagal, atau semua sub-issue-nya selesai. Mention `@all` tidak membangunkannya;
+- **Tandai semua sudah dibaca** dan aksi arsipkan-semua membiarkannya. Mengarsipkannya mengakhiri penundaan, begitu juga menyelesaikan issue sendiri selama **Arsipkan issue yang Anda tangani** menghitung penyelesaian (secara default demikian);
+- membuka halaman issue itu sendiri tidak membacanya atau mengakhiri penundaan. Buka dari tab **Ditunda** dan kelompok aksi di atasnya menampilkan kapan issue kembali; **Ubah waktu** di sana mengembalikannya sekarang (`H`) atau memilih waktu lain.
+
+Tunda bersifat pribadi: hanya mengubah kotak masuk Anda sendiri. Semua yang Anda tunda ada di tab **Ditunda**, tempat tombol pada setiap baris mengembalikannya sekarang.
+
+Jika tab **Ditunda** tidak dapat dimuat, pilih **Coba lagi**. Item yang sebelumnya sudah dimuat tetap terlihat bila penyegaran gagal.
+
+## Saat sebuah notifikasi keluar dari kotak masuk
+
+Membaca sebuah notifikasi tidak menghapusnya. Sebuah baris keluar dari kotak masuk hanya bila:
+
+- Anda mengarsipkannya, dari barisnya, kartu hover, kelompok aksi di atas issue, atau aksi massal;
+- Anda menunda issue-nya. Ini bersifat sementara: issue kembali pada waktu yang Anda pilih, atau lebih awal saat ada yang memerlukan Anda. Lihat [Menunda sebuah issue](#menunda-sebuah-issue);
+- Anda menangani issue-nya sendiri, seperti dinyatakan oleh **Arsipkan issue yang Anda tangani** di **Pengaturan → Notifikasi**. Default-nya, **Saat Anda menyelesaikannya atau memicu agent**, menghitung memindahkan issue ke status `done` atau `closed`, dan tindakan apa pun yang benar-benar menyerahkan pekerjaan ke agent: berkomentar, menjalankan quick action, atau mengarahkan (steer) eksekusi yang aktif; menugaskan agent atau squad pada issue non-`backlog`; memindahkan issue yang ditugaskan ke agent atau squad keluar dari `backlog` (termasuk ke `todo`); berpindah ke langkah workflow dengan agent handler; menjalankan ulang task; atau memicu wakeup secara manual. Merapikan issue tanpa membangunkan agent — seperti memindahkan issue tanpa assignee dari `backlog` ke `todo`, memarkir penugasan agent di `backlog`, membatalkan penugasan, memposting komentar `/note`, menekan trigger, atau menabrak runtime yang terblokir — membiarkan notifikasi tetap di kotak masuk Anda. **Saat Anda menyelesaikannya** hanya menghitung `done` dan `closed`, **Jangan pernah** mematikan ini, dan **Kustom** memilih aksi satu per satu, termasuk membalas, memajukan status, menugaskan ulang, atau mengubah prioritas, project, tanggal, atau label, yang nonaktif secara default. Hanya notifikasi Anda sendiri pada issue itu yang diarsipkan, sudah dibaca atau belum. Saat orang lain atau agent melakukan hal yang sama, notifikasinya tetap di kotak masuk Anda, sehingga Anda tetap melihat kabarnya;
+- notifikasi tersebut adalah notifikasi **Eksekusi gagal** dan issue-nya berpindah ke status yang mengembalikannya kepada seseorang: `in_review`, status kustom dalam kategori `started`, atau status apa pun dalam kategori `done` atau `closed`. Ini mengarsipkan notifikasi Eksekusi gagal semua orang pada issue tersebut, siapa pun yang memindahkannya, dan tidak bergantung pada pengaturan di atas. `blocked` menjadi pengecualian: status ini juga mengembalikan issue, tetapi pekerjaannya masih terhambat, sehingga kegagalan sebelumnya masih layak dibaca.
+- kotak masuk Anda di workspace melewati 2.000 notifikasi. Kotak masuk menyimpan 2.000 yang terbaru dan tak lama kemudian mengarsipkan yang lebih lama, sudah dibaca atau belum. Notifikasi yang kembali dari penundaan atau yang Anda pulihkan dari arsip dihitung sejak waktu kembalinya. Notifikasi pada issue yang ditunda tidak dihitung dan dibiarkan.
+
+Jendela yang terbuka langsung menjatuhkan baris yang diarsipkan, kecuali yang sedang Anda buka. Saat notifikasinya keluar dari kotak masuk dengan sendirinya (Anda mengatur issue ke `done` dari statusnya, memicu agent padanya, jendela lain mengarsipkannya, atau sebuah edit mengeluarkannya dari filter bagian), baris tetap menyala di tempatnya dan kelompok aksi di atas issue berkata **Diarsipkan**. Arahkan kursor untuk melihat alasannya dan apa yang terjadi berikutnya, seperti *Diubah menjadi In Progress · Kembali ke Kotak Masuk saat ada aktivitas baru*. Saat Anda memicu agent, header issue menampilkannya sedang bekerja, sementara baris di sidebar diperbarui di tempat sampai Anda berpindah. Saat perubahan yang Anda buat dari kelompok aksi mengarsipkan notifikasi, kelompok tetap menampilkan **Status**, **Assignee**, dan **Quick actions** untuk perubahan berikutnya. **Urungkan** (`Z`) mengembalikan notifikasi, dan **Berikutnya** (`E`), kini tombol berwarna penuh, membuka baris berikutnya. Baris keluar setelah Anda berpindah, dan issue yang sedang berjalan tetap terlihat di bawah **Views → Working**. Bila itu notifikasi terakhir di kotak masuk Anda, tidak ada **Berikutnya**; `E` membuka kotak masuk yang sudah bersih.
+
+Saat Anda sendiri mengeluarkan baris yang terbuka, dari kelompok aksi di atas issue, barisnya, kartu hover, atau aksi massal yang mencakupnya, baris berikutnya terbuka. Jika tidak ada lagi yang bisa dibuka, halaman kotak masuk terbuka pada **Kotak Masuk bersih**. Halaman ini menyebut apa yang baru Anda lakukan, dengan **Urungkan** (atau `Z`) untuk mengembalikannya, dan menampilkan berapa banyak issue yang ditunda dan kapan yang berikutnya kembali. Bila filter menyembunyikan sisa kotak masuk Anda, halaman ini menyebut berapa banyak notifikasi yang tersisa dan menawarkan **Hapus filter dan lanjutkan** sebagai gantinya. Kembali akan mengembalikan ke issue. Mengarsipkan dan aksi massal dikonfirmasi dengan **Urungkan**, yang mengembalikan notifikasi dan membiarkan status issue apa adanya. Konfirmasi yang menawarkan **Urungkan**, untuk mengarsipkan, menunda, dan berhenti berlangganan, tampil selama 10 detik, dan selama konfirmasi tampil, `Z` mengurungkan aksi terakhir itu.
+
+Notifikasi berikutnya pada issue tersebut masuk lagi ke kotak masuk.
+
+**Pengaturan → Notifikasi → Keluar dari Kotak Masuk** berisi **Arsipkan issue yang Anda tangani** (**Jangan pernah**, **Saat Anda menyelesaikannya**, **Saat Anda menyelesaikannya atau memicu agent**, atau **Kustom**) dan tautan ke notifikasi yang diarsipkan.
+
+## Tampilan dan jenis notifikasi
+
+Tombol sliders di header bagian Inbox membuka pengaturan tampilannya, yang disimpan di perangkat ini:
+
+- **Baris ditampilkan**: 5, 10, atau 20; baris **Tampilkan lebih banyak** mencantumkan sisanya.
+- **Baris ringkas**: satu baris per entri, aktif secara default; bila dimatikan, baris menambahkan siapa melakukan apa pada baris kedua.
+- **Jumlah belum dibaca**: angka di samping judul bagian.
+- **Lencana belum dibaca pada Work**: lencana pada Work di app rail.
+
+Di bawahnya, **Beri tahu saya tentang** mengaktifkan atau menonaktifkan setiap jenis notifikasi. Ini adalah sakelar yang sama dengan **Pengaturan → Notifikasi**, yang mengelompokkannya menurut cara notifikasi sampai kepada Anda:
+
+| Grup | Jenis |
+|---|---|
+| **Tentang Anda** | Penugasan, Mention, Reaksi |
+| **Tugas yang Anda ikuti** | Perubahan status, Komentar, Prioritas & Tanggal tenggat |
+| **Proyek yang Anda ikuti** | Issue baru |
+| **Agent** | Aktivitas agent (eksekusi gagal) |
+
+**Perubahan status** mulai dalam keadaan nonaktif; setiap jenis lain mulai aktif. Jenis yang dimatikan tidak membuat notifikasi, dan menyalakannya kembali tidak memunculkan yang terlewat; perubahannya tetap tercatat pada issue. Beberapa jenis, seperti hasil quick-create dan penghentian sementara autopilot, berada di luar grup ini dan selalu dikirimkan. Notifikasi sistem dan browser mengontrol banner desktop dan tidak mengubah kotak masuk itu sendiri.
+
+Di bawah **Komentar**, **Sertakan serah terima squad** mencakup komentar pada issue sebuah squad yang digunakan leader dan agent-nya untuk saling menyerahkan pekerjaan: leader yang @-mention sebuah agent atau squad, dan agent yang melapor balik. Opsi ini mulai aktif; matikan untuk hanya menyimpan komentar yang ditujukan untuk manusia. Komentar yang @-mention Anda atau siapa pun, balasan agent terhadap komentar seseorang, eksekusi agent yang gagal, dan status yang memerlukan perhatian tetap masuk.
+
+## Langkah selanjutnya
+
+- [Komentar](/comments) — balasan, mention, dan thread diskusi.
+- [@-mention agent di komentar](/mentioning-agents) — notifikasi anggota vs. eksekusi agent.
+- [Autopilots](/autopilots) — konfigurasikan pembuatan pekerjaan otomatis dan subscriber default.

@@ -1,0 +1,628 @@
+---
+title: Menggunakan CLI
+description: Instal dan masuk ke CLI Multica, serta kelola ruang kerja, tugas, agent, dan runtime dari terminal.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+CLI Multica menghubungkan runtime lokal sekaligus mengelola ruang kerja, tugas, agent, dan otomatisasi dari terminal. Halaman ini membahas alur yang umum digunakan; flag yang didukung oleh versi yang Anda instal selalu ditentukan oleh `--help` masing-masing command.
+
+## Instalasi
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+Jika Homebrew sudah terinstal, Anda juga bisa menjalankan:
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+</Tab>
+<Tab value="Windows">
+
+Jalankan di PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+</Tab>
+</Tabs>
+
+Konfirmasi instalasi:
+
+```bash
+multica version
+```
+
+## Koneksi pertama
+
+Pilih layanan yang ingin Anda hubungkan:
+
+<Tabs items={["Multica Cloud", "Instance self-hosted"]}>
+<Tab value="Multica Cloud">
+
+```bash
+multica setup
+```
+
+</Tab>
+<Tab value="Instance self-hosted">
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+</Tab>
+</Tabs>
+
+`setup` menyimpan alamat server, membuka browser untuk menyelesaikan proses masuk, dan menjalankan daemon. Setelah selesai, periksa:
+
+```bash
+multica auth status
+multica daemon status
+```
+
+Jika Anda hanya perlu masuk kembali tanpa menimpa konfigurasi lain, jalankan `multica login`. Pada komputer tanpa browser, buat token akses pribadi di pengaturan web terlebih dahulu, lalu masukkan dengan:
+
+```bash
+multica login --token
+```
+
+Command ini meminta Anda menempelkan token di terminal, sehingga nilai lengkapnya tidak masuk ke histori shell.
+
+## Memilih ruang kerja
+
+Lihat daftar ruang kerja dan ganti ruang kerja default:
+
+```bash
+multica workspace list
+multica workspace switch <slug>
+```
+
+Command berikutnya menggunakan ruang kerja ini. Satu command tertentu dapat menimpanya dengan `--workspace-id`, atau Anda bisa mengatur `MULTICA_WORKSPACE_ID`.
+
+Undang anggota:
+
+```bash
+multica workspace member invite teammate@example.com
+multica workspace member invite admin@example.com --role admin
+```
+
+## Operasi tugas yang umum
+
+```bash
+# Lihat dan cari
+multica issue list
+multica issue get MUL-123
+multica issue search "kegagalan login"
+
+# Buat dan perbarui
+multica issue create --title "Perbaiki kegagalan login"
+multica issue status MUL-123 in_progress
+multica issue assign MUL-123 --to "Backend Agent"
+
+# Komentar dan eksekusi
+multica issue comment list MUL-123
+multica issue comment add MUL-123 --content "Periksa dulu tes regresi"
+multica issue comment update <comment-id> --expected-revision 2 --content "Periksa tes regresi dan catatan rilis"
+multica issue runs MUL-123
+```
+
+Baca deskripsi atau komentar yang panjang dari stdin agar tidak perlu menangani baris baru dan tanda kutip:
+
+```bash
+multica issue create --title "Catatan pembaruan" --description-stdin < notes.md
+multica issue comment add MUL-123 --content-stdin < review.md
+multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
+```
+
+Periksa, hentikan, atau ulangi satu eksekusi:
+
+```bash
+multica issue run-messages <task-id> --issue MUL-123
+multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
+```
+
+Tambahkan komentar ke eksekusi yang masih berjalan, alih-alih mengantrekan eksekusi lanjutan (hanya untuk eksekusi yang menerima pesan tambahan; Anda bisa mengarahkan agent tepat ketika komentar Anda memang dapat memulainya):
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
+```
+
+Jika `issue comment add` timeout atau koneksinya terputus, komentar mungkin sudah tersimpan. Di dalam eksekusi agent, menjalankan ulang command yang sama aman: CLI mengirim idempotency key yang diturunkan dari eksekusi, tugas, parent, konten, dan attachment, dan server mengembalikan komentar yang sudah tersimpan alih-alih memostingnya lagi. Di tempat lain, berikan `--idempotency-key <key>` yang sama pada setiap percobaan untuk mendapatkan perlindungan yang sama. Server lama mengabaikan key ini.
+
+Jika tugas terbuka dengan judul yang sama (tidak peka huruf besar/kecil, spasi berlebih diabaikan) sudah ada di bawah proyek dan parent yang sama, `issue create` menolak dan menunjuk ke tugas tersebut. Untuk tetap membuat tugas lain, tambahkan `--allow-duplicate`. Untuk menandai tugas sebagai duplikat dari tugas lain, jalankan `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+
+Untuk pengiriman PR secara berurutan, gunakan `issue create --title "..." --pr-auto-complete off` atau `issue update <id> --pr-auto-complete off` agar status tugas tersebut tetap ketika PR di-merge. Gunakan `--pr-auto-complete on` untuk mengembalikan aturan ruang kerja; ini berlaku pada event PR berikutnya. `issue pull-requests <id>` menampilkan override tugas, pengaturan ruang kerja, status target, dan status keputusan, bahkan tanpa PR yang terhubung. Server yang didukung menyimpan override saat pembuatan secara atomik; server lama menerima PUT lanjutan. Jika itu gagal, CLI melaporkan ID tugas yang dibuat dan command update untuk dicoba ulang, jadi jangan ulangi create.
+
+### Update massal
+
+Terapkan perubahan yang sama ke beberapa tugas, atau berikan satu key atau UUID tugas per baris dengan `--ids-stdin`:
+
+```bash
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA --dry-run
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA
+multica issue batch update MUL-123 MUL-124 --property "Severity=High" --unset-property Reviewer
+```
+
+`--add-label` dan `--remove-label` tidak mengubah label lain; `--clear-labels` menghapus label sebelum penambahan apa pun. `--property` mengatur nilai dan `--unset-property` menghapusnya; properti multi-nilai diganti secara keseluruhan. Status, assignee, proyek, tanggal, parent, dan stage juga didukung. Tambahkan `--no-start` untuk menerapkan perubahan tanpa memulai eksekusi agent.
+
+Setiap tugas mendapat hasilnya sendiri: `updated`, `unchanged`, atau `skipped` beserta alasannya. Jika ada tugas yang di-skip, command mencetak hasilnya dan keluar dengan kode bukan nol; perubahan yang berhasil tetap berlaku. Perbaiki dan coba ulang hanya tugas yang di-skip. `--dry-run` menampilkan pratinjau pemeriksaan dan perubahan yang dimaksud tanpa menulis.
+
+### Menghapus tugas
+
+Hapus satu tugas, atau berikan beberapa key tugas atau UUID lengkap untuk menghapusnya sekaligus:
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+Penghapusan bersifat permanen: komentar dan attachment dihapus, eksekusi yang sedang berjalan dibatalkan, eksekusi autopilot yang terkait digagalkan, tanda duplikat yang menunjuk ke tugas yang dihapus dibersihkan, dan sub-tugas dilepas tanpa dihapus. Setiap ID di-resolve sebelum konfirmasi; tugas yang tidak dikenal atau tidak dapat diakses membatalkan command sebelum penghapusan.
+
+Command ini meminta konfirmasi. `--yes` melewati prompt; tanpa itu, eksekusi non-interaktif yang tidak bisa menjawab akan gagal tanpa menghapus apa pun.
+
+`--dry-run` memeriksa apa yang akan dihapus, termasuk izin penghapusan, tanpa menulis atau meminta konfirmasi:
+
+```bash
+multica issue delete MUL-123 MUL-124 --dry-run --output json
+```
+
+### Timeline
+
+`issue get` menampilkan tugas sebagaimana kondisinya sekarang. `issue timeline` mencantumkan secara berurutan perubahan status, prioritas, assignee, judul, dan tanggal serta hasil eksekusi, bercampur dengan komentar, sehingga menjawab pertanyaan seperti "kapan pindah ke in_review" atau "sudah berapa lama tertahan di status ini":
+
+```bash
+multica issue timeline MUL-123 --action status_changed
+multica issue timeline MUL-123 --activity-only --output json
+multica issue timeline MUL-123 --since 2026-08-19T00:00:00Z
+```
+
+`--activity-only` membuang komentar dan mempertahankan setiap catatan aktivitas; `--action` hanya mengembalikan action yang diberikan, dapat diulang, dan otomatis mengaktifkan `--activity-only`. Server membatasi seberapa jauh ke belakang pembacaan; ketika hasilnya terpotong, peringatan dikirim ke stderr, dan durasi sebaiknya tidak disimpulkan darinya.
+
+### Membaca thread komentar yang panjang
+
+Pada tugas dengan banyak komentar, membacanya satu per satu menghabiskan banyak token bagi agent. Pindai thread terlebih dahulu, lalu buka yang Anda butuhkan:
+
+```bash
+multica issue comment list MUL-123 --roots-only --summary --output json --compact
+multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json --compact
+```
+
+- `--roots-only` hanya mengembalikan komentar tingkat atas, masing-masing dengan jumlah balasan dan waktu aktivitas terakhir.
+- `--summary` memotong setiap komentar menjadi pratinjau singkat.
+- `--compact` berlaku untuk output JSON dan membuang field yang tidak membawa informasi (seperti `issue_id` yang digemakan dan array kosong).
+- `--recent N` mengembalikan N thread dengan aktivitas terbaru beserta semua balasannya, yang bisa panjang.
+- Thread yang sudah resolved dilipat menjadi root dan kesimpulannya secara default; tambahkan `--full` untuk teks lengkap.
+
+Daftar juga bisa dipangkas ke field yang Anda butuhkan: `multica issue list --output json --fields id,identifier,title,status`. Pemfilteran dilakukan di CLI, jadi ini mengecilkan output dan konteks, bukan request.
+
+Untuk mendaftar tugas berdasarkan waktu pembaruan terakhir, berikan `--updated-since` dan `--updated-until` sebagai timestamp RFC3339. Server mengembalikan tugas yang `updated_at`-nya saat ini sama dengan atau setelah `since` dan sebelum `until`: `[since, until)`. Flag ini bekerja bersama filter, pengurutan, dan paginasi yang ada. Pertahankan batas yang sama di semua halaman; pembaruan bersamaan dapat mengubah kumpulan hasil karena paginasi tidak menyediakan snapshot.
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
+
+### Wakeup
+
+Wakeup memulai eksekusi biasa untuk agent ketika suatu event terjadi, suatu kondisi menjadi benar, atau waktu tertentu tiba. Aturan lengkapnya ada di [Wakeup tugas](/issue-wakeups).
+
+```bash
+multica issue wakeup events
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --event comment.created --filter-actor-type member --filter-actor-id <user-id> \
+  --instruction "When they reply, update the quote from their answer"
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --kind every --every 1h --expires-in 72h \
+  --instruction "Check whether the supplier has replied"
+multica issue wakeup list MUL-123
+multica issue wakeup runs MUL-123 <wakeup-id>
+```
+
+Membuatnya dari terminal sebagai member memerlukan `--agent-id`; agent yang membuatnya di dalam eksekusinya sendiri membangunkan dirinya sendiri secara default.
+
+## Wakeup chat [#chat-wakeups]
+
+Hanya agent di dalam eksekusi chat yang dapat menggunakan `chat wakeup`; percakapan saat ini bersifat implisit. Command ini tidak menerima ID sesi dan tidak dapat digunakan dari terminal member biasa atau eksekusi tugas. Lihat [Tindak lanjut nanti](/chat#follow-up-later) untuk kontrol sisi pengguna.
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Gunakan tepat satu kondisi `--until-*`, `--at` / `--after`, atau `--every`. Pembuatan dan update memerlukan `--title` dan `--instruction` (atau `--instruction-file`). `update` mengganti konfigurasi dan memulai ulang tenggat relatif; command ini tidak dapat mengubah wakeup antara kondisi, pengingat, dan pemeriksaan. Kondisi dan pemeriksaan default ke 24 jam dan mengizinkan maksimal 7 hari melalui `--expires-in` atau `--expires-at`; pengingat mengizinkan maksimal 30 hari dan tidak menerima flag kedaluwarsa. Pemeriksaan berjalan dengan jarak minimal 10 menit, dan tenggat boleh mengizinkan maksimal 100 pemeriksaan: `--every 10m` dengan default 24 jam akan menjadi 144 pemeriksaan dan ditolak, jadi gunakan interval yang lebih panjang atau tenggat yang lebih awal seperti `--expires-in 16h`.
+
+Kondisi mendukung `--until-issue` dengan `--state` atau `--status`, `--until-children-done` dengan `--stage` opsional, `--until-pr`, `--until-run`, dan `--until-reply` dengan `--from <user-id>` opsional. Kondisi PR menggunakan PR GitHub yang dimirror di ruang kerja ini: `owner/repo#N[:merged|closed|checks]`. `checks` menunggu check selesai pada head saat ini, baik lulus maupun gagal. Kondisi `checks` hanya dapat dibuat ketika server membaca status CI dari GitHub; server self-hosted memerlukan `GITHUB_APP_ID` dan `GITHUB_APP_PRIVATE_KEY` (lihat [Integrasi GitHub](/github-integration)). Hasil check yang sudah selesai saat pembuatan dicatat sebagai baseline dan tidak langsung membangunkan agent.
+
+Gunakan `list`, `get <id>`, atau `cancel <id>` untuk memeriksa atau membatalkan wakeup. Selama pemeriksaan berkala, `checkin <id> --note "..."` mencatat pembaruan senyap tanpa mengirim balasan; `finish <id>` mengakhiri pemeriksaan ketika tujuannya tercapai. Giliran tenggat akhir harus melapor kembali dan tidak dapat check-in secara senyap.
+
+## Agent dan skill
+
+```bash
+multica agent list
+multica agent get <agent-id>
+multica agent create --help
+multica agent update <agent-id> --help
+
+multica skill list
+multica skill get <skill-id>
+multica skill import --url <skill-url>
+multica agent skills add <agent-id> --skill-ids <skill-id>
+```
+
+Ketika proses import menemukan skill dengan nama yang sama, perilaku default adalah berhenti tanpa mengubah konten yang sudah ada. Pilih sesuai maksud Anda:
+
+```bash
+multica skill import --url <skill-url> --on-conflict overwrite
+multica skill import --url <skill-url> --on-conflict rename
+multica skill import --url <skill-url> --on-conflict skip
+```
+
+`overwrite` hanya diizinkan untuk pembuat skill tersebut dan tetap mempertahankan ID asli serta binding ke agent.
+
+Environment variable dan konfigurasi MCP sering membawa token. Nilai yang diketik di command line tersimpan di histori shell dan output `ps`, jadi berikan melalui bentuk `-file` atau `-stdin`:
+
+```bash
+multica agent create --name "Ops helper" --runtime-id <runtime-id> \
+  --custom-env-file ./agent-env.json \
+  --mcp-config-file ./mcp.json \
+  --custom-args '["--max-turns", "40"]'
+
+multica agent env set <agent-id> --custom-env-stdin < agent-env.json
+multica agent update <agent-id> --mcp-config-file ./mcp.json
+```
+
+- Flag `--custom-env` hanya ada pada `agent create`. Ubah variabel nanti dengan `agent env set`, yang mengganti seluruh set; key yang nilainya `****` mempertahankan nilai yang ada.
+- `agent update --mcp-config null` menghapus konfigurasi MCP.
+- `--custom-args` adalah array JSON yang ditempatkan di akhir argumen peluncuran. Pilih model dengan `--model`; beberapa tool menolak `--model` di dalam argumen kustom.
+- `--permission-mode` mengontrol siapa yang dapat memanggil agent: `private` hanya untuk owner, atau `public_to` dengan `--public-to-workspace` atau `--public-to-member <user-id>`. `--visibility private|workspace` adalah bentuk lama dan dipetakan ke `--permission-mode`; ketika keduanya diberikan, `--permission-mode` yang dipakai.
+
+### Riwayat eksekusi agent
+
+`multica agent tasks <agent-id> --limit 200` mengembalikan halaman terbaru dari eksekusi.
+Ukuran halaman default dan maksimum adalah 200. Jika masih ada eksekusi lain, stderr menampilkan
+cursor; teruskan tanpa diubah sebagai `--before '<cursor>'` untuk membaca halaman berikutnya.
+`--output json` mempertahankan output array dan menyertakan usage hanya untuk halaman tersebut.
+
+Endpoint `GET /api/agents/{id}/tasks` yang terkait menerima `limit` dan
+`before`, dan tetap mengembalikan response array JSON. Header response `X-Agent-Tasks-Next-Cursor`
+menyediakan cursor berikutnya; jika tidak ada, berarti ini halaman terakhir.
+Cursor mempertahankan urutan `(created_at, id)`, termasuk presisi timestamp.
+Limit atau cursor yang tidak valid mengembalikan HTTP 400; limit di atas 200 akan dibatasi.
+Klien yang tidak mengikuti cursor hanya menerima 200 eksekusi terbaru.
+
+
+## Daemon dan runtime
+
+```bash
+multica daemon start
+multica daemon stop
+multica daemon restart
+multica daemon status --output json
+multica daemon logs --follow
+
+multica runtime list
+multica runtime rename <runtime-id> "Office Mac"
+multica runtime usage <runtime-id>
+multica runtime activity <runtime-id>
+```
+
+```bash
+multica daemon autostart enable
+multica runtime usage <runtime-id> --days 30
+multica runtime update <runtime-id> --target-version <version> --wait
+multica runtime profile create --display-name "Internal Claude wrapper" \
+  --command-name ccms --runtime-type claude
+```
+
+`daemon autostart` mendaftarkan profil saat ini agar berjalan saat login; lihat [Jalankan saat login](/daemon-runtimes#autostart) untuk detail per platform. `runtime usage` mencakup 90 hari secara default, dan `--days` hingga 365. `runtime update` meminta daemon di komputer tersebut untuk memperbarui CLI-nya ke versi yang diberikan. Berbeda dengan mengeklik **Update** di halaman **Runtimes** (yang [mengantre saat sibuk](/daemon-runtimes#updating-cli)), permintaan ini tidak diantrekan: jika mesin sedang menjalankan task, update gagal alih-alih menunggu. `--wait` menunggu hingga selesai dan keluar dengan kode bukan nol jika update gagal atau timeout, atau jika penantiannya sendiri timeout. `runtime profile create` menerima tool yang kompatibel melalui `--runtime-type` (`--protocol-family` yang lama tetap berfungsi); argumen tetap saat ini hanya dapat diatur di aplikasi web. `runtime profile create` mengikat profil ke mesin ini secara default; gunakan `--daemon-id <id>` untuk memilih mesin lokal terdaftar lainnya. Ikat profil lama yang tidak memiliki scope dengan `multica runtime profile update <profile-id> --daemon-id <id>`.
+
+Menghapus runtime yang masih memiliki agent aktif yang terikat padanya akan ditolak secara default. `multica runtime delete <id> --cascade` melepas ikatan agent tersebut, mempertahankan konfigurasi dan riwayatnya, serta membatalkan eksekusi aktifnya.
+
+Lihat [Daemon dan runtime](/daemon-runtimes) untuk cara kerjanya dan profil khusus.
+
+## Environments [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env` (bentuk panjang `multica environment`) memulai environment yang dideklarasikan repository di `.multica/environments.toml`. Daemon mengawasinya, sehingga tetap berjalan setelah eksekusi berakhir, tampil di sidebar tugas, dan berhenti pada TTL-nya. `start` menunggu hingga environment merespons dan mencetak URL-nya. Command ini memakai kredensial task yang sedang berjalan, jadi hanya berfungsi di dalam eksekusi agent; dari komputer Anda sendiri, gunakan sidebar tugas. Lihat [Environments](/environments) untuk format file dan contohnya.
+
+## Proyek, ruang kerja, dan autopilot
+
+```bash
+multica project create --title "Summer campaign" --lead "Lei Li" \
+  --repo https://github.com/acme/campaign-site
+multica project resource add <project-id> --type github_repo \
+  --url https://github.com/acme/brand-assets --default-branch-hint main
+
+multica workspace create --name "Operations" --slug ops --issue-prefix OPS
+multica workspace update --context-stdin < team-context.md
+
+multica autopilot create --title "Weekly sales report" --agent "Ops helper" \
+  --mode create_issue --issue-title-template "Sales report {{date}}"
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europe/London
+```
+
+- `--lead` menerima nama member atau agent. `--default-branch-hint` hanya memberi tahu agent branch default repository; ini tidak berpindah branch.
+- `--context` ruang kerja diberikan ke setiap agent di ruang kerja tersebut. `--slug` tidak dapat diubah setelah pembuatan. `--issue-prefix` diubah menjadi huruf besar; mengubahnya menomori ulang setiap tugas yang ada, dan identifier lama di referensi eksternal tidak lagi ter-resolve.
+- `--issue-title-template` hanya menginterpolasi `{{date}}` (UTC, `YYYY-MM-DD`) dan menolak token `{{...}}` lainnya. `--timezone` pada trigger schedule default ke UTC.
+
+### Filter event webhook [#webhook-event-filters]
+
+Gunakan `--event-filters-file` pada `autopilot trigger-add` atau `trigger-update` untuk mengonfigurasi filter event dan action pada trigger webhook. Simpan array JSON yang tidak kosong sebagai `filters.json`:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Setiap baris juga boleh menyertakan `conditions`, dengan aturan field payload yang sama seperti di aplikasi. Misalnya, baris ini hanya menerima pull request non-draft yang menargetkan `main`:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Setiap aturan mendukung hingga 20 kondisi. Path field dapat berisi maksimal 256 karakter, dan daftar `in` dapat berisi maksimal 100 nilai. Membuat atau memperbarui trigger dengan kondisi yang terlalu besar mengembalikan HTTP 400.
+
+Ini menerima pengiriman review PR dan semua event push. Menghilangkan `actions` atau memakai array actions kosong menerima setiap action untuk event tersebut.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+File tersebut menggantikan seluruh daftar filter saat update. Menghilangkan kedua opsi filter mempertahankan filter yang tersimpan, termasuk ketika memperbarui label atau mengaktifkan/menonaktifkan trigger. `autopilot get` mengembalikan filter di array `triggers` tingkat atas.
+
+Untuk menghapus semua filter dan menerima setiap event, gunakan flag khusus update:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` dan `--event-filters-file` tidak dapat digabungkan. `null` tingkat atas atau array kosong, field yang tidak dikenal, JSON yang rusak, dan nama event/action yang kosong ditolak. Opsi ini hanya berlaku untuk trigger webhook; membuat trigger tanpa file filter menerima semua event. Lihat [Autopilot](/autopilots#event-filters) untuk cara event masuk dicocokkan.
+
+## Ringkasan command
+
+| Command | Fungsi |
+| --- | --- |
+| `issue` | Membuat, memperbarui, menugaskan, dan mencari tugas; mengelola komentar, subscriber, label, properti, wakeup, timeline, dan eksekusi |
+| `project` | Mengelola proyek, resource-nya, dan workflow yang digunakan |
+| `inbox` | Membaca dan mengelola notifikasi Anda: daftar, tandai dibaca, arsipkan, snooze |
+| `workflow` | Mengelola workflow tugas: status dan siapa yang menangani masing-masing |
+| `issue-status` | Mengelola katalog status ruang kerja: status, warna, dan ikonnya |
+| `label`, `property` | Mengelola label ruang kerja dan properti khusus |
+| `quick-action` | Mengelola dan menjalankan quick action ruang kerja |
+| `view` | Membaca view tugas yang tersimpan dan mendaftar tugas yang ditampilkan view |
+| `agent`, `skill`, `squad` | Mengelola agent, skill, dan squad |
+| `autopilot` | Mengelola otomatisasi, trigger, dan riwayat eksekusi |
+| `workspace` | Membuat, melihat, dan beralih ruang kerja, serta mengundang anggota |
+| `repo` | Mengelola repository ruang kerja dan melakukan checkout secara lokal |
+| `daemon`, `runtime` | Menjalankan dan menghentikan daemon lokal; melihat dan mengelola runtime |
+| `env` | Memulai, menghentikan, dan mendaftar environment yang dideklarasikan repository (hanya di dalam eksekusi agent) |
+| `attachment` | Mengunggah atau mengunduh attachment |
+| `user profile` | Melihat atau memperbarui profil pengguna saat ini |
+| `auth`, `login`, `setup` | Masuk, memeriksa status autentikasi, dan menginisialisasi koneksi |
+| `config` | Melihat atau mengubah konfigurasi lokal profil CLI saat ini |
+| `update`, `version` | Memperbarui CLI atau menampilkan versi |
+
+`multica chat` membaca **sesi chat eksternal yang sedang ditangani oleh agent**; command ini terutama untuk agent dalam integrasi chat, bukan command umum untuk menelusuri percakapan ruang kerja apa pun.
+
+## ID dan format output
+
+Tugas menggunakan key seperti `MUL-123` atau UUID lengkap; prefix UUID yang dipersingkat tidak diterima.
+
+Command `list` untuk resource lain biasanya menampilkan ID singkat yang dapat disalin dan mendukung `--full-id` untuk UUID lengkap. Ketika ID singkat ambigu, CLI akan meminta karakter tambahan atau UUID lengkap. ID eksekusi (task) yang singkat juga memerlukan `--issue` untuk mengidentifikasi tugas pemiliknya.
+
+Banyak command mendukung output terstruktur:
+
+```bash
+multica issue list --output json
+multica agent list --output json
+```
+
+Script sebaiknya menggunakan output JSON daripada mem-parsing tabel yang ditujukan untuk terminal. Format output dan flag paginasi yang didukung masing-masing command ditentukan oleh `multica <command> --help`.
+
+## Profil dan konfigurasi
+
+Konfigurasi default berada di `~/.multica/config.json`. Gunakan `--profile <name>` untuk mengisolasi kumpulan alamat server, token, ruang kerja default, dan status daemon secara terpisah:
+
+```bash
+multica setup self-host --profile staging \
+  --server-url https://api.staging.example.com \
+  --app-url https://app.staging.example.com
+
+multica issue list --profile staging
+```
+
+Profil bernama berada di `~/.multica/profiles/<name>/config.json`. Periksa nilai saat ini:
+
+```bash
+multica config show
+multica config show --profile staging
+```
+
+Jangan mengatur `MULTICA_DAEMON_PORT` di shell host, Compose service, atau container entrypoint yang menjalankan daemon. Daemon host biasanya menentukan health port-nya dari `--profile`; jika port tersebut tidak dapat di-bind, daemon memakai port loopback yang tersedia dan menyuntikkan port sebenarnya ke dalam task agent sendiri. Hapus variabel ini sepenuhnya dari environment startup lama: jika tidak, versi 0.4.22 dan 0.4.23 akan salah mengira shell tersebut sebagai task yang dikelola dan menolak login. Versi yang lebih baru memungkinkan login manusia yang dijaga (guarded) dan `daemon status` untuk tetap berfungsi ketika port menjadi satu-satunya sinyal task, tetapi command API biasa dan command yang me-resolve profil tetap secara sengaja fail-closed hingga variabel tersebut dihapus.
+
+Saat CLI berjalan di dalam task agent yang dikelola daemon, CLI tidak memuat atau mengubah file profil milik manusia ini. Command API Multica melakukan autentikasi dengan kredensial yang dibatasi pada task (task-scoped) yang disuntikkan oleh daemon. `config show` dan `config set` menggunakan state privat yang bersifat lokal pada task; command manusia/lokal seperti `login`, `logout`, `setup`, `workspace switch`, perubahan path profil runtime lokal, `daemon start` / `stop` / `restart`, `daemon logs`, dan `daemon probe-runtimes` tidak tersedia. `auth status` tidak menampilkan materi token dalam konteks ini.
+
+`daemon status` dan `daemon disk-usage` tetap tersedia sehingga agent dapat memeriksa runtime yang menghostingnya, dibatasi pada runtime tersebut: `status` memeriksa health port yang disuntikkan daemon, dan `disk-usage` memindai root workspace yang disuntikkan daemon. Keduanya tidak menerima `--profile`; `disk-usage` juga menolak `--all-profiles` dan `--workspaces-root`, dan kolom STATUS-nya kosong karena me-resolve-nya akan memerlukan token tersimpan milik manusia. Gunakan `du` dan `df` untuk hal lain di luar lingkup ini.
+
+Ini melindungi resolusi profil CLI Multica yang bersifat implisit, sambil tetap mempertahankan variabel `HOME` dan XDG normal yang digunakan oleh tool penyedia lain. Ini bukan batas filesystem di level OS: proses yang berjalan sebagai pengguna sistem yang sama tetap dapat membuka path yang sudah diketahui secara eksplisit. Gunakan pengguna khusus, container, VM, atau isolasi setara jika jaminan yang lebih kuat tersebut diperlukan.
+
+<Callout type="warning">
+File konfigurasi CLI berisi token yang dapat mengakses Multica sebagai Anda. Jangan commit file ini ke repository, unggah ke log, atau bagikan ke orang lain.
+</Callout>
+
+## Referensi command
+
+Tabel berikut mencakup semua command tingkat atas (top-level) saat ini, dikelompokkan sama seperti pengelompokan di CLI itu sendiri. Semua command menerima flag global `--server-url`, `--workspace-id`, `--profile`, dan `--debug`. `--output` didaftarkan per command, dan format default-nya berbeda-beda: command `list` secara default menampilkan tabel, sedangkan command `get` dan `create` sebagian besar default ke JSON. Flag lengkap ditentukan oleh `multica <command> --help`.
+
+### Attachment tugas
+
+Untuk `issue create`, `issue update`, dan `issue comment add`, setiap `--attachment` menerima satu path file literal, termasuk koma atau tanda kutip ganda dalam nama file. Ulangi flag untuk beberapa file: `--attachment 'report,final.csv' --attachment notes.txt`. Tanpa flag ini tidak ada file yang dilampirkan; path kosong yang eksplisit adalah error. Semua path lokal diperiksa sebelum file apa pun diunggah.
+
+Migrasi dari parsing CSV: ganti `--attachment a,b` dengan `--attachment a --attachment b` untuk melampirkan dua file. Bentuk yang lama kini memilih satu file bernama `a,b`. Hapus tanda kutip CSV tambahan dari workaround lama `--attachment '"report,final.csv"'`; gunakan `--attachment 'report,final.csv'` kecuali nama filenya sendiri memang mengandung tanda kutip ganda tersebut.
+
+### Core
+
+| Command | Subcommand | Fungsi | Flag utama |
+| --- | --- | --- | --- |
+| `issue` | `list` | Menampilkan daftar tugas | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until` (batas RFC3339 berpasangan), `--metadata` (dapat diulang), `--property` (dapat diulang, `"Name=Value"` atau perbandingan seperti `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"`; `__none__` cocok dengan yang belum diatur), `--limit`, `--offset`, `--sort` (termasuk `property:<name-or-id>`), `--full-id`, `--fields` (hanya JSON; field yang dipertahankan, dipisahkan koma), `--resolve-properties` (hanya JSON; baris berisi nama properti, opsi, dan anggota di samping id yang tersimpan) |
+| | `get <id>` | Menampilkan satu tugas | `--resolve-properties` (hanya JSON; baris berisi nama properti, opsi, dan anggota di samping id yang tersimpan) |
+| | `create` | Membuat tugas | `--title` (wajib), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (dapat diulang), `--property` (dapat diulang), `--allow-duplicate` (membuat meskipun tugas terbuka dengan judul yang sama sudah ada) |
+| | `update <id>` | Memperbarui field tugas | Field yang sama seperti `create`, ditambah `--description-base-revision` (dari `issue get`; menolak penimpaan deskripsi yang usang), `--position`, `--no-start`, `--duplicate-of` |
+| | `edit-description <id>` | Mengganti teks yang persis sama di deskripsi tugas tanpa menulis ulang seluruh isi | `--old` / `--old-file` (wajib), `--new` / `--new-file` (wajib), `--replace-all` |
+| | `batch update <id>...` | Menerapkan satu perubahan ke beberapa tugas | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
+| | `delete <id>...` | Menghapus satu atau beberapa tugas secara permanen | `--yes` melewati konfirmasi; menerima key tugas atau UUID lengkap; `--dry-run` |
+| | `assign <id>` | Menugaskan atau membatalkan penugasan | `--to` (pencocokan nama secara fuzzy terhadap member, agent, dan squad), `--to-id`, `--unassign`, `--no-start` |
+| | `status <id> <status>` | Mengubah status | `--no-start`, `--duplicate-of` |
+| | `reorder <id>` | Memindahkan posisi dalam satu kolom | |
+| | `search <query>` | Mencari tugas | `--limit`, `--include-closed`, `--project` |
+| | `children <id>` | Menampilkan daftar sub-tugas yang dikelompokkan berdasarkan stage | |
+| | `pull-requests <id>` | Menampilkan daftar PR yang terhubung | |
+| | `pull-requests link <id> <pr-url>` | Menghubungkan PR tersinkron yang judul dan branch-nya tidak memuat key tugas | Juga memulihkan PR yang dihapus dengan `unlink` |
+| | `pull-requests unlink <id> <pr>` | Menghapus PR yang terhubung dan menjaganya tetap terhapus | `<pr>` adalah URL PR, nomornya, atau id-nya |
+| | `comment list/add/update/delete/resolve/unresolve` | Mengelola komentar | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`; `update`: `--expected-revision` (wajib), `--content` / `--content-stdin` / `--content-file`; `list`: `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
+| | `timeline <id>` | Menampilkan catatan aktivitas dan komentar berurutan menurut waktu | `--action` (dapat diulang), `--activity-only`, `--since`, `--tail` |
+| | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | Mengelola wakeup tugas; lihat [Wakeup tugas](/issue-wakeups) | `create` / `update`: `--agent-id`, `--kind` (`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, kondisi `--until-*`, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file`; `checkin`: `--note` |
+| | `subscriber list/add/remove <issue-id>` | Mengelola subscriber | `--user`, `--user-id` (default ke pengguna saat ini) |
+| | `label list/add/remove <issue-id>` | Mengelola label pada tugas | |
+| | `metadata list/get/set/delete <issue-id>` | Mengelola metadata key-value di level tugas | |
+| | `property list/set/unset <issue-id>` | Mengatur nilai properti khusus | `set`: `--name`, `--value` (`actor` / `multi_actor` menerima nama member, email, atau id) |
+| | `runs <issue-id>` | Melihat riwayat eksekusi | `--full-id` |
+| | `run-messages <task-id>` | Melihat pesan dari satu eksekusi | `--since`, `--issue` |
+| | `usage <issue-id>` | Melihat agregat penggunaan token | |
+| | `rerun-task <run-id>` | Mengulang eksekusi tertentu dengan agent asli dan konteks pemicunya | `--issue`, `--fresh` |
+| | `cancel-task <task-id>` | Membatalkan eksekusi yang sedang berjalan atau dalam antrean | `--issue` |
+| `project` | `get/create/update/delete` | Mengelola proyek | `create`: `--title` (wajib), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (dapat diulang), `--visibility` (`workspace` atau `private`), `--member` (dapat diulang, dengan `--visibility private`); `update`: `--visibility`, `--member` (menambahkan anggota baik proyek sedang menjadi privat maupun sudah privat) |
+| | `list` | Menampilkan dan memfilter proyek | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
+| | `overview <id>` | Mengembalikan proyek, progresnya, resource, agent yang berjalan, dan aktivitas terbaru dalam satu pembacaan | `--output` (`json` secara default, atau `table`) |
+| | `progress <id>` | Menampilkan progres proyek, riwayat mingguan, perkiraan, dan rinciannya | `--history`, `--by` (`assignee` atau `label`), `--output` (`table` atau `json`) |
+| | `activity <id>` | Menampilkan perubahan terbaru di seluruh tugas proyek, terbaru lebih dulu | `--limit`, `--before` (`next_cursor` dari output JSON), `--output` (`table` atau `json`) |
+| | `status <id> <status>` | Mengubah status proyek | |
+| | `archive/restore <id>` | Mengarsipkan atau memulihkan proyek. Proyek yang diarsipkan disembunyikan dari `list`, tidak menerima tugas baru, dan menjeda autopilot yang membuat tugas ke dalamnya | `list --archived` hanya menampilkan proyek yang diarsipkan |
+| | `resource list/add/update/remove` | Mengelola resource proyek | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` untuk direktori lokal) |
+| | `member list/add/remove` | Menampilkan, menambah, atau menghapus anggota proyek privat. Hanya anggota `owner`/`admin` dalam daftar dan pengelola akses proyek yang dapat menambah atau menghapus; agent tidak dapat mengubah akses | `add <project-id> <member>...`, `remove <project-id> <member>`; member berupa nama, email, atau user ID |
+| | `workflow get/set <project-id>` | Menampilkan workflow efektif proyek, atau menggantinya | `set <project-id> <workflow\|default>`: `--map old=new` (dapat diulang), `--dry-run` mencetak rencana migrasi status; penggantian tidak menugaskan ulang tugas maupun memulai eksekusi. Hanya admin dan lead proyek |
+| `workflow` | `list/get/create/update/delete` | Mengelola workflow; `get` dan command lain menerima ID, prefix ID, nama persis, atau `default`. Status yang dideklarasikan workflow adalah entri katalog ruang kerja, yang diedit dengan `issue-status` | `create` / `update`: `--name`, `--description`, `--steps-file` (array JSON berisi step; mengganti semua step); `update`: `--map old=new` (dapat diulang), `--dry-run`. Edit dan hapus dibatasi untuk owner workflow dan admin ruang kerja; workflow yang masih digunakan proyek tidak dapat dihapus |
+| | `handoff set <workflow> <status-key>` | Mengatur handler, instruksi, dan status berikutnya/sebelumnya untuk satu step; field yang tidak diubah dipertahankan | `--handler` (`none`, `project_lead`, `creator`, atau nama/UUID member/agent/squad), `--instructions` / `--instructions-file`, `--next`, `--back`, `--copy-for-project` |
+| `issue-status` | `list/get/create/update/archive` | Mengelola katalog status ruang kerja — status yang dipilih setiap workflow. Untuk mengubah status tugas saat ini, gunakan `issue status` | `create`: `--name`, `--category`, `--color`, `--key`, `--icon`; `update`: `--name`, `--description`, `--color`, `--icon` (kosong mengembalikan ke default kategori), `--position`; `list`: `--include-archived`. Perubahan memerlukan owner/admin ruang kerja |
+| `label` | `list/get/create/update/delete` | Mengelola label ruang kerja | `list`: `--resource-type` (`issue` atau `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` atau `skill`), `--description` |
+| `property` | `list/get/create/update/archive/unarchive` | Mengelola properti khusus ruang kerja | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (dapat diulang, hanya untuk tipe select); `list`: `--include-archived`; tipe tidak dapat diubah setelah dibuat |
+| `quick-action` | `list/get/create/update/archive/restore/delete/run` | Mengelola dan menjalankan [quick action](/quick-actions). Referensi menerima UUID, prefix UUID, atau nama persis; penulisan manajemen memerlukan member manusia (`public` memerlukan owner/admin ruang kerja) | `list`: `--include-archived`, `--full-id`; `create` / `update`: `--name`, `--description`, `--prompt` / `--prompt-file` / `--prompt-stdin`, `--agent` / `--squad` (atau `--clear-target` pada `update`), `--visibility` (`private` atau `public`; default `private` pada `create`), `--status` (`update`); `run <action> <issue>`: `--dry-run` menampilkan pratinjau tanpa memposting |
+| `view` | `list/get/issues/create/update/duplicate/delete` | Membaca view tersimpan yang dapat Anda buka (milik Anda dan yang dibagikan di ruang kerja); `issues` mendaftar apa yang ditampilkan view, dalam urutan tersimpannya, dengan setiap filter tersimpan diterapkan oleh server. `create`, `update`, `duplicate`, dan `delete` menulis view persis seperti yang disimpan aplikasi, sehingga tampil di sidebar dan tetap dapat diedit di sana; `update` hanya mengubah apa yang disebut flag-nya dan menolak menimpa view yang berubah sejak dibaca. Hanya owner, atau owner/admin ruang kerja untuk view yang dibagikan, yang dapat mengubah atau menghapusnya. Di dalam eksekusi agent, view dan kondisi "my" adalah milik owner runtime | `<view>` menerima ID, prefix ID, atau nama persis; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (maksimal 100), `--cursor` (`next_cursor` halaman sebelumnya), `--today` (hari yang menjadi acuan filter tanggal jatuh tempo relatif; default hari ini), `--fields` (hanya JSON), `--full-id`; `create`: `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility`; filter `create/update/duplicate`: `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--project-status`, `--relation`, `--due`, `--property "Name=Value"`, `--negate <filter>`, `--include-no-assignee`, `--include-no-project`, `--agent-running`, `--agent-idle`, `--unread`; tampilan: `--view-mode`, `--grouping`, `--table-grouping`, `--swimlane-grouping`, `--gantt-zoom`, `--sort`, `--direction`, `--show-sub-issues`; `--definition-file` (JSON `query`/`display`, misalnya output `view get` yang diedit), `--clear-filters` (update/duplicate), `--dry-run` |
+| `agent` | `list/get/create/update/archive/restore` | Mengelola agent | `--name`, `--runtime-id` (wajib untuk `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (hanya `create`), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (bentuk lama), `--max-concurrent-tasks` |
+| | `copy <agent-id>` | Menyalin ke agent baru; agent asli tidak diubah | `--name` (default ke nama asli ditambah ` (copy)`), `--runtime-id` (menyalin ke runtime lain juga memerlukan `--model`), `--no-skills`; konfigurasi rahasia seperti `custom_env`, `mcp_config`, dan `runtime_config` tidak ikut disalin — berikan ulang dengan flag yang sama seperti `create` |
+| | `tasks <id>` | Melihat eksekusi milik agent | |
+| | `avatar <id>` | Mengunggah avatar | |
+| | `env get/set <agent-id>` | Membaca dan menulis environment variable khusus (owner agent atau owner/admin ruang kerja; setiap pembacaan dicatat) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`; mengganti seluruh set, dan key yang nilainya `****` mempertahankan nilai yang ada |
+| | `skills list/set/add <agent-id>` | Mengelola skill yang terpasang | `--skill-ids` (`set` mengganti seluruh daftar, `add` menambahkan di akhir) |
+| | `mcp list/add/enable/disable/remove <agent-id>` | Menugaskan MCP server ruang kerja ke agent ini | Ambil server id dari `workspace mcp list`. Entri di library tidak berpengaruh apa pun sampai ditambahkan di sini; `disable` menghentikan pengirimannya tanpa menghapus penugasannya |
+| `autopilot` | `list/get/create/update/delete` | Mengelola otomatisasi | `create`: `--title`, `--mode` (keduanya wajib), tepat satu dari `--agent` / `--squad` / `--squad-id` (wajib), `--description`, `--issue-title-template`, `--project`, `--subscriber` (dapat diulang) |
+| | `trigger <id>` | Memicu eksekusi secara manual | |
+| | `runs <id>` | Melihat riwayat eksekusi | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Mengelola trigger schedule dan webhook | `trigger-add`: `--kind` (`schedule` atau `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
+| `workspace` | `list/get/create/update/switch` | Mengelola ruang kerja; `switch` mengatur ruang kerja default untuk profil saat ini; di dalam eksekusi agent, `list` hanya menampilkan ruang kerjanya sendiri | `create`: `--name`, `--slug` (keduanya wajib), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` mengubah field yang sama kecuali slug |
+| | `mcp list/add/update/remove` | Mengelola library MCP server milik ruang kerja | Penulisan (write) hanya untuk owner/admin. Server yang ditambahkan di sini belum ditugaskan ke agent mana pun — tugaskan ke salah satu agent dengan `multica agent mcp add`. `list` hanya menampilkan nama dan transport; entri yang tersimpan bersifat write-only dan tidak pernah dikembalikan. `--server-config-file` / `--server-config-stdin` menjaga token agar tidak masuk ke histori shell |
+| | `member list/invite <email>` | Melihat anggota, mengirim undangan | `invite`: `--role` (member atau admin, default member) |
+| `repo` | `list/add/remove/checkout` | Mengelola repository ruang kerja dan melakukan checkout secara lokal | `--url` (dapat diulang); `checkout`: `--ref` |
+| `skill` | `list/get/create/update/delete` | Mengelola skill | `get`: `--with-content` (secara default mengembalikan metadata dan `revision`); `update`: `--base-revision` (dari `skill get`; menolak penimpaan usang dengan HTTP 409) |
+| | `import` | Mengimpor skill dari URL atau file lokal | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default-nya `fail`) |
+| | `search <query>` | Mencari skill | |
+| | `files list/upsert/delete <skill-id>` | Mengelola file di dalam skill | `list`: `--with-content`; `upsert` / `delete`: `--base-revision` (menolak penimpaan usang dengan HTTP 409) |
+| | `label list/add/remove <skill-id>` | Mengelola label pada skill | `add` / `remove`: `<label-id>` menerima UUID lengkap atau prefix singkat |
+| `squad` | `list/get/create/update/delete` | Mengelola squad (`delete` akan mengarsipkan) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode` (`leader` atau `direct`; lihat [Mode kolaborasi](/squads#mode-kolaborasi)) |
+| | `briefs <squad>` | Menampilkan konteks squad yang diterima setiap anggota agent; memerlukan izin untuk mengelola squad | `--agent` (nama atau ID) |
+| | `member list/add/set-role/remove` | Mengelola anggota squad | |
+| | `activity <issue-id> <outcome>` | Mencatat evaluasi dari leader | |
+| `chat` | `history`, `thread [id]` | Membaca sesi chat eksternal yang sedang ditangani oleh agent | `--limit`, `--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Mengelola tindak lanjut di eksekusi chat saat ini; lihat [Wakeup chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
+| `inbox` | `list` | [Menampilkan daftar notifikasi Anda](/inbox) tanpa menandainya dibaca; `--archived` atau `--snoozed` menampilkan yang itu | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` atau `json`); `--archived` membaca setiap halaman |
+| | `count` | Jumlah belum dibaca di ruang kerja ini dan di setiap ruang kerja Anda; eksekusi agent hanya melihat ruang kerjanya sendiri | `--output` |
+| | `read [<id>...]` | Menandai notifikasi dibaca, seluruh tugas untuk masing-masing; atau setiap notifikasi pada satu tugas, atau semuanya | `--issue`, `--all` (memerlukan `--yes`) |
+| | `unread <id>...` | Menandai notifikasi belum dibaca | |
+| | `archive [<id>...]` | Mengarsipkan notifikasi, seluruh tugas untuk masing-masing; atau secara massal | `--all`, `--read`, `--completed` (masing-masing memerlukan `--yes`) |
+| | `unarchive <id>...` | Memulihkan notifikasi yang diarsipkan | |
+| | `snooze <id>...` | Mengeluarkan tugas setiap notifikasi dari inbox hingga waktu tertentu | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Mengembalikan tugas yang di-snooze sekarang juga | |
+
+### Runtime
+
+| Command | Subcommand | Fungsi | Flag utama |
+| --- | --- | --- | --- |
+| `daemon` | `start` | Menjalankan daemon lokal | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` berarti tanpa batas), `--max-concurrent-tasks`, `--no-auto-update`; masing-masing memiliki environment variable `MULTICA_*` yang sesuai |
+| | `stop` / `status` / `restart` | Menghentikan, memeriksa status, memulai ulang (`restart` menerima flag yang sama seperti `start`) | |
+| | `logs` | Melihat log daemon | `--follow`, `--lines` |
+| | `disk-usage` | Melihat penggunaan disk lokal | `--by-workspace`, `--by-task`, `--top` |
+| | `autostart enable/disable/status` | Mendaftarkan atau menghapus start-at-login untuk profil saat ini | `status`: `--output` |
+| `runtime` | `list/usage/activity/update/rename/delete` | Melihat dan mengelola runtime | `usage`: `--days` (default 90, maksimal 365); `update`: `--target-version` (wajib), `--wait`; `delete`: `--cascade` (melepas ikatan agent, mempertahankan datanya, dan membatalkan eksekusinya) |
+| | `profile list/create/update/delete` | Mengelola profil runtime khusus | `create`: `--display-name`, `--command-name` (keduanya wajib), `--runtime-type` (atau `--protocol-family` yang lama), `--description`; `update`: `--enabled` |
+| | `profile set-path/unset-path <profile-id>` | Menetapkan path executable lokal (hanya lokal, tidak pernah diunggah ke server) | |
+| `env` | `start <name>` / `stop <name>` / `list` | Memulai, menghentikan, atau mendaftar environment yang dideklarasikan tugas ini; hanya di dalam eksekusi agent. Lihat [Environments](/environments) | `start`: `--wait` (default `true`); semua: `--output` (`table` atau `json`) |
+
+### Additional
+
+| Command | Subcommand | Fungsi | Flag utama |
+| --- | --- | --- | --- |
+| `auth` | `status` / `logout` | Memeriksa status autentikasi; `logout` hanya menghapus token yang tersimpan secara lokal dan tidak mencabutnya di server | |
+| `user` | `profile get/update` | Melihat atau memperbarui profil pengguna saat ini | |
+| `login` | — | Masuk melalui browser dan mengonfigurasi semua ruang kerja secara otomatis | `--token` (meminta input secara interaktif di terminal ketika diberikan tanpa nilai) |
+| `setup` | `cloud` (default), `self-host` | Menyimpan alamat server, menyelesaikan proses masuk, dan menjalankan daemon | `self-host`: `--server-url`, `--app-url`, `--port`, `--frontend-port` |
+| `attachment` | `download <attachment-id>`, `upload <path>` | Mengunduh atau mengunggah attachment | `download`: `--output-dir`; `upload`: `--task` |
+| `config` | `show`, `set <key> <value>` | Melihat atau mengubah konfigurasi lokal profil saat ini | Urutan prioritas: flag command-line > environment variable > `config.json` > default bawaan; atur dengan string kosong untuk menghapus nilai |
+| `update` | — | Memperbarui CLI ke versi terbaru | |
+| `version` | — | Menampilkan informasi versi | `--output` (`text` atau `json`) |
+
+## Mengoperasikan Multica dari agent coding lain
+
+Jika sebagian besar pekerjaan Anda sudah berlangsung di Codex, Claude Code, atau Cursor, Anda
+dapat mengoperasikan Multica dari sana tanpa perlu beralih ke terminal. [Skill Multica CLI](https://github.com/multica-ai/multica-cli)
+mengajarkan agent tersebut untuk menjalankan command di halaman ini secara aman: membaca tugas dan thread
+komentar tanpa menghabiskan token secara berlebihan, menulis komentar melalui file, dan menangani
+efek samping yang dibawa oleh mention, perubahan status, dan penugasan.
+
+Skill ini berjalan sepenuhnya melalui CLI Anda yang sudah terautentikasi dan tidak memberikan akses sendiri —
+izin tetap berasal dari login, profil yang dipilih, dan ruang kerja Anda. Dibutuhkan CLI v0.4.26 atau
+yang lebih baru. README repository menjelaskan instalasi untuk Claude Code plugin marketplace, installer
+skill Codex, Cursor, dan tool lain apa pun yang memuat instruksi Markdown.
+
+## Langkah selanjutnya
+
+- [Skill Multica CLI](https://github.com/multica-ai/multica-cli) — mengoperasikan Multica dari Codex, Claude Code, atau Cursor.
+- [Autentikasi dan token](/auth-tokens) — membuat, memperbarui, dan mencabut PAT.
+- [Pemecahan masalah](/troubleshooting) — mendiagnosis error command dan eksekusi yang tidak pernah dimulai.
+- [Membuat dan mengonfigurasi agent](/agents-create) — semantik lengkap setiap field `agent create`.

@@ -21,6 +21,7 @@ function matchSupportedLocale(raw: string): SupportedLocale {
   if (lang === "fr") return "fr";
   if (lang === "es") return "es";
   if (lang === "ru") return "ru";
+  if (lang === "id") return "id";
   return "en";
 }
 
@@ -65,6 +66,17 @@ export const DESKTOP_EMERGENCY_COPY: Record<
     configDescriptionAfter: string;
   }
 > = {
+  id: {
+    crashTitle: "Terjadi kesalahan",
+    crashDescription:
+      "Multica mengalami error yang tidak terduga dan tidak dapat terus menampilkan halaman. Memuat ulang biasanya memulihkan masalah ini — pekerjaan Anda tersimpan di server.",
+    crashFallbackError: "Terjadi error yang tidak terduga.",
+    reload: "Muat ulang",
+    configTitle: "Kesalahan konfigurasi desktop",
+    configDescriptionBefore: "Multica tidak dapat memuat ",
+    configDescriptionAfter:
+      ". Perbaiki atau hapus file tersebut, lalu mulai ulang aplikasi.",
+  },
   en: {
     crashTitle: "Something went wrong",
     crashDescription:

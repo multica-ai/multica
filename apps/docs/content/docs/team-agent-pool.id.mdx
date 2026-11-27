@@ -1,0 +1,89 @@
+---
+title: Berbagi pool agent dalam sebuah tim
+description: Cara beberapa developer berbagi satu pool AI coding agent, mengatur siapa yang boleh menjalankan masing-masing agent, menyerahkan pekerjaan antara orang dan agent, serta melihat apa yang sedang dikerjakan setiap agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Panduan ini ditujukan untuk tim beberapa developer yang ingin berbagi AI coding agent, bukan masing-masing menjalankan agent sendiri di terminal. Panduan ini merangkai fitur-fitur yang didokumentasikan di halaman terpisah: [role](/members-roles), [Access](/agents#izin-dan-akses) agent, [berbagi runtime](/daemon-runtimes#private-and-public-runtimes), [squad](/squads), dan [workflow](/workflows).
+
+Di workspace Multica, anggota dan agent bekerja dari issue yang sama. Setiap issue dapat ditugaskan ke seseorang, sebuah agent, atau sebuah squad; agent memposting progres sebagai komentar, memindahkan issue ke `in_review` saat menyerahkan hasil, dan setiap eksekusi dicatat pada issue.
+
+## Fungsi setiap bagian
+
+| Tim Anda perlu | Gunakan | Diatur di |
+|---|---|---|
+| Melihat semua pekerjaan, oleh manusia maupun agent, di satu tempat | Satu workspace, dengan tata letak list, board, table, Gantt, dan swimlane | [Issues](/issues) |
+| Menentukan siapa yang termasuk dalam workspace dan apa yang boleh mereka kelola | Role: `owner`, `admin`, `member`, dan guest yang dibatasi per proyek | [Anggota dan role](/members-roles) |
+| Menentukan siapa yang boleh menjalankan agent tertentu | Access milik agent: **Only me**, **Entire workspace**, atau **Specific people** | [Agents](/agents#izin-dan-akses) |
+| Berbagi komputer tempat agent berjalan | Runtime privat, publik, atau yang dibagikan ke anggota | [Berbagi runtime](/daemon-runtimes#private-and-public-runtimes) |
+| Mengirim pekerjaan ke agent yang tepat tanpa memilih satu per satu | Sebuah squad, yang agent leader-nya mengarahkan setiap issue | [Squads](/squads) |
+| Meneruskan pekerjaan dari agent ke reviewer dan kembali | Status review, komentar, dan handoff workflow | [Workflows](/workflows) |
+| Menggunakan kembali metode tim di berbagai agent | Skill yang dilampirkan ke agent | [Skills](/skills) |
+| Menjalankan pekerjaan berulang tanpa ada yang memulainya | Autopilot dengan schedule atau webhook | [Otomatisasi](/autopilots) |
+| Memantau biaya dan kegagalan | Laporan penggunaan dan error per agent | [Analytics](/analytics) |
+
+## Contoh: tim engineering beranggotakan 10 orang
+
+Langkah-langkah di bawah ini menyiapkan tim sepuluh developer yang berbagi tiga agent. Sesuaikan nama dan angkanya dengan tim Anda.
+
+1. **Buat workspace dan undang anggota.** Seorang `owner` atau `admin` mengundang para developer sebagai `member` dan satu atau dua lead sebagai `admin`. Kontraktor yang hanya perlu mengikuti satu proyek bergabung sebagai [guest](/members-roles#guests) dengan proyek tersebut dibagikan kepadanya.
+2. **Hubungkan komputer.** Setiap developer yang ingin agent berjalan di mesinnya sendiri membuka [Multica Desktop](/desktop-app), yang mendaftarkannya sebagai runtime. Untuk agent yang diandalkan seluruh tim, hubungkan mesin bersama, seperti VM cloud, dengan `multica setup`, lalu minta pemiliknya menjadikan runtime itu publik atau membagikannya ke anggota tertentu. Membagikan runtime memungkinkan orang lain menjalankan agent di sana; ini tidak membagikan login AI coding tool.
+3. **Buat agent bersama.** Misalnya agent **Frontend** di Claude Code, agent **Backend** di Codex, dan agent **Reviewer** di tool lain, semuanya di runtime bersama. Berikan instruksi dan [skill](/skills) tim. Atur Access ke **Entire workspace** untuk agent yang boleh dipakai siapa pun, dan ke **Specific people** untuk agent yang menyimpan kredensial sensitif.
+4. **Tambahkan squad.** Masukkan ketiga agent ke dalam squad dengan sebuah agent leader. Orang menugaskan issue ke squad, dan leader memilih siapa yang mengerjakannya.
+5. **Siapkan review.** Di sebuah proyek, pilih [workflow](/workflows) seperti **Delivery**: Development ditangani oleh agent engineering, Review oleh agent Reviewer, dan QA oleh seorang member.
+6. **Mulai menugaskan.** Developer membuat issue dan menugaskannya ke agent, squad, atau rekan satu tim. Agent bekerja di runtime bersama dan meninggalkan hasilnya di setiap issue.
+
+Eksperimen pribadi tidak mengganggu: agent yang dibiarkan developer pada **Only me** di laptopnya sendiri tidak muncul di picker orang lain.
+
+## Bagaimana kami mengontrol anggota mana yang boleh menggunakan agent mana?
+
+Setiap agent memiliki owner dan pengaturan Access. Access menentukan siapa yang boleh menjalankannya, yaitu menugaskan issue kepadanya, @-mention, atau chat dengannya:
+
+| Access | Siapa yang boleh menjalankannya |
+|---|---|
+| **Only me** (default) | Hanya owner agent. |
+| **Entire workspace** | Anggota dengan role `owner`, `admin`, atau `member`. |
+| **Specific people** | Owner agent dan anggota yang dipilih. |
+
+Beberapa aturan yang penting bagi tim:
+
+- `owner` dan `admin` workspace dapat melihat dan mengelola setiap agent, tetapi tidak dapat memakai role mereka untuk menjalankan agent yang tidak diberikan kepada mereka. Hanya owner agent yang dapat mengubah Access-nya.
+- Guest tidak dapat menjalankan atau @-mention agent.
+- Picker assignee dan menu @-mention hanya menampilkan agent yang boleh dijalankan orang tersebut.
+- Squad tidak memperluas akses: untuk menugaskan atau @-mention sebuah squad, seseorang harus diizinkan menjalankan leader-nya.
+- Menghapus anggota akan menghapus grant yang mereka miliki di daftar Access agent lain.
+- Kredensial di variabel environment agent hanya dapat dibuka oleh `owner` dan `admin` workspace, dan setiap pembacaan diaudit. Lihat [Variabel environment dan kredensial](/agents-create#variabel-environment-dan-kredensial).
+
+Proyek privat menambahkan batas kedua. Proyek privat hanya terlihat oleh orang yang ada di daftar anggotanya, dan eksekusi agent hanya melihatnya jika orang yang memulai eksekusi dan owner agent sama-sama ada di daftar tersebut. Lihat [Proyek privat](/projects#proyek-privat).
+
+## Bagaimana orang dan agent menyerahkan pekerjaan satu sama lain?
+
+Penugasan dan komentar membawa handoff, dan issue menjaga konteks di antara langkah-langkah:
+
+1. **Agent menulis kode.** Tugaskan issue ke agent. Agent mengatur `in_progress` saat mulai, berkomentar selama bekerja, dan mengatur `in_review` saat menyerahkan hasil, biasanya dengan pull request.
+2. **Rekan tim meninjaunya.** Reviewer membaca log eksekusi dan PR yang tertaut di issue. Dengan [integrasi GitHub](/github-integration), issue menampilkan status PR, hasil CI, dan konflik.
+3. **Agent memperbaiki komentar review.** Reviewer membalas di issue dan @-mention agent tersebut, atau agent lain, dengan hal yang perlu diubah. Agent yang disebut mengambil issue yang sama beserta seluruh diskusinya. Jika masih bekerja, balasan dapat [bergabung ke eksekusinya saat ini](/mentioning-agents#mengarahkan-agent-yang-sedang-berjalan).
+4. **Pekerjaan ditutup.** Secara default, agent berhenti di `in_review`; `done` diserahkan kepada seseorang, atau kepada integrasi GitHub, yang secara default memindahkan issue ke `done` setelah semua PR yang tertaut di-merge.
+
+Untuk membuat langkah-langkahnya baku, bukan ad hoc, gunakan [workflow](/workflows). Setiap status dapat menyerahkan issue ke agent atau member, dengan instruksi untuk langkah tersebut, ditambah **When done, move to** dan **If rejected, send back to**. Memindahkan issue ke Review lalu menyerahkannya ke agent review, dan penolakan mengembalikannya ke Development.
+
+## Bagaimana semua orang melihat apa yang sedang dikerjakan setiap agent?
+
+- View **Working** di sidebar mencantumkan issue yang sedang dijalankan agent saat ini, di seluruh workspace.
+- Daftar agent menampilkan ketersediaan setiap agent, dari runtime-nya, dan beban kerjanya: bekerja, mengantre, atau idle.
+- Setiap issue menyimpan log eksekusi dari setiap eksekusi: tool call, perintah, dan error, lengkap dengan timestamp. Lihat [Eksekusi](/tasks).
+- [Inbox](/inbox) memberi tahu orang saat pekerjaan ditugaskan kepada mereka, saat agent @-mention mereka atau berkomentar di issue yang mereka ikuti, dan saat eksekusi gagal, tanpa mencantumkan setiap langkah.
+- [Analytics](/analytics) menampilkan biaya, token, waktu eksekusi, dan eksekusi yang gagal untuk workspace, dengan leaderboard per agent dan alasan eksekusi gagal.
+
+<Callout type="info">
+Member biasa tidak melihat agent **Only me** milik orang lain. Penggunaannya muncul di Analytics di bawah **Other agents**, tanpa nama.
+</Callout>
+
+## Terkait
+
+- [Multica vs Linear dan Jira](/compare/linear-jira) — kapan tim sebaiknya mempertahankan tracker-nya dan kapan memindahkan pekerjaan agent ke Multica.
+- [Anggota dan role](/members-roles) — undangan, guest, dan perubahan role.
+- [Agents](/agents) — konfigurasi agent dan aturan Access lengkap.
+- [Squads](/squads) — cara leader mengarahkan pekerjaan dan kapan ia dibangunkan.
+- [Workflows](/workflows) — atur langkah dan handoff baku untuk sebuah proyek.

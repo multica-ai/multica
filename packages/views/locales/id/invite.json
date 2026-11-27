@@ -1,0 +1,60 @@
+{
+  "header": {
+    "back": "Kembali",
+    "log_out": "Keluar"
+  },
+  "list": {
+    "title": "Anda telah diundang",
+    "subtitle": "Bergabung akan membuka ruang kerja tersebut. Undangan lain tetap tertunda.",
+    "workspace_fallback": "Ruang Kerja",
+    "inviter_fallback": "Seseorang",
+    "invited_admin": "{{inviter}} mengundang Anda sebagai admin",
+    "invited_member": "{{inviter}} mengundang Anda sebagai anggota",
+    "accept": "Bergabung",
+    "joining": "Bergabung...",
+    "decline": "Tolak",
+    "declining": "Menolak...",
+    "skip": "Lewati dan siapkan ruang kerja saya sendiri"
+  },
+  "empty": {
+    "title": "Tidak ada undangan tertunda",
+    "hint": "Lanjutkan untuk menyiapkan ruang kerja Anda sendiri.",
+    "continue": "Lanjutkan ke penyiapan",
+    "go_to_dashboard": "Buka ruang kerja"
+  },
+  "linked": {
+    "not_found": "Undangan ini mungkin telah kedaluwarsa, dicabut, atau tidak terkait dengan akun Anda.",
+    "accepted": "Undangan ini sudah diterima.",
+    "declined": "Undangan ini sudah ditolak.",
+    "expired": "Undangan ini telah kedaluwarsa."
+  },
+  "errors": {
+    "accept_failed": "Gagal menerima undangan",
+    "decline_failed": "Gagal menolak undangan",
+    "member_limit_reached": "{{workspace}} sudah penuh. Tanyakan kepada orang yang mengundang Anda; Anda dapat bergabung setelah ruang kerja di-upgrade."
+  },
+  "join": {
+    "no_code": "Kode undangan tidak ditemukan. Gunakan tautan bagikan yang valid.",
+    "invalid": "Tautan undangan ini tidak valid atau sudah kedaluwarsa.",
+    "joined_title": "Berhasil bergabung!",
+    "redirecting": "Mengalihkan ke ruang kerja Anda...",
+    "error_title": "Tidak dapat membuka undangan",
+    "go_home": "Ke beranda",
+    "loading": "Memuat detail undangan...",
+    "title": "Anda diundang ke {{workspace}}",
+    "invited_by": "Diundang oleh {{name}}",
+    "join_as": "Anda akan bergabung dengan ruang kerja ini sebagai",
+    "role_admin": "Admin",
+    "role_member": "Anggota",
+    "login_required": "Anda perlu masuk untuk bergabung dengan ruang kerja ini.",
+    "join": "Bergabung dengan ruang kerja",
+    "joining": "Bergabung...",
+    "log_in_to_join": "Masuk untuk bergabung",
+    "join_failed": "Gagal bergabung dengan ruang kerja. Tautan mungkin sudah kedaluwarsa.",
+    "seats_full": "Semua kursi anggota yang dibeli sudah terpakai. Minta admin ruang kerja menambah kursi sebelum mencoba lagi.",
+    "seats_unavailable": "Kapasitas anggota tidak dapat diverifikasi. Silakan coba lagi.",
+    "full_title": "{{workspace}} sudah penuh",
+    "full_description": "Hubungi orang yang mengundang Anda. Tautan ini berfungsi lagi setelah ruang kerja di-upgrade.",
+    "retry": "Coba lagi"
+  }
+}

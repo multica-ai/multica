@@ -1,0 +1,56 @@
+---
+title: Bot WeChat
+description: Pindai kode QR untuk menghubungkan akun WeChat Anda ke agent Multica melalui iLink.
+---
+
+Multica terhubung ke layanan iLink Bot milik WeChat menggunakan protokol yang diimplementasikan oleh [plugin OpenClaw Weixin](https://github.com/Tencent/openclaw-weixin) dari Tencent. Ini adalah channel terpisah dari WeCom. Anda tidak perlu memasang OpenClaw atau menjalankan tool otomatisasi WeChat desktop.
+
+## Menghubungkan
+
+1. Buka agent milik Anda, atau agent mana pun jika Anda owner atau admin workspace. Pilih **Add messaging channel** di bawah **Messaging**, lalu pilih **WeChat**. Kode QR langsung muncul.
+2. Pindai kode QR dengan akun WeChat **Anda sendiri** dan konfirmasi di ponsel Anda. Jika WeChat meminta kode verifikasi numerik, masukkan di dialog. Setelah terhubung, dialog menutup dan WeChat muncul di bawah **Messaging** agent.
+3. Kirim pesan pribadi baru ke bot di WeChat. Agent memerlukan runtime yang online untuk menjalankan pekerjaan.
+
+Akun yang memindai tertaut ke pengguna Multica yang membuka dialog ini. Pesan dari akun itu dieksekusi dengan izin workspace pengguna tersebut. Jangan bagikan kode QR atau meminta orang lain memindainya. Akun WeChat lain dan pesan grup tidak diterima.
+
+Jendela login berlangsung paling lama lima menit; penyedia dapat mengakhiri masa berlaku kode lebih cepat. Buat kode QR baru setelah kedaluwarsa. Menutup dialog akan membatalkan login yang tertunda. Bot yang sudah terhubung ke agent atau workspace lain harus diputuskan di sana terlebih dahulu. WeChat mengontrol kelayakan akun dan dapat menolak atau menantang sebuah koneksi.
+
+![Login QR WeChat di pengaturan agent](/images/docs/weixin/qr-login.png)
+
+Kode QR pada ilustrasi ini adalah fixture pengujian, bukan kode otorisasi yang aktif.
+
+## Pesan dan perintah
+
+- Pesan teks melanjutkan chat Multica yang sama. Jawaban akhir kembali ke WeChat sebagai teks biasa; jawaban panjang dipecah menjadi pesan yang aman untuk Unicode. Tidak ada pengeditan pesan secara streaming.
+- Selama agent bekerja, Multica memperbarui indikator mengetik WeChat jika tersedia. Indikator berhenti setelah selesai, gagal, atau dibatalkan. Pembaruan yang gagal dicoba lagi pada interval lima detik berikutnya. Izin mengetik yang tidak ada atau permintaan indikator yang gagal tidak mengganggu pesan maupun balasan.
+- `/help` mencantumkan perintah yang tersedia tanpa memulai eksekusi agent atau mengubah chat saat ini.
+- `/new [message]` memulai chat Multica baru. `/clear [message]` mereset konteks yang terlihat oleh agent di chat saat ini. `/issue <title>` membuat issue yang ditugaskan ke agent yang terhubung.
+- Dengan object storage yang dikonfigurasi, gambar, file, video, dan pesan suara yang belum ditranskripsi akan dilampirkan ke chat Multica. Transkripsi suara yang disediakan WeChat digunakan sebagai teks; Multica tidak menambahkan layanan speech-to-text atau mengonversi audio SILK.
+- File yang dilampirkan pada jawaban akhir agent dikirim kembali ke WeChat. Gambar yang didukung dan video MP4 menggunakan pesan media native; format lain, termasuk audio, menggunakan pesan file. Setiap transfer dibatasi **20 MiB** oleh adapter ini. Transfer file keluar yang gagal menghasilkan pemberitahuan; file tetap ada di Multica.
+- Chat grup, akses kontak, notifikasi proaktif, perluasan pesan yang diteruskan, dan pengambilan riwayat pesan yang dikutip tidak didukung.
+
+Balasan memerlukan kredensial konteks yang diterbitkan WeChat untuk percakapan ini. Jika balasan ditolak karena konteksnya sudah kedaluwarsa, kirim pesan baru. Multica tidak mengasumsikan masa berlaku konteks yang tetap. Respons API yang berhasil berarti diterima oleh penyedia, bukan bukti pengiriman atau pembacaan. Jika respons pengiriman hilang, Multica mencatat hasil yang tidak diketahui dan tidak mengirim ulang secara otomatis.
+
+Saat beban berat, notifikasi balasan WeChat mungkin dilewati; jawabannya tetap tersedia di chat Multica.
+
+## Memutuskan koneksi
+
+Gunakan **Manage WeChat → Disconnect** di bagian **Messaging** agent. Pesan baru berhenti sampai ke agent dan konteks balasan yang tersimpan dihapus. Riwayat chat Multica tetap tersedia. Respons iLink yang secara eksplisit menyatakan otorisasi kedaluwarsa juga menonaktifkan koneksi dan menampilkan pemberitahuan otorisasi kedaluwarsa; hubungkan kembali dengan memindai kode QR baru. Mengotorisasi ulang koneksi yang ada ke agent yang sama mempertahankan chat dan receive cursor-nya. Saat sebuah bot sudah terhubung ke agent lain di workspace ini, dialog koneksi menyebutkan nama agent tersebut jika Anda dapat mengelolanya, sehingga Anda bisa memutuskannya di sana terlebih dahulu; identitas agent di workspace lain tetap privat.
+
+![Akun WeChat yang terhubung di pengaturan messaging workspace](/images/docs/weixin/connected.png)
+
+## Self-hosting
+
+Buat kunci enkripsi yang persisten:
+
+```sh
+openssl rand -base64 32
+```
+
+Simpan sebagai `MULTICA_WEIXIN_SECRET_KEY` di API server dan restart server. Gunakan kunci yang sama di setiap replica. Simpan bersama secret deployment dan backup Anda; mengubahnya membuat kredensial yang ada tidak dapat didekripsi dan mengharuskan bot dihubungkan ulang. Tanpa kunci ini, kontrol koneksi dinonaktifkan. Docker Compose meneruskan variabel ini.
+
+API server memerlukan akses HTTPS keluar ke `ilinkai.weixin.qq.com`, host regional `*.weixin.qq.com` yang dikembalikan WeChat, dan `novac2c.cdn.weixin.qq.com`. Tidak diperlukan webhook publik atau tunnel masuk. Klien browser hanya menerima konten tampilan QR dan status; kredensial bot dan konteks balasan dienkripsi saat disimpan di server.
+
+Terapkan migrasi database seperti biasa. Channel supervisor bersama memegang satu long poll per instalasi di seluruh replica, dan update cursor disimpan setelah inbound engine bersama menerima sebuah batch. Balasan akhir menggunakan lease pengiriman database bersama untuk menghindari pengiriman ganda. Event keluar yang tertunda ada di memori: restart server dapat menginterupsi balasan, dan pengiriman yang ambigu sengaja tidak diputar ulang. Jawaban dan lampiran tetap ada di Multica.
+
+Referensi protokol: Tencent `@tencent-weixin/openclaw-weixin` **2.4.10**, source commit [`874637a`](https://github.com/Tencent/openclaw-weixin/tree/874637a0dbc24050f72d1385add4fc6170a2d726), termasuk [dokumentasi protokolnya](https://github.com/Tencent/openclaw-weixin/blob/874637a0dbc24050f72d1385add4fc6170a2d726/docs/protocol_zh_CN.md). Adapter ini adalah implementasi Go native dan tidak memiliki dependensi runtime pada package tersebut. Perilaku penyedia dan kelayakan akun dapat berubah secara independen dari rilis Multica.

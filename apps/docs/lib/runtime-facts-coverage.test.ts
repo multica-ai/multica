@@ -35,6 +35,7 @@ const providersCountPatterns: Record<Lang, RegExp> = {
   ko: /(\d+)(?:가지|개) AI 코딩 도구/g,
   ja: /(\d+) 種類の AI コーディングツール/g,
   fr: /(\d+) outils de codage IA/g,
+  id: /(\d+) alat pengkodean AI/g,
 };
 
 // A count that links to the providers page: "[31 AI coding tools](/providers)".

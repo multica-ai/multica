@@ -74,6 +74,20 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     "Toggle Theme(theme switcher)(aria-label)": "Changer de thème",
     "Edit on GitHub(edit page)": "Modifier sur GitHub",
   },
+  id: {
+    "Search(search trigger)": "Cari",
+    "Search(search dialog)": "Cari",
+    "No results found(search dialog)": "Tidak ada hasil",
+    "On this page(table of contents)": "Di halaman ini",
+    "No Headings(table of contents)": "Tidak ada judul",
+    "Last updated on(page footer)": "Terakhir diperbarui",
+    "Choose a language(language switcher)": "Pilih bahasa",
+    "Choose a language(language switcher)(aria-label)": "Pilih bahasa",
+    "Next Page(pagination)": "Halaman berikutnya",
+    "Previous Page(pagination)": "Halaman sebelumnya",
+    "Toggle Theme(theme switcher)(aria-label)": "Ganti tema",
+    "Edit on GitHub(edit page)": "Edit di GitHub",
+  },
 };
 
 // Display name shown in the LanguageToggle dropdown.
@@ -84,6 +98,7 @@ export const localeLabels: Record<Lang, string> = {
   ko: "한국어",
   ja: "日本語",
   fr: "Français",
+  id: "Bahasa Indonesia",
 };
 
 // Copy for the welcome page (Hero + Byline). Pages are translated as MDX;
@@ -125,15 +140,22 @@ export const homeCopy = {
     titleAccent: "au même endroit.",
     byline: ["Premiers pas", "Mis à jour en juillet 2026", "2 min de lecture"],
   },
+  id: {
+    eyebrow: "Dokumentasi Multica",
+    titleLead: "Manusia dan agent,",
+    titleAccent: "dalam satu tempat.",
+    byline: ["Memulai", "Diperbarui Juli 2026", "2 menit membaca"],
+  },
 } as const satisfies Record<Lang, unknown>;
 
 // Chrome around the editorial demos embedded in docs pages. Each demo keeps
 // its own scenario copy next to its component.
 export const demoChromeCopy = {
-  en: { play: "Play", pause: "Pause", replay: "Replay", reset: "Reset" },
-  zh: { play: "播放", pause: "暂停", replay: "重播", reset: "重置" },
-  "zh-Hant": { play: "播放", pause: "暫停", replay: "重播", reset: "重設" },
-  ko: { play: "재생", pause: "일시정지", replay: "다시 보기", reset: "초기화" },
-  ja: { play: "再生", pause: "一時停止", replay: "もう一度", reset: "リセット" },
-  fr: { play: "Lire", pause: "Pause", replay: "Rejouer", reset: "Réinitialiser" },
+  en: { label: "Try it", replay: "Replay", click: "Click" },
+  zh: { label: "动手试试", replay: "重新演示", click: "点击" },
+  "zh-Hant": { label: "動手試試", replay: "重新播放", click: "點擊" },
+  ko: { label: "직접 해보기", replay: "다시 보기", click: "클릭" },
+  ja: { label: "試してみる", replay: "もう一度", click: "クリック" },
+  fr: { label: "Essayez", replay: "Rejouer", click: "Cliquez" },
+  id: { label: "Coba sendiri", replay: "Ulangi", click: "Klik" },
 } as const satisfies Record<Lang, unknown>;

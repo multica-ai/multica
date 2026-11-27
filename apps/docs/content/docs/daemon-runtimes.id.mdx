@@ -1,0 +1,404 @@
+---
+title: Daemon dan runtime
+description: Bagaimana Multica menghubungkan komputer, menemukan alat pengkodean AI, dan mengeksekusi eksekusi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { RuntimeOfflineDemo } from "@/components/demos/runtime-offline-demo";
+
+Multica mencatat dan mengoordinasikan pekerjaan; komputer yang terhubung mengeksekusinya. **Daemon** pada sebuah komputer mengklaim eksekusi dan menjalankan alat pengkodean AI yang terinstal di komputer tersebut.
+
+## Daemon vs runtime
+
+- **Daemon** adalah proses latar belakang Multica yang berjalan di satu komputer. Daemon terhubung ke server, menemukan tool lokal, mengklaim eksekusi, dan melaporkan hasilnya kembali.
+- **Runtime** merepresentasikan satu lingkungan eksekusi konkret yang tersedia untuk sebuah ruang kerja. Runtime berhubungan dengan satu komputer ditambah satu alat pengkodean AI — atau satu profil runtime kustom — di komputer tersebut.
+
+Misalnya, jika sebuah komputer memiliki Claude Code dan Codex terinstal dan terhubung ke dua ruang kerja, daemon mendaftarkan satu runtime Claude Code dan satu runtime Codex untuk setiap ruang kerja. Merestart daemon memperbarui catatan yang sudah ada; daemon tidak terus membuat runtime baru untuk kombinasi yang sama.
+
+## Lokasi eksekusi dan batasan data
+
+Alat pengkodean AI yang dijalankan oleh runtime lokal, kredensial login milik tool-tool itu sendiri, dan direktori kode lokal Anda semuanya tetap berada di komputer yang terhubung. Server Multica tidak mengeksekusi perintah atas nama tool lokal, dan tidak secara otomatis mengunggah seluruh direktori kerja Anda.
+
+Agar tim dapat berkolaborasi, server menyimpan tugas, komentar, konfigurasi agent, konteks eksekusi, catatan eksekusi, dan hasil yang ditulis balik oleh agent. Konten tersebut dapat mencakup potongan kode atau konteks proyek lain yang dipilih agent untuk dibaca dan disertakan dalam balasannya.
+
+<Callout type="warning">
+"Eksekusi lokal" tidak berarti setiap secret hanya ada di komputer ini. Environment variable kustom dan konfigurasi MCP milik sebuah agent disimpan di server, dan tampilannya dibatasi oleh aturan nilai sensitif; environment variable kustom dikirim ke runtime saat eksekusi.
+</Callout>
+
+## Memulai daemon
+
+<Tabs items={["Desktop", "CLI"]}>
+<Tab value="Desktop">
+
+Multica Desktop memulai daemon secara otomatis; tidak perlu perintah tambahan.
+
+</Tab>
+<Tab value="CLI">
+
+Di web, komputer remote, atau lingkungan headless, [instal Multica CLI](/cli) dulu, lalu jalankan:
+
+```bash
+multica daemon start
+```
+
+</Tab>
+</Tabs>
+
+Daemon berjalan di latar belakang secara default. Perintah umum:
+
+| Perintah | Tujuan |
+| --- | --- |
+| `multica daemon status` | Menampilkan status daemon dan koneksi, termasuk alasan agent yang terdeteksi dilewati |
+| `multica daemon logs -f` | Mengikuti log |
+| `multica daemon restart` | Merestart daemon dan mendeteksi ulang tool lokal |
+| `multica daemon stop` | Menghentikan daemon |
+| `multica daemon start --foreground` | Berjalan di terminal saat ini, untuk debugging |
+
+Untuk menempatkan workspace eksekusi di disk lain, simpan root untuk profil saat ini dengan `multica config set workspaces_root <path>`, atau berikan `--workspaces-root <path>` ke `daemon start` atau `daemon restart`. Flag ini mengganti `MULTICA_WORKSPACES_ROOT`, yang mengganti konfigurasi profil. Direktori eksekusi yang sudah ada tidak dipindahkan saat root berubah.
+
+Saat startup, daemon mendeteksi alat pengkodean AI yang didukung pada `PATH` dan mendaftarkan runtime untuk ruang kerja yang boleh Anda hubungkan. Jika sebuah tool baru saja diinstal atau masuk, restart daemon untuk mendeteksinya.
+
+Daemon memerlukan setidaknya satu alat pengkodean AI bawaan yang didukung terdeteksi sebelum dapat dimulai. Metode instalasi dan nama executable ada di [Instal alat pengkodean AI](/install-agent-runtime).
+
+### Menjalankan di container Linux [#linux-container]
+
+Instal Multica CLI dan setidaknya satu alat coding yang didukung di dalam image. Jalankan container sebagai pengguna non-root. Atur `MULTICA_SERVER_URL` ke URL API yang dapat dijangkau dari dalam container. Mount personal access token sebagai secret dan teruskan ke login melalui standard input. Ganti `my-workspace` dengan slug ruang kerja Anda.
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+Jalankan login dan pemilihan ruang kerja saat menyiapkan profil. Untuk runtime yang berumur panjang, mount `~/.multica` milik pengguna container pada penyimpanan persisten yang dapat ditulis. Direktori ini menyimpan access token profil dan ID daemon. Jika direktori hilang saat container diganti, Anda harus login lagi dan daemon mendaftarkan runtime baru. Agent yang ditugaskan ke runtime asli tidak dapat mengambil tugas di container pengganti.
+
+Untuk mempertahankan direktori eksekusi dan cache `.repos` saat container diganti, mount root workspace pada penyimpanan persisten yang dapat ditulis. Dengan `--profile container`, root workspace default adalah `~/multica_workspaces_container`.
+
+Konfigurasikan autentikasi milik alat coding secara terpisah. Biarkan supervisor container merestart daemon foreground, dan upgrade CLI dengan mengganti image.
+
+### Mulai saat login [#autostart]
+
+Daemon yang dimulai dari CLI tidak aktif kembali sendiri setelah reboot. Agar daemon dimulai otomatis, daftarkan profil saat ini:
+
+```bash
+multica daemon autostart enable
+multica daemon autostart status
+multica daemon autostart disable
+```
+
+Perintah yang didaftarkan adalah `multica daemon start --foreground` untuk profil tersebut, yang diluncurkan oleh OS saat login: nilai Run registry untuk pengguna saat ini di Windows, LaunchAgent di `~/Library/LaunchAgents` di macOS, dan unit systemd user di Linux, atau entri autostart XDG jika sesi systemd user tidak tersedia. Untuk profil bernama, tambahkan `--profile <name>`; setiap profil didaftarkan secara terpisah.
+
+- Hanya `enable` yang membuat pendaftaran. `multica daemon start` tidak pernah mendaftar sendiri; perintah ini mencetak petunjuk satu baris saat belum ada yang terdaftar, dan bila ada entri buatan Multica, perintah ini menyegarkan path executable di dalamnya, sehingga upgrade atau pemindahan CLI tidak memerlukan `enable` lagi.
+- Di macOS dan Linux, sesi login hanya menerima `PATH` yang ditangkap dari shell Anda pada saat `enable`. Variabel lain yang di-export (API key, `HTTPS_PROXY`, dan sebagainya) tidak ikut terbawa. Simpan pengaturan daemon dengan `multica config set` dan letakkan variabel lain di environment pengguna Anda.
+- Unit systemd user dimulai saat login. Untuk memulai saat boot tanpa login, jalankan `loginctl enable-linger <username>` seperti yang disarankan output `enable`.
+- `multica daemon stop` menghentikan daemon yang sedang berjalan tetapi mempertahankan pendaftarannya.
+- Jika sebuah file yang tidak dibuat Multica sudah ada di lokasi tersebut (misalnya unit systemd milik Anda sendiri), `enable` dan `disable` menolak mengubahnya.
+- Daemon yang diluncurkan Desktop dikelola oleh Desktop; `daemon start` tidak memberi petunjuk maupun menyegarkan pendaftaran untuknya.
+
+### Memperbarui CLI dari Runtimes [#updating-cli]
+
+Saat rilis yang lebih baru tersedia untuk daemon CLI mandiri, pemilik runtime dan admin ruang kerja dapat mengklik **Update** di halaman **Runtimes**. Jika komputer sedang menjalankan tugas dan daemon mendukung pembaruan yang diantrekan, pembaruan ditahan tanpa mengganggu pekerjaan aktif, dan halaman **Runtimes** menampilkan **Updates when idle** beserta jumlah tugas yang sedang berjalan dan tombol **Cancel** pada setiap runtime di komputer tersebut.
+
+Instalasi dimulai otomatis setelah tugas terakhir yang berjalan selesai. Hanya satu pembaruan yang belum selesai diizinkan per komputer; pembaruan yang diantrekan kedaluwarsa setelah 24 jam jika komputer tidak pernah idle, dan dapat dibatalkan sampai instalasi dimulai. Daemon pada versi CLI lama tanpa dukungan antrean menolak pembaruan remote saat sibuk; coba lagi setelah komputer idle. Daemon yang diluncurkan Multica Desktop dikelola oleh Desktop dan diupgrade bersama aplikasi Desktop.
+
+## Dispatch dan status online
+
+Setelah terdaftar, sebuah runtime menjaga koneksi persisten. Saat eksekusi baru masuk antrean, server memberi tahu daemon yang sesuai; daemon juga melakukan polling secara berkala agar koneksi yang terputus tidak menghilangkan notifikasi. Saat sebuah runtime online dengan kapasitas tersisa, eksekusi biasanya langsung dimulai.
+
+Daemon mengirim heartbeat setiap 15 detik. Server menggabungkan heartbeat dan status koneksi untuk menentukan apakah sebuah runtime online; setelah sebuah daemon keluar secara tidak terduga, runtime ditandai offline dalam waktu paling lambat sekitar 3 menit. Selama 5 menit pertama setelah kontak terputus, halaman **Runtimes** menampilkannya sebagai "Recently lost", lalu "Offline".
+
+Saat sebuah runtime offline:
+
+- Eksekusi yang sudah diantrekan menunggu runtime pulih; eksekusi itu tidak berpindah ke komputer lain. Eksekusi yang diantrekan hanya gagal setelah runtime berhenti mengirim heartbeat lebih lama dari masa tenggang reconnect **dan** eksekusi itu sendiri sudah diantrekan selama itu juga. Runtime yang hanya sibuk tetap mempertahankan antreannya, dan pekerjaan yang ditugaskan ke runtime yang sudah offline tetap mendapat masa tenggang penuh untuk ditunggu.
+- Eksekusi yang sedang berjalan tidak langsung gagal. Eksekusi itu gagal dengan `runtime_offline` hanya setelah heartbeat runtime hilang lebih lama dari masa tenggang reconnect (`MULTICA_RUNTIME_RECONNECT_GRACE`, default 3 jam); eksekusi tugas atau obrolan yang memenuhi syarat dapat dicoba ulang secara otomatis.
+- Saat daemon dimulai lagi, daemon mendaftarkan ulang runtime-nya dan mengklaim kembali eksekusi yang tidak berakhir dengan bersih sebelumnya.
+- Sebuah runtime yang offline lebih dari 7 hari tanpa agent pengguna yang aktif atau tugas yang belum selesai dibersihkan secara otomatis; agent yang diarsipkan dan riwayat tugas dipertahankan. Untuk profil kustom lama yang belum terikat, hanya instans pada komputer milik pembuat profil yang dipertahankan sampai admin memilih komputernya.
+
+Pada demo di bawah, eksekusi yang ditugaskan saat komputer offline menunggu di antrean dan baru diklaim setelah komputer kembali online.
+
+<RuntimeOfflineDemo />
+
+Detail state dan aturan percobaan ulang ada di [Eksekusi](/tasks).
+
+## Batas konkurensi
+
+Secara default, satu daemon mengeksekusi paling banyak 20 eksekusi sekaligus; setiap agent paling banyak 6. Konkurensi efektifnya adalah yang lebih kecil dari keduanya.
+
+Eksekusi yang menunggu Direct local directory tidak menggunakan slot eksekusi daemon. Eksekusi itu mengambil kembali slot sebelum dimulai dan tetap dihitung sebagai pekerjaan milik daemon untuk keamanan shutdown dan pembaruan.
+
+Setelah batasnya tercapai, eksekusi baru tetap mengantre. Sesuaikan konkurensi satu agent di pengaturan agent, dan batas seluruh komputer dengan `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Eksekusi paralel bersaing untuk kapasitas komputer, kuota akun tool, dan direktori kerja yang sama sekaligus.
+
+Penggunaan token, biaya, dan kegagalan di seluruh eksekusi diringkas per ruang kerja di halaman [Analytics](/analytics); `multica runtime usage <runtime-id>` menampilkan penggunaan token untuk satu runtime.
+
+Untuk runtime Claude Code dan Codex, halaman runtime juga menampilkan **Limits**: seberapa banyak jendela sesi 5 jam dan jendela mingguan dari paket yang telah digunakan akun CLI, kapan masing-masing direset, dan apakah penggunaan berjalan lebih cepat daripada waktu yang berlalu. CLI melaporkan angka ini saat menjalankan tugas, sehingga angkanya sesuai eksekusi terakhir runtime. Akun API-key tidak memiliki batas paket untuk ditampilkan.
+
+## Konfigurasi MCP lokal [#local-mcp]
+
+Saat sebuah agent belum menyimpan konfigurasi MCP, Multica tidak meneruskan pengaturan MCP apa pun dan tool membaca konfigurasinya sendiri di komputer tersebut seperti biasa.
+
+Setelah sebuah agent memiliki konfigurasi MCP (bahkan yang kosong), Multica membuat konfigurasi khusus untuk setiap eksekusi dan menyerahkannya ke tool; Claude Code, misalnya, hanya memuat file itu dalam mode strict. Agar server yang sudah disiapkan di komputer tetap berfungsi, daemon membaca konfigurasi MCP tingkat pengguna milik tool di komputer runtime dan menggabungkannya dengan konfigurasi agent. Untuk server dengan nama yang sama, sumber pertama dalam urutan ini yang menang:
+
+1. Server yang dikelola Multica atau ditetapkan dari pustaka MCP ruang kerja pada tab **MCP** milik agent;
+2. File konfigurasi tingkat pengguna milik tool;
+3. Hanya Claude Code: server MCP yang dibundel dengan plugin Claude Code yang aktif. Plugin berasal dari `enabledPlugins` di `~/.claude/settings.json`; daemon membaca `.mcp.json` setiap plugin dan file MCP apa pun yang dideklarasikan manifest-nya.
+
+| Tool | Konfigurasi tingkat pengguna yang dibaca |
+|---|---|
+| Claude Code | `mcpServers` di `~/.claude.json`, ditambah server MCP dari plugin yang aktif |
+| Codex | `mcp_servers` di `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) |
+| Cursor Agent | `mcpServers` di `~/.cursor/mcp.json` |
+| OpenCode | `mcp` di `$XDG_CONFIG_HOME/opencode/opencode.json` dan `opencode.jsonc` di direktori yang sama (default `~/.config/opencode/`). File JSONC diutamakan. |
+| OpenClaw | `mcp.servers` di `$CLAWDBOT_CONFIG_PATH`, atau di `$OPENCLAW_STATE_DIR/openclaw.json` (default `~/.openclaw/openclaw.json`) |
+| CodeArts | `mcp` di `~/.codeartsdoer/codearts_cli.json` atau `codearts_cli.jsonc` |
+
+CodeBuddy, Kimi CLI, dan Pi memuat konfigurasi tingkat pengguna mereka sendiri saat startup dan menggabungkannya dengan apa yang dikirim Multica, sehingga daemon tidak menggabungkan lebih dulu untuk mereka; melakukannya akan menjalankan server yang sama dua kali. CodeBuddy mempertahankan entri Multica saat nama bentrok. Tool lain yang tidak ada di tabel hanya menerima konfigurasi agent.
+
+Penggabungan terjadi di komputer runtime; perintah, URL, header, dan nilai environment dari server lokal tidak pernah diunggah. Daftar "Inherited from runtime" pada tab **MCP** milik agent hanya menampilkan nama, transport, sumber, dan status aktif setiap server; server yang tertutup oleh server agent dengan nama yang sama ditandai "Overridden by Multica". Jika file konfigurasi lokal tidak dapat diurai, daemon mencatat warning dan eksekusi itu hanya menggunakan konfigurasi agent.
+
+### Login MCP Cursor [#cursor-mcp-login]
+
+Cursor menyimpan login OAuth MCP per direktori proyek, dan setiap eksekusi memiliki direktorinya sendiri. Karena itu daemon menyimpan satu file login per agent Cursor di komputer runtime, yaitu `cursor-mcp-auth/<agent-id>/mcp-auth.json` di direktori konfigurasi Multica, dan memberi setiap eksekusi salinannya. Daemon menggabungkan kembali perubahan yang dibuat Cursor pada salinan itu ke file agent setiap beberapa detik dan saat eksekusi berakhir, sehingga token yang diperbarui satu eksekusi sampai ke eksekusi agent berikutnya. Login sekali ke server seperti Mobbin, dan eksekusi agent berikutnya di komputer itu menggunakan login tersebut. File ini terpisah dari login proyek Cursor milik Anda sendiri, sehingga eksekusi tidak pernah mengeluarkan Anda dari sana. Setiap eksekusi agent di komputer itu menggunakannya, termasuk eksekusi yang dipicu anggota lain.
+
+Saat agent memiliki konfigurasi MCP, setiap eksekusi mendapat direktori data Cursor sendiri, dan `mcp-auth.json` eksekusi di sana adalah salinannya. Saat tidak memilikinya, eksekusi menggunakan direktori data Cursor Anda sendiri (`~/.cursor`, atau `CURSOR_DATA_DIR` milik daemon) dan server MCP yang dikonfigurasi di sana; daemon hanya mengganti `mcp-auth.json` yang disimpan Cursor untuk direktori eksekusi di bawah `projects/` dengan salinan file agent. Salinan dihapus saat direktori eksekusi dibersihkan.
+
+Tanpa konfigurasi MCP, dua jenis eksekusi tidak mendapat salinan, karena proyek Cursor-nya juga tempat Anda bekerja dan salinan akan menggantikan login Anda sendiri di sana: eksekusi yang bekerja di tempat (in place) di direktori lokal proyek, dan eksekusi yang direktorinya berada di dalam repositori git, seperti repositori dotfiles di folder home Anda, karena Cursor kemudian memperlakukan repositori itu sebagai proyek. Eksekusi ini menggunakan login apa pun yang sudah dimiliki Cursor untuk direktori tersebut, dan transkripnya tidak memberikan perintah login; login sendiri dengan menjalankan `cursor-agent mcp login <server>` di direktori itu.
+
+Jika sebuah server masih memerlukan login, transkrip eksekusi menyebutkan server mana dan memberikan perintah yang dijalankan di komputer runtime. Untuk agent dengan konfigurasi MCP, misalnya:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+Untuk agent tanpa konfigurasi tersebut, perintahnya menggunakan direktori data Cursor Anda sendiri:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+Kedua perintah dijalankan di folder login yang disimpan di samping file login agent, sehingga tetap berfungsi setelah direktori eksekusi dibersihkan.
+
+Login berlaku mulai eksekusi agent berikutnya, yang mengumpulkannya dari folder login sebelum dimulai; eksekusi saat ini tidak mengambilnya. Untuk menggunakan file login Anda sendiri, atur `CURSOR_MCP_AUTH_SOURCE` di environment variable agent ke path absolut `mcp-auth.json` atau direktori proyek Cursor yang memuatnya; nilai ini diutamakan di atas file per-agent. Dua eksekusi satu agent yang memperbarui token yang sama pada saat yang sama masih dapat saling mengeluarkan; login lagi jika itu terjadi.
+
+## Pembersihan dan retensi [#cleanup]
+
+Daemon menjalankan pembersihan pertamanya sekitar 30 detik setelah dimulai, lalu setiap 2 jam. Direktori yang sedang digunakan eksekusi yang berjalan tidak pernah dibersihkan. `multica daemon disk-usage` menampilkan penggunaan per ruang kerja atau per eksekusi. Durasi di bawah adalah nilai default; variabel `MULTICA_GC_*` yang terkait ada di [Variabel lingkungan](/environment-variables#gc).
+
+Kolom `MODE` per eksekusi menandai eksekusi in-place dengan `in place`. JSON melaporkan baris ini sebagai `local_directory: true` bila metadata eksekusi mengidentifikasi mode tersebut.
+
+### Direktori eksekusi
+
+Setiap eksekusi mendapat direktori di bawah root workspace (default `~/multica_workspaces`) yang berisi kode yang di-checkout, output, dan log; eksekusi berikutnya pada tugas yang sama menggunakannya kembali.
+
+Tabel ini mencakup pembersihan seluruh direktori untuk direktori yang dikelola Multica. Eksekusi yang bekerja di tempat di direktori lokal proyek mempertahankan direktori catatannya sendiri, seperti dijelaskan di bawah.
+
+| Sumber eksekusi | Kapan dihapus |
+|---|---|
+| Issue | Setelah issue berstatus kategori `done` atau `closed` dan tidak diperbarui selama 24 jam |
+| Chat | 24 jam setelah sesi diarsipkan; pada pembersihan berikutnya setelah sesi dihapus. Dipertahankan selama sesi tidak diarsipkan |
+| Autopilot (Run Only), quick create | Pada pembersihan berikutnya setelah eksekusi berakhir |
+| Pemilik tidak ditemukan (metadata hilang, atau server tidak lagi memiliki catatannya) | Setelah 72 jam tanpa perubahan pada direktori |
+
+Selama issue masih terbuka, 12 jam setelah eksekusi selesai hanya konten yang dapat dibuat ulang yang dihapus: direktori `node_modules`, `.next`, dan `.turbo`, ditambah path persis ini di bawah `codex-home`: `.sandbox-bin`, `.tmp/plugins`, `.tmp/marketplaces`, dan `cache/remote_plugin_catalog`. File lain, termasuk database SQLite dan file WAL-nya, tetap ada. Direktori eksekusi issue yang dikelola juga dihapus 14 hari setelah selesai secara default, baik issue ditutup maupun tidak.
+
+Untuk chat yang tidak diarsipkan di direktori kerja yang dikelola Multica, daemon menerapkan pembersihan konten yang dapat dibuat ulang yang sama 12 jam setelah eksekusi terakhirnya berakhir secara default. Setelah pembersihan berhasil, daemon melewati pemindaian berulang untuk eksekusi tersebut. Eksekusi selesai berikutnya menjadi memenuhi syarat lagi setelah jeda yang sama. Untuk chat di direktori lokal proyek, hanya path cache Codex di atas yang dibersihkan.
+
+Saat sebuah eksekusi bekerja di tempat, direktori kerjanya adalah direktori proyek Anda. Daemon tidak menyentuhnya saat pembersihan. Direktori catatannya menyimpan log daemon dan `output/`. Setelah `MULTICA_GC_COMPLETED_TASK_TTL` (default 14 hari), daemon menghapus seluruh `codex-home` miliknya jika riwayat sesi disimpan di luar direktori catatan. Home dengan riwayat sesi lokal tugas dipertahankan. Atur variabel ini ke `0` untuk menonaktifkan kedaluwarsa home. Eksekusi berikutnya membangun ulang home dan menyambungkan kembali penyimpanan percakapan; penyimpanan itu tetap mengikuti kebijakan retensi sesinya sendiri di bawah.
+
+Karena itu direktori catatan masih dapat muncul di `multica daemon disk-usage --by-task` setelah eksekusi berakhir. TTL tugas selesai tidak menghapus direktori catatan atau mengedaluwarsakan home provider lain, seperti `hermes-home` yang dipertahankan.
+
+### Cache repositori bersama
+
+Daemon menyimpan satu cache bare-repository per repositori ruang kerja, di bawah `.repos/<workspace-id>/` pada root workspace. Eksekusi dari ruang kerja yang sama di komputer ini berbagi cache tersebut: setiap checkout membuat git worktree dari cache dan hanya mengambil (fetch) commit baru alih-alih meng-clone lagi. Eksekusi Codex di Linux dan Windows adalah pengecualian dan mendapat clone mandiri dengan `.git` di dalam direktori kerja, karena sandbox workspace-write milik Codex membiarkan metadata Git di luar direktori kerja bersifat read-only.
+
+Nama direktori cache baru menggunakan hingga 16 karakter ASCII dari nama repositori ditambah hash 12 karakter, agar URL remote yang panjang tidak memperpanjang path metadata Git di Windows. Saat sinkronisasi atau checkout, cache yang sudah ada dipindahkan ke nama pendek jika tidak ada worktree terdaftar yang tersisa setelah entri usang dipangkas dan tujuannya belum ada. Isinya dipertahankan tanpa clone ulang. Cache dengan worktree terdaftar mempertahankan path aslinya agar checkout yang tertaut tetap berfungsi. Jika migrasi gagal, daemon mencatat warning dan terus menggunakan cache yang ada; percobaan berikutnya dapat mengulang.
+
+Cache dihapus hanya jika ketiganya terpenuhi: tidak ada ruang kerja atau proyek yang merujuk repositori lagi, tidak ada worktree yang tersisa, dan tidak ada eksekusi yang melakukan checkout darinya selama 30 hari. Cache di-clone lagi saat diperlukan. Setelah menghapus branch agent yang usang, daemon menjalankan `git reflog expire --expire=30.days --all` dan `git gc --prune=30.days` pada cache saat tidak ada eksekusi yang berjalan.
+
+### Sesi, memori, dan direktori sementara
+
+| Data | Lokasi | Retensi |
+|---|---|---|
+| Catatan sesi Codex (satu per agent per issue) | `multica-sessions/` di home Codex (default `~/.codex`) | Dihapus setelah 14 hari tidak digunakan; eksekusi berikutnya pada issue itu tidak dapat lagi melanjutkan sesi Codex sebelumnya |
+| Catatan sesi Hermes | `hermes-sessions/` di direktori konfigurasi Multica (default `~/.multica`; `~/.multica/profiles/<name>` untuk profil bernama) | Dihapus setelah 14 hari tidak digunakan |
+| Memori Hermes (satu per agent) | `hermes-state/` di direktori yang sama | Dihapus setelah 90 hari tidak digunakan |
+| Login MCP Cursor (satu per agent) | `cursor-mcp-auth/` di direktori yang sama | Dipertahankan |
+| Direktori sementara privat setiap eksekusi (`TMPDIR`) | `multica-task-*` di direktori temp sistem | Dihapus saat eksekusi berakhir; jika daemon dihentikan paksa, pembersihan berikutnya menghapusnya |
+
+Tugas issue dan chat Hermes menggunakan direktori sesi percakapannya sebagai `HERMES_HOME` yang terisolasi, dengan `state.db` biasa dan jurnal SQLite-nya di dalamnya. Ini berfungsi baik dengan ACP in-process maupun Hermes berbasis gateway. Penyimpanan sesi yang sudah ada digunakan kembali, dan riwayat lokal tugas dimigrasikan sebelum eksekusi berikutnya dimulai.
+
+Multica menyegarkan skill dan konfigurasi turunan di home untuk setiap eksekusi. Autentikasi provider dipertahankan; adapter pesan dan HTTP ingress dinonaktifkan untuk tugas terkelola. State gateway host, log, sesi, dan cron job diisolasi. Gateway milik tugas apa pun dihentikan saat tugas selesai sehingga tugas berikutnya menerima lingkungan eksekusinya sendiri.
+
+### Memori native dan subagent Codex [#codex-memory]
+
+Eksekusi Codex yang dikelola daemon memiliki memori native Codex yang dimatikan secara default, sehingga memori dari komputer ini atau eksekusi sebelumnya tidak terbawa ke ruang kerja lain. Pengaturan ini hanya ditulis ke `CODEX_HOME/config.toml` milik eksekusi itu sendiri (`features.memories`, `memories.generate_memories`, dan `memories.use_memories` semuanya `false`); `~/.codex/config.toml` Anda tidak diubah. Untuk mempertahankan memori native, atur `MULTICA_CODEX_MEMORY=1` di environment daemon.
+
+Subagent native Codex juga dimatikan secara default: Multica menganggap eksekusi selesai saat thread induk selesai, dan hasil dari subagent yang masih bekerja hilang. Jika Anda menerima risikonya, atur `MULTICA_CODEX_MULTI_AGENT=1`.
+
+## Berbagi runtime [#private-and-public-runtimes]
+
+Sebuah runtime lokal bersifat **privat** secara default: hanya pemilik runtime yang dapat membuat agent di dalamnya, dan pemilik serta admin ruang kerja bukan pengecualian. Runtime itu adalah komputer milik orang lain, dan menjalankan agent di sana menggunakan komputer dan kredensial tool milik mereka.
+
+Hanya pemilik yang dapat menjadikannya **publik**. Admin ruang kerja dapat mengganti nama atau menghapus sebuah runtime, tetapi membaginya adalah keputusan pemiliknya. Setelah publik, anggota ruang kerja lain dapat memilih runtime ini dan merutekan eksekusi agent mereka ke komputer ini; kredensial login alat pengkodean AI yang mendasarinya tidak dibagikan.
+
+Untuk membaginya dengan orang tertentu saja, buka halaman detail runtime, pilih **Members**, pilih satu atau beberapa anggota ruang kerja, lalu **Save**. Anggota tersebut dapat memilih runtime dan membuat agent di dalamnya. Hanya pemilik yang dapat mengubah daftar ini, dan berada di daftar tidak memungkinkan siapa pun mengganti nama, menghapus, atau mengelola runtime.
+
+Saat pemilik menghapus anggota, mempersempit runtime publik ke anggota tertentu, atau menjadikannya **privat** lagi, Multica menampilkan agent dan eksekusi aktif yang terdampak, termasuk sesi Agent Builder, sebelum menerapkan perubahan. Konfirmasi melepas ikatan agent rekan tim tersebut, membatalkan eksekusi mereka yang diantrekan, didispatch, berjalan, menunggu direktori lokal, dan ditangguhkan dengan `runtime_access_revoked`, dan menjeda autopilot aktif yang ditugaskan ke agent yang dilepas ikatannya. Agent dan eksekusi milik pemilik atau anggota yang tetap memiliki akses tidak terpengaruh. Rencana yang berubah memerlukan konfirmasi ulang; penulisan chat yang bersamaan mungkin memerlukan percobaan ulang. Untuk melanjutkan pekerjaan, ikat agent ke runtime yang dapat diakses, lalu lanjutkan autopilot yang dijeda secara eksplisit.
+
+Pembatalan mempertahankan riwayat chat dan menyimpan data pemulihan draf/lampiran di server. Web dan desktop menggunakan UI pemulihan draf yang sudah ada; mobile belum menampilkan UI pemulihan tersebut. Giliran yang sudah dimulai tanpa output menunggu pengakuan pembatalan dari daemon atau masa tenggang finalisasi server sebelum memutuskan apakah input dipulihkan. Daemon yang terhubung mengamati pembatalan melalui pemeriksaan rutinnya. Jika komputer offline, akses sisi server tetap dicabut segera, tetapi proses lokal dapat terus berjalan sampai menerima pembatalan setelah terhubung kembali; server tidak dapat menjamin penghentian remote yang segera.
+
+### Menghapus runtime lokal bawaan [#remove-a-runtime]
+
+Di halaman detail runtime, buka menu aksi dan pilih **Delete runtime**. Jika masih ada agent yang terikat, tinjau daftarnya dan konfirmasikan bahwa Anda ingin melepas ikatannya. Instruksi, chat, dan riwayat eksekusi mereka dipertahankan. Eksekusi yang diantrekan dan sedang berjalan dibatalkan. Multica menjeda autopilot aktif yang ditugaskan ke agent tersebut atau ke squad yang mereka pimpin. Ikat agent ke runtime lain sebelum menugaskan pekerjaan baru. Setelah mengikat ulang, lanjutkan autopilot yang dijeda secara manual. Daemon yang masih mendeteksi tool tersebut dapat mendaftarkannya lagi.
+
+## Profil runtime kustom
+
+Jika tim Anda menggunakan wrapper internal, sebuah executable dengan versi terkunci, atau memerlukan argumen tambahan yang tetap untuk sebuah tool yang kompatibel, buat sebuah **profil runtime kustom**.
+
+Profil kustom tidak menambahkan protokol komunikasi baru. Anda tetap memilih salah satu keluarga protokol yang sudah didukung Multica (tipe protokol integrasi tool tersebut; lihat [Perbandingan alat pengkodean AI](/providers)), dan perintahnya sendiri harus kompatibel dengan keluarga tersebut.
+
+### Lingkungan runtime eksekusi
+
+Saat daemon memulai sebuah eksekusi agent, daemon menyuntikkan konteks eksekusi ke dalam proses runtime. Nilai-nilai ini dimiliki oleh daemon: environment kustom sebuah agent tidak dapat menimpa variabel `MULTICA_` apa pun atau variabel direktori sementara eksekusi.
+
+Tabel berikut mendaftar variabel yang dapat digunakan runtime kustom hari ini. Daftar ini sengaja tidak lengkap dan bukan permukaan API yang berversi. Bangun integrasi hanya pada lima variabel yang ditandai **integration contract**; perlakukan sisanya sebagai detail informasional yang dapat berubah.
+
+| Variabel | Nilai dalam sebuah eksekusi | Stabilitas |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | Kredensial API `mat_` yang terikat pada eksekusi | **Integration contract** |
+| `MULTICA_TASK_ID` | ID eksekusi yang aktif | **Integration contract** |
+| `MULTICA_AGENT_ID` | ID agent yang ditugaskan | **Integration contract** |
+| `MULTICA_WORKSPACE_ID` | ID ruang kerja eksekusi tersebut | **Integration contract** |
+| `MULTICA_SERVER_URL` | URL server Multica yang dipilih daemon | **Integration contract** |
+| `MULTICA_TASK_CONFIG_ROOT` | Root konfigurasi Multica CLI privat yang khusus untuk eksekusi ini | Informasional |
+| `MULTICA_TASK_WORKSPACES_ROOT` | Root workspace eksekusi yang dikelola daemon | Informasional |
+| `MULTICA_AGENT_NAME` | Nama tampilan agent yang ditugaskan | Informasional |
+| `MULTICA_DAEMON_PORT` | Port health/API daemon lokal yang digunakan perintah khusus eksekusi seperti `multica repo checkout` | Informasional |
+| `MULTICA_TASK_SLOT` | Slot dalam pool konkurensi daemon secara keseluruhan; berguna untuk resource yang diindeks per slot seperti GPU | Informasional |
+| `MULTICA_REPO_CHECKOUT_MODE` | Diatur ke `isolated` hanya pada eksekusi Codex di Linux dan Windows, sehingga `multica repo checkout` membuat clone mandiri dengan `.git` di dalam direktori kerja; tidak diatur pada eksekusi lain | Informasional |
+| `TMPDIR` | Direktori sementara privat untuk eksekusi yang aktif; juga disediakan sebagai `TMP` dan `TEMP` kecuali di Windows, tempat tugas mewarisi path temp pengguna untuk `/tmp` bersama milik Git Bash; Claude Code di Windows menetapkan `CLAUDE_CODE_TMPDIR` ke direktori temp tugas secara default | Informasional |
+
+Server menentukan kepemilikan untuk permintaan yang dibuat dengan `MULTICA_TOKEN`; tulisan seperti komentar tugas diatribusikan ke agent yang ditugaskan dan eksekusi yang aktif. Untuk pengikatan lengkap token tersebut, izin, atribusi, masa hidup maksimum 24 jam, dan perilaku pembersihannya, lihat [Token sementara untuk eksekusi agent](/auth-tokens#token-sementara-untuk-eksekusi-agent).
+
+<Callout type="info">
+Runtime **Codex** dan **Claude Code** bawaan menggunakan kembali proses provider yang hangat (warm) di antara giliran lanjutan secara default. Pada eksekusi warm-pool, variabel per-tugas yang berubah setiap giliran (`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`) diberikan ke CLI `multica` milik daemon melalui file overlay privat per giliran, bukan diatur di environment statis proses provider yang berumur panjang, sehingga tidak dijamin muncul di environment proses provider atau skrip child sembarang. Perintah profil runtime kustom tidak menggunakan warm pool dan tetap menerima semua variabel langsung di environment proses. Atur `MULTICA_WARM_POOL=0` pada daemon jika alur kerja Codex atau Claude Code bawaan membutuhkan variabel environment langsung versi lama.
+</Callout>
+
+<Callout type="warning">
+Saat disuntikkan langsung ke environment proses (termasuk profil runtime kustom dan eksekusi dengan `MULTICA_WARM_POOL=0`), nilai-nilai ini ada di environment sebenarnya pada proses runtime. Child process apa pun yang dimulai oleh runtime mewarisi semuanya secara default, termasuk `MULTICA_TOKEN`. Jika sebuah child tidak seharusnya memegang kredensial ini, hapus secara eksplisit; jangan mengandalkan isolasi proses yang sebenarnya tidak ada. Pengecualiannya berjalan sebaliknya: tool yang menyaring environment subprocess-nya sendiri mungkin memerlukan aturan izin eksplisit. Misalnya, shell tool milik Codex menghapus nama yang mengandung `TOKEN`, `KEY`, atau `SECRET`, sehingga daemon memasang kebijakan shell terkelola yang mengizinkan variabel eksekusi yang diperlukan. Simpan token hanya di environment proses — jangan pernah di prompt, log, file repositori, atau konfigurasi persisten. Sebuah child membagikan identitas dan izin eksekusi induknya; child tidak menerima identitas baru yang berlingkup independen.
+</Callout>
+
+### Secrets manager pada perintah peluncuran [#secrets-managers]
+
+Beberapa tim memulai agent melalui secrets manager, dengan perintah seperti `doppler run -- claude`. Secrets manager dimulai setelah daemon dan membangun ulang environment agent dari proyek secret Anda. Jika proyek itu juga menyimpan `MULTICA_TOKEN`, sering kali token personal `mul_` yang disimpan untuk skrip, token itu menggantikan token tugas, dan setiap panggilan Multica CLI di dalam tugas gagal dengan `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`. Saat CLI melihat token `mul_` di samping `MULTICA_TASK_ID`, error menunjuk ke bagian ini.
+
+Biarkan nilai dari daemon yang menang:
+
+- **Doppler**: tambahkan `--preserve-env=MULTICA_TOKEN` sebelum `--`, misalnya `doppler run --preserve-env=MULTICA_TOKEN -- claude`. Jika proyek mendefinisikan variabel `MULTICA_` lain, daftarkan dengan dipisahkan koma: `--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`. Doppler hanya menerima bentuk `=`; `--preserve-env MULTICA_TOKEN` dengan spasi tidak berfungsi. Opsi ini tidak berpengaruh bersama `--mount`.
+- **Tool lain**: gunakan opsi tool yang membuat environment variable yang sudah ada diutamakan, atau hapus variabel `MULTICA_` dari proyek secret yang digunakan untuk eksekusi agent.
+
+Profil shell seperti `~/.zshrc` yang meng-export `MULTICA_TOKEN` menggantikan token tugas dengan cara yang sama saat shell agent memuatnya. Hapus export tersebut, atau atur hanya saat `MULTICA_TASK_ID` kosong.
+
+### Membuat profil
+
+Hanya pemilik dan admin ruang kerja yang dapat membuat, mengedit, atau menghapus profil runtime kustom:
+
+1. Buka **Runtimes** dan pilih sebuah komputer tempat perintah tersebut terinstal.
+2. Klik **Add custom runtime**.
+3. Pilih keluarga protokol yang benar-benar kompatibel dengan perintah tersebut.
+4. Isi nama, perintah, dan argumen tetap, lalu simpan.
+
+Profil baru hanya dimiliki oleh komputer yang dipilih saat Anda membuatnya. Hanya daemon komputer itu yang mengunduh dan mendaftarkannya; komputer lain tidak terpengaruh, meskipun perintah yang sama terinstal di sana. Jika perintah tidak dapat ditemukan, errornya hanya muncul di komputer yang dipilih. Membuat profil tidak menginstal perintah atau membuat Anda masuk ke tool.
+
+Untuk profil lama, **Machine** di **Edit custom runtime** bersifat opsional: biarkan **Keep current machines** terpilih untuk hanya mengubah nama, perintah, atau pengaturan lain. Memilih sebuah komputer menghapus salinan yang tidak terpakai di komputer lain; agent aktif atau tugas yang belum selesai di sana memblokir pengikatan. Agent yang diarsipkan dan riwayat tugas dipertahankan. Sampai profil terikat, instans pada komputer milik pembuatnya dipertahankan agar daemon dapat terhubung kembali. Salinan tidak terpakai milik anggota lain mengikuti pembersihan offline tujuh hari yang normal.
+
+Kolom perintah menerima sebuah executable dan argumen, bukan skrip shell. Argumen biasa, tanda kutip, dan escape backslash berfungsi; pipe, redirect, `&&`, `;`, backtick, dan ekspansi environment variable tidak berfungsi. Saat Anda memerlukan perilaku tersebut, letakkan di skrip wrapper dan gunakan skrip itu sebagai perintahnya.
+
+Pemeriksaan versi dan penemuan model Pi berjalan di direktori sementara yang kosong sehingga wrapper sandbox dapat menolak peluncuran dari direktori home Anda. Environment home dan konfigurasi tingkat pengguna Anda tetap tersedia. Gunakan path absolut untuk skrip atau file konfigurasi pada argumen tetap; probe tidak menemukan konfigurasi relatif terhadap direktori peluncuran daemon. Eksekusi tugas tetap menggunakan direktori kerja tugas.
+
+### Bagaimana argumen Anda diurutkan
+
+Semua yang Anda ketik di kolom perintah tetap langsung setelah executable, sebelum argumen yang ditambahkan Multica:
+
+```text
+<your command> <your fixed arguments> <Multica's protocol arguments> <the agent's custom arguments>
+```
+
+Wrapper bergaya subcommand bergantung pada urutan ini. Jika perintah Anda adalah `ccms start q36`, tool itu melihat `start q36` lebih dulu dan memilih subcommand-nya sebelum `-p` milik Multica dan argumen lainnya tiba; wrapper semacam itu tidak menerima urutan lain.
+
+Dulu argumen Anda ditambahkan di akhir. Kebanyakan perintah bergaya flag mengurai dengan cara yang sama baik dengan urutan apa pun, tetapi perintah yang membedakan flag global dari flag subcommand mempermasalahkan di mana sebuah flag berada. Jika Anda sudah memiliki sebuah profil dengan argumen tetap, jalankan satu eksekusi di atasnya setelah upgrade untuk memastikan masih berfungsi.
+
+Selain itu:
+
+- **Nilai Multica sendiri yang menang saat terjadi konflik.** Jika argumen tetap Anda menyetel sebuah flag yang juga disetel Multica, nilai Multica datang lebih belakangan dan berlaku. Yang paling penting, model yang dipilih pada agent menimpa `--model` yang dipatok di profil. Untuk mematok sebuah model untuk semua orang, biarkan field model agent kosong.
+- **Flag yang kritis bagi protokol diabaikan.** `-p`, `--output-format`, `--input-format`, `--permission-mode`, dan yang setara untuk keluarga lain dihapus dari argumen tetap Anda, karena menimpanya akan merusak koneksi daemon ke tool tersebut. Subcommand dan argumen posisional lainnya selalu diteruskan.
+
+Jika sebuah daemon yang diluncurkan Desktop tidak dapat menemukan sebuah perintah yang bisa dijalankan terminal Anda, tetapkan path absolut untuk komputer saat ini:
+
+```bash
+multica runtime profile set-path <profile-id> --path /absolute/path/to/command
+```
+
+Hapus override path tersebut:
+
+```bash
+multica runtime profile unset-path <profile-id>
+```
+
+Mengedit sebuah profil hanya memengaruhi eksekusi yang diklaim setelahnya.
+
+- **Memensiunkan satu komputer.** Anda tidak dapat menghapus instans runtime secara langsung selama profil kustomnya masih ada. Hentikan daemon di komputer yang dipensiunkan agar tidak dapat mendaftarkan ulang instans tersebut. Instans yang offline memenuhi syarat pembersihan otomatis setelah 7 hari, begitu tidak memiliki agent aktif atau tugas yang belum selesai. Jika profil lama masih menyimpan salinan di komputer pembuatnya, edit profil dan pilih komputer yang harus mempertahankannya.
+- **Memensiunkan profil.** Menghapus profil menghapus runtime-nya di setiap komputer yang terdaftar. Pindahkan dulu agent aktif ke runtime di luar profil, atau arsipkan agent yang dapat dipensiunkan. Jika Anda tidak dapat mengelola agent yang memblokir, minta pemiliknya untuk memindahkan atau mengarsipkannya.
+
+## Runtime remote Qoder Cloud Agents
+
+Qoder Cloud Agents menjalankan issue yang ditugaskan melalui sesi remote. Server Multica mengawasi sebuah bridge yang menggunakan protokol tugas daemon yang sudah ada; tidak diperlukan daemon lokal yang dioperasikan pengguna untuk runtime ini.
+
+### Sebelum memulai
+
+- Anda harus menjadi admin ruang kerja. Setiap ruang kerja memiliki satu koneksi Qoder.
+- Buat personal access token (PAT) Qoder, setidaknya satu environment, dan agent yang ingin Anda gunakan di Qoder Cloud Agents. Model, tool, dan skill dikonfigurasi pada agent remote di Qoder Cloud Agents, bukan di Multica.
+- Instalasi self-hosted harus mengatur `MULTICA_VCS_SECRET_KEY` di server: kunci 32 byte berenkode base64 yang tetap sama di setiap restart. Tanpanya, Qoder Cloud Agents tidak muncul di menu **Add**.
+
+### Menghubungkan Qoder
+
+1. Di halaman **Runtimes**, klik **Add** dan pilih **Qoder Cloud Agents** di bawah **Cloud services**.
+2. Di bawah **Region**, pilih situs yang menerbitkan PAT Anda: **Global (qoder.com)** atau **China (qoder.com.cn)**. PAT hanya berfungsi di region-nya sendiri; jika ditolak, gunakan tombol yang mencoba ulang di situs lainnya.
+3. Tempel PAT ke **Personal access token**. Setelah terverifikasi, daftar **Environment** dimuat dari Qoder. Satu environment dipilih otomatis; jika tidak, pilih salah satu.
+4. Opsional: buka **GitHub authorization** dan tambahkan URL repositori serta token untuk setiap repositori yang boleh di-clone agent. Agent hanya dapat meng-clone repositori yang diotorisasi di sini.
+5. Opsional: buka **Execution** untuk mengatur eksekusi bersamaan (default 3, hingga 10) dan batas waktu eksekusi (default 60 menit, dari 5 hingga 240).
+6. Klik **Connect**. Qoder Cloud Agents muncul di bagian cloud pada halaman Runtimes dan online dalam beberapa detik.
+
+### Menambahkan agent
+
+Buka Qoder Cloud Agents dari halaman Runtimes dan klik **Create an agent with it**, atau buat agent seperti biasa dan pilih runtime Qoder. Pada formulir agent, pilih agent remote di bawah **Remote agent**. Untuk agent yang sudah ada, ubah agent yang ditautkan atau repositori defaultnya di tab **Qoder Cloud Agents** milik agent. Beberapa agent Multica dapat berbagi satu koneksi, masing-masing ditautkan ke agent berbeda di Qoder Cloud Agents.
+
+Kredensial koneksi dienkripsi dan dibagikan dalam ruang kerja. Admin mengelola koneksi; anggota dapat memilih agent yang dapat diakses di Qoder Cloud Agents. Proyek memilih repositori dan branch awal; token repositori diteruskan ke Qoder Cloud Agents saat sesi coding dibuat. Nilai PAT tidak pernah dikembalikan ke browser setelah disimpan.
+
+Di halaman Qoder Cloud Agents, admin dapat mengedit koneksi dan repositori, **Pause** untuk berhenti mengirim tugas baru sambil mempertahankan kredensial dan agent, atau **Disconnect** untuk menghapus token yang tersimpan, menghapus runtime, dan melepas ikatan agent-nya.
+
+### Cara kerja eksekusi
+
+Eksekusi di luar batas konkurensi menunggu di antrean. Tindak lanjut pada issue yang sama melanjutkan sesi Qoder sebelumnya milik agent saat sesi itu idle. Sebuah agent dapat menetapkan repositori default, yang digunakan saat proyek issue tidak memilikinya. Agent diminta mendorong branch yang dinamai sesuai identifier issue dan memberi awalan judul pull request dengan identifier tersebut, sehingga pull request tertaut ke issue.
+
+Versi pertama ini mendukung eksekusi issue, chat, pemimpin squad, pembuatan issue dengan agent, pelaporan progres, pembatalan, dan pemulihan dari jurnal eksekusi yang dipersistenkan. Konfigurasikan model, tool, dan skill di Qoder. File dan gambar yang dilampirkan pada issue dan pesan chat sampai ke sesi, termasuk PDF dan dokumen Office, hingga 5 MB per file; file yang lebih besar tidak diteruskan, dan agent diberi tahu bahwa file tersebut ada. Direktori lokal dan pembuatan agent di Qoder Cloud Agents dari Multica tidak didukung. Halaman Runtimes memisahkan runtime remote dari komputer yang terhubung. Di chat, file yang dikirim agent dengan DeliverArtifacts, hingga 10 MB masing-masing, dilampirkan pada balasannya.
+
+Untuk penyiapan bridge mandiri dan batasan operasional, lihat [README runtime Qoder](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
+
+## Memecahkan masalah runtime offline
+
+Periksa dengan urutan ini:
+
+1. Jalankan `multica daemon status` untuk memastikan daemon berjalan.
+2. Jalankan `multica daemon logs -f` untuk mencari error login, jaringan, atau deteksi tool.
+3. Jalankan `command -v <tool-command>` di environment yang sama untuk memastikan daemon dapat menemukannya.
+4. Buka halaman **Runtimes** Multica dan periksa apakah komputer target dan alat pengkodean AI yang sesuai tampil online.
+5. Setelah menginstal sebuah tool, mengubah path, atau memperbarui profil, jalankan `multica daemon restart`.
+
+Jika masalahnya berlanjut, lihat [Pemecahan masalah](/troubleshooting).
+
+## Langkah selanjutnya
+
+- [Instal alat pengkodean AI](/install-agent-runtime) — instal dan verifikasi sebuah alat pengkodean AI yang didukung.
+- [Perbandingan alat pengkodean AI](/providers) — bandingkan model, resumpsi sesi, MCP, dan dukungan skill.
+- [Eksekusi](/tasks) — antrean, penghentian, dan percobaan ulang.

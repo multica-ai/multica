@@ -1,0 +1,627 @@
+{
+  "page": {
+    "new_autopilot": "Otomatisasi baru",
+    "table": {
+      "name": "Nama",
+      "agent": "Agent",
+      "created_by": "Dibuat oleh",
+      "mode": "Mode",
+      "status": "Status",
+      "last_run": "Eksekusi terakhir",
+      "assignee": "Penerima tugas",
+      "trigger": "Pemicu",
+      "next_run": "Eksekusi berikutnya",
+      "created": "Dibuat"
+    },
+    "last_run_empty": "--",
+    "no_matches": "Tidak ada otomatisasi yang cocok",
+    "retry": "Coba lagi"
+  },
+  "status": {
+    "active": "Aktif",
+    "paused": "Dijeda",
+    "paused_runtime_required": "Dijeda — penerima tugas memerlukan runtime",
+    "archived": "Diarsipkan",
+    "paused_project_archived": "Dijeda — proyeknya diarsipkan"
+  },
+  "execution_mode": {
+    "create_issue": "Buat Tugas",
+    "run_only": "Hanya Eksekusi"
+  },
+  "relative_date": {
+    "today": "Hari ini",
+    "one_day_ago": "1h lalu",
+    "days_ago": "{{count}}h lalu",
+    "months_ago": "{{count}}bln lalu"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Ringkasan berita harian",
+      "summary": "Cari dan ringkas berita hari ini untuk tim"
+    },
+    "pr_review": {
+      "title": "Pengingat ulasan PR",
+      "summary": "Tandai pull request basi yang perlu diulas"
+    },
+    "bug_triage": {
+      "title": "Triase bug",
+      "summary": "Nilai dan prioritaskan laporan bug baru"
+    },
+    "weekly_progress": {
+      "title": "Laporan progres mingguan",
+      "summary": "Susun ringkasan mingguan progres tim"
+    },
+    "dependency_audit": {
+      "title": "Audit dependensi",
+      "summary": "Pindai kerentanan keamanan dan paket yang usang"
+    },
+    "documentation_check": {
+      "title": "Pemeriksaan dokumentasi",
+      "summary": "Ulas perubahan terbaru untuk kesenjangan dokumentasi"
+    }
+  },
+  "detail": {
+    "not_found": "Otomatisasi tidak ditemukan",
+    "not_found_description": "Mungkin telah dihapus atau Anda tidak memiliki akses.",
+    "back_to_list": "Semua otomatisasi",
+    "pause_aria": "Jeda otomatisasi",
+    "activate_aria": "Aktifkan otomatisasi",
+    "paused_runtime_required": "Dijeda karena penerima tugas kehilangan runtime-nya. Hubungkan runtime, lalu aktifkan kembali otomatisasi ini.",
+    "bind_runtime": "Hubungkan runtime",
+    "edit": "Edit",
+    "run_now": "Eksekusi sekarang",
+    "running": "Mengeksekusi...",
+    "toast_triggered": "Otomatisasi dipicu",
+    "toast_trigger_failed": "Gagal memicu otomatisasi",
+    "run_blocked_invocation_not_allowed": "Tidak dipicu — Anda tidak memiliki izin untuk menggunakan agent otomatisasi ini",
+    "run_blocked_runtime_offline": "Tidak dipicu — runtime agent sedang offline",
+    "run_blocked_agent_runtime_required": "Tidak dipicu — agent tidak memiliki runtime; hubungkan satu untuk menjalankannya",
+    "run_blocked_runtime_access_denied": "Tidak dipicu — runtime pribadi agent ini tidak dapat diakses. Jadikan runtime publik, atau kaitkan agent ke runtime yang dapat diakses.",
+    "run_blocked_target_unavailable": "Tidak dipicu — agent tidak tersedia",
+    "run_blocked_attribution": "Tidak dipicu — tidak ada anggota aktif yang tersedia untuk menjalankan autopilot ini.",
+    "run_blocked_already_active": "Tidak dipicu — eksekusi sedang berjalan atau baru saja selesai.",
+    "run_blocked_quota_exceeded": "Tidak dipicu — batas eksekusi untuk periode ini telah tercapai",
+    "run_blocked_generic": "Tidak dipicu — eksekusi diblokir",
+    "section_triggers": "Pemicu",
+    "section_run_history": "Riwayat Eksekusi",
+    "field_agent": "Agent",
+    "field_created_by": "Dibuat oleh",
+    "field_output_mode": "Mode Output",
+    "field_project": "Proyek",
+    "no_project": "Tidak ada proyek",
+    "project_unavailable": "Proyek tidak tersedia",
+    "field_prompt": "Prompt",
+    "field_subscribers": "Pemantau",
+    "field_subscribers_none": "Tidak ada",
+    "no_prompt": "Belum ada runbook.",
+    "copy_link": "Salin tautan",
+    "link_copied": "Tautan disalin",
+    "link_copy_failed": "Tidak dapat menyalin tautan",
+    "open_project": "Buka proyek",
+    "summary": {
+      "create_issue": "{{agent}} membuat tugas di setiap eksekusi",
+      "run_only": "{{agent}} menjalankannya tanpa membuat tugas",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
+    "add_trigger": "Tambah pemicu",
+    "no_triggers": "Belum ada pemicu yang dikonfigurasi. Tambahkan jadwal atau webhook agar berjalan otomatis.",
+    "no_runs": "Belum ada eksekusi. Klik \"Eksekusi sekarang\" untuk memicu secara manual.",
+    "delete_button": "Hapus otomatisasi",
+    "toast_deleted": "Otomatisasi dihapus",
+    "toast_delete_failed": "Gagal menghapus otomatisasi",
+    "delete_dialog": {
+      "title": "Hapus otomatisasi",
+      "description": "Ini akan menghapus permanen \"{{title}}\", beserta pemicu dan riwayat eksekusinya. Tindakan ini tidak dapat dibatalkan.",
+      "cancel": "Batal",
+      "confirm": "Hapus",
+      "deleting": "Menghapus..."
+    },
+    "paused_project_archived": "Dijeda karena proyeknya diarsipkan. Pulihkan proyek, lalu aktifkan kembali otomatisasi ini."
+  },
+  "access": {
+    "title": "Kelola akses",
+    "description": "Anggota yang Anda tambahkan dapat mengedit, mengeksekusi, dan mengelola pemicu serta webhook otomatisasi ini.",
+    "current_label": "Memiliki akses",
+    "add": "Tambah anggota",
+    "search_placeholder": "Cari anggota…",
+    "no_results": "Anggota tidak ditemukan",
+    "remove_tooltip": "Hapus akses",
+    "empty": "Belum ada yang diberi akses.",
+    "toast_granted": "Akses diberikan",
+    "toast_revoked": "Akses dihapus",
+    "toast_failed": "Tidak dapat memperbarui akses",
+    "owner_note": "Pembuat dan admin ruang kerja selalu memiliki akses."
+  },
+  "run_status": {
+    "issue_created": "Tugas Dibuat",
+    "running": "Mengeksekusi",
+    "skipped": "Dilewati",
+    "completed": "Selesai",
+    "failed": "Gagal"
+  },
+  "run_source": {
+    "schedule": "Jadwal",
+    "manual": "Manual",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "Tugas terhubung",
+    "view_log": "Lihat log eksekusi",
+    "stop": "Hentikan eksekusi",
+    "stop_failed": "Tidak dapat menghentikan eksekusi.",
+    "skipped_group": {
+      "label": "Dilewati",
+      "summary": "{{count}} eksekusi dilewati"
+    }
+  },
+  "webhook_payload": {
+    "label": "Peristiwa webhook:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Salin",
+    "copied": "Payload webhook disalin",
+    "copied_short": "Disalin",
+    "copy_failed": "Gagal menyalin",
+    "truncated_marker": "[dipotong — klik Salin untuk mendapatkan payload lengkap]"
+  },
+  "trigger_kind": {
+    "schedule": "Jadwal",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "Dinonaktifkan",
+    "deprecated_badge": "Usang",
+    "next_label": "Berikutnya: {{date}}",
+    "webhook_url_label": "URL Webhook",
+    "show_url": "Tampilkan URL",
+    "hide_url": "Sembunyikan URL",
+    "hidden_url_aria": "URL webhook disembunyikan — klik untuk menampilkan",
+    "copy_url": "Salin URL",
+    "url_copied": "URL webhook disalin",
+    "url_copy_failed": "Gagal menyalin",
+    "edit_schedule": "Edit jadwal",
+    "edit_webhook": "Edit webhook",
+    "event_filter_summary_all": "Menerima semua peristiwa",
+    "event_filter_summary_conditions_other": "{{count}} kondisi",
+    "rotate_url": "Rotasi URL",
+    "rotate_confirm_title": "Rotasi URL webhook",
+    "rotate_confirm_description": "URL saat ini akan langsung berhenti berfungsi. Semua sistem eksternal yang memanggilnya harus diperbarui dengan URL baru. Lanjutkan?",
+    "rotate_confirm_cancel": "Batal",
+    "rotate_confirm_action": "Rotasi URL",
+    "rotate_in_progress": "Merotasi...",
+    "toast_rotated": "URL webhook dirotasi",
+    "toast_rotate_failed": "Gagal merotasi URL",
+    "toast_deleted": "Pemicu dihapus",
+    "toast_delete_failed": "Gagal menghapus pemicu",
+    "delete_dialog": {
+      "title": "Hapus pemicu",
+      "description": "Pemicu ini akan dihapus dan tidak akan lagi menjalankan autopilot ini. Tindakan ini tidak dapat dibatalkan.",
+      "cancel": "Batal",
+      "confirm": "Hapus",
+      "deleting": "Menghapus..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Pengiriman Webhook",
+    "empty": "Belum ada pengiriman webhook. Kirim POST ke URL webhook untuk melihat entri di sini.",
+    "row": {
+      "attempts": "{{count}}× percobaan",
+      "replay_badge": "Putar ulang"
+    },
+    "status": {
+      "queued": "Dalam antrean",
+      "dispatched": "Terkirim",
+      "rejected": "Ditolak",
+      "ignored": "Diabaikan",
+      "failed": "Gagal"
+    },
+    "signature": {
+      "not_required": "Tidak ada tanda tangan",
+      "valid": "Tanda tangan valid",
+      "invalid": "Tanda tangan tidak valid",
+      "missing": "Tanda tangan tidak ada"
+    },
+    "detail": {
+      "title": "Pengiriman",
+      "received_at": "Diterima",
+      "last_attempt_at": "Percobaan terakhir",
+      "attempt_count": "Percobaan",
+      "dispatch_attempts": "Percobaan pengiriman",
+      "available_at": "Pengiriman berikutnya",
+      "response_status": "Respons",
+      "dedupe_key": "Kunci deduplikasi",
+      "dedupe_source": "Sumber deduplikasi",
+      "content_type": "Content-Type",
+      "replayed_from": "Diputar ulang dari",
+      "error_label": "Error",
+      "raw_body": "Isi mentah",
+      "selected_headers": "Header",
+      "response_body": "Isi respons"
+    },
+    "replay": {
+      "action": "Putar ulang",
+      "in_progress": "Memutar ulang...",
+      "toast_success": "Pengiriman diputar ulang",
+      "toast_failed": "Pemutaran ulang gagal",
+      "disabled_invalid_signature": "Tidak dapat memutar ulang — tanda tangan tidak valid",
+      "disabled_rejected": "Tidak dapat memutar ulang pengiriman yang ditolak",
+      "disabled_queued": "Pemutaran ulang sudah dalam antrean. Tunggu hingga selesai."
+    },
+    "ignore": {
+      "title": "Alasan diabaikan",
+      "payload_filtered": "Kondisi payload tidak terpenuhi",
+      "event_filtered": "Peristiwa atau aksi tidak cocok",
+      "trigger_disabled": "Pemicu dinonaktifkan",
+      "autopilot_paused": "Otomatisasi dijeda",
+      "autopilot_archived": "Otomatisasi diarsipkan",
+      "quota_exceeded": "Kuota eksekusi tercapai",
+      "actual_value": "Nilai aktual",
+      "missing": "Field tidak ada",
+      "truncated": "Pratinjau dipotong. Lihat body mentah untuk nilai lengkap."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Tambah Pemicu",
+    "type_label": "Jenis",
+    "type_schedule": "Jadwal",
+    "type_webhook": "Webhook",
+    "label_field": "Label (opsional)",
+    "label_placeholder": "mis. Pagi hari kerja",
+    "webhook_help": "Multica akan membuat URL webhook setelah Anda menyimpan. Kirim POST JSON apa pun ke URL tersebut untuk memicu otomatisasi ini.",
+    "submit": "Tambah pemicu",
+    "submitting": "Menambahkan...",
+    "toast_added_schedule": "Pemicu jadwal ditambahkan",
+    "toast_added_webhook": "Pemicu webhook ditambahkan",
+    "toast_add_failed": "Gagal menambahkan pemicu"
+  },
+  "edit_trigger_dialog": {
+    "title": "Edit jadwal",
+    "label_field": "Label (opsional)",
+    "label_placeholder": "mis. Pagi hari kerja",
+    "enabled_label": "Diaktifkan",
+    "submit": "Simpan",
+    "submitting": "Menyimpan...",
+    "toast_updated": "Jadwal diperbarui",
+    "toast_update_failed": "Gagal memperbarui jadwal"
+  },
+  "edit_webhook_dialog": {
+    "title": "Edit webhook",
+    "label_placeholder": "mis. pull request GitHub",
+    "toast_updated": "Webhook diperbarui",
+    "toast_update_failed": "Gagal memperbarui webhook"
+  },
+  "dialog": {
+    "sr_create": "Otomatisasi Baru",
+    "sr_edit": "Edit Otomatisasi",
+    "header_create": "Otomatisasi baru",
+    "header_edit": "Edit otomatisasi",
+    "subtitle": "Pekerjaan AI terjadwal atau dipicu webhook",
+    "expand": "Perluas",
+    "collapse": "Perkecil",
+    "close": "Tutup",
+    "title_placeholder": "Nama otomatisasi",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Dibaca oleh agent pada setiap eksekusi",
+    "description_placeholder": "# Tujuan\nApa yang harus dicapai oleh agent?\n\n# Konteks\nUntuk siapa ini? Ada batasan?\n\n# Langkah\n1. …\n2. …",
+    "auto_run_hint": "Setelah disimpan, berjalan otomatis sampai dijeda.",
+    "cancel": "Batal",
+    "create": "Buat otomatisasi",
+    "save": "Simpan",
+    "creating": "Membuat...",
+    "saving": "Menyimpan...",
+    "toast_created": "Otomatisasi dibuat",
+    "toast_create_partial": "Otomatisasi dibuat, tetapi jadwal gagal disimpan",
+    "toast_create_partial_with_reason": "Otomatisasi dibuat, tetapi jadwal gagal disimpan: {{reason}}",
+    "toast_create_failed": "Gagal membuat otomatisasi",
+    "toast_updated": "Otomatisasi diperbarui",
+    "toast_update_partial": "Otomatisasi diperbarui, tetapi jadwal gagal disimpan",
+    "toast_update_partial_with_reason": "Otomatisasi diperbarui, tetapi jadwal gagal disimpan: {{reason}}",
+    "toast_update_failed": "Gagal memperbarui otomatisasi",
+    "section_agent": "Agent",
+    "section_assignee": "Penerima tugas",
+    "select_agent": "Pilih agent",
+    "select_assignee": "Pilih agent atau squad",
+    "section_project": "Proyek",
+    "project_hint": "Juga menentukan tempat eksekusi berjalan — repositori atau direktori lokal proyek",
+    "no_project": "Tidak ada proyek",
+    "section_output_mode": "Mode output",
+    "section_subscribers": "Pemantau",
+    "subscribers_hint": "Otomatis memantau setiap tugas yang dibuat otomatisasi ini",
+    "subscribers_empty": "Belum ada pemantau — tambahkan rekan tim untuk memberi tahu mereka setiap kali eksekusi",
+    "subscribers_add": "Tambah pemantau",
+    "subscribers_search_placeholder": "Cari anggota berdasarkan nama…",
+    "subscribers_no_results": "Tidak ada anggota yang cocok",
+    "subscribers_remove_tooltip": "Hapus",
+    "section_schedule": "Jadwal",
+    "section_trigger_kind": "Pemicu",
+    "trigger_kind_schedule": "Jadwal",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica akan membuat URL webhook setelah otomatisasi ini dibuat. Kirim POST JSON apa pun ke URL tersebut untuk memicunya.",
+    "webhook_help_edit": "Otomatisasi ini dipicu oleh webhook. Kelola URL (salin / rotasi) di halaman detail otomatisasi.",
+    "webhook_created_title": "Otomatisasi webhook siap",
+    "webhook_created_description": "Kirim POST JSON apa pun ke URL di bawah dan otomatisasi akan terpicu. Salin sekarang — Anda juga dapat menemukan dan merotasinya di halaman detail otomatisasi.",
+    "webhook_created_warning": "Perlakukan URL ini seperti kata sandi. Siapa pun yang memilikinya dapat memicu otomatisasi.",
+    "webhook_created_done": "Selesai",
+    "event_filter_label": "Filter peristiwa",
+    "event_filter_docs_link_label": "Pelajari cara kerja filter peristiwa",
+    "event_filter_event_placeholder": "Peristiwa, mis. pull_request",
+    "event_filter_actions_placeholder": "Aksi (opsional)",
+    "event_filter_add_rule": "Tambah aturan",
+    "event_filter_event_label": "Peristiwa",
+    "event_filter_actions_label": "Aksi",
+    "event_filter_new_rule_label": "Aturan baru",
+    "event_filter_condition_label": "Kondisi",
+    "event_filter_error_event_required": "Masukkan nama peristiwa.",
+    "event_filter_error_path_required": "Masukkan field payload.",
+    "event_filter_error_path_invalid": "Pisahkan nama field dengan titik, maksimal {{path}} karakter.",
+    "event_filter_error_value_required": "Masukkan nilai.",
+    "event_filter_error_too_many_values": "Maksimal {{values}} nilai.",
+    "event_filter_remove_label": "Hapus aturan",
+    "event_filter_hint": "Hanya proses peristiwa yang cocok dengan satu aturan beserta semua kondisi payload-nya. Biarkan kosong untuk menerima semua peristiwa.",
+    "event_filter_condition_remove_label": "Hapus kondisi",
+    "event_filter_condition_add_label": "Tambah kondisi",
+    "event_filter_condition_ops": {
+      "equals": "adalah",
+      "not_equals": "bukan",
+      "contains": "mengandung",
+      "in": "salah satu dari",
+      "exists": "ada"
+    },
+    "event_filter_condition_path_label": "Field payload",
+    "event_filter_condition_path_placeholder": "Field payload, mis. pull_request.base.ref",
+    "event_filter_condition_op_label": "Operator",
+    "event_filter_condition_value_label": "Nilai",
+    "event_filter_condition_value_placeholder": "mis. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Abaikan huruf besar/kecil",
+    "schedule_multiple_notice": "Otomatisasi ini memiliki {{count}} jadwal. Tutup dialog ini dan edit masing-masing di bagian Pemicu di bawah.",
+    "webhook_multiple_notice": "Otomatisasi ini memiliki lebih dari satu webhook. Tutup dialog ini dan edit masing-masing di bawah Pemicu.",
+    "webhook_edit_filters": "Edit filter",
+    "webhook_filters_saved_separately": "Filter peristiwa langsung tersimpan — mengklik Batal di sini tidak akan membatalkannya.",
+    "schedule_empty": "Tidak ada jadwal — otomatisasi ini hanya berjalan saat dipicu secara manual.",
+    "schedule_add": "Tambah jadwal",
+    "error_title_required": "Masukkan nama untuk otomatisasi ini.",
+    "error_assignee_required": "Pilih agent atau squad yang akan menjalankan otomatisasi ini.",
+    "output_modes": {
+      "create_issue": {
+        "label": "Buat tugas",
+        "description": "Setiap eksekusi membuat tugas yang terlacak"
+      },
+      "run_only": {
+        "label": "Hanya eksekusi",
+        "description": "Eksekusi senyap, tanpa membuat tugas"
+      }
+    },
+    "event_filter_condition_all": "Dan payload cocok dengan semua kondisi"
+  },
+  "schedule_editor": {
+    "time_label": "Waktu",
+    "time_at": "Pada waktu tertentu",
+    "time_every": "Pada interval",
+    "every_prefix": "Setiap",
+    "unit_hours": "jam",
+    "unit_minutes": "menit",
+    "days_label": "Hari",
+    "days_every": "Setiap hari",
+    "days_weekly": "Hari dalam seminggu",
+    "days_monthly": "Tanggal dalam bulan",
+    "monthly_short_month_hint": "Bulan tanpa tanggal {{day}} akan dilewati.",
+    "days_short": {
+      "sun": "Min",
+      "mon": "Sen",
+      "tue": "Sel",
+      "wed": "Rab",
+      "thu": "Kam",
+      "fri": "Jum",
+      "sat": "Sab"
+    },
+    "timezone_label": "Zona waktu",
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "klik untuk mengedit",
+    "cron_hint": "Cron standar 5 kolom (menit jam tanggal bulan hari)",
+    "cron_invalid": "Ekspresi cron ini tidak valid.",
+    "timezone_invalid": "Zona waktu ini tidak dikenali oleh server.",
+    "advanced_hint": "Ekspresi ini menggunakan fitur yang tidak dapat ditampilkan oleh editor visual. Edit teks cron secara langsung, atau sederhanakan untuk mengaktifkan kembali kontrol.",
+    "advanced_unverified": "Server tidak dapat dihubungi untuk memeriksa ekspresi ini, sehingga kontrol tetap nonaktif. Pastikan teks cron benar sebelum menyimpan.",
+    "advanced_checking": "Memeriksa ekspresi ini dengan server. Kontrol tetap nonaktif sampai server merespons.",
+    "next_runs_label": "Eksekusi berikutnya",
+    "next_in": "dalam {{countdown}}",
+    "preview_unavailable": "Eksekusi berikutnya tidak tersedia saat ini.",
+    "no_upcoming_runs": "Ekspresi ini tidak memiliki eksekusi mendatang.",
+    "describe": {
+      "days_every": "Setiap hari",
+      "days_monthly": "Tanggal {{day}} setiap bulan",
+      "days_long": {
+        "sun": "Min",
+        "mon": "Sen",
+        "tue": "Sel",
+        "wed": "Rab",
+        "thu": "Kam",
+        "fri": "Jum",
+        "sat": "Sab"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "Pada {{time}}",
+      "time_every_hour": "Setiap jam pada :{{minute}}",
+      "time_every_hours": "Setiap {{interval}} jam pada :{{minute}}",
+      "time_every_hour_window": "Setiap jam",
+      "time_every_hours_window": "Setiap {{interval}} jam",
+      "time_every_minute": "Setiap menit",
+      "time_every_minutes": "Setiap {{interval}} menit",
+      "window": "{{from}}–{{to}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}h {{hours}}j {{minutes}}m",
+      "hours_minutes": "{{hours}}j {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Jam",
+      "fixed_minute": "Menit",
+      "interval": "Interval",
+      "interval_unit": "Satuan interval",
+      "window_start_hour": "Jam mulai jendela",
+      "window_start_minute": "Menit mulai jendela",
+      "window_end_hour": "Jam akhir jendela",
+      "window_end_minute": "Menit akhir jendela",
+      "day_pattern": "Pola hari",
+      "day_of_month": "Tanggal dalam bulan",
+      "timezone": "Zona waktu",
+      "days_full": {
+        "sun": "Minggu",
+        "mon": "Senin",
+        "tue": "Selasa",
+        "wed": "Rabu",
+        "thu": "Kamis",
+        "fri": "Jumat",
+        "sat": "Sabtu"
+      }
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Filter agent atau squad...",
+    "select_agent": "Pilih agent",
+    "select_assignee": "Pilih agent atau squad",
+    "agents_group": "Agent",
+    "squads_group": "Squad",
+    "agent_runtime_required": "Hubungkan runtime sebelum memilih agent ini",
+    "squad_runtime_required": "Hubungkan runtime ke leader squad ini sebelum memilihnya"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Cari zona waktu..."
+  },
+  "toolbar": {
+    "section_assignee": "Penerima tugas",
+    "section_mode": "Mode",
+    "section_trigger": "Pemicu",
+    "section_creator": "Dibuat oleh"
+  },
+  "actions": {
+    "row_menu": "Tindakan otomatisasi",
+    "pause": "Jeda",
+    "resume": "Lanjutkan",
+    "delete": "Hapus",
+    "delete_dialog": {
+      "title": "Hapus otomatisasi?",
+      "description_other": "Ini akan menghapus permanen {{count}} otomatisasi dan riwayat eksekusinya.",
+      "warning": "Tindakan ini tidak dapat dibatalkan.",
+      "cancel": "Batal",
+      "confirm": "Hapus permanen",
+      "deleting": "Menghapus…",
+      "title_multiple": "Hapus {{count}} otomatisasi?",
+      "description_single": "Ini akan menghapus \"{{name}}\" beserta riwayat eksekusinya secara permanen."
+    }
+  },
+  "wakeups": {
+    "title": "Wakeup tugas",
+    "issue": "Tugas",
+    "trigger": "Pemicu",
+    "enabled": "Diaktifkan",
+    "all_triggers": "Semua pemicu",
+    "event": "Peristiwa",
+    "at": "Satu kali",
+    "recurring": "Berulang",
+    "all_agents": "Semua agent",
+    "running": "Mengeksekusi",
+    "active_runs": "{{count}} eksekusi aktif",
+    "issue_closed": "Tugas ditutup",
+    "read_only": "Hanya pembuat atau admin ruang kerja yang dapat mengelola wakeup ini",
+    "select_row": "Pilih {{issue}}, {{agent}}",
+    "select_page": "Pilih semua wakeup yang aktif",
+    "load_error": "Tidak dapat memuat wakeup",
+    "loading": "Memuat wakeup…",
+    "disable_selected": "Matikan yang dipilih",
+    "confirm_title": "Matikan {{count}} wakeup?",
+    "confirm_body": "Wakeup mendatang akan berhenti. Eksekusi dalam antrean yang belum dimulai akan dibatalkan. Eksekusi yang sedang berjalan akan tetap berlanjut — hentikan dari log eksekusi.",
+    "cancel": "Batal",
+    "confirm": "Matikan",
+    "disabling": "Mematikan…",
+    "batch_result": "Dimatikan: {{succeeded}}. Gagal: {{failed}}.",
+    "scopes": {
+      "active": "Menunggu atau sedang dieksekusi",
+      "all": "Semua wakeup",
+      "disabled": "Dimatikan",
+      "ended": "Berakhir",
+      "paused": "Dijeda"
+    },
+    "target_agent": "Agent wakeup",
+    "empty_filtered": "Tidak ada wakeup yang cocok",
+    "batch_success": "Mematikan {{count}} aturan wakeup",
+    "batch_partial": "Mematikan {{succeeded}}; {{failed}} gagal. Item yang gagal tetap terpilih untuk dicoba lagi.",
+    "source": "Sumber",
+    "sources": {
+      "all": "Semua sumber",
+      "member": "Anggota",
+      "agent": "Agent",
+      "system": "Sistem"
+    },
+    "runs_7d": "Eksekusi (7 hari)",
+    "ends": "Berakhir",
+    "until_issue_ends": "Sampai tugas berakhir",
+    "fires_once": "Terpicu sekali",
+    "assignee_target": "Penerima tugas · {{name}}",
+    "no_target": "Tidak ada agent penerima tugas",
+    "banner_other": "{{count}} wakeup dijeda secara otomatis. Terbaru: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "Lihat",
+    "create": "Wakeup baru",
+    "create_pick_issue": "Pilih tugas untuk menambahkan wakeup",
+    "create_pick_issue_description": "Wakeup ini terikat pada tugas ini dan berakhir bersamanya.",
+    "intro": {
+      "title": "Panggil kembali agent pada saat yang tepat",
+      "description": "Wakeup berada di tugas: saat PR digabungkan, seseorang membalas, atau waktunya tiba, agent kembali untuk melanjutkan pekerjaan. Saat tugas selesai, wakeup-nya berhenti.",
+      "slides": {
+        "event": {
+          "title": "Tunggu sesuatu terjadi",
+          "description": "Tidak perlu membiarkan agent terus berjalan sambil menunggu. Saat kondisi terpenuhi, Multica membangunkannya."
+        },
+        "time": {
+          "title": "Atau pilih waktu",
+          "description": "Wakeup sekali jalan cocok untuk \"periksa lagi besok sore\"; yang berulang cocok untuk pemeriksaan harian."
+        },
+        "ends": {
+          "title": "Berhenti saat tugas selesai",
+          "description": "Wakeup milik tugasnya. Setelah tugas selesai atau dibatalkan, wakeup dimatikan sehingga tidak ada aturan yang tertinggal."
+        }
+      },
+      "art": {
+        "issue_inbox": "Tampilan kosong untuk grup kotak masuk",
+        "issue_board": "Kolom papan yang dapat diubah ukurannya",
+        "issue_paste": "Tempel gambar ke komentar",
+        "reply": "\"PR sudah digabungkan. Memperbarui dokumen dan menutup tugas.\"",
+        "event_examples": "PR digabungkan, komentar baru"
+      }
+    },
+    "defaults": {
+      "title": "Saat sub-tugas selesai",
+      "description": "Membangunkan penerima tugas induk saat sebuah tahap selesai dan tahap berikutnya menunggu, dan sekali lagi saat semua sub-tugas ditutup. Penerima tugas berupa anggota akan mendapat notifikasi kotak masuk.",
+      "badge": "Default workspace",
+      "enabled": "Aktif secara default",
+      "instruction": "Instruksi default",
+      "instruction_hint": "Dikirim ke agent yang dibangunkan. Biarkan kosong untuk memakai instruksi bawaan di bawah.",
+      "instruction_placeholder": "Biarkan kosong untuk memakai instruksi bawaan",
+      "builtin": "Instruksi bawaan",
+      "instruction_invalid": "Batasi instruksi hingga 4.000 byte.",
+      "save": "Simpan",
+      "saving": "Menyimpan...",
+      "save_error": "Tidak dapat menyimpan default.",
+      "customized_other": "{{count}} tugas terbuka memiliki pengaturan sendiri dan mengabaikan default ini.",
+      "admin_only": "Hanya owner dan admin yang dapat mengubah default ini.",
+      "load_error": "Tidak dapat memuat default wakeup.",
+      "edit_instruction": "Edit instruksi default",
+      "view_instruction": "Lihat instruksi default"
+    },
+    "banner_single": "1 wakeup dijeda otomatis: {{issue}} “{{condition}}” — {{reason}}"
+  },
+  "intro": {
+    "label": "Otomatisasi",
+    "title": "Biarkan agent memulai pekerjaan sendiri",
+    "description": "Atur jadwal atau webhook. Setiap kali terpicu, Multica membuat tugas untuk agent, atau langsung menjalankan agent. Pilih template dan sesuaikan.",
+    "templates": "Mulai dari template"
+  }
+}

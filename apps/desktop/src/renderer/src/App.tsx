@@ -64,6 +64,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   fr: "fr-FR",
   es: "es",
   ru: "ru",
+  id: "id-ID",
 };
 
 

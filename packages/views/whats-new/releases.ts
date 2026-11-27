@@ -92,6 +92,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Задача может ждать другие",
             body: "В меню задачи выберите «Связи → Ждать другую задачу» или добавьте связь в разделе «Связи» на боковой панели. Когда эти задачи завершатся, назначенный агент начнёт работу сам, а назначенный человек получит уведомление.",
           },
+          id: {
+            title: "Biarkan tugas menunggu tugas lain",
+            body: "Di menu tugas, pilih Relasi → Tunggu tugas lain, atau tambahkan di Relasi pada sidebarnya. Saat tugas-tugas itu selesai, agent penerima tugas dimulai otomatis dan penerima tugas manusia diberi tahu.",
+          },
         },
       },
       {
@@ -131,6 +135,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Участники команды передают работу напрямую",
             body: "Если вы управляете командой, откройте её и в разделе «Совместная работа» выберите «Участники передают напрямую». Участники будут передавать задачу друг другу, а лидер подключится, только если достигнут лимит или запуск завершился ошибкой.",
           },
+          id: {
+            title: "Biarkan anggota squad serah terima langsung",
+            body: "Jika Anda mengelola squad, buka squad itu dan atur Kolaborasi ke Anggota serah terima langsung. Anggota lalu menyerahkan issue satu sama lain, dan leader baru turun tangan saat batas tercapai atau run gagal.",
+          },
         },
       },
       {
@@ -169,6 +177,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Меняйте время напоминания",
             body: "В чате откройте «Напоминания» с полосы над полем ввода или по значку будильника в заголовке, затем нажмите на часы рядом с напоминанием, чтобы изменить время.",
+          },
+          id: {
+            title: "Ubah kapan wakeup memeriksa lagi",
+            body: "Di chat, buka Wakeup dari strip di atas kotak pesan atau ikon jam alarm di header, lalu klik jam di samping wakeup untuk mengubah waktunya.",
           },
         },
       },
@@ -215,6 +227,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Выбирайте привычного агента одной клавишей",
             body: "При создании задачи с агентом рядом с «Создано» появляются три агента и команды, которых вы выбираете чаще всего. Нажмите на нужного или Alt/Option+1–3, а стрелка рядом открывает поиск по всем.",
           },
+          id: {
+            title: "Pilih agent favorit Anda dengan satu tombol",
+            body: "Saat membuat issue dengan agent, tiga agent dan squad yang paling sering Anda pakai muncul di samping Created by. Klik salah satunya atau tekan Alt/Option+1–3 untuk beralih, atau klik panah di sebelahnya untuk mencari semuanya.",
+          },
         },
       },
       {
@@ -254,6 +270,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Передачи внутри команды — не во «Входящие»",
             body: "В «Настройки → Уведомления» в разделе «Комментарии» отключите «Включать передачи внутри команды», и комментарии, которыми лидер и агенты команды передают друг другу работу, перестанут приходить. @упоминания и запуски, требующие внимания, по-прежнему приходят.",
           },
+          id: {
+            title: "Jauhkan handoff squad dari Inbox Anda",
+            body: "Di Settings → Notifications, matikan Include squad handoffs di bagian Comments untuk berhenti menerima komentar yang dipakai leader dan agent squad untuk meneruskan pekerjaan. @mention untuk Anda dan run yang perlu perhatian tetap masuk.",
+          },
         },
       },
       {
@@ -292,6 +312,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Расход по командам",
             body: "В разделе «Аналитика» выберите команду в фильтре «Принадлежность», чтобы все графики показывали только её, или сгруппируйте рейтинг и ошибки по командам. Разверните команду, чтобы увидеть расход каждого участника.",
+          },
+          id: {
+            title: "Lihat penggunaan per squad",
+            body: "Di Analytics, pilih squad pada filter Attribution agar setiap grafik hanya menampilkan squad tersebut, atau kelompokkan leaderboard dan error per squad. Buka squad untuk melihat pengeluaran tiap anggota.",
           },
         },
       },
@@ -339,6 +363,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Разбирайте «Входящие» с клавиатуры",
             body: "На странице «Входящие» нажимайте J и K, чтобы перейти к следующему или предыдущему уведомлению без архивации, и U, чтобы отметить открытое уведомление непрочитанным. Щёлкните правой кнопкой по уведомлению во «Входящих» на панели «Работа», чтобы отметить его непрочитанным, архивировать или удалить.",
           },
+          id: {
+            title: "Triase Inbox dari keyboard",
+            body: "Di halaman Inbox, tekan J dan K untuk berpindah ke notifikasi berikutnya atau sebelumnya tanpa mengarsipkan, dan U untuk menandai notifikasi yang terbuka sebagai belum dibaca. Klik kanan notifikasi di Inbox pada panel Work untuk menandainya belum dibaca, mengarsipkan, atau menghapusnya.",
+          },
         },
       },
     ],
@@ -385,6 +413,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Все уведомления — на странице «Входящие»",
             body: "Нажмите на уведомление во «Входящих» на панели «Работа» — оно откроется на странице «Входящие», а все действия собраны в одной панели. Вверху раздела переключайтесь между вкладками «Входящие», «Отложенные» и «Архив»; E архивирует, H откладывает.",
           },
+          id: {
+            title: "Tangani semua notifikasi di halaman Inbox",
+            body: "Klik notifikasi di Inbox pada panel Work dan notifikasi itu terbuka di halaman Inbox, dengan semua aksinya dalam satu bar. Beralih antara tab Inbox, Snoozed, dan Archived di bagian atas; tekan E untuk mengarsipkan dan H untuk snooze.",
+          },
         },
       },
       {
@@ -425,6 +457,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Следите за ходом проекта",
             body: "Откройте проект: на вкладке «Обзор» описание занимает всю ширину, а рядом — прогресс, недельный тренд и дата завершения в текущем темпе. Вкладка «Активность» показывает изменения. Отменённые задачи в прогресс не входят.",
           },
+          id: {
+            title: "Lihat perkembangan sebuah project",
+            body: "Buka project: tab Overview menampilkan deskripsinya selebar penuh, di samping progres, tren mingguan, dan tanggal selesai yang diperkirakan dari laju terbaru. Tab Activity mencantumkan apa saja yang berubah. Issue yang dibatalkan tidak dihitung dalam progres.",
+          },
         },
       },
       {
@@ -462,6 +498,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Предпросмотр HTML и Mermaid прямо при редактировании",
             body: "При редактировании описания задачи начните блок кода с ```html или ```mermaid — предпросмотр появится на месте. Нажмите на строку заголовка, чтобы добавить или переименовать заголовок, а Enter на выделенном блоке откроет исходный код.",
+          },
+          id: {
+            title: "Pratinjau HTML dan Mermaid saat mengedit",
+            body: "Di deskripsi issue yang sedang Anda edit, mulai blok kode dengan ```html atau ```mermaid dan pratinjau akan dirender langsung di tempat. Klik title bar-nya untuk menambah atau mengganti judul, dan tekan Enter pada blok yang dipilih untuk mengedit sumbernya.",
           },
         },
       },
@@ -509,6 +549,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Агенты возвращаются с отчётом в чат",
             body: "Попросите агента в чате сообщить, когда задача завершится или PR будет слит, — он отчитается в том же диалоге и напомнит о себе, если ждёт ответа от коллеги. Полоса над полем ввода показывает, чего именно он ждёт.",
           },
+          id: {
+            title: "Agent kembali melapor di chat",
+            body: "Minta agent di chat untuk memberi tahu Anda saat issue selesai atau PR di-merge, dan agent akan melapor di percakapan yang sama; agent juga menindaklanjuti saat meminta sesuatu pada orang lain untuk Anda. Strip di atas kotak pesan menunjukkan apa yang sedang ditunggu.",
+          },
         },
       },
       {
@@ -548,6 +592,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Дополняйте ответ прямо во время выполнения",
             body: "Пока агент отвечает в чате, просто напишите и отправьте сообщение: если поле показывает «Добавить в текущий запуск», оно вольётся в ответ без его остановки. С вложением или в иных случаях оно начнётся в следующем запуске.",
+          },
+          id: {
+            title: "Tambahkan ke balasan yang sedang berjalan",
+            body: "Saat agent membalas di chat, Anda bisa terus mengetik dan mengirim: ketika kotak bertuliskan Add to current run, pesan Anda bergabung ke balasan itu tanpa menghentikannya. Dengan lampiran, di antara kasus lain, tertulis Start after this run dan pesan menunggu giliran berikutnya.",
           },
         },
       },
@@ -589,6 +637,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Общайтесь с агентом через WeChat",
             body: "Откройте своего агента, выберите «Добавить канал сообщений» в разделе «Сообщения», укажите WeChat и отсканируйте QR-код. После этого пишите боту в личные сообщения — ответы и файлы придут туда же.",
           },
+          id: {
+            title: "Chat dengan agent dari WeChat",
+            body: "Buka agent milik Anda, pilih Add messaging channel di bawah Messaging, pilih WeChat, lalu pindai kode QR dengan WeChat Anda sendiri. Setelah itu kirim pesan pribadi ke bot di WeChat; balasan dan file akan kembali ke sana.",
+          },
         },
       },
       {
@@ -628,6 +680,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Организуйте проекты в папки",
             body: "На боковой панели нажмите + рядом с «Проекты» и выберите «Новая папка», затем перетащите туда проекты или выберите «Переместить в папку» в меню проекта. В настройках отображения можно сгруппировать проекты по папкам.",
+          },
+          id: {
+            title: "Atur project ke dalam folder",
+            body: "Di sidebar, klik + di samping Projects dan pilih New folder, lalu seret project ke dalamnya atau pilih Move to folder dari menu project. Di Projects, buka Display settings untuk mengelompokkan berdasarkan folder.",
           },
         },
       },
@@ -675,6 +731,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Откладывайте уведомления на потом",
             body: "Входящие теперь находятся в верхней части панели «Работа». Наведите на уведомление и нажмите на часы — или нажмите H в открытой задаче — чтобы выбрать время возврата; до тех пор оно ждёт в разделе «Отложенные».",
           },
+          id: {
+            title: "Tunda notifikasi sampai nanti",
+            body: "Inbox Anda kini berada di bagian atas panel Work. Arahkan kursor ke notifikasi lalu klik ikon jam, atau tekan H pada issue yang terbuka, untuk memilih kapan notifikasi muncul lagi; sampai saat itu notifikasi menunggu di tampilan Snoozed.",
+          },
         },
       },
       {
@@ -713,6 +773,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Диктуйте вместо набора текста в десктопе",
             body: "В десктопном приложении включите «Настройки → Голосовой ввод» и нажмите на микрофон в чате или комментарии (или удерживайте его во время речи). При первом запуске выберите модель — распознавание выполняется локально.",
+          },
+          id: {
+            title: "Dikte alih-alih mengetik di desktop",
+            body: "Di aplikasi desktop, aktifkan Settings → Voice input, lalu ketuk mikrofon di chat, komentar, atau balasan untuk mendikte, atau tahan saat Anda berbicara. Pertama kali, pilih model suara untuk diunduh; audio ditranskripsi di komputer Anda.",
           },
         },
       },
@@ -753,6 +817,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Планируйте проекты на доске и архивируйте завершённые",
             body: "В разделе «Проекты» переключитесь на доску или сгруппируйте по статусу, приоритету или руководителю. Завершённый проект можно скрыть через архив и в любой момент восстановить из архивных проектов.",
           },
+          id: {
+            title: "Rencanakan project di board, dan arsipkan yang sudah selesai",
+            body: "Di Projects, buka Display settings untuk beralih ke Board atau mengelompokkan berdasarkan status, prioritas, atau lead, dan cari dari header. Arsipkan project dari menunya untuk menyembunyikannya, dan pulihkan kapan saja dari Archived projects.",
+          },
         },
       },
       {
@@ -791,6 +859,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Меньше шума от чужих задач",
             body: "Вверху чужой задачи нажмите «Отписаться и архивировать» или Shift+E, чтобы отключить уведомления в один клик. По умолчанию приходят только ключевые обновления — режим меняется в «Настройки → Уведомления».",
+          },
+          id: {
+            title: "Kurangi gangguan dari issue orang lain",
+            body: "Di bagian atas issue milik orang lain, klik Unsubscribe & archive atau tekan Shift+E untuk menghentikan pembaruannya sekaligus. Issue mereka kini hanya mengirim pembaruan penting; untuk menerima semuanya, atur Other people's issues ke All activity di Settings → Notifications.",
           },
         },
       },
@@ -831,6 +903,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Редактируйте сразу несколько задач",
             body: "Отметьте задачи в списке и измените метки, проект или срок на нижней панели; в меню «Ещё» доступны дата начала, родительская задача и свойства. Пропущенные задачи можно выделить одной кнопкой и повторить.",
           },
+          id: {
+            title: "Edit banyak issue sekaligus",
+            body: "Pilih issue di daftar, lalu gunakan bar di bagian bawah untuk mengubah label, project, atau tanggal jatuh tempo; More actions mencakup tanggal mulai, parent, dan custom property. Jika ada yang terlewat, klik Select only these untuk memperbaiki dan mencobanya lagi.",
+          },
         },
       },
       {
@@ -869,6 +945,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Попросите агента создать тему оформления",
             body: "В чате или задаче опишите агенту нужные цвета, фон или стиль интерфейса. Он соберёт и проверит тему, после чего её можно включить в «Настройки → Внешний вид».",
+          },
+          id: {
+            title: "Minta agent membuat tema Anda",
+            body: "Di chat atau issue, minta agent mana pun membuat tema dan jelaskan warna, latar belakang, atau tampilan glass yang Anda inginkan. Agent membuat dan memeriksa tema lalu menyerahkannya kepada Anda; setelah itu beralih ke tema tersebut di Settings → Appearance.",
           },
         },
       },
@@ -916,6 +996,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Устанавливайте и импортируйте темы",
             body: "В «Настройки → Внешний вид» нажмите «Управление» рядом с темой, чтобы установить темы сообщества или импортировать .zip / папку. Переключать темы можно в любой момент из меню аккаунта.",
           },
+          id: {
+            title: "Instal, impor, atau buat tema",
+            body: "Di Settings → Appearance, klik Manage di samping Theme untuk menjelajahi dan menginstal tema komunitas, atau gunakan Import theme untuk file .zip atau folder. Ganti tema kapan saja dari Theme di menu akun.",
+          },
         },
       },
       {
@@ -954,6 +1038,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Управляйте сервисами задачи с боковой панели",
             body: "Откройте задачу и запустите окружение в разделе «Окружения». Из меню каждого сервиса можно открыть логи, перезапустить или остановить его, а на десктопе — перейти прямо в окно приложения.",
+          },
+          id: {
+            title: "Jalankan service sebuah issue dari sidebar-nya",
+            body: "Buka issue dan gunakan Start an environment di bawah Environments pada sidebar-nya. Menu tiap service dapat melihat log, me-restart, atau menghentikannya, dan aplikasi desktop dapat dibawa ke depan dengan Switch to window.",
           },
         },
       },
@@ -994,6 +1082,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Оставляйте пометки к ответам агента",
             body: "В чате выделите фрагмент ответа агента и добавьте заметку. Сохранённые заметки ждут в поле ввода и отправляются вместе со следующим сообщением.",
+          },
+          id: {
+            title: "Beri catatan pada balasan chat agent",
+            body: "Di Chat, pilih teks pada balasan agent dan tambahkan catatan. Catatan yang tersimpan menunggu di kotak pesan dan dikirim bersama pesan Anda berikutnya, dengan atau tanpa teks tambahan.",
           },
         },
       },
@@ -1040,6 +1132,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Выбирайте тему и шрифты во «Внешнем виде»",
             body: "Откройте «Настройки → Внешний вид», чтобы выбрать одну из пяти встроенных тем, настроить шрифты, размеры текста, плотность и контрастность для этого устройства.",
           },
+          id: {
+            title: "Pilih tema dan font di Appearance",
+            body: "Buka Settings → Appearance untuk memilih salah satu dari lima tema bawaan. Anda juga dapat mengatur font dan ukuran untuk antarmuka dan konten, serta menyesuaikan kerapatan dan kontras. Pilihan Anda disimpan di perangkat ini.",
+          },
         },
       },
       {
@@ -1079,6 +1175,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Ограничьте доступ к проекту его участниками",
             body: "При создании проекта или в его свойствах выберите «Только участники проекта» и добавьте нужных людей. Задачи, комментарии и вложения увидят только они, а также владельцы и администраторы рабочего пространства.",
           },
+          id: {
+            title: "Batasi project hanya untuk anggotanya",
+            body: "Saat membuat project, atau nanti di propertinya, atur Access ke Project members only dan tambahkan orang yang membutuhkannya. Issue, komentar, dan lampirannya kemudian hanya terlihat oleh mereka serta owner dan admin workspace.",
+          },
         },
       },
       {
@@ -1116,6 +1216,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Отслеживайте сервисы, запущенные задачей",
             body: "Откройте задачу и проверьте раздел «Окружения» на боковой панели — там показаны сервисы, запущенные агентами, их статус, ссылка и оставшееся время работы.",
+          },
+          id: {
+            title: "Lihat service yang dimulai sebuah issue",
+            body: "Buka issue dan periksa Environments di sidebar-nya untuk melihat service yang dijalankan agent-nya, lengkap dengan status, tautan, dan sisa waktu. Di macOS dan Linux, agent dapat menjaga service tetap berjalan dengan multica env start.",
           },
         },
       },
@@ -1162,6 +1266,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Восстанавливайте прошлые версии навыков",
             body: "Откройте навык и перейдите в «Историю», чтобы посмотреть сохранённые версии. Восстановленная версия станет актуальной для следующих запусков агентов.",
           },
+          id: {
+            title: "Pulihkan versi skill sebelumnya",
+            body: "Buka skill dan masuk ke History untuk melihat isi tiap versi yang tersimpan. Pulihkan salah satunya, dan versi itu menjadi yang terbaru untuk run agent Anda berikutnya.",
+          },
         },
       },
       {
@@ -1201,6 +1309,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Показывайте только непрочитанные задачи",
             body: "В «Представлениях» добавьте встроенный вид «Непрочитанные» на боковую панель или отфильтруйте любой список по «Статус прочтения → Непрочитанные».",
           },
+          id: {
+            title: "Lihat hanya issue yang belum dibaca",
+            body: "Di Views, beri bintang pada tampilan bawaan Unread untuk menambahkannya ke sidebar. Anda juga dapat memfilter tampilan mana pun dengan Read state → Unread.",
+          },
         },
       },
       {
@@ -1238,6 +1350,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Закрепляйте основные рабочие пространства",
             body: "Откройте переключатель рабочих пространств и нажмите значок булавки, чтобы держать нужные сверху. Индикаторы непрочитанных сохраняются.",
+          },
+          id: {
+            title: "Sematkan workspace utama Anda",
+            body: "Buka workspace switcher dan klik pin di samping workspace untuk menjaganya tetap di atas. Titik belum dibaca tetap muncul pada workspace yang disematkan.",
           },
         },
       },
@@ -1283,6 +1399,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Новый макет рабочего пространства",
             body: "Левая панель переключает разделы «Работа», «Команда», «Чат», «Входящие» и «Автопилот». Боковую панель рядом можно свернуть или изменить её ширину.",
           },
+          id: {
+            title: "Tata letak workspace baru",
+            body: "Bar di sebelah kiri berpindah antara Work, Team, Chat, Inbox, dan Auto. Ciutkan atau ubah ukuran panel samping di sebelahnya untuk memberi ruang.",
+          },
         },
       },
       {
@@ -1322,6 +1442,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Обновлённые представления",
             body: "Добавляйте представления в избранное, комбинируйте или исключайте фильтры, а также фильтруйте по статусу агента или «Я и мои агенты».",
           },
+          id: {
+            title: "View yang dibangun ulang",
+            body: "Simpan view sebagai favorit, gabungkan atau kecualikan filter, dan filter berdasarkan status agent atau “Me and my agents”.",
+          },
         },
       },
       {
@@ -1360,6 +1484,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Ограничивайте число одновременных запусков в среде выполнения",
             body: "Откройте среду выполнения и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
+          },
+          id: {
+            title: "Batasi run bersamaan per runtime",
+            body: "Buka runtime dan atur berapa banyak run yang ditangani sekaligus. Run tambahan menunggu di antrean.",
           },
         },
       },
@@ -1406,6 +1534,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Новая командная панель",
             body: "Выделите несколько задач и измените их разом через командную панель. Она также ищет по рабочему пространству и превращает фразу в новую задачу для агента.",
           },
+          id: {
+            title: "Command bar baru",
+            body: "Pilih beberapa issue lalu buka command bar untuk mengubah semuanya sekaligus. Command bar juga mencari di workspace dan mengubah sebuah kalimat menjadi issue baru untuk agent.",
+          },
         },
       },
       {
@@ -1443,6 +1575,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "До 200 вариантов в свойствах",
             body: "Свойства с одиночным и множественным выбором теперь поддерживают до 200 вариантов с поиском по тексту и пиньиню.",
+          },
+          id: {
+            title: "Hingga 200 opsi property",
+            body: "Property single-select dan multi-select dapat menampung hingga 200 opsi, yang dapat dicari dengan teks atau pinyin.",
           },
         },
       },
@@ -1489,6 +1625,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Запускайте задачи через Devin CLI",
             body: "Агенты могут работать через локальный Devin CLI с продолжением сессии, навыками проекта и MCP.",
           },
+          id: {
+            title: "Jalankan task di Devin CLI",
+            body: "Agent dapat berjalan di Devin CLI lokal Anda, dengan session resume, project skill, dan MCP.",
+          },
         },
       },
       {
@@ -1527,6 +1667,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Multica на традиционном китайском",
             body: "Переключить язык интерфейса можно в разделе «Настройки» → «Язык».",
+          },
+          id: {
+            title: "Multica dalam Bahasa Mandarin Tradisional",
+            body: "Ganti bahasa aplikasi di Settings → Preferences.",
           },
         },
       },
@@ -1573,6 +1717,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Рабочие процессы доступны каждому участнику",
             body: "Любой участник может создавать и дублировать рабочие процессы. Создатели и администраторы могут редактировать их и настраивать передачу задач.",
           },
+          id: {
+            title: "Setiap anggota dapat membuat workflow",
+            body: "Anggota mana pun dapat membuat dan menggandakan workflow. Pembuat dan admin dapat mengeditnya serta mengatur handoff.",
+          },
         },
       },
       {
@@ -1611,6 +1759,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Делитесь средой выполнения с выбранными участниками",
             body: "Указывайте конкретных пользователей с доступом к среде выполнения, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
+          },
+          id: {
+            title: "Bagikan runtime ke anggota pilihan",
+            body: "Pilih persis siapa yang dapat memakai runtime, bukan hanya semua orang atau hanya Anda. Saat akses diperketat, agent yang terdampak ditampilkan lebih dulu.",
           },
         },
       },

@@ -43,6 +43,7 @@ function matchSupportedLocale(candidates: string[]): SupportedLocale {
     }
     if (lowered.startsWith("zh")) return "zh-Hans";
     if (lowered.startsWith("en")) return "en";
+    if (lowered.startsWith("id")) return "id";
   }
   return DEFAULT_LOCALE;
 }
@@ -74,7 +75,8 @@ export function MobileI18nProvider({ children }: { children: ReactNode }) {
           stored !== "system" &&
           stored !== "en" &&
           stored !== "zh-Hans" &&
-          stored !== "zh-Hant"
+          stored !== "zh-Hant" &&
+          stored !== "id"
         ) {
           return;
         }

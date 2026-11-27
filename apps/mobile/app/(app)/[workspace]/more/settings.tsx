@@ -39,6 +39,7 @@ const LANGUAGE_OPTIONS: LocalePreference[] = [
   "en",
   "zh-Hans",
   "zh-Hant",
+  "id",
 ];
 
 function initialsOf(name: string | undefined): string {
@@ -72,6 +73,7 @@ export default function SettingsPage() {
     en: t("language.english"),
     "zh-Hans": t("language.chinese_simplified"),
     "zh-Hant": t("language.chinese_traditional"),
+    id: t("language.indonesian"),
   };
 
   const onSwitch = async (ws: Workspace) => {
