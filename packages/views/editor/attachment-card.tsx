@@ -24,6 +24,8 @@ import { useAttachmentDownloadState } from "./hooks/use-attachment-download-stat
 interface AttachmentCardChromeProps {
   filename: string;
   uploading?: boolean;
+  /** Showing in the docked preview pane right now. */
+  active?: boolean;
   canPreview: boolean;
   canDownload: boolean;
   canDelete?: boolean;
@@ -35,6 +37,7 @@ interface AttachmentCardChromeProps {
 function AttachmentCardChrome({
   filename,
   uploading,
+  active,
   canPreview,
   canDownload,
   canDelete,
@@ -46,7 +49,8 @@ function AttachmentCardChrome({
   const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
   return (
     <div
-      className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
+      data-active={active || undefined}
+      className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted data-active:border-foreground/20 data-active:bg-accent"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {uploading ? (
@@ -151,6 +155,8 @@ export interface AttachmentCardProps {
   onDelete?: () => void;
   /** Registers the card with the right-click menu. */
   scopeRef?: (element: HTMLElement | null) => void;
+  /** Showing in the docked preview pane right now. */
+  active?: boolean;
 }
 
 export function AttachmentCard({
@@ -163,6 +169,7 @@ export function AttachmentCard({
   onDownload,
   onDelete,
   scopeRef,
+  active,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Without an attachmentId only the URL-renderable kinds open — otherwise
@@ -174,6 +181,7 @@ export function AttachmentCard({
       <AttachmentCardChrome
         filename={filename}
         uploading={uploading}
+        active={active}
         canPreview={canPreview}
         canDownload={!!href}
         canDelete={!!onDelete}
@@ -200,6 +208,8 @@ export interface AttachmentFileCardProps {
   onDelete?: () => void;
   /** Registers the card with the right-click menu. */
   scopeRef?: (element: HTMLElement | null) => void;
+  /** Showing in the docked preview pane right now. */
+  active?: boolean;
 }
 
 /**
@@ -219,6 +229,7 @@ export function AttachmentFileCard({
   onDownload,
   onDelete,
   scopeRef,
+  active,
 }: AttachmentFileCardProps) {
   const { t } = useT("editor");
   const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
@@ -229,7 +240,7 @@ export function AttachmentFileCard({
   const open = canPreview ? onPreview : canDownload ? handleDownload : undefined;
 
   return (
-    <div ref={scopeRef} className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
+    <div ref={scopeRef} data-active={active || undefined} className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50 data-active:border-foreground/20 data-active:bg-accent">
       {/* The card's click target, under the content so text stays
           selectable-looking but every click lands here; the action buttons
           sit above it. */}

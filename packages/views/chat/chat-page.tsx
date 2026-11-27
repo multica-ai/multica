@@ -22,6 +22,8 @@ import { CollapsedNavTrigger, PageHeader } from "../layout/page-header";
 import { PanelHeader } from "../layout/panel-nav";
 import { useListColumnCollapsed } from "../layout/app-shell-context";
 import { ListColumn } from "../layout/list-column";
+import { usePreviewNavYield } from "../layout/use-preview-nav-yield";
+import { PreviewDock, PreviewDockHost } from "../editor";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import {
@@ -154,6 +156,7 @@ export function ChatPage() {
   }, [isCurrentChatRoute, workspaceSlug, c.activeSessionId]);
 
   const listCollapsed = useListColumnCollapsed();
+  const navPreviewYield = usePreviewNavYield();
 
   // `?agent=` intent bookkeeping. The ref holds the param value already
   // consumed (or superseded) so the effect below fires at most once per deep
@@ -561,29 +564,35 @@ export function ChatPage() {
   // prompt instead of an orphaned compose box. -------------------------------
   const hasTarget = !!c.activeSessionId || composingNew;
   return (
-    <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">
-        {listHeader}
-        <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
-      </ListColumn>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {listCollapsed && !c.currentSession && <PageHeader>{newChatButton}</PageHeader>}
-        {hasTarget ? (
-          conversation
-        ) : noAgentPage ? (
-          noAgentState
-        ) : (
-          <div
-            className={cn(
-              "flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground",
-              activeTransition && !reduceMotion && "animate-chat-enter-fade",
+    <PreviewDockHost>
+      <div className="flex min-h-0 flex-1">
+        <ListColumn collapsed={listCollapsed} width="list">
+          {listHeader}
+          <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
+        </ListColumn>
+        {/* A file opens in a pane beside the conversation; the session list
+            steps aside when the two don't fit next to it. */}
+        <PreviewDock yields={[navPreviewYield]}>
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+            {listCollapsed && !c.currentSession && <PageHeader>{newChatButton}</PageHeader>}
+            {hasTarget ? (
+              conversation
+            ) : noAgentPage ? (
+              noAgentState
+            ) : (
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground",
+                  activeTransition && !reduceMotion && "animate-chat-enter-fade",
+                )}
+              >
+                <MessageSquare className="h-10 w-10 text-faint-foreground" />
+                <p className="text-body">{t(($) => $.page.select_prompt)}</p>
+              </div>
             )}
-          >
-            <MessageSquare className="h-10 w-10 text-faint-foreground" />
-            <p className="text-body">{t(($) => $.page.select_prompt)}</p>
           </div>
-        )}
+        </PreviewDock>
       </div>
-    </div>
+    </PreviewDockHost>
   );
 }

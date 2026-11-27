@@ -21,6 +21,7 @@ import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { formatBytes } from "../../../common/format-bytes";
 import { fileTypeLabel } from "../../../editor/utils/preview";
+import { useStageThemeClass } from "../../../editor/preview-surface";
 import type {
   PreviewItemDetails,
   PreviewSequenceControls,
@@ -127,6 +128,7 @@ function VersionSwitcher({
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
+  const stageTheme = useStageThemeClass();
   const inSession = new Set(controls.items.map((i) => i.key));
   // Newest first, like every version picker people know.
   const entries = file.versions.map((attachment, i) => ({ attachment, n: i + 1 })).reverse();
@@ -147,8 +149,9 @@ function VersionSwitcher({
           </button>
         }
       />
-      {/* Portaled out of the viewer's dark chrome, so it opts in itself. */}
-      <DropdownMenuContent className="dark min-w-56" align="start">
+      {/* Portaled out of the viewer's dark chrome, so it opts in itself; the
+          pane follows the app theme. */}
+      <DropdownMenuContent className={cn(stageTheme, "min-w-56")} align="start">
         {entries.map(({ attachment, n }) => (
           <DropdownMenuItem
             key={attachment.id}

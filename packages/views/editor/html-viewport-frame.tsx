@@ -25,6 +25,7 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
+import { useStageThemeClass } from "./preview-surface";
 import {
   HTML_PREVIEW_WIDTH_KEY,
   readHtmlPreviewWidthMessage,
@@ -174,6 +175,7 @@ export function HtmlViewportFrame({
   children: ReactNode;
 }) {
   const { t } = useT("editor");
+  const stageTheme = useStageThemeClass();
   const [area, setArea] = useState<HTMLDivElement | null>(null);
   const size = useLayoutSize(area);
   const fitWidth = useFitWidth(area, viewport === "fill", size?.width || null);
@@ -227,7 +229,7 @@ export function HtmlViewportFrame({
         </div>
       </div>
       {layoutWidth !== null && (
-        <p className="dark shrink-0 pt-2 text-center text-caption tabular-nums text-muted-foreground">
+        <p className={cn(stageTheme, "shrink-0 pt-2 text-center text-caption tabular-nums text-muted-foreground")}>
           {fit ? `${fit.width} × ${fit.height}` : layoutWidth}
           {percent < 100 && (
             <>

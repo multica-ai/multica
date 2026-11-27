@@ -50,7 +50,7 @@ import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { useDocCollab, type DocCollaborator } from "../../docs/components/use-doc-collab";
-import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ImageThumbnailsProvider } from "../../editor";
+import { ContentEditor, ReadonlyContent, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence, ImageThumbnailsProvider, PreviewDock, PreviewDockHost, type PreviewDockYield } from "../../editor";
 import {
   WAKEUP_ACTIVITY_ACTIONS,
   WakeupActivityIcon,
@@ -81,7 +81,7 @@ import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
 import { InboxIssueActions, IssueBarActions } from "./inbox-issue-actions";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
-import { useReducedMotion } from "@multica/core/appearance";
+import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
@@ -208,6 +208,7 @@ import { CollectionPageState } from "../../layout/collection-page";
 import { PAGE_GUTTER, usePageHeaderTitleBar } from "../../layout/page-header";
 import { READING_COLUMN } from "../../layout/reading-column";
 import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
+import { usePreviewNavYield } from "../../layout/use-preview-nav-yield";
 
 import { ProgressRing } from "./progress-ring";
 import { IssueSidebarAddRow, useIssueSidebarAddables, type IssueSidebarAddable } from "./issue-sidebar-add-row";
@@ -3132,6 +3133,47 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     setAutoOpenCustomProp(null);
   }, [autoOpenCustomProp]);
 
+  // The sidebar parked for a docked preview. Its collapse is not
+  // the reader's, so the saved layout keeps what they last chose.
+  const sidebarParkedRef = useRef(false);
+  const sidebarParkedSizeRef = useRef(0);
+  const persistLayout = useCallback<typeof onLayoutChanged>(
+    (layout) => {
+      if (!sidebarParkedRef.current) onLayoutChanged(layout);
+    },
+    [onLayoutChanged],
+  );
+  const sidebarPreviewYield = useMemo<PreviewDockYield>(
+    () => ({
+      reclaimable: () => {
+        const panel = sidebarRef.current;
+        return panel && !panel.isCollapsed() ? panel.getSize().inPixels : 0;
+      },
+      park: () => {
+        const panel = sidebarRef.current;
+        if (!panel || panel.isCollapsed()) return;
+        sidebarParkedRef.current = true;
+        sidebarParkedSizeRef.current = panel.getSize().inPixels;
+        beginDesktopSidebarToggle(false);
+        // The pane opens this frame; without a transition to start, so must the sidebar.
+        if (prefersReducedMotion()) panel.collapse();
+        else window.requestAnimationFrame(() => panel.collapse());
+      },
+      restore: () => {
+        if (!sidebarParkedRef.current) return;
+        sidebarParkedRef.current = false;
+        const panel = sidebarRef.current;
+        if (!panel?.isCollapsed()) return;
+        beginDesktopSidebarToggle(true);
+        // expand() would fall back to the minimum width; put back the reader's.
+        const size = sidebarParkedSizeRef.current;
+        window.requestAnimationFrame(() => panel.resize(size));
+      },
+    }),
+    [beginDesktopSidebarToggle, sidebarRef],
+  );
+  const navPreviewYield = usePreviewNavYield();
+
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
       setMobileSidebarOpen((open) => !open);
@@ -3140,6 +3182,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
 
     const panel = sidebarRef.current;
     if (!panel) return;
+    // The reader's own toggle: it is theirs again, and saved as usual.
+    sidebarParkedRef.current = false;
     const nextOpen = panel.isCollapsed();
     beginDesktopSidebarToggle(nextOpen);
     window.requestAnimationFrame(() => {
@@ -4674,34 +4718,37 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // open into one sequence. The versions provider lets each comment's file
   // cards mark a re-uploaded file `v2`.
   const withPreview = (layout: ReactNode) => (
-    <PreviewSequenceProvider
-      items={previewSequence}
-      describeItem={describeDeliverable}
-      onOpenOverview={openOverviewFromViewer}
-      onOpened={deliverableLink.onViewerOpened}
-      onClosed={deliverableLink.onViewerClosed}
-    >
-      <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
-      {openDeliverable && (
-        <OpenDeliverableOnLoad
-          name={openDeliverable}
+    <PreviewDockHost>
+      <PreviewSequenceProvider
+        items={previewSequence}
+        scopeKey={id}
+        describeItem={describeDeliverable}
+        onOpenOverview={openOverviewFromViewer}
+        onOpened={deliverableLink.onViewerOpened}
+        onClosed={deliverableLink.onViewerClosed}
+      >
+        <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
+        {openDeliverable && (
+          <OpenDeliverableOnLoad
+            name={openDeliverable}
+            files={deliverableFiles}
+            read={deliverableLinkRead}
+            onOpenedInViewer={deliverableLink.onOpenedInViewer}
+            onDone={onDeliverableLinkDoneStable}
+          />
+        )}
+        <DeliverablesOverview
+          open={overview.open}
+          onClose={closeOverview}
+          returnKey={overview.returnKey}
+          identifier={issue.identifier}
           files={deliverableFiles}
-          read={deliverableLinkRead}
-          onOpenedInViewer={deliverableLink.onOpenedInViewer}
-          onDone={onDeliverableLinkDoneStable}
+          commentById={commentById}
+          onLocate={locateOrigin}
+          onCopyLink={copyDeliverableLink}
         />
-      )}
-      <DeliverablesOverview
-        open={overview.open}
-        onClose={closeOverview}
-        returnKey={overview.returnKey}
-        identifier={issue.identifier}
-        files={deliverableFiles}
-        commentById={commentById}
-        onLocate={locateOrigin}
-        onCopyLink={copyDeliverableLink}
-      />
-    </PreviewSequenceProvider>
+      </PreviewSequenceProvider>
+    </PreviewDockHost>
   );
 
   // The peek has no room for the properties sidebar: its core properties are
@@ -4729,9 +4776,14 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   }
 
   return withPreview(
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={persistLayout}>
       <ResizablePanel id="content" minSize="50%">
-        {detailContent}
+        {/* Files open in a pane beside the issue, inside the content panel so
+            the saved layout (content, sidebar) is the same with or without
+            one. Room comes from the nav, then the sidebar. */}
+        <PreviewDock yields={[navPreviewYield, sidebarPreviewYield]} className="h-full">
+          {detailContent}
+        </PreviewDock>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel

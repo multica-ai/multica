@@ -11,6 +11,7 @@ import { useT } from "../../../i18n";
 import { formatBytes } from "../../../common/format-bytes";
 import { fileIcon } from "../../../editor/utils/file-icon";
 import { getPreviewKind } from "../../../editor/utils/preview";
+import { usePreviewActiveKey } from "../../../editor/preview-sequence-context";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
 import { useOpenAttachment } from "./use-open-attachment";
 import { displayDeliverableFiles, displayedVersion } from "./deliverable-kind";
@@ -42,6 +43,11 @@ export function DeliverablesSection({
   const files = useMemo(() => displayDeliverableFiles(groupedFiles), [groupedFiles]);
   const [open, setOpen] = useState(true);
   const { open: openAttachment, modal } = useOpenAttachment();
+  // The file in the docked preview pane, any version of it: the list stays
+  // beside the pane, so it marks where the reader is.
+  const activeKey = usePreviewActiveKey();
+  const isActive = (file: DeliverableFile) =>
+    activeKey !== null && file.versions.some((version) => version.id === activeKey);
 
   if (files.length === 0) return null;
 
@@ -68,7 +74,8 @@ export function DeliverablesSection({
                 <TooltipHint key={file.key} label={file.latest.filename}>
                   <button
                     type="button"
-                    className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    data-active={isActive(file) || undefined}
+                    className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:ring-2 data-active:ring-foreground/40"
                     aria-label={versionedName(file, t)}
                     onClick={() => openAttachment(file.latest)}
                   >
@@ -86,6 +93,7 @@ export function DeliverablesSection({
             <FileRow
               key={file.key}
               file={file}
+              active={isActive(file)}
               onOpen={() => openAttachment(file.latest)}
               onCopyLink={onCopyLink ? () => onCopyLink(file.latest.filename) : undefined}
             />
@@ -111,10 +119,12 @@ function versionedName(file: DeliverableFile, t: IssuesT): string {
 
 function FileRow({
   file,
+  active,
   onOpen,
   onCopyLink,
 }: {
   file: DeliverableFile;
+  active: boolean;
   onOpen: () => void;
   onCopyLink?: () => void;
 }) {
@@ -124,12 +134,16 @@ function FileRow({
   // The copy button is a sibling of the row button, not inside it: a button
   // can't contain another. It shows on hover and on keyboard focus.
   return (
-    <div className="group relative flex items-center rounded-md transition-colors hover:bg-accent/50">
+    <div
+      data-active={active || undefined}
+      className="group relative flex items-center rounded-md transition-colors hover:bg-accent/50 data-active:bg-accent"
+    >
       <button
         type="button"
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-caption"
         title={latest.filename}
         aria-label={versionedName(file, t)}
+        aria-current={active || undefined}
         onClick={onOpen}
       >
         <Icon className="size-3.5 shrink-0 text-muted-foreground" />

@@ -50,6 +50,7 @@ vi.mock("./use-download-attachment", () => ({
 
 vi.mock("./preview-sequence-context", () => ({
   usePreviewSequence: () => ({ openAt: openAtMock }),
+  usePreviewActiveKey: () => null,
 }));
 
 import { MessageSquare } from "@multica/ui/icons";

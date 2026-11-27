@@ -70,7 +70,7 @@ import { dropdownPrimitives } from "../common/menu-primitives";
 import { CLOSED_ROW_MENU, yieldsToTextMenu, type RowMenuState } from "../common/point-menu";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
-import { usePreviewSequence } from "./preview-sequence-context";
+import { usePreviewActiveKey, usePreviewSequence } from "./preview-sequence-context";
 import { useImageThumbnails } from "./image-thumbnails-context";
 import { OriginalImageMenu } from "./original-image-menu";
 import {
@@ -327,6 +327,7 @@ export function Attachment({
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
   const sequence = usePreviewSequence();
+  const activeKey = usePreviewActiveKey();
 
   const state = normalize(attachment, resolveAttachment, cdnDomain, cdnSigned);
   const forceKind =
@@ -525,6 +526,7 @@ export function Attachment({
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}
+          active={!!sequenceKey && sequenceKey === activeKey}
         />
         {preview.modal}
       </>
@@ -543,6 +545,7 @@ export function Attachment({
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
         scopeRef={scopeRef}
+        active={!!sequenceKey && sequenceKey === activeKey}
       />
       {preview.modal}
     </>

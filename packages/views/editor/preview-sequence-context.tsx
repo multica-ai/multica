@@ -32,17 +32,24 @@
  * page: which comment a file came from, its earlier versions) supplies
  * `describeItem`, and `onOpenOverview` for a grid of everything (MUL-7649).
  * The viewer stays generic — it only renders the slots it is handed.
+ *
+ * Under a `PreviewDockHost` whose dock has room, files open in the docked
+ * pane beside the page instead (MUL-10014), and the full-window viewer is
+ * one click away from it ("Full screen"); closing that returns to the pane.
+ * Without a dock, or without room for one, the viewer opens as before.
  */
 
 import {
   createContext,
   use,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   collectAttachmentSequence,
@@ -53,12 +60,14 @@ import {
 import { useT } from "../i18n";
 import {
   AttachmentPreviewModal,
+  AttachmentPreviewPane,
   PreviewImagePrefetch,
   type PreviewCopyLinkAction,
   type PreviewLocateAction,
   type PreviewSource,
 } from "./attachment-preview-modal";
 import { canOpenPreview, getPreviewKind } from "./utils/preview";
+import { PREVIEW_DOCK_SETTLE_MS, usePreviewDockController } from "./preview-dock";
 
 /**
  * The sequence a web / desktop surface pages through: every attachment the
@@ -124,6 +133,19 @@ const NO_SEQUENCE: PreviewSequenceApi = { openAt: () => false };
 
 const PreviewSequenceContext = createContext<PreviewSequenceApi>(NO_SEQUENCE);
 
+// Apart from the API so a file switch only re-renders what marks the file on
+// screen, not every attachment that can open one.
+const PreviewActiveKeyContext = createContext<string | null>(null);
+
+/**
+ * The key of the file showing in the docked pane, so the card or row it came
+ * from can mark itself. Null while no pane is open: the full-window viewer
+ * covers the page, there is nothing to mark.
+ */
+export function usePreviewActiveKey(): string | null {
+  return use(PreviewActiveKeyContext);
+}
+
 /**
  * Returns the surrounding surface's viewer, or a no-op handle when there is
  * no provider. Always safe to call — `openAt` reporting false is the
@@ -158,6 +180,8 @@ interface Session {
   index: number;
   /** The file opened with `stayOnError`; a load failure keeps it on screen. */
   pinnedKey?: string;
+  /** Where it shows: the docked pane, or the full-window viewer. */
+  mode: "pane" | "viewer";
 }
 
 export function PreviewSequenceProvider({
@@ -166,6 +190,7 @@ export function PreviewSequenceProvider({
   onOpenOverview,
   onOpened,
   onClosed,
+  scopeKey,
   children,
 }: {
   items: ReadonlyArray<ImageSequenceItem>;
@@ -185,6 +210,11 @@ export function PreviewSequenceProvider({
   onOpened?: () => void;
   /** The viewer finished closing, by any means. */
   onClosed?: () => void;
+  /**
+   * What the surface shows, e.g. the issue id. A change closes the viewer:
+   * a pane left open beside the next issue would show the last one's file.
+   */
+  scopeKey?: string;
   children: ReactNode;
 }) {
   const { t } = useT("editor");
@@ -194,9 +224,24 @@ export function PreviewSequenceProvider({
   itemsRef.current = items;
   const onOpenedRef = useRef(onOpened);
   onOpenedRef.current = onOpened;
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+  const dock = usePreviewDockController();
+  const dockRef = useRef(dock);
+  dockRef.current = dock;
 
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
+  // The full-window viewer opened over the pane ("Full screen").
+  const [viewerOver, setViewerOver] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const paneOpenRef = useRef(false);
+  const closingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelClosing = useCallback(() => {
+    if (!closingTimer.current) return;
+    clearTimeout(closingTimer.current);
+    closingTimer.current = null;
+  }, []);
   // Outlives a session: a reader who wants the info panel wants it on the
   // next file they open too.
   const [infoOpen, setInfoOpen] = useState(false);
@@ -217,6 +262,9 @@ export function PreviewSequenceProvider({
         const snapshot = [...itemsRef.current];
         const index = indexOfImageKey(snapshot, key);
         if (index < 0) return false;
+        cancelClosing();
+        const docked = dockRef.current?.open() ?? false;
+        paneOpenRef.current = docked;
         directionRef.current = 1;
         brokenRef.current = new Set();
         setBroken(brokenRef.current);
@@ -224,12 +272,61 @@ export function PreviewSequenceProvider({
           items: snapshot,
           index,
           pinnedKey: options?.stayOnError ? key : undefined,
+          mode: docked ? "pane" : "viewer",
         });
+        setViewerOver(false);
         setOpen(true);
+        if (docked) setFocusRequest((n) => n + 1);
         onOpenedRef.current?.();
         return true;
       },
     }),
+    [cancelClosing],
+  );
+
+  // The pane slides shut with its file still in it, then the session ends.
+  const closePane = useCallback(() => {
+    paneOpenRef.current = false;
+    dockRef.current?.close();
+    setOpen(false);
+    setViewerOver(false);
+    cancelClosing();
+    closingTimer.current = setTimeout(() => {
+      closingTimer.current = null;
+      setSession(null);
+      onClosedRef.current?.();
+    }, PREVIEW_DOCK_SETTLE_MS);
+  }, [cancelClosing]);
+
+  // Ends a pane session at once: the surface changed under it, or the dock
+  // it was showing in went away.
+  const dropPane = useCallback(() => {
+    if (!paneOpenRef.current) return;
+    paneOpenRef.current = false;
+    dockRef.current?.close();
+    cancelClosing();
+    setOpen(false);
+    setViewerOver(false);
+    setSession(null);
+    onClosedRef.current?.();
+  }, [cancelClosing]);
+
+  const lastScopeKey = useRef(scopeKey);
+  useEffect(() => {
+    if (lastScopeKey.current === scopeKey) return;
+    lastScopeKey.current = scopeKey;
+    dropPane();
+  }, [scopeKey, dropPane]);
+
+  useEffect(() => {
+    if (!dock) dropPane();
+  }, [dock, dropPane]);
+
+  useEffect(
+    () => () => {
+      if (closingTimer.current) clearTimeout(closingTimer.current);
+      if (paneOpenRef.current) dockRef.current?.close();
+    },
     [],
   );
 
@@ -297,24 +394,80 @@ export function PreviewSequenceProvider({
     [session],
   );
 
+  const inPane = session?.mode === "pane";
+  // What "close" means for the frame on top: the viewer over the pane goes
+  // back to the pane; the pane, or a viewer on its own, closes.
+  const closeViewer = inPane ? () => setViewerOver(false) : () => setOpen(false);
+  const closeTop = inPane && !viewerOver ? closePane : closeViewer;
   const details =
     session && current && describeItem
-      ? describeItem(current, { items: session.items, goTo, close: () => setOpen(false) })
+      ? describeItem(current, { items: session.items, goTo, close: closeTop })
       : undefined;
   const locate = details?.locate;
+  const openOverview =
+    onOpenOverview && current
+      ? () => {
+          if (inPane) closePane();
+          else setOpen(false);
+          onOpenOverview(current.key);
+        }
+      : undefined;
+  const sequence =
+    session && session.items.length > 1
+      ? {
+          index: session.index,
+          total: session.items.length,
+          onPrev: prevIndex >= 0 ? () => go(-1) : undefined,
+          onNext: nextIndex >= 0 ? () => go(1) : undefined,
+        }
+      : undefined;
+  const imageFailed = !!session && !!current && current.key === session.pinnedKey && broken.has(current.key);
+
+  // The pane comes back into focus when the viewer over it closes.
+  const lastViewerOver = useRef(viewerOver);
+  useEffect(() => {
+    if (lastViewerOver.current && !viewerOver) setFocusRequest((n) => n + 1);
+    lastViewerOver.current = viewerOver;
+  }, [viewerOver]);
+
+  // Not mounted under the full-window viewer: a video or an HTML page would
+  // keep playing behind it, and alongside the viewer's own copy.
+  const pane =
+    inPane && current && dock?.target && !viewerOver
+      ? createPortal(
+          <AttachmentPreviewPane
+            source={toPreviewSource(current)}
+            onClose={closePane}
+            onMaximize={() => setViewerOver(true)}
+            sequence={sequence}
+            onImageError={handleImageError}
+            imageFailed={imageFailed}
+            titleAccessory={details?.titleAccessory}
+            locate={locate}
+            copyLink={details?.copyLink}
+            onOpenOverview={openOverview}
+            focusRequest={focusRequest}
+          />,
+          dock.target,
+        )
+      : null;
 
   const modal =
     session && current ? (
       <AttachmentPreviewModal
         source={toPreviewSource(current)}
-        open={open}
-        onClose={() => setOpen(false)}
-        onExitComplete={() => {
-          setSession(null);
-          onClosed?.();
-        }}
+        open={inPane ? open && viewerOver : open}
+        onClose={closeViewer}
+        onExitComplete={
+          inPane
+            ? undefined
+            : () => {
+                setSession(null);
+                onClosed?.();
+              }
+        }
         onImageError={handleImageError}
-        imageFailed={current.key === session.pinnedKey && broken.has(current.key)}
+        imageFailed={imageFailed}
         titleAccessory={details?.titleAccessory}
         info={
           details?.info
@@ -326,37 +479,24 @@ export function PreviewSequenceProvider({
             ? {
                 label: locate.label,
                 onSelect: () => {
-                  setOpen(false);
+                  closeViewer();
                   locate.onSelect();
                 },
               }
             : undefined
         }
         copyLink={details?.copyLink}
-        onOpenOverview={
-          onOpenOverview
-            ? () => {
-                setOpen(false);
-                onOpenOverview(current.key);
-              }
-            : undefined
-        }
-        sequence={
-          session.items.length > 1
-            ? {
-                index: session.index,
-                total: session.items.length,
-                onPrev: prevIndex >= 0 ? () => go(-1) : undefined,
-                onNext: nextIndex >= 0 ? () => go(1) : undefined,
-              }
-            : undefined
-        }
+        onOpenOverview={openOverview}
+        sequence={sequence}
       />
     ) : null;
 
+  const activeKey = inPane && open && current ? current.key : null;
+
   return (
     <PreviewSequenceContext.Provider value={api}>
-      {children}
+      <PreviewActiveKeyContext.Provider value={activeKey}>{children}</PreviewActiveKeyContext.Provider>
+      {pane}
       {modal}
       {/* Warm the immediate image neighbours while a preview is open, so
           paging swaps from cache instead of waiting a network round-trip.
