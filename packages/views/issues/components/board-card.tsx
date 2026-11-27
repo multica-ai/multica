@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, memo } from "react";
+import { useCallback, memo, type ReactNode } from "react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -53,11 +53,14 @@ export const BoardCardContent = memo(function BoardCardContent({
   editable = false,
   childProgress,
   project,
+  framed = true,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
   project?: Project;
+  /** False when an outer card frame (one hosting sub-issues) draws the border. */
+  framed?: boolean;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -208,7 +211,12 @@ export const BoardCardContent = memo(function BoardCardContent({
       data-status={issue.status}
       data-priority={issue.priority}
       data-assignee-type={issue.assignee_type ?? "none"}
-      className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50 group-data-[cursor]/card:border-foreground/15 group-data-[cursor]/card:bg-board-card-hover group-data-[cursor]/card:ring-1 group-data-[cursor]/card:ring-ring/60">
+      className={
+        framed
+          ? "rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50 group-data-[cursor]/card:border-foreground/15 group-data-[cursor]/card:bg-board-card-hover group-data-[cursor]/card:ring-1 group-data-[cursor]/card:ring-ring/60"
+          : "rounded-t-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] transition-colors group-hover/card:bg-board-card-hover group-data-[peeked]/card:bg-board-card-hover group-data-[cursor]/card:bg-board-card-hover"
+      }
+    >
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -368,11 +376,17 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   childProgress,
   project,
   disableSorting,
+  nested,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
   disableSorting?: boolean;
+  /**
+   * Sub-issues rendered inside this card's frame, below its own content and
+   * outside its link so no card or control is nested inside an anchor.
+   */
+  nested?: ReactNode;
 }) {
   const p = useWorkspacePaths();
   const peek = useIssuePeekActions();
@@ -398,6 +412,23 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
     transition,
   };
 
+  const link = (
+    <AppLink
+      href={p.issueDetail(issueRouteRef(issue))}
+      newTabTitle={issue.identifier}
+      className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
+      {...peekLinkProps}
+    >
+      <BoardCardContent
+        issue={issue}
+        editable
+        childProgress={childProgress}
+        project={project}
+        framed={!nested}
+      />
+    </AppLink>
+  );
+
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
@@ -405,14 +436,16 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         style={style}
         data-board-card=""
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
-        data-peeked={peeked ? "" : undefined}
-        data-cursor={cursor ? "" : undefined}
+        data-peeked={peeked && !nested ? "" : undefined}
+        data-cursor={cursor && !nested ? "" : undefined}
         {...attributes}
         {...listeners}
-        className={`group/card transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}
+        className={`${nested ? "" : "group/card"} transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}
         onKeyDown={
           peek
             ? (e) => {
+                // A nested sub-issue card already handled this Space press.
+                if (e.defaultPrevented) return;
                 // Space peeks the focused card (the card itself or its link,
                 // never a picker button inside it). The board registers no
                 // keyboard drag sensor, so Space is free here.
@@ -424,19 +457,26 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
             : undefined
         }
       >
-        <AppLink
-          href={p.issueDetail(issueRouteRef(issue))}
-          newTabTitle={issue.identifier}
-          className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
-          {...peekLinkProps}
-        >
-          <BoardCardContent
-            issue={issue}
-            editable
-            childProgress={childProgress}
-            project={project}
-          />
-        </AppLink>
+        {nested ? (
+          <div className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card shadow-[var(--board-card-shadow,var(--surface-shadow))]">
+            {/* Hover and peek styling stay on this card's own section, so
+                hovering a nested sub-issue does not light up the parent. */}
+            <div
+              className="group/card"
+              data-peeked={peeked ? "" : undefined}
+              data-cursor={cursor ? "" : undefined}
+            >
+              {link}
+            </div>
+            {/* A right-click belongs to the innermost card; stop it here so
+                the hosting card does not reopen the menu for itself. */}
+            <div onContextMenu={(e) => e.stopPropagation()}>
+              {nested}
+            </div>
+          </div>
+        ) : (
+          link
+        )}
       </div>
     </IssueActionsContextMenu>
   );

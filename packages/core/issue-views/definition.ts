@@ -55,6 +55,7 @@ export function issueViewDefinitionFromState(state: IssueViewState): IssueViewDe
       tableColumns: state.tableColumns,
       tableGrouping: state.tableGrouping,
       tableHierarchy: state.tableHierarchy,
+      boardHierarchy: state.boardHierarchy,
       tableCalculation: state.tableCalculation,
       swimlaneGrouping: state.swimlaneGrouping,
       ganttZoom: state.ganttZoom,
