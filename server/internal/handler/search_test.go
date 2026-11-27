@@ -666,3 +666,48 @@ func TestBuildSearchQuery_ProjectFilter(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSearchQuery_TitleDescScopeDropsComments(t *testing.T) {
+	query, _ := buildScopedSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{}, true)
+
+	if strings.Contains(query, "comment_matches") || strings.Contains(query, "FROM comment c") {
+		t.Fatalf("title_desc scope still scans comments:\n%s", query)
+	}
+	if strings.Contains(query, "cm.") {
+		t.Fatalf("title_desc scope still references the un-joined cm alias:\n%s", query)
+	}
+	relevance := query[:strings.Index(query, "AS relevance_rank")]
+	if strings.Contains(relevance, "THEN 7") || strings.Contains(relevance, "THEN 8") {
+		t.Fatalf("title_desc scope keeps the comment relevance tiers:\n%s", query)
+	}
+	if !strings.Contains(query, "im.title_phrase") || !strings.Contains(query, "im.description_phrase") {
+		t.Fatalf("title_desc scope dropped title/description eligibility:\n%s", query)
+	}
+	const wantMultiTermEligible = "((im.title_term_0 OR im.description_term_0) AND (im.title_term_1 OR im.description_term_1))"
+	if !strings.Contains(query, wantMultiTermEligible) {
+		t.Fatalf("title_desc scope missing cross-title/description multi-term eligibility %q:\n%s", wantMultiTermEligible, query)
+	}
+	if !strings.Contains(query, "ELSE 'description'") || strings.Contains(query, "ELSE 'comment'") {
+		t.Fatalf("title_desc scope match_source fallback should be 'description':\n%s", query)
+	}
+
+	all, _ := buildScopedSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{}, false)
+	for _, anchor := range []string{"comment_matches AS MATERIALIZED", "COALESCE(cm.comment_phrase, FALSE) THEN 7", "ELSE 'comment'"} {
+		if !strings.Contains(all, anchor) {
+			t.Fatalf("default scope lost %q:\n%s", anchor, all)
+		}
+	}
+
+	// Verify title_desc composes cleanly with project and hidden-project filters.
+	projectFilter := pgtype.UUID{Bytes: uuid.MustParse("11111111-2222-3333-4444-555555555555"), Valid: true}
+	hiddenProject := pgtype.UUID{Bytes: uuid.MustParse("22222222-3333-4444-5555-666666666666"), Valid: true}
+	filteredTitleDesc, filteredArgs := buildScopedSearchQuery(
+		"foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, projectFilter, true, hiddenProject,
+	)
+	if len(filteredArgs) != 11 {
+		t.Fatalf("len(filteredArgs) = %d, want 11 (%#v)", len(filteredArgs), filteredArgs)
+	}
+	if strings.Contains(filteredTitleDesc, "comment_matches") || !strings.Contains(filteredTitleDesc, "i.project_id = $9") || !strings.Contains(filteredTitleDesc, "LIMIT $10 OFFSET $11") {
+		t.Fatalf("unexpected project-filtered title_desc query:\n%s", filteredTitleDesc)
+	}
+}
