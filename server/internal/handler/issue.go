@@ -341,6 +341,53 @@ func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, params db.Up
 	return issue, cancelled, nil
 }
 
+// lockIssueParentChange checks a write that sets parent_issue_id under the
+// workspace's parent tree lock. Callers take it before any issue row lock, so
+// every parent write takes the two in the same order.
+func lockIssueParentChange(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage) error {
+	if _, touched := rawFields["parent_issue_id"]; !touched || !params.ParentIssueID.Valid {
+		return nil
+	}
+	return lockAndCheckIssueParent(ctx, q, workspaceID, params.ID, params.ParentIssueID)
+}
+
+var errIssueParentCycle = errors.New("circular parent relationship detected")
+
+// issueParentWouldCycle reports whether making parentID the parent of issueID
+// would put issueID under itself.
+func issueParentWouldCycle(ctx context.Context, q *db.Queries, workspaceID, issueID, parentID pgtype.UUID) (bool, error) {
+	return q.IssueHasAncestor(ctx, db.IssueHasAncestorParams{
+		WorkspaceID: workspaceID,
+		IssueID:     parentID,
+		AncestorID:  issueID,
+	})
+}
+
+// lockAndCheckIssueParent re-checks a parent change inside the write's
+// transaction. Handlers check first for a clear error, but two changes can each
+// pass that check and together close a loop; under the workspace's parent lock
+// the second one sees what the first wrote.
+func lockAndCheckIssueParent(ctx context.Context, q *db.Queries, workspaceID, issueID, parentID pgtype.UUID) error {
+	current, err := q.GetIssueParentID(ctx, db.GetIssueParentIDParams{ID: issueID, WorkspaceID: workspaceID})
+	if err != nil {
+		return err
+	}
+	if current == parentID {
+		return nil
+	}
+	if err := q.LockIssueParentTree(ctx, workspaceID); err != nil {
+		return fmt.Errorf("lock issue parent tree: %w", err)
+	}
+	cycle, err := issueParentWouldCycle(ctx, q, workspaceID, issueID, parentID)
+	if err != nil {
+		return fmt.Errorf("check issue parent cycle: %w", err)
+	}
+	if cycle {
+		return errIssueParentCycle
+	}
+	return nil
+}
+
 func (h *Handler) broadcastCancelledWakeups(ctx context.Context, workspaceID pgtype.UUID, cancelled []db.AgentTaskQueue) {
 	if len(cancelled) > 0 {
 		h.TaskService.BroadcastCancelledTasks(ctx, uuidToString(workspaceID), cancelled)
@@ -3961,6 +4008,14 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue attachments: %w", err)
 		}
 	}
+	if err := lockIssueParentChange(ctx, qtx, workspaceID, params, rawFields); err != nil {
+		return db.Issue{}, db.Issue{}, false, err
+	}
+	if params.DuplicateOfIssueID.Valid {
+		if err := lockAndCheckDuplicateMark(ctx, qtx, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
+			return db.Issue{}, db.Issue{}, false, err
+		}
+	}
 	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
 		ID:          params.ID,
 		WorkspaceID: workspaceID,
@@ -4146,7 +4201,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
-		// Checked against the locked rows in updateIssueWithStatusGuard.
+		// Checked against the locked rows before the update.
 		DuplicateOfIssueID: duplicateOfID,
 	}
 	if req.ExpectedRevision != nil {
@@ -4257,18 +4312,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if !h.requireProjectVisible(w, r, uuidToString(prevIssue.WorkspaceID), newParent.ProjectID, http.StatusBadRequest, "parent issue not found in this workspace") {
 				return
 			}
-			// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
-			cursor := newParentID
-			for depth := 0; depth < 10; depth++ {
-				ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
-				if err != nil || !ancestor.ParentIssueID.Valid {
-					break
-				}
-				if ancestor.ParentIssueID == prevIssue.ID {
-					writeError(w, http.StatusBadRequest, "circular parent relationship detected")
-					return
-				}
-				cursor = ancestor.ParentIssueID
+			cycle, err := issueParentWouldCycle(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.ID, newParentID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update issue")
+				return
+			}
+			if cycle {
+				writeError(w, http.StatusBadRequest, errIssueParentCycle.Error())
+				return
 			}
 			params.ParentIssueID = newParentID
 		} else {
@@ -4425,6 +4476,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if writeDuplicateMarkError(w, err) {
+			return
+		}
+		if errors.Is(err, errIssueParentCycle) {
+			writeError(w, http.StatusBadRequest, errIssueParentCycle.Error())
 			return
 		}
 		if errors.Is(err, errIssueFieldConflict) {
@@ -5239,19 +5294,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					skip(issueID, identifier, "parent_not_found", "parent issue not found in this workspace")
 					continue
 				}
-				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
-				cycleDetected := false
-				cursor := newParentID
-				for depth := 0; depth < 10; depth++ {
-					ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
-					if err != nil || !ancestor.ParentIssueID.Valid {
-						break
-					}
-					if ancestor.ParentIssueID == prevIssue.ID {
-						cycleDetected = true
-						break
-					}
-					cursor = ancestor.ParentIssueID
+				cycleDetected, err := issueParentWouldCycle(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.ID, newParentID)
+				if err != nil {
+					skip(issueID, identifier, "write_failed", "failed to write this issue")
+					continue
 				}
 				if cycleDetected {
 					skip(issueID, identifier, "parent_cycle", fmt.Sprintf("%s is a descendant of this issue, so making it the parent would create a cycle", identifierOf(newParent)))
@@ -5375,6 +5421,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			var skipErr *batchSkipError
 			if errors.As(err, &skipErr) {
 				skip(issueID, identifier, skipErr.code, skipErr.message)
+				continue
+			}
+			if errors.Is(err, errIssueParentCycle) {
+				skip(issueID, identifier, "parent_cycle", "the new parent is a descendant of this issue, so making it the parent would create a cycle")
 				continue
 			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)

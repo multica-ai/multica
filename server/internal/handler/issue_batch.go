@@ -274,6 +274,9 @@ func (h *Handler) writeBatchIssue(ctx context.Context, workspaceID pgtype.UUID, 
 
 	var cancelled []db.AgentTaskQueue
 	if params != nil {
+		if err = lockIssueParentChange(ctx, q, workspaceID, *params, rawFields); err != nil {
+			return out, err
+		}
 		out.prev, err = lockIssueForFieldUpdate(ctx, q, workspaceID, params, rawFields, workflowAssignee)
 		if err != nil {
 			return out, err
