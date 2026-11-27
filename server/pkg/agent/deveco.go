@@ -150,7 +150,9 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[deveco:stderr] ")
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start deveco: %w", err)
 	}
@@ -172,20 +174,22 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// Only then is it safe to close the stdout read end as a last-resort
 	// unblock for a scanner that a wedged descendant still keeps open.
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return // finished on its own; nothing to terminate
 		case <-runCtx.Done():
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd, syscall.SIGTERM)
+			process.signal(syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
+			case <-process.exitObserved: // still unreaped; cleanup follows the handler
 			case <-time.After(devecoTerminateGrace()):
-				signalProcessGroup(cmd, syscall.SIGKILL)
+				process.signal(syscall.SIGKILL)
 			}
 		}
-		_ = stdout.Close()
+		closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 	}()
 
 	go func() {
@@ -196,7 +200,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		startTime := time.Now()
 		scanResult := b.processEvents(stdout, msgCh)
 
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
@@ -229,7 +233,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
+			Error:      process.withObservationError(scanResult.errMsg),
 			DurationMs: duration.Milliseconds(),
 			SessionID:  scanResult.sessionID,
 			Usage:      usage,

@@ -244,7 +244,9 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[dsh:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start dsh: %w", err)
 	}
@@ -265,12 +267,22 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		defer writeMu.Unlock()
 		return encoder.Encode(value)
 	}
-	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = cmd.Wait()
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- writeFrame(command) }()
+	var writeErr error
+	select {
+	case writeErr = <-writeDone:
+	case <-runCtx.Done():
+		_ = stdin.Close()
+		writeErr = errors.Join(runCtx.Err(), <-writeDone)
+	}
+	if writeErr != nil {
+		process.signal(syscall.SIGKILL)
+		close(cancellationDone)
+		_ = process.Wait()
 		releaseProcessGroup(cmd)
 		cancel()
-		return nil, fmt.Errorf("send dsh execute command: %w", err)
+		return nil, fmt.Errorf("send dsh execute command: %w", errors.Join(writeErr, process.observationError()))
 	}
 
 	b.cfg.Logger.Info("dsh started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
@@ -279,24 +291,33 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	procDone := make(chan struct{})
 
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return
 		case <-runCtx.Done():
 		}
-		_ = writeFrame(dshCancelCommand{Version: DshProtocolVersion, Type: "cancel", RequestID: requestID})
+		cancelWriteDone := make(chan struct{})
+		go func() {
+			defer close(cancelWriteDone)
+			_ = writeFrame(dshCancelCommand{Version: DshProtocolVersion, Type: "cancel", RequestID: requestID})
+		}()
+		defer func() { _ = stdin.Close(); <-cancelWriteDone }()
 		timer := time.NewTimer(dshCancelGrace)
 		defer timer.Stop()
 		select {
 		case <-procDone:
 			return
+		case <-process.exitObserved:
+			closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
+			return
 		case <-timer.C:
 		}
-		signalProcessGroup(cmd, syscall.SIGTERM)
-		if !waitProcessGroupGone(cmd, dshTerminateGrace) {
-			signalProcessGroup(cmd, syscall.SIGKILL)
+		process.signal(syscall.SIGTERM)
+		if !process.waitGroupGone(dshTerminateGrace) {
+			process.signal(syscall.SIGKILL)
 		}
-		_ = stdout.Close()
+		closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 	}()
 
 	go func() {
@@ -324,7 +345,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		if scanErr != nil {
 			_ = stdout.Close()
 		}
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
 		releaseProcessGroup(cmd)
 
@@ -350,6 +371,20 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				result.Error = "dsh exited without a terminal result"
 			}
 		}
+		if result.Status == "completed" {
+			switch {
+			case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+				result.Status = "timeout"
+				result.Error = fmt.Sprintf("dsh timed out after %s", opts.Timeout)
+			case errors.Is(runCtx.Err(), context.Canceled):
+				result.Status = "cancelled"
+				result.Error = "dsh execution cancelled"
+			case exitErr != nil:
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("dsh exited with error: %v", exitErr)
+			}
+		}
+		result.Error = process.withObservationError(result.Error)
 		if result.Error != "" {
 			result.Error = withAgentStderr(result.Error, "dsh", stderrBuf.Tail())
 		}

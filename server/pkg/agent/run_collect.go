@@ -482,21 +482,10 @@ func (c *collector) awaitOutputAfterExit(ctx context.Context, complete OutputCom
 	}
 }
 
-// reapProcessTree SIGKILLs the process group led by cmd's child, so helpers the
-// child forked die with it. Safe to call after the child has already exited:
-// configureProcessGroup makes the child the group leader, so its pid doubles as
-// the group id and the group outlives the leader for as long as any member runs.
-// An empty group yields ESRCH, which signalProcessGroup absorbs.
-//
-// The group kill is issued just after Wait has reaped the leader, so in
-// principle the leader's pid is already free for reuse. Sequential pid
-// allocation makes reuse inside that window (microseconds, and only after
-// wrapping the whole pid space) not a practical concern, and it is the same
-// window the other backends' cancellation paths already live with.
-//
-// On Windows signalProcessGroup terminates the Job Object that
-// startOwnedProcessTree assigned the child to, which reaches the same
-// descendants; see proc_windows.go.
+// reapProcessTree signals the runtime's process group (or its Windows Job).
+// Unix callers must retain the unreaped leader while signalling: after Wait,
+// an empty group's identifier can be reused by an unrelated process group.
+// Streaming runtimes use ownedRuntimeProcess to enforce that ordering.
 func reapProcessTree(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return

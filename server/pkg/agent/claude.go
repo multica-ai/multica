@@ -328,6 +328,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			completionGuardError,
 		)
 
+		if !parked {
+			finalError = proc.ownedProcess.withObservationError(finalError)
+		}
+
 		// Attach the stderr tail to any non-empty failure message; callers
 		// upstream surface this as the task's error field, which is the only
 		// place users see it. A process that exited has been reaped, so

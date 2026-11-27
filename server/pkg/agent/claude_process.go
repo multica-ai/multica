@@ -28,6 +28,10 @@ type claudeProcess struct {
 	fingerprint              string
 	sessionID                string
 	cmd                      *exec.Cmd
+	ownedProcess             *ownedRuntimeProcess
+	beginTermination         context.CancelFunc
+	terminationDone          chan struct{}
+	terminateOnce            sync.Once
 	stdin                    io.WriteCloser
 	stdinOnce                sync.Once
 	inputWriter              *claudeInputWriter
@@ -152,21 +156,18 @@ func (p *claudeProcess) stopAfterErrorResult() {
 	p.signalProcessTree()
 }
 
-// signalProcessTree SIGTERMs the process group, escalates to SIGKILL unless
-// the whole group exits within the grace window, then closes stdout to unblock
-// a reader a wedged descendant still holds open.
-//
-// The escalation keys off the process group, not procDone: procDone only means
-// cmd.Wait() returned for the leader, so a SIGTERM-ignoring descendant that
-// does not hold claude's stdout would otherwise skip the SIGKILL and leak.
-// SIGKILL is uncatchable, so once delivered no group member can write again
-// and closing stdout is safe. WaitDelay is the final backstop (#5918).
+// Signal through the process owner so simultaneous cancellation and delayed
+// error cleanup cannot send a signal after the leader is reaped.
 func (p *claudeProcess) signalProcessTree() {
-	signalProcessGroup(p.cmd, syscall.SIGTERM)
-	if !waitProcessGroupGone(p.cmd, claudeTerminateGrace()) {
-		signalProcessGroup(p.cmd, syscall.SIGKILL)
-	}
-	_ = p.stdout.Close()
+	p.terminateOnce.Do(func() {
+		p.beginTermination()
+		defer close(p.terminationDone)
+		p.ownedProcess.signal(syscall.SIGTERM)
+		if !p.ownedProcess.waitGroupGone(claudeTerminateGrace()) {
+			p.ownedProcess.signal(syscall.SIGKILL)
+		}
+		closeRuntimeOutputAfterDrain(p.procDone, func() { _ = p.stdout.Close() })
+	})
 }
 
 func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string, opts ExecOptions, pooled bool, fingerprint string) (*claudeProcess, *claudeUsageSnapshot, error) {
@@ -265,7 +266,13 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	// The observer follows process termination. A successful pooled turn can
+	// end while this process stays available for later turns.
+	observeCtx, beginTermination := context.WithCancel(context.Background())
+	terminationDone := make(chan struct{})
+	ownedProcess, err := startOwnedRuntimeProcess(observeCtx, cmd, b.cfg.Logger, terminationDone, func() { _ = stdout.Close() })
+	if err != nil {
+		beginTermination()
 		_ = stdin.Close()
 		cleanupOnErr()
 		return nil, nil, fmt.Errorf("start claude: %w", err)
@@ -274,18 +281,21 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 	b.cfg.Logger.Info("claude started", "warm_pool", pooled, "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	proc := &claudeProcess{
-		pooled:        pooled,
-		fingerprint:   fingerprint,
-		cmd:           cmd,
-		stdin:         stdin,
-		inputWriter:   &claudeInputWriter{w: stdin},
-		stdout:        stdout,
-		stderrBuf:     stderrBuf,
-		procDone:      make(chan struct{}),
-		mcpConfigPath: mcpConfigPath,
-		sessionDir:    sessionDir,
-		taskEnvFile:   taskEnvFile,
-		logger:        b.cfg.Logger,
+		pooled:           pooled,
+		fingerprint:      fingerprint,
+		cmd:              cmd,
+		ownedProcess:     ownedProcess,
+		beginTermination: beginTermination,
+		terminationDone:  terminationDone,
+		stdin:            stdin,
+		inputWriter:      &claudeInputWriter{w: stdin},
+		stdout:           stdout,
+		stderrBuf:        stderrBuf,
+		procDone:         make(chan struct{}),
+		mcpConfigPath:    mcpConfigPath,
+		sessionDir:       sessionDir,
+		taskEnvFile:      taskEnvFile,
+		logger:           b.cfg.Logger,
 	}
 	return proc, usageSnapshot, nil
 }
@@ -316,7 +326,7 @@ func (p *claudeProcess) readStdout() {
 		_ = p.stdout.Close()
 	}
 	p.closeStdin()
-	exitErr := p.cmd.Wait()
+	exitErr := p.ownedProcess.Wait()
 	// The leader is reaped; drop ownership. On Windows that closes the Job
 	// Object, which kills anything still inside it — precisely what should
 	// happen to a descendant that outlived the CLI (GH #7522).

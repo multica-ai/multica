@@ -173,7 +173,9 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[codearts:stderr] ")
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start codearts: %w", err)
@@ -211,6 +213,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// last-resort unblock for a scanner that a wedged descendant still keeps
 	// open. WaitDelay is the final backstop (#4533).
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return // finished on its own; nothing to terminate
@@ -221,14 +224,15 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// strand that goroutine for the lifetime of the daemon.
 		closeStdin()
 		if cmd.Process != nil {
-			signalProcessGroup(cmd, syscall.SIGTERM)
+			process.signal(syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
+			case <-process.exitObserved: // still unreaped; cleanup follows the handler
 			case <-time.After(codeartsTerminateGrace()):
-				signalProcessGroup(cmd, syscall.SIGKILL)
+				process.signal(syscall.SIGKILL)
 			}
 		}
-		_ = stdout.Close()
+		closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 	}()
 
 	go func() {
@@ -240,7 +244,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		scanResult := b.processEvents(stdout, msgCh)
 
 		// Wait for process exit, then release the cancellation handler.
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
@@ -301,7 +305,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
+			Error:      process.withObservationError(scanResult.errMsg),
 			DurationMs: duration.Milliseconds(),
 			SessionID:  scanResult.sessionID,
 			Usage:      usage,

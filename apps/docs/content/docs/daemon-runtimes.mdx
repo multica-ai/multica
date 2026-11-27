@@ -16,6 +16,10 @@ Multica records and coordinates the work; connected computers execute it. The **
 
 For example, if a computer has both Claude Code and Codex installed and is connected to two workspaces, the daemon registers one Claude Code runtime and one Codex runtime for each workspace. Restarting the daemon updates the existing records; it does not keep creating new runtimes for the same combination.
 
+## Run process cleanup
+
+On Linux and macOS, streamed runs using Claude Code, CodeArts, DevEco, OpenCode’s `run` transport, or DSH stop descendants that remain in the runtime’s process group when the runtime exits, including after normal completion. A background server or browser started by such a run should not be expected to survive it. Processes that leave the group are outside this cleanup boundary. ACP terminals retain their separate lifetime until the terminal is released.
+
 ## Execution location and data boundaries
 
 The AI coding tools a local runtime invokes, those tools' own login credentials, and your local code directories all stay on the connected computer. The Multica server does not execute commands on behalf of local tools, and it does not automatically upload your entire working directory.
