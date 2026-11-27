@@ -9,7 +9,7 @@ function Probe() {
   return null;
 }
 
-/** Active tab sitting on entry index 1 of a two-entry history. */
+/** Active tab with both backward and forward history. */
 function seedHistory() {
   useTabStore.setState({
     activeWorkspaceSlug: "acme",
@@ -23,7 +23,7 @@ function seedHistory() {
             title: "",
             pinned: false,
             history: {
-              stack: ["/acme/issues", "/acme/issues/abc"],
+              stack: ["/acme/issues", "/acme/issues/abc", "/acme/issues/def"],
               index: 1,
             },
             memento: { scroll: {}, view: {} },
@@ -64,11 +64,10 @@ describe("useNavigationInputBindings", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("goes forward on Cmd+Right", () => {
-    useTabStore.getState().goBack();
+  it("goes forward on Ctrl+Right", () => {
     render(<Probe />);
     keydown({ key: "ArrowRight", ctrlKey: true });
-    expect(activeHistoryIndex()).toBe(1);
+    expect(activeHistoryIndex()).toBe(2);
   });
 
   // #6728: the Cmd/Ctrl+[ and +] chords moved to the shared shortcut registry
@@ -105,10 +104,10 @@ describe("useNavigationInputBindings", () => {
     expect(activeHistoryIndex()).toBe(1);
   });
 
-  it("navigates on mouse side buttons 3 (back) and 4 (forward)", () => {
+  it("leaves mouse side buttons to the main process", () => {
     render(<Probe />);
     window.dispatchEvent(new MouseEvent("mouseup", { button: 3 }));
-    expect(activeHistoryIndex()).toBe(0);
+    expect(activeHistoryIndex()).toBe(1);
     window.dispatchEvent(new MouseEvent("mouseup", { button: 4 }));
     expect(activeHistoryIndex()).toBe(1);
   });
