@@ -32,16 +32,19 @@ export function DirectoryCard({
   app,
   handlers,
   detail,
+  namePending,
 }: {
   app: DirectoryApp;
   handlers: DirectoryCardHandlers;
   detail?: SetUpDetail;
+  /** The catalog that names the app has not loaded yet. */
+  namePending?: boolean;
 }) {
   const { t } = useT("settings");
   const paths = useWorkspacePaths();
   const { getActorName } = useActorName();
 
-  if (!app.inUse && !app.request) return <SetUpCard app={app} detail={detail} />;
+  if (!app.inUse && !app.request) return <SetUpCard app={app} detail={detail} namePending={namePending} />;
 
   const scopeLine =
     app.scopes.length === 2
@@ -65,6 +68,7 @@ export function DirectoryCard({
     <AppCard
       slug={app.slug}
       name={app.name}
+      namePending={namePending}
       logo={app.entry?.logo}
       href={paths.appDetail(app.slug)}
       meta={
@@ -97,7 +101,15 @@ export function DirectoryCard({
   );
 }
 
-export function SetUpCard({ app, detail = "category" }: { app: DirectoryApp; detail?: SetUpDetail }) {
+export function SetUpCard({
+  app,
+  detail = "category",
+  namePending,
+}: {
+  app: DirectoryApp;
+  detail?: SetUpDetail;
+  namePending?: boolean;
+}) {
   const { t } = useT("settings");
   const paths = useWorkspacePaths();
   const categoryLabel = useAppCategoryLabel();
@@ -114,6 +126,7 @@ export function SetUpCard({ app, detail = "category" }: { app: DirectoryApp; det
     <AppCard
       slug={app.slug}
       name={app.name}
+      namePending={namePending}
       logo={app.entry?.logo}
       href={paths.appDetail(app.slug)}
       meta={text ? <span className="truncate">{text}</span> : undefined}

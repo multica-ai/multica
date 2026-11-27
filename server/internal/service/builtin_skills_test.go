@@ -352,8 +352,11 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":        "issue",
-		"references/sub-issues.md":    "sub-issue",
+		"references/issues.md":     "issue",
+		"references/sub-issues.md": "sub-issue",
+		// A dependency task arrives as an issue task ("make MUL-2 wait for
+		// MUL-1"), and the description has no room left under its cap.
+		"references/dependencies.md":  "issue",
 		"references/batch-changes.md": "batch",
 		"references/mentions.md":      "mention",
 		"references/agents.md":        "agent",
@@ -556,7 +559,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// MUL-5442: the brief's Sub-issue Creation section is a
 				// one-line map pointing here. These anchors are the demoted
 				// playbook — if they leave, the brief pointer dangles.
-				"todo starts work now, backlog parks it",
+				"todo starts once unblocked, backlog parks it",
 				"--status backlog",
 				"`--stage <N>`",
 				"wakes the parent assignee when a stage",
@@ -568,6 +571,22 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Slice by user-visible behavior, never by layer",
 				"A PR that is large to review is not a reason to split",
 				"`[Parent issue]` block",
+				// MUL-10260: sibling order has one recipe; --blocked-by is
+				// only for waits stages cannot express.
+				"Order sub-issues of one parent with stages, not with `--blocked-by` chains",
+			},
+		},
+		{
+			// MUL-10260: blockers apply to any issue, so their contract has
+			// its own reference instead of living only under sub-issues.
+			file: "references/dependencies.md",
+			want: []string{
+				"--blocked-by <issue>",
+				"--remove-blocked-by",
+				"issue list --blocked",
+				"`via: manual|stage`",
+				"Blockers never change issue status",
+				"use stages instead",
 			},
 		},
 		{

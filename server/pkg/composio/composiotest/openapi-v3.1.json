@@ -4635,14 +4635,28 @@
                                     ]
                                   },
                                   "handler": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {"type":"string","enum":["condition_check"]},
-                                      "condition": {"type":"string","minLength":1,"maxLength":2000},
-                                      "action": {"type":"string","enum":["block"]}
-                                    },
-                                    "required": ["type","condition","action"],
-                                    "additionalProperties": false
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {"type":"string","enum":["condition_check"]},
+                                          "condition": {"type":"string","minLength":1,"maxLength":2000},
+                                          "action": {"type":"string","enum":["block"]}
+                                        },
+                                        "required": ["type","condition","action"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {"type":"string","enum":["webhook"]},
+                                          "timeout_ms": {"type":"integer","minimum":100,"maximum":5000},
+                                          "fallback_action": {"type":"string","enum":["block","continue"]}
+                                        },
+                                        "required": ["type","fallback_action"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
                                   }
                                 },
                                 "required": ["type","id","applies_to","handler"],
@@ -4690,6 +4704,16 @@
                                           "action": {"type":"string","enum":["block"]}
                                         },
                                         "required": ["type","action"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {"type":"string","enum":["webhook"]},
+                                          "timeout_ms": {"type":"integer","minimum":100,"maximum":5000},
+                                          "fallback_action": {"type":"string","enum":["block","continue"]}
+                                        },
+                                        "required": ["type","fallback_action"],
                                         "additionalProperties": false
                                       }
                                     ]

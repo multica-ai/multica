@@ -831,10 +831,16 @@ func effectiveTaskSquadID(task db.AgentTaskQueue) pgtype.UUID {
 // squad-created sub-issues) while leaving direct standalone human triggers
 // unattributed.
 //
+// An issue a squad run created stays the squad's work only for the squad's own
+// agents: a run reaching it without a squad from its trigger is the squad's
+// only when its agent leads or belongs to the squad. Without that, every later
+// run on the issue, and every issue those runs create, would count as the
+// squad's (MUL-10072).
+//
 // Callers write the result to usage_squad_id — NEVER to squad_id — so existing
 // leader/worker routing semantics keyed off squad_id (workflow step ownership,
 // self-trigger suppression, conversation root ownership) remain untouched.
-func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
+func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, agentID pgtype.UUID, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
 	if explicitSquadID.Valid {
 		return explicitSquadID
 	}
@@ -848,16 +854,29 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 			}
 		}
 	}
+	return resolveIssueOriginSquadID(ctx, s.Queries, issue, agentID)
+}
+
+func resolveIssueOriginSquadID(ctx context.Context, q *db.Queries, issue db.Issue, agentID pgtype.UUID) pgtype.UUID {
 	if issue.OriginType.Valid &&
 		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
 		issue.OriginID.Valid {
-		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
-			if sid := effectiveTaskSquadID(originTask); sid.Valid {
+		if originTask, err := q.GetAgentTask(ctx, issue.OriginID); err == nil {
+			if sid := effectiveTaskSquadID(originTask); sid.Valid && agentInSquad(ctx, q, sid, agentID) {
 				return sid
 			}
 		}
 	}
 	return pgtype.UUID{}
+}
+
+// agentInSquad reports whether agentID leads or belongs to squadID.
+func agentInSquad(ctx context.Context, q *db.Queries, squadID, agentID pgtype.UUID) bool {
+	if squad, err := q.GetSquad(ctx, squadID); err == nil && squad.LeaderID == agentID {
+		return true
+	}
+	isMember, err := q.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squadID, MemberType: "agent", MemberID: agentID})
+	return err == nil && isMember
 }
 
 // RecordHumanDelegation notes that attr's member personally started an agent
@@ -1366,7 +1385,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, pgtype.UUID{}, attrDelegatedFrom)
+	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, issue.AssigneeID, pgtype.UUID{}, attrDelegatedFrom)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1544,7 +1563,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, squadID, attrDelegatedFrom)
+	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, agentID, squadID, attrDelegatedFrom)
 	params := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
@@ -2666,7 +2685,7 @@ func (s *TaskService) sendDirectChatMessage(
 					return fmt.Errorf("list bound chat attachments for title: %w", err)
 				}
 				if len(attachments) > 0 {
-					title := chattitle.Derive(attachments[0].Filename)
+					title := chattitle.DeriveFromFilename(attachments[0].Filename)
 					if title != "" {
 						if _, err := qtx.InitializeChatSessionMediaTitle(ctx, db.InitializeChatSessionMediaTitleParams{
 							ID: session.ID, MessageID: msg.ID, Title: title,
@@ -5334,20 +5353,24 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
-	task, _, err := s.FailTaskWithTransition(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir)
+	task, _, err := s.FailTaskWithTransition(ctx, taskID, protocol.TaskFailRequest{
+		Error: errMsg, SessionID: sessionID, WorkDir: workDir, BranchName: branchName, FailureReason: failureReason,
+		SessionRolloutMissing: sessionRolloutMissing, RetiredSessionID: retiredSessionID, DurableWorkDir: durableWorkDir,
+	})
 	return task, err
 }
 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, report protocol.TaskFailRequest) (*db.AgentTaskQueue, bool, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
 	// rather than only in the /fail handler because failClaimedTaskBeforeLaunch
 	// reaches FailTask without going through request decoding.
-	errMsg = util.SanitizeTextForPostgres(errMsg)
+	errMsg := util.SanitizeTextForPostgres(report.Error)
+	failureReason := report.FailureReason
 
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
@@ -5382,7 +5405,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	// Restoring a Trae session replays history, but the next prompt can still
+	// execute the same tool again. Older reporters cannot certify this turn.
+	if retryableReasons[failureReason] && (report.NoToolCallsStarted || !taskfailure.IsTraePromptStreamDisconnect(errMsg)) {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
@@ -5421,16 +5446,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			ID:             taskID,
 			Error:          pgtype.Text{String: errMsg, Valid: true},
 			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
-			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
+			SessionID:      pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+			WorkDir:        pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
+			DurableWorkDir: pgtype.Text{String: report.DurableWorkDir, Valid: report.DurableWorkDir != ""},
 			// A failed run can still have produced a branch: worktree mode
 			// commits whatever the agent left before tearing the worktree down,
 			// precisely so partial work survives. Dropping the name here would
 			// leave that commit with no pointer to it.
-			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
-			SessionRolloutMissing: sessionRolloutMissing,
-			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
+			BranchName:            pgtype.Text{String: report.BranchName, Valid: report.BranchName != ""},
+			SessionRolloutMissing: report.SessionRolloutMissing,
+			RetiredSessionID:      pgtype.Text{String: report.RetiredSessionID, Valid: report.RetiredSessionID != ""},
 		})
 		if errors.Is(err, pgx.ErrNoRows) && failureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
 			t, err = qtx.FailCancelledTaskProcessCleanup(ctx, db.FailCancelledTaskProcessCleanupParams{ID: taskID, ErrorMessage: errMsg})
@@ -5453,7 +5478,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// un-upgraded daemon's agent_error.unknown row is caught by the error
 		// text too.
 		if t.ChatSessionID.Valid && ResumeUnsafeFailure(failureReason, errMsg) {
-			deadSession := sessionID
+			deadSession := report.SessionID
 			if deadSession == "" {
 				deadSession = t.SessionID.String
 			}
@@ -5471,10 +5496,10 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// terminal status: the fresh-session retry that replaced it may well
 		// have succeeded, and the pointer would otherwise still name the
 		// transcript it retried away from.
-		if t.ChatSessionID.Valid && retiredSessionID != "" {
+		if t.ChatSessionID.Valid && report.RetiredSessionID != "" {
 			if err := qtx.ClearChatSessionSessionIfMatches(ctx, db.ClearChatSessionSessionIfMatchesParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: retiredSessionID, Valid: true},
+				SessionID: pgtype.Text{String: report.RetiredSessionID, Valid: true},
 				RuntimeID: t.RuntimeID,
 			}); err != nil {
 				return fmt.Errorf("clear retired chat session resume pointer: %w", err)
@@ -5490,13 +5515,13 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// when there's no session_id to record, leave runtime_id untouched
 			// (NULL → COALESCE keeps the existing value).
 			var sessionRuntimeID pgtype.UUID
-			if sessionID != "" {
+			if report.SessionID != "" {
 				sessionRuntimeID = t.RuntimeID
 			}
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+				SessionID: pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+				WorkDir:   pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
 				RuntimeID: sessionRuntimeID,
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
@@ -7272,6 +7297,9 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if target.leaderSquad != nil {
 			isLeader, squadID = true, target.leaderSquad.ID
 		}
+		// The recovery run continues the coordinator's run, so it keeps that
+		// run's squad usage attribution.
+		usageSquadID := s.resolveInheritedSquadID(ctx, target.issue, target.agent.ID, squadID, target.source.ID)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,
@@ -7282,6 +7310,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
 			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 			SquadID:              squadID,
+			UsageSquadID:         usageSquadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
 			RuntimeMcpOverlay:    overlay.Overlay,

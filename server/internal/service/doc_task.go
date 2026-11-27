@@ -173,10 +173,23 @@ func (s *TaskService) attributionFromDocComment(ctx context.Context, comment db.
 // CancelTasksForDoc cancels every active run on a deleted doc, the doc
 // counterpart of CancelTasksForIssue.
 func (s *TaskService) CancelTasksForDoc(ctx context.Context, docID pgtype.UUID) error {
+	return s.cancelDocTasks(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.CancelAgentTasksByDoc(ctx, docID)
+	})
+}
+
+// CancelTasksForDocThread cancels every active run on a deleted discussion.
+func (s *TaskService) CancelTasksForDocThread(ctx context.Context, docID, threadID pgtype.UUID) error {
+	return s.cancelDocTasks(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.CancelAgentTasksByDocThread(ctx, db.CancelAgentTasksByDocThreadParams{DocID: docID, DocThreadID: threadID})
+	})
+}
+
+func (s *TaskService) cancelDocTasks(ctx context.Context, cancel func(*db.Queries) ([]db.AgentTaskQueue, error)) error {
 	var cancelled []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		var err error
-		cancelled, err = qtx.CancelAgentTasksByDoc(ctx, docID)
+		cancelled, err = cancel(qtx)
 		if err != nil {
 			return err
 		}

@@ -108,9 +108,27 @@ WHERE task_id = @task_id
   AND type IN ('tool_use', 'thinking', 'error')
 ORDER BY seq ASC;
 
--- name: DeleteTaskMessages :exec
+-- name: DeleteTaskMessages :execrows
 DELETE FROM task_message
 WHERE task_id = $1;
+
+-- name: MarkTaskTranscriptPurged :one
+-- Records an admin clearing a finished run's log and drops the run's final
+-- output, which is the agent's last message and so part of that log. The rest
+-- of result stays: it carries the reply comment id and process-cleanup flags
+-- other paths read. The status guard keeps a run that is still writing its log
+-- out of reach. Clearing again keeps who cleared first, and when.
+UPDATE agent_task_queue
+SET transcript_purged_at = COALESCE(transcript_purged_at, now()),
+    transcript_purged_by = COALESCE(transcript_purged_by, sqlc.arg(purged_by)::uuid),
+    result = CASE WHEN jsonb_typeof(result) = 'object' THEN result - 'output' END
+WHERE id = @id AND status IN ('completed', 'failed', 'cancelled')
+RETURNING *;
+
+-- name: DropAutopilotRunOutput :exec
+UPDATE autopilot_run
+SET result = CASE WHEN jsonb_typeof(result) = 'object' THEN result - 'output' END
+WHERE id = @id AND result IS NOT NULL;
 
 -- name: ListTaskReplyFragments :many
 -- Rebuild a Telegram placeholder without its progress when another replica

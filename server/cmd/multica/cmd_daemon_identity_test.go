@@ -336,6 +336,23 @@ func TestDaemonStatusShowsWhoManagesTheDaemon(t *testing.T) {
 	})
 }
 
+func TestDaemonStatusRendersStartingPIDPlainly(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "starting-pid-test"
+	mkProfiles(t, profile)
+	serveHealthAsPID(t, profile, map[string]any{"status": "starting", "profile": profile}, 1531839)
+
+	out, err := captureStdout(t, func() error {
+		return runDaemonStatus(daemonStatusCmdFor(t, profile, ""), nil)
+	})
+	if err != nil {
+		t.Fatalf("runDaemonStatus: %v", err)
+	}
+	if want := "Daemon [starting-pid-test]: starting (pid 1531839)\n"; out != want {
+		t.Fatalf("daemon status output = %q, want %q", out, want)
+	}
+}
+
 // Inside a daemon-managed task the health port is injected by the host daemon
 // rather than derived from a profile hash, so there is no collision to detect.
 // The task's own profile is necessarily empty (--profile is rejected there),

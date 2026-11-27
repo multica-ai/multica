@@ -134,6 +134,7 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
+  TaskTranscriptPurge,
   RuntimeRateLimitsResponse,
   Attachment,
   ChatSession,
@@ -142,6 +143,7 @@ import type {
   ChatMessagesPage,
   ChatDraftRestoresResponse,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -459,6 +461,8 @@ import {
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
+  TaskTranscriptPurgeSchema,
+  EMPTY_TASK_TRANSCRIPT_PURGE,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -3527,6 +3531,14 @@ export class ApiClient {
     });
   }
 
+  /** Clears a finished run's log. Workspace owners and admins only. */
+  async purgeTaskTranscript(taskId: string): Promise<TaskTranscriptPurge> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`, { method: "DELETE" });
+    return parseWithFallback<TaskTranscriptPurge>(raw, TaskTranscriptPurgeSchema, EMPTY_TASK_TRANSCRIPT_PURGE, {
+      endpoint: "DELETE /api/tasks/:id/messages",
+    });
+  }
+
   async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/context-receipt`);
     return parseWithFallback<TaskContextReceiptResponse>(
@@ -4834,6 +4846,13 @@ export class ApiClient {
     }
     return parseWithFallback(raw, ChatWakeupListSchema, EMPTY_CHAT_WAKEUP_LIST, {
       endpoint: "GET /api/chat/sessions/{id}/wakeups",
+    });
+  }
+
+  async rescheduleChatWakeup(sessionId: string, wakeupId: string, timing: ChatWakeupTiming): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(timing),
     });
   }
 

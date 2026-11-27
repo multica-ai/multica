@@ -170,6 +170,18 @@ describe("onIssueLabelsChanged", () => {
     qc = new QueryClient();
   });
 
+  it.each([undefined, 2])("refreshes project progress, which counts issues by label (revision %s)", (revision) => {
+    const progressKey = projectKeys.progress(WS_ID, PROJECT_ID);
+    const membersKey = projectKeys.members(WS_ID, PROJECT_ID);
+    qc.setQueryData(progressKey, { by_label: [] });
+    qc.setQueryData(membersKey, []);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], revision);
+
+    expect(qc.getQueryState(progressKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(membersKey)?.isInvalidated).toBe(false);
+  });
+
   it("patches the per-issue label cache when present (LabelPicker source)", () => {
     qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(WS_ID, ISSUE_ID), {
       labels: [labelA],
@@ -684,6 +696,51 @@ describe("onIssueUpdated — source deletion detaches sub-issues", () => {
     expectInvalidated(qc, oldChildrenKey);
     expectInvalidated(qc, batchedChildrenKey);
     expectInvalidated(qc, issueKeys.childProgress(WS_ID));
+  });
+});
+
+describe("onIssueUpdated — blockers stay this reader's own", () => {
+  it("keeps the cached blocked_by when a broadcast carries a narrower list", () => {
+    const qc = new QueryClient();
+    const privateBlocker = {
+      id: OTHER_ISSUE_ID,
+      identifier: "MUL-2",
+      title: "Private blocker",
+      status: "todo",
+      via: "manual",
+      closed: false,
+    };
+    const child: Issue = {
+      ...parentedIssue,
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 1,
+    };
+    const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData(detailKey, child);
+    qc.setQueryData(childrenKey, [child]);
+    qc.setQueryData(listKey, makeListCache(child));
+
+    // The server strips cross-project private blockers from every broadcast.
+    onIssueUpdated(qc, WS_ID, {
+      ...child,
+      title: "Renamed",
+      blocked_by: [],
+      revision: 2,
+    });
+
+    const expected = {
+      title: "Renamed",
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 2,
+    };
+    expect(qc.getQueryData(detailKey)).toMatchObject(expected);
+    expect(qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues[0])
+      .toMatchObject(expected);
+    expect(qc.getQueryData<Issue[]>(childrenKey)?.[0]).toMatchObject(expected);
   });
 });
 

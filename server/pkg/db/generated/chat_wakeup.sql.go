@@ -241,6 +241,30 @@ func (q *Queries) DeleteChatWakeupsBySystemRuntimeAgents(ctx context.Context, ru
 	return err
 }
 
+const endActiveChatWakeupsForRequester = `-- name: EndActiveChatWakeupsForRequester :execrows
+UPDATE chat_wakeup
+SET status = 'cancelled',
+    end_reason = 'member_removed',
+    ended_at = now(),
+    updated_at = now()
+WHERE workspace_id = $1 AND requester_id = $2 AND status = 'active'
+`
+
+type EndActiveChatWakeupsForRequesterParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RequesterID pgtype.UUID `json:"requester_id"`
+}
+
+// A departing member's chat wakeups would start turns answering to someone
+// who is no longer in the workspace.
+func (q *Queries) EndActiveChatWakeupsForRequester(ctx context.Context, arg EndActiveChatWakeupsForRequesterParams) (int64, error) {
+	result, err := q.db.Exec(ctx, endActiveChatWakeupsForRequester, arg.WorkspaceID, arg.RequesterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const endActiveChatWakeupsForSession = `-- name: EndActiveChatWakeupsForSession :many
 UPDATE chat_wakeup
 SET status = 'cancelled',

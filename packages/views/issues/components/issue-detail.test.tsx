@@ -1629,6 +1629,22 @@ describe("IssueDetail (shared)", () => {
       expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
     });
 
+    it("moves status and assignee into the page header while the properties sidebar is closed", async () => {
+      const { container } = renderIssueDetail();
+
+      const toggle = await screen.findByRole("button", { name: enIssues.detail.sidebar_tooltip });
+      expect(container.querySelector('[data-testid="issue-header-actions"]')).toBeNull();
+
+      fireEvent.click(toggle);
+      const headerActions = await waitFor(() => {
+        const el = container.querySelector<HTMLElement>('[data-testid="issue-header-actions"]');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      expect(headerActions.closest("header")).not.toBeNull();
+      expect(within(headerActions).getByText(enIssues.status.in_progress)).toBeInTheDocument();
+    });
+
     it("floats the notification's actions above the composer, after the issue's own", async () => {
       const { container } = renderWithArchive();
 

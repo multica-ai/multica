@@ -43,6 +43,7 @@ import {
   useIssuePeekActions,
   useIssuePeekLinkProps,
 } from "../surface/peek-context";
+import { useIsIssueCursor } from "../surface/issue-cursor";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -207,7 +208,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       data-status={issue.status}
       data-priority={issue.priority}
       data-assignee-type={issue.assignee_type ?? "none"}
-      className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50">
+      className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50 group-data-[cursor]/card:border-foreground/15 group-data-[cursor]/card:bg-board-card-hover group-data-[cursor]/card:ring-1 group-data-[cursor]/card:ring-ring/60">
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -376,6 +377,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   const p = useWorkspacePaths();
   const peek = useIssuePeekActions();
   const peeked = useIsIssuePeeked(issue.id);
+  const cursor = useIsIssueCursor(issue.id);
   const peekLinkProps = useIssuePeekLinkProps(issue);
   const {
     attributes,
@@ -404,6 +406,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         data-board-card=""
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
+        data-cursor={cursor ? "" : undefined}
         {...attributes}
         {...listeners}
         className={`group/card transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}

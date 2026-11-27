@@ -174,6 +174,37 @@ function hasLocalEdits(draft: SkillDraft, baseline: SkillDraft | null): boolean 
 }
 
 /**
+ * The draft to show once a save returns: the saved version, except the fields
+ * the user changed after `sent` left the page. Saving recreates every file row,
+ * so kept files take their new id from the path they were sent under.
+ */
+function draftAfterSave(
+  draft: SkillDraft,
+  sent: SkillDraft,
+  saved: SkillDraft,
+): SkillDraft {
+  const sentPathById = new Map(sent.files.map((f) => [f.id, f.path]));
+  const savedIdByPath = new Map(saved.files.map((f) => [f.path, f.id]));
+  return {
+    name: draft.name === sent.name ? saved.name : draft.name,
+    description:
+      draft.description === sent.description
+        ? saved.description
+        : draft.description,
+    content: draft.content === sent.content ? saved.content : draft.content,
+    files:
+      draft.files === sent.files
+        ? saved.files
+        : draft.files.map((f) => ({
+            ...f,
+            id: savedIdByPath.get(
+              (f.id ? sentPathById.get(f.id) : undefined) ?? f.path,
+            ),
+          })),
+  };
+}
+
+/**
  * The page body: the skill's sections, its files beside an editor, or its
  * version history. Files and versions need more width than the reading
  * column, so they take the body over instead of being a section of it.
@@ -445,34 +476,38 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
    * The draft this page last handed the user, normalized by `toDraft`. Dirty
    * state is measured against THIS, never against the latest server skill.
    *
-   * INVARIANT: `seedFromSkill` is the only writer, and it always writes the
-   * same snapshot it pushes into state. `dirtySummary` is a `useMemo` keyed on
-   * those state values, so every baseline write is paired with the state
-   * change that recomputes it. Assigning this ref anywhere else breaks that
+   * INVARIANT: `seedFromSkill` is the only writer, and it always pushes a new
+   * `files` array into state with it. `dirtySummary` is a `useMemo` keyed on
+   * that state, so every baseline write is paired with the state change that
+   * recomputes it. Assigning this ref anywhere else breaks that
    * pairing and silently re-opens MUL-5645.
    */
   const baselineRef = useRef<SkillDraft | null>(null);
 
-  const seedFromSkill = useCallback((s: Skill) => {
-    const seeded = toDraft(s);
+  const seedFromSkill = useCallback((s: Skill, sent?: SkillDraft) => {
+    const baseline = toDraft(s);
+    const seeded = sent
+      ? draftAfterSave(draftRef.current, sent, baseline)
+      : baseline;
     setName(seeded.name);
     setDescription(seeded.description);
     setContent(seeded.content);
     setFiles(seeded.files);
-    baselineRef.current = seeded;
+    baselineRef.current = baseline;
   }, []);
 
   /**
    * Adopt a server version wholesale: draft, baseline, seeded key and conflict
    * flag all move together. Every path that accepts a server version goes
    * through here — first load, silent refresh, Save, Discard — so the four
-   * pieces can never drift apart.
+   * pieces can never drift apart. Save passes the draft it `sent`, so edits
+   * made while the request was in flight stay in the draft.
    */
   const adoptServerVersion = useCallback(
-    (s: Skill, resetSelection = false) => {
+    (s: Skill, resetSelection = false, sent?: SkillDraft) => {
       seededKeyRef.current = `${wsId}:${s.id}@${s.updated_at}`;
       setConflictPending(false);
-      seedFromSkill(s);
+      seedFromSkill(s, sent);
       if (resetSelection) setSelectedPath(SKILL_MD);
     },
     [wsId, seedFromSkill],
@@ -612,6 +647,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (!skill || !canEdit) return;
     const trimmedName = name.trim();
     const trimmedDesc = description.trim();
+    const sent = { name, description, content, files };
     setSaving(true);
     try {
       const payload: UpdateSkillRequest = {
@@ -622,7 +658,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       };
       const updated = await api.updateSkill(skill.id, payload);
       qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, updated);
-      adoptServerVersion(updated);
+      adoptServerVersion(updated, false, sent);
       qc.invalidateQueries({
         queryKey: workspaceKeys.skills(wsId),
         exact: true,

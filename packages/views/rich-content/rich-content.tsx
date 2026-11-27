@@ -43,12 +43,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment } from "@multica/core/types";
+// Subpath imports, not the @multica/ui/markdown barrel: the barrel also
+// exports the shiki-based CodeBlock, which would pull shiki into the chunk.
+import { isAllowedFileCardHref } from "@multica/ui/markdown/file-cards";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import {
-  isAllowedFileCardHref,
-  isIssueIdentifier,
   markdownSanitizeSchema,
   markdownUrlTransform,
-} from "@multica/ui/markdown";
+} from "@multica/ui/markdown/sanitize";
 import {
   resolveClickIntent,
   useAppOrigin,
@@ -81,6 +83,10 @@ import {
 } from "./rich-code-block";
 import { RichTable, RichTableSourceContext } from "./rich-table";
 import { getTextContent } from "./rich-table-model";
+import { rendersAsPlainText } from "./markdown-limit";
+import { downloadBlob } from "../editor/utils/mermaid-export";
+import { useT } from "../i18n";
+import { Download } from "@multica/ui/icons";
 import "katex/dist/katex.min.css";
 import "../editor/styles/index.css";
 import "./rich-content.css";
@@ -597,13 +603,58 @@ export interface RichContentProps {
   className?: string;
 }
 
-export const RichContent = memo(function RichContent({
-  content,
-  attachments,
-  density = "document",
-  phase = "settled",
-  className,
-}: RichContentProps) {
+export const RichContent = memo(function RichContent(props: RichContentProps) {
+  return rendersAsPlainText(props.content) ? <PlainTextContent {...props} /> : <MarkdownContent {...props} />;
+});
+
+/** The wrapper both renderings share: density, phase and the readonly styles. */
+function contentWrapperProps({ density = "document", phase = "settled", className }: RichContentProps) {
+  return {
+    "data-rich-content": "",
+    "data-mc": "content",
+    "data-density": density,
+    "data-phase": phase,
+    className: cn(
+      "rich-text-editor readonly text-body",
+      density === "compact" && "rich-content-compact",
+      className,
+    ),
+  };
+}
+
+/**
+ * A body too long to format (see `./markdown-limit`), shown as its raw text in
+ * a bounded, scrollable code block so it neither freezes the page nor makes it
+ * thousands of screens tall.
+ */
+function PlainTextContent(props: RichContentProps) {
+  const { content } = props;
+  const { t } = useT("editor");
+  return (
+    <div {...contentWrapperProps(props)}>
+      <div
+        data-find-ignore
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground"
+      >
+        <span>{t(($) => $.plain_text.notice)}</span>
+        <button
+          type="button"
+          onClick={() => downloadBlob(new Blob([content], { type: "text/plain;charset=utf-8" }), "content.txt")}
+          className="flex items-center gap-1 transition-colors hover:text-foreground"
+        >
+          <Download className="size-3 shrink-0" />
+          {t(($) => $.plain_text.download)}
+        </button>
+      </div>
+      <pre data-testid="rich-content-plain-text" className="max-h-[60vh] overflow-y-auto [overflow-wrap:anywhere]">
+        <code>{content}</code>
+      </pre>
+    </div>
+  );
+}
+
+function MarkdownContent(props: RichContentProps) {
+  const { content, attachments, phase = "settled" } = props;
   // Subscribed, not read once. The CDN config is fetched asynchronously after
   // auth, so content that renders first would otherwise keep its legacy CDN
   // links as plain anchors permanently — the preprocess step that turns them
@@ -642,21 +693,10 @@ export const RichContent = memo(function RichContent({
 
   return (
     <AttachmentDownloadProvider attachments={attachments}>
-      <div
-        ref={wrapperRef}
-        data-rich-content=""
-        data-mc="content"
-        data-density={density}
-        data-phase={phase}
-        className={cn(
-          "rich-text-editor readonly text-body",
-          density === "compact" && "rich-content-compact",
-          className,
-        )}
-      >
+      <div ref={wrapperRef} {...contentWrapperProps(props)}>
         {markdown}
         <LinkHoverCard {...hover} />
       </div>
     </AttachmentDownloadProvider>
   );
-});
+}

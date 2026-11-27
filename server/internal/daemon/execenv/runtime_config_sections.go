@@ -817,9 +817,9 @@ func writeIssueStatusRulesForStatusMap(b *strings.Builder, ctx TaskContextForEnv
 func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Sub-issue Creation\n\n")
 	b.WriteString("Default to one issue, one PR. Split only when each piece can be merged and verified on its own — another repository, separate code, or a different owner such as a human step or another agent — and slice by user-visible behavior, never by layer: a backend / frontend split of one feature loses the discussion behind it and cannot be verified end to end until every piece lands. A PR that is large to review is not a reason to split; organize it into commits and give reviewers a guide in its description.\n\n")
-	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages.")
+	b.WriteString("`--status todo` starts an agent-assigned child once nothing it waits on (an earlier stage, a `--blocked-by` issue) is unfinished; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages.")
 	if where, ok := subIssueContractsSkill(modelVisibleSkills(ctx.AgentSkills)); ok {
-		b.WriteString(" Before creating sub-issues, read " + where + " — it covers when to split, serial chains, promotion, and stage wake semantics.")
+		b.WriteString(" Before creating sub-issues, read " + where + " — it covers when to split, ordering with stages, promotion, and stage wake semantics.")
 	}
 	b.WriteString("\n\n")
 }
@@ -945,9 +945,11 @@ func writeMentions(b *strings.Builder, docsEnabled bool) {
 	// The notify caveat is scoped to FOLLOWERS on
 	// purpose — for a human who does not follow the issue, a mention is
 	// exactly how they find out, and that escalation must stay available
-	// (Elon's review catch on #7245). The cost asymmetry line is what breaks
-	// the ambiguous middle.
-	b.WriteString("A mention pulls someone into work they are not doing yet: escalate to a human owner, hand another agent a concrete new sub-task, loop someone in because the user asked. It is not needed merely to notify — followers of the issue already see your comment, and completion notifications are platform-owned. Nor is it how a name is written — crediting a decision or citing someone's earlier point is prose about them, not work for them; the link form dispatches whoever it names, so a reference stays plain text. A thank-you / sign-off / FYI mention of another agent enqueues a paid run whose only possible reply is another courtesy; a missed mention costs one follow-up ask, a stray one costs a run. Silence ends conversations.\n\n")
+	// (Elon's review catch on #7245). It does not say "of the issue": doc
+	// discussion runs get this section too, and there the people already
+	// notified are the discussion's earlier writers (NotifyDocComment). The
+	// cost asymmetry line is what breaks the ambiguous middle.
+	b.WriteString("A mention pulls someone into work they are not doing yet: escalate to a human owner, hand another agent a concrete new sub-task, loop someone in because the user asked. It is not needed merely to notify — followers already see your comment, and completion notifications are platform-owned. Nor is it how a name is written — crediting a decision or citing someone's earlier point is prose about them, not work for them; the link form dispatches whoever it names, so a reference stays plain text. A thank-you / sign-off / FYI mention of another agent enqueues a paid run whose only possible reply is another courtesy; a missed mention costs one follow-up ask, a stray one costs a run. Silence ends conversations.\n\n")
 }
 
 // writeAttachments emits the Attachments pointer.

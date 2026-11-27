@@ -22,6 +22,58 @@ func (q *Queries) DeleteGitHubPRCheckRuns(ctx context.Context, prID pgtype.UUID)
 	return err
 }
 
+const getGitHubPRForRefresh = `-- name: GetGitHubPRForRefresh :one
+SELECT installation_id, repo_owner, repo_name, pr_number, state, head_sha, snapshot_head_sha, snapshot_fetched_at
+FROM github_pull_request
+WHERE workspace_id = $1
+  AND lower(repo_owner) = lower($3::text)
+  AND lower(repo_name) = lower($4::text)
+  AND pr_number = $2
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetGitHubPRForRefreshParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	PrNumber    int32       `json:"pr_number"`
+	RepoOwner   string      `json:"repo_owner"`
+	RepoName    string      `json:"repo_name"`
+}
+
+type GetGitHubPRForRefreshRow struct {
+	InstallationID    int64              `json:"installation_id"`
+	RepoOwner         string             `json:"repo_owner"`
+	RepoName          string             `json:"repo_name"`
+	PrNumber          int32              `json:"pr_number"`
+	State             string             `json:"state"`
+	HeadSha           string             `json:"head_sha"`
+	SnapshotHeadSha   string             `json:"snapshot_head_sha"`
+	SnapshotFetchedAt pgtype.Timestamptz `json:"snapshot_fetched_at"`
+}
+
+// Looks up one mirrored PR by case-insensitive owner/repo and number so a
+// chat wakeup targeting a PR can kick off an immediate snapshot refresh.
+func (q *Queries) GetGitHubPRForRefresh(ctx context.Context, arg GetGitHubPRForRefreshParams) (GetGitHubPRForRefreshRow, error) {
+	row := q.db.QueryRow(ctx, getGitHubPRForRefresh,
+		arg.WorkspaceID,
+		arg.PrNumber,
+		arg.RepoOwner,
+		arg.RepoName,
+	)
+	var i GetGitHubPRForRefreshRow
+	err := row.Scan(
+		&i.InstallationID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.State,
+		&i.HeadSha,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+	)
+	return i, err
+}
+
 const getGitHubPullRequestByID = `-- name: GetGitHubPullRequestByID :one
 SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request WHERE id = $1
 `
@@ -249,12 +301,126 @@ func (q *Queries) ListGitHubPRRowsByAddress(ctx context.Context, arg ListGitHubP
 	return items, nil
 }
 
+const listStaleChecksWatchedGitHubPRs = `-- name: ListStaleChecksWatchedGitHubPRs :many
+WITH watched_issue_prs AS (
+    SELECT ipr.pull_request_id AS pr_id
+    FROM issue_wakeup AS w
+    JOIN issue_pull_request AS ipr ON ipr.issue_id = w.issue_id
+    WHERE w.enabled
+      AND w.condition->>'type' = 'pull_request'
+      AND w.condition->>'event' = 'checks_finished'
+),
+watched_chat_prs AS (
+    SELECT pr.id AS pr_id
+    FROM chat_wakeup AS cw
+    JOIN github_pull_request AS pr
+      ON pr.workspace_id = cw.workspace_id
+     AND lower(pr.repo_owner) = lower(split_part(cw.condition->>'repo', '/', 1))
+     AND lower(pr.repo_name) = lower(split_part(cw.condition->>'repo', '/', 2))
+     AND pr.pr_number = CASE
+         WHEN COALESCE(cw.condition->>'number', '') ~ '^[0-9]{1,9}$' THEN (cw.condition->>'number')::INTEGER
+     END
+    WHERE cw.status = 'active'
+      AND cw.kind = 'condition'
+      AND cw.condition->>'type' = 'pull_request'
+      AND cw.condition->>'event' = 'checks_finished'
+),
+candidates AS (
+    SELECT pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
+    FROM github_pull_request AS pr
+    WHERE pr.state IN ('open', 'draft')
+      AND (
+          pr.snapshot_fetched_at IS NULL
+          OR (pr.head_sha <> '' AND pr.snapshot_head_sha <> pr.head_sha)
+          OR pr.snapshot_fetched_at < $6
+      )
+      AND (
+          pr.id IN (SELECT pr_id FROM watched_issue_prs)
+          OR pr.id IN (SELECT pr_id FROM watched_chat_prs)
+      )
+    GROUP BY pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
+)
+SELECT installation_id, repo_owner, repo_name, pr_number
+FROM candidates
+ORDER BY (
+    ROW(installation_id, repo_owner, repo_name, pr_number) >
+    ROW(
+        $1::BIGINT,
+        $2::TEXT,
+        $3::TEXT,
+        $4::INTEGER
+    )
+) DESC,
+installation_id, repo_owner, repo_name, pr_number
+LIMIT $5
+`
+
+type ListStaleChecksWatchedGitHubPRsParams struct {
+	AfterInstallationID int64              `json:"after_installation_id"`
+	AfterRepoOwner      string             `json:"after_repo_owner"`
+	AfterRepoName       string             `json:"after_repo_name"`
+	AfterPrNumber       int32              `json:"after_pr_number"`
+	MaxRows             int32              `json:"max_rows"`
+	OlderThan           pgtype.Timestamptz `json:"older_than"`
+}
+
+type ListStaleChecksWatchedGitHubPRsRow struct {
+	InstallationID int64  `json:"installation_id"`
+	RepoOwner      string `json:"repo_owner"`
+	RepoName       string `json:"repo_name"`
+	PrNumber       int32  `json:"pr_number"`
+}
+
+// Third sweep source: open/draft PRs watched by an enabled "checks finished"
+// wakeup (issue or chat). A PR can leave the undecided sweep while a checks
+// wakeup is still waiting (for example, an initial fetch right after
+// synchronize saw no checks yet, or jobs were re-run on the same head), or
+// webhook/chase refreshes may have been dropped during a rate limit or deploy.
+// Sweeping watched PRs on a shorter TTL keeps --until-pr checks responsive
+// without relying on a manual page visit. Rotates an address cursor like the
+// other sweeps.
+func (q *Queries) ListStaleChecksWatchedGitHubPRs(ctx context.Context, arg ListStaleChecksWatchedGitHubPRsParams) ([]ListStaleChecksWatchedGitHubPRsRow, error) {
+	rows, err := q.db.Query(ctx, listStaleChecksWatchedGitHubPRs,
+		arg.AfterInstallationID,
+		arg.AfterRepoOwner,
+		arg.AfterRepoName,
+		arg.AfterPrNumber,
+		arg.MaxRows,
+		arg.OlderThan,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleChecksWatchedGitHubPRsRow{}
+	for rows.Next() {
+		var i ListStaleChecksWatchedGitHubPRsRow
+		if err := rows.Scan(
+			&i.InstallationID,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStaleConflictWatchedGitHubPRs = `-- name: ListStaleConflictWatchedGitHubPRs :many
 WITH candidates AS (
     SELECT pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
     FROM github_pull_request AS pr
     WHERE pr.state IN ('open', 'draft')
-      AND (pr.snapshot_fetched_at IS NULL OR pr.snapshot_fetched_at < $6)
+      AND (
+          pr.snapshot_fetched_at IS NULL
+          OR (pr.head_sha <> '' AND pr.snapshot_head_sha <> pr.head_sha)
+          OR pr.snapshot_fetched_at < $6
+      )
       AND pr.id IN (
           SELECT ipr.pull_request_id
           FROM issue_wakeup AS w
@@ -340,9 +506,14 @@ WITH candidates AS (
     SELECT installation_id, repo_owner, repo_name, pr_number
     FROM github_pull_request AS pr
     WHERE state IN ('open', 'draft')
-      AND (snapshot_fetched_at IS NULL OR snapshot_fetched_at < $6)
       AND (
           snapshot_fetched_at IS NULL
+          OR (head_sha <> '' AND snapshot_head_sha <> head_sha)
+          OR snapshot_fetched_at < $6
+      )
+      AND (
+          snapshot_fetched_at IS NULL
+          OR (head_sha <> '' AND snapshot_head_sha <> head_sha)
           OR api_mergeable IS NULL
           OR api_mergeable = 'UNKNOWN'
           OR checks_rollup_state IN ('PENDING', 'EXPECTED')
@@ -386,8 +557,10 @@ type ListStaleUndecidedGitHubPRsRow struct {
 }
 
 // TTL / safety-net sweep source. Returns distinct addresses of open/draft PRs
-// whose snapshot is both stale and undecided. A decided snapshot leaves the
-// periodic refresh set; later webhook or view activity can still refresh it.
+// whose snapshot is missing for the current head (never fetched or head_sha
+// advanced past snapshot_head_sha) or both stale and undecided. A decided
+// snapshot for the current head leaves the periodic refresh set; later webhook,
+// watched-wakeup, or view activity can still refresh it.
 // The caller advances an address cursor after each bounded batch. Rows after
 // the cursor sort first, followed by a wrap to the start, so even perpetually
 // failing addresses cannot pin the same first LIMIT rows forever.

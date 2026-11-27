@@ -71,14 +71,20 @@ func (h *Handler) hiddenProjectsForAgentRun(ctx context.Context, workspaceID pgt
 func (h *Handler) requestHiddenProjects(w http.ResponseWriter, r *http.Request, workspaceID string) (projectaccess.Hidden, bool) {
 	hidden, err := h.hiddenProjects(r, workspaceID)
 	if err != nil {
-		if writeQueryCancellation(w, r, err) {
-			return projectaccess.Hidden{}, false
-		}
-		slog.Warn("resolve project access failed", append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		writeProjectAccessError(w, r, workspaceID, err)
 		return projectaccess.Hidden{}, false
 	}
 	return hidden, true
+}
+
+// writeProjectAccessError answers a failed project access lookup: nothing for
+// a request the client already cancelled, otherwise a logged 500.
+func writeProjectAccessError(w http.ResponseWriter, r *http.Request, workspaceID string, err error) {
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
+	slog.Warn("resolve project access failed", append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
+	writeError(w, http.StatusInternalServerError, "failed to resolve project access")
 }
 
 // requireProjectVisible writes status with notFoundMsg when projectID is a

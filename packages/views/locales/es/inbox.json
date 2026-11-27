@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "Bandeja de entrada",
-    "back": "Bandeja de entrada"
+    "title": "Bandeja de entrada"
   },
   "menu": {
     "mark_all_read": "Marcar todo como leído",
@@ -153,6 +152,8 @@
   },
   "kept": {
     "archived": "Archivado",
+    "undo_archive": "Deshacer archivado",
+    "unsubscribed": "Te diste de baja",
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
     "changed_status": "Estado cambiado a {{status}}",

@@ -180,6 +180,22 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(10 + 50 + 0.25 + 12.5, 5);
   });
 
+  // Fable 5.2 has its own, cheaper Anthropic row.
+  it.each(["claude-fable-5-2", "claude-fable-5.2", "claude-fable-5-2[1m]"])(
+    "prices Claude %s at its own 8 / 40 tier",
+    (model) => {
+      const cost = estimateCost({
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+      expect(cost).toBeCloseTo(8 + 40 + 0.2 + 10, 5);
+    },
+  );
+
   it.each([
     {
       model: "claude-sonnet-5-5",
@@ -1499,6 +1515,7 @@ describe("isModelPriced", () => {
     expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-fable-5-1")).toBe(true);
+    expect(isModelPriced("claude-fable-5-2")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);

@@ -25,7 +25,7 @@ Après **Quand**, choisissez une condition et complétez ce qu'elle demande : un
 </Step>
 <Step>
 
-Après **Réveiller**, choisissez l'agent. Si l'assigné de la tâche est un agent, il est déjà sélectionné. Seuls les agents liés à un runtime et que vous avez le droit d'exécuter sont proposés ; voir [Permissions et accès](/agents#permissions-et-accès).
+Après **Réveiller**, choisissez l'agent. Si l'assigné de la tâche est un agent que vous pouvez exécuter, il est déjà sélectionné. Seuls les agents liés à un runtime et que vous avez le droit d'exécuter sont proposés ; voir [Permissions et accès](/agents#permissions-et-accès).
 
 </Step>
 <Step>
@@ -120,13 +120,13 @@ Pour voir tous les réveils de l'espace de travail, ouvrez **Auto** dans la barr
 
 Quand une tâche a des sous-tâches, une puce à côté de l'en-tête **Sous-tâches** affiche une règle marquée **Système**, par exemple « Réveille Lambda à la fin ». Cliquez dessus pour voir sa progression, son instruction et l'interrupteur qui la désactive pour cette tâche. Personne n'a besoin de la créer :
 
-- Quand toutes les sous-tâches d'une étape sont closes alors qu'une étape suivante attend, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
+- Quand toutes les sous-tâches d'une étape sont closes alors que l'étape suivante a des sous-tâches en `backlog` à lancer, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Les sous-tâches de l'étape suivante déjà en `todo` démarrent automatiquement à la fin des étapes précédentes sans réveiller le parent entre-temps. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
 - Ajouter ou rouvrir une sous-tâche ne réveille personne, y compris une étape ajoutée après la clôture de toutes les autres : sortez-la de `backlog` pour la lancer, ou mentionnez l'assigné pour qu'il l'organise.
 - Un agent assigné est réveillé ; pour un squad, c'est son chef ; un membre assigné reçoit plutôt une notification dans sa boîte de réception. Sans assigné, personne n'est réveillé.
 - Tant que le parent est en `backlog`, rien n'est réveillé ; le réveil a lieu une fois le parent sorti de `backlog`.
 - L'instruction par défaut indique à l'agent quelle étape s'est close et laquelle suit : vérifier ses dépendances, puis sortir de `backlog` les sous-tâches de l'étape suivante. Quand tout est clos, il rassemble les résultats sur le parent.
 
-L'assigné du parent est déjà réveillé par cette règle : inutile d'ajouter un réveil « Les sous-tâches se terminent » pour la même chose. Pour définir des étapes, voir [Tâches](/issues#projets-et-sous-tâches).
+L'assigné du parent est déjà réveillé par cette règle : inutile d'ajouter un réveil « Les sous-tâches se terminent » pour la même chose. Pour définir des étapes, voir [Tâches](/issues#projets-et-sous-tâches). Les tâches qui attendent des [bloqueurs](/issues#relations) manuels ou d'étape disposent aussi d'un réveil système de dépendance qui démarre automatiquement leur assigné (ou notifie un membre) dès que tous les bloqueurs sont terminés, sauf si la tâche est en `backlog`.
 
 Sur une tâche donnée, tout membre de l'espace de travail peut désactiver cette règle ou réécrire son instruction (jusqu'à 4 000 octets) ; les agents ne peuvent pas la modifier. Une fois modifiée, la tâche ne suit plus la valeur par défaut de l'espace de travail.
 

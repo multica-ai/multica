@@ -46,6 +46,23 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND is_default
   AND steps @> jsonb_build_array(jsonb_build_object('status_key', sqlc.arg('status_key')::text));
 
+-- name: TransferSquadWorkflowStepsToLeader :execrows
+-- Mirrors TransferSquadAssignees for workflow steps: an archived squad cannot
+-- be assigned, so a step still handing off to it would refuse every issue
+-- that enters it. The leader agent takes the step over.
+UPDATE issue_workflow SET
+    steps = (
+        SELECT jsonb_agg(
+            CASE WHEN step->'handler' @> jsonb_build_object('type', 'squad', 'id', sqlc.arg('squad_id')::text)
+                THEN jsonb_set(step, '{handler}', jsonb_build_object('type', 'agent', 'id', sqlc.arg('leader_id')::text))
+                ELSE step
+            END ORDER BY ord)
+        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
+    ),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND steps @> jsonb_build_array(jsonb_build_object('handler', jsonb_build_object('type', 'squad', 'id', sqlc.arg('squad_id')::text)));
+
 -- name: ListProjectsUsingDefaultIssueWorkflow :many
 SELECT * FROM project
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid

@@ -187,6 +187,59 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(false);
   });
 
+  it("a pin back into the edge zone does not erase the reader's progress", () => {
+    // Regression (MUL-10304): scrolling up mounts an older row whose measured
+    // height moves the viewport further in the same scroll event, so that
+    // notch is pinned back. Landing back in the edge zone used to count as the
+    // reader returning, wiping what they had taken — every attempt started
+    // from zero and the list could not be scrolled at all.
+    const { follow, tick } = makeFollow();
+    follow.input(100);
+    expect(follow.onScroll(100)).toBe(false); // 100px taken
+    follow.endInputFrame();
+    tick(400);
+    follow.input(100);
+    expect(follow.onScroll(869)).toBe(true); // row above mounted: pinned
+    follow.endInputFrame();
+    follow.onAtEdgeChange(false);
+    expect(follow.onScroll(0)).toBe(false); // the pin lands
+    follow.onAtEdgeChange(true);
+    tick(400);
+    follow.input(100);
+    expect(follow.onScroll(100)).toBe(false); // 200px taken in total
+    expect(follow.isFollowing()).toBe(false);
+  });
+
+  it("attributes a scroll that differs from its input by sub-pixel rounding", () => {
+    // The surface snaps scroll offsets to device pixels, so a fractional
+    // trackpad delta, or a list resting half a pixel above its end, never
+    // moves by exactly the input. That is still the reader's own scroll.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(100);
+    expect(follow.onScroll(100.5)).toBe(false);
+    follow.endInputFrame();
+    tick(16);
+    follow.input(4.37);
+    expect(follow.onScroll(105.5)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("rounding slack never outlives the reader's claim", () => {
+    // The reader has taken exactly the threshold and their claim is spent. A
+    // 1px system shift inside the motion window is not theirs: crediting it
+    // would release the follow and leave the next reply growth off screen.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(FOLLOW_EDGE_THRESHOLD);
+    expect(follow.onScroll(FOLLOW_EDGE_THRESHOLD)).toBe(false);
+    follow.endInputFrame();
+    tick(100);
+    expect(follow.onScroll(FOLLOW_EDGE_THRESHOLD + 1)).toBe(true);
+    expect(follow.isFollowing()).toBe(true);
+    expect(follow.onResize(FOLLOW_EDGE_THRESHOLD + 181)).toBe(true);
+  });
+
   it("pins displacement that lands inside the intent window", () => {
     // The final chunk of a reply has a whole window to land in after any
     // small nudge; the pin decision must not hide behind a timer, because

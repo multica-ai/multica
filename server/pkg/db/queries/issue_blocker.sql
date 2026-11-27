@@ -6,6 +6,15 @@ LEFT JOIN project p ON p.id=i.project_id AND p.workspace_id=i.workspace_id
 WHERE b.workspace_id = sqlc.arg('workspace_id') AND b.issue_id=ANY(sqlc.arg('issue_ids')::uuid[])
 ORDER BY b.issue_id,b.via,i.number;
 
+-- name: ListIssueDependents :many
+-- The reverse of ListIssueBlockers: the issues that wait on one issue.
+SELECT i.id,i.number,i.title,i.status,i.project_id,COALESCE(p.visibility='private',false)::boolean AS private,b.via,
+ (i.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))) AS closed
+FROM effective_issue_blocker b JOIN issue i ON i.id=b.issue_id AND i.workspace_id=b.workspace_id
+LEFT JOIN project p ON p.id=i.project_id AND p.workspace_id=i.workspace_id
+WHERE b.workspace_id = sqlc.arg('workspace_id') AND b.blocker_issue_id = sqlc.arg('issue_id')
+ORDER BY b.via,i.number;
+
 -- name: HasOpenIssueBlockers :one
 SELECT issue_has_open_blockers(sqlc.arg('workspace_id')::uuid,sqlc.arg('issue_id')::uuid)::boolean AS blocked;
 
@@ -45,3 +54,19 @@ WITH acknowledged AS (
 )
 UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp(),task_id=sqlc.arg('task_id')
 FROM acknowledged a WHERE r.wakeup_id=a.id AND r.revision=a.revision AND r.processed_at IS NULL;
+
+-- name: DismissIssueBlockerRelease :exec
+-- The write that made the issue startable declined its run, which answers the
+-- pending release. A later wait resets condition_state and releases again.
+WITH dismissed AS (
+ UPDATE issue_wakeup w
+ SET condition_state='ready',next_fire_at=NULL,updated_at=clock_timestamp()
+ FROM issue i
+ WHERE i.id=sqlc.arg('issue_id') AND w.issue_id=i.id AND w.workspace_id=i.workspace_id
+ AND w.system_rule='blockers_done' AND w.enabled
+ AND i.status<>'backlog' AND i.triage_state IS NULL
+ AND NOT issue_has_open_blockers(i.workspace_id,i.id)
+ RETURNING w.id,w.revision
+)
+UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp()
+FROM dismissed d WHERE r.wakeup_id=d.id AND r.revision=d.revision AND r.processed_at IS NULL;

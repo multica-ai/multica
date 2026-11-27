@@ -20,6 +20,15 @@ export type ShortcutActionId =
   | "nextInboxItem"
   | "prevInboxItem"
   | "undoInboxAction"
+  | "setIssueStatus"
+  | "assignIssue"
+  | "setIssuePriority"
+  | "setIssueLabels"
+  | "setIssueDueDate"
+  | "moveIssueToProject"
+  | "runIssueQuickAction"
+  | "replyToIssue"
+  | "showShortcuts"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -37,7 +46,7 @@ export type ShortcutActionId =
   | "goSkills"
   | "goSettings";
 
-export type ShortcutCategory = "general" | "navigation";
+export type ShortcutCategory = "general" | "issue" | "navigation";
 
 export interface ShortcutModifiers {
   /** Command on macOS, Control on Windows/Linux. */
@@ -54,6 +63,12 @@ export interface ShortcutChord {
   /** Logical key (`KeyboardEvent.key`), not physical keyboard position. */
   key: string;
   modifiers: ShortcutModifiers;
+  /**
+   * The key pressed after this one, for a two-key sequence such as G then I.
+   * Only navigation actions take sequences (see `isShortcutAllowedForAction`),
+   * and a sequence never matches a single event: `GlobalShortcuts` follows it.
+   */
+  then?: ShortcutChord;
 }
 
 export interface ShortcutActionDefinition {
@@ -81,8 +96,18 @@ export function createShortcutChord(
   };
 }
 
+/** A plain key followed by another, such as G then I. */
+export function createShortcutSequence(
+  first: string,
+  then: ShortcutChord,
+): ShortcutChord {
+  return { ...createShortcutChord(first), then };
+}
+
 const primary = (key: string) =>
   createShortcutChord(key, { primary: true });
+
+const go = (key: string) => createShortcutSequence("G", createShortcutChord(key));
 
 export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "openSearch", category: "general", defaultShortcut: primary("K"), allowInEditable: true },
@@ -153,6 +178,34 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     defaultShortcut: createShortcutChord("Z"),
     allowInEditable: false,
   },
+  // Issue verbs act on the issue in front of the user: a peek, a list
+  // selection, or the open issue (Inbox detail or issue page). The letters
+  // follow Linear, including ⇧P for project (P is priority) and ⇧D for due date.
+  { id: "setIssueStatus", category: "issue", defaultShortcut: createShortcutChord("S"), allowInEditable: false },
+  { id: "assignIssue", category: "issue", defaultShortcut: createShortcutChord("A"), allowInEditable: false },
+  { id: "setIssuePriority", category: "issue", defaultShortcut: createShortcutChord("P"), allowInEditable: false },
+  { id: "setIssueLabels", category: "issue", defaultShortcut: createShortcutChord("L"), allowInEditable: false },
+  {
+    id: "setIssueDueDate",
+    category: "issue",
+    defaultShortcut: createShortcutChord("D", { shift: true }),
+    allowInEditable: false,
+  },
+  {
+    id: "moveIssueToProject",
+    category: "issue",
+    defaultShortcut: createShortcutChord("P", { shift: true }),
+    allowInEditable: false,
+  },
+  { id: "runIssueQuickAction", category: "issue", defaultShortcut: createShortcutChord("Q"), allowInEditable: false },
+  { id: "replyToIssue", category: "issue", defaultShortcut: createShortcutChord("R"), allowInEditable: false },
+  // `?` is Shift+/ on most layouts, and arrives as "?" with Shift held.
+  {
+    id: "showShortcuts",
+    category: "general",
+    defaultShortcut: createShortcutChord("?", { shift: true }),
+    allowInEditable: false,
+  },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   // Voice input works where the caret is, so it must fire inside editors. It
   // is matched on keydown AND keyup (holding it is push-to-talk), so the voice
@@ -171,13 +224,14 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   // away from the page while the caret sits in an input, textarea, or editor.
   { id: "goBack", category: "navigation", defaultShortcut: primary("["), allowInEditable: false },
   { id: "goForward", category: "navigation", defaultShortcut: primary("]"), allowInEditable: false },
-  { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goChat", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goMyIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goProjects", category: "navigation", defaultShortcut: null, allowInEditable: false },
+  // G then a letter, as in Linear and GitHub. T is Issues (tasks): I is Inbox.
+  { id: "goInbox", category: "navigation", defaultShortcut: go("I"), allowInEditable: false },
+  { id: "goChat", category: "navigation", defaultShortcut: go("C"), allowInEditable: false },
+  { id: "goMyIssues", category: "navigation", defaultShortcut: go("M"), allowInEditable: false },
+  { id: "goIssues", category: "navigation", defaultShortcut: go("T"), allowInEditable: false },
+  { id: "goProjects", category: "navigation", defaultShortcut: go("P"), allowInEditable: false },
   { id: "goAutopilots", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goAgents", category: "navigation", defaultShortcut: null, allowInEditable: false },
+  { id: "goAgents", category: "navigation", defaultShortcut: go("A"), allowInEditable: false },
   { id: "goSquads", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goUsage", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goRuntimes", category: "navigation", defaultShortcut: null, allowInEditable: false },
@@ -303,6 +357,9 @@ export function shortcutChordEquals(
   right: ShortcutChord | null,
 ): boolean {
   if (left === null || right === null) return left === right;
+  if (left.then || right.then) {
+    if (!left.then || !right.then || !shortcutChordEquals(left.then, right.then)) return false;
+  }
   return (
     left.key === right.key &&
     left.modifiers.primary === right.modifiers.primary &&
@@ -311,6 +368,13 @@ export function shortcutChordEquals(
     left.modifiers.alt === right.modifiers.alt &&
     left.modifiers.shift === right.modifiers.shift
   );
+}
+
+/** The first key of a sequence, or the chord itself. */
+export function shortcutFirstStep(shortcut: ShortcutChord): ShortcutChord {
+  if (!shortcut.then) return shortcut;
+  const { then: _then, ...first } = shortcut;
+  return first;
 }
 
 /** Exact matcher: any additional modifier intentionally makes the event differ. */
@@ -324,7 +388,7 @@ export function shortcutMatchesEvent(
   // example pressing Command/Control/Shift by itself). Neither may execute an
   // action, even though `shortcutChordEquals(null, null)` is useful elsewhere
   // when comparing persisted values.
-  if (!shortcut) return false;
+  if (!shortcut || shortcut.then) return false;
   const eventShortcut = shortcutFromEvent(event, platform);
   if (eventShortcut !== null && shortcutChordEquals(shortcut, eventShortcut)) {
     return true;
@@ -347,6 +411,9 @@ export function formatShortcut(
   platform: ShortcutPlatform = getShortcutPlatform(),
 ): string {
   if (!shortcut) return "—";
+  if (shortcut.then) {
+    return `${formatShortcut(shortcutFirstStep(shortcut), platform)} ${formatShortcut(shortcut.then, platform)}`;
+  }
   const { modifiers } = shortcut;
   const keyLabels: Record<string, string> = {
     Enter: platform === "macos" ? "↵" : "Enter",
@@ -395,6 +462,15 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
     target.tagName === "SELECT" ||
     target.closest("[contenteditable='true']") !== null
   );
+}
+
+/**
+ * A control recording a new shortcut (Settings › Shortcuts) marks itself with
+ * `data-shortcut-recorder`: every key pressed there is the binding being
+ * recorded, so no listener that runs before it may take one.
+ */
+export function isShortcutRecorderTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-shortcut-recorder]") !== null;
 }
 
 const PORTAL_LAYER_SELECTOR =
@@ -560,6 +636,7 @@ export function isShortcutAllowedForAction(
   platform: ShortcutPlatform = getShortcutPlatform(),
   runtime: ShortcutRuntime = getShortcutRuntime(),
 ): boolean {
+  if (shortcut.then) return isSequenceAllowedForAction(actionId, shortcut);
   if (!isShortcutChordActionable(shortcut)) return false;
   if (isReservedShortcut(shortcut, platform, runtime)) return false;
   // Tab is focus navigation (and Ctrl+Tab is browser tab navigation) on every
@@ -584,6 +661,34 @@ export function isShortcutAllowedForAction(
     return hasCommand;
   }
   return hasModifier || !PLAIN_GLOBAL_RESERVED_KEYS.has(shortcut.key);
+}
+
+/**
+ * Whether `first` may start a sequence for `actionId`. A sequence starts with
+ * a bare printable key (G) and goes on with another printable key, Shift
+ * allowed. Both stay out of editors, so only actions that never run there may
+ * take one, and among those only navigation, which `GlobalShortcuts` follows;
+ * other actions are matched one event at a time.
+ */
+export function canStartShortcutSequence(actionId: ShortcutActionId, first: ShortcutChord): boolean {
+  const action = SHORTCUT_ACTION_BY_ID[actionId];
+  if (action.category !== "navigation" || action.allowInEditable) return false;
+  return !first.then && isSequenceKey(first) && !hasShortcutModifier(first);
+}
+
+function isSequenceAllowedForAction(actionId: ShortcutActionId, shortcut: ShortcutChord): boolean {
+  const then = shortcut.then!;
+  return (
+    canStartShortcutSequence(actionId, shortcutFirstStep(shortcut)) &&
+    isSequenceKey(then) &&
+    !then.then &&
+    !hasCommandModifier(then) &&
+    !then.modifiers.alt
+  );
+}
+
+function isSequenceKey(shortcut: ShortcutChord): boolean {
+  return isShortcutChordActionable(shortcut) && shortcut.key.length === 1 && shortcut.key !== " ";
 }
 
 /** One-time parser for v1 string preferences persisted before structured chords. */

@@ -1,5 +1,11 @@
 "use client";
-import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -66,6 +72,7 @@ import {
   panelRowStateClass,
 } from "../../layout/panel-nav";
 import { TREE_ROW_BUTTON_CLASS } from "../../layout/panels/sidebar-tree";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { MoveDialog, type MoveTarget } from "./move-dialog";
 import { useCanDeleteDoc } from "./use-can-delete-doc";
 import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
@@ -74,11 +81,21 @@ type Item =
   | { kind: "doc"; item: DocSummary }
   | { kind: "folder"; item: DocFolder };
 
-/** A row's actions show on hover or focus, as on the other panels' rows. */
+type RowMenu = ReturnType<typeof useRowMenu>;
+
 const ROW_ACTION_CLASS = cn(
   TREE_ROW_BUTTON_CLASS,
-  "text-muted-foreground opacity-0 group-hover/row:opacity-100 data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100 disabled:pointer-events-none [@media(pointer:coarse)]:opacity-100",
+  "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground disabled:pointer-events-none",
 );
+
+/** A row's actions show on hover, keyboard focus or while their menu is open.
+ *  At rest they take no space, so the title runs to the row's end. */
+const ROW_ACTIONS_CLASS =
+  "hidden shrink-0 items-center gap-0.5 group-hover/row:flex group-has-[:focus-visible]/row:flex group-data-menu-open/row:flex [@media(pointer:coarse)]:flex";
+
+/** Marks the row a right-click menu is open on. */
+const ROW_MENU_OPEN_CLASS =
+  "data-menu-open:bg-nav-item-hover data-menu-open:text-nav-item-hover-foreground";
 
 /** Folders a folder cannot move into: itself and everything beneath it. */
 export function folderAndDescendants(
@@ -319,8 +336,9 @@ export function DocTree() {
       );
     }
   };
-  const menu = (target: Item) => (
-    <DropdownMenu>
+  // Right-click opens the same menu at the cursor.
+  const menu = (target: Item, rowMenu: RowMenu) => (
+    <DropdownMenu open={rowMenu.menu.open} onOpenChange={rowMenu.onOpenChange}>
       <DropdownMenuTrigger
         render={
           <button
@@ -332,7 +350,10 @@ export function DocTree() {
       >
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align={rowMenu.menu.point ? "start" : "end"}
+        anchor={rowMenu.anchor}
+      >
         {target.kind === "folder" && (
           <>
             <DropdownMenuItem onClick={() => void newDoc(target.item.id)}>
@@ -394,7 +415,7 @@ export function DocTree() {
             isDropTarget={dropTarget === folder.id}
             dragProps={dragProps({ kind: "folder", item: folder })}
             dropProps={dropProps(folder.id)}
-            actions={
+            actions={(rowMenu) => (
               <>
                 <button
                   type="button"
@@ -406,9 +427,9 @@ export function DocTree() {
                 >
                   <Plus className="size-3.5" />
                 </button>
-                {menu({ kind: "folder", item: folder })}
+                {menu({ kind: "folder", item: folder }, rowMenu)}
               </>
-            }
+            )}
           >
             {branch(folder.id, new Set([...ancestors, folder.id]))}
           </DocFolderItem>
@@ -417,34 +438,17 @@ export function DocTree() {
         .filter((d) => d.folderId === parent)
         .map((doc) => {
           const active = pathname === p.docDetail(doc.id);
-          const title = doc.title || t(($) => $.untitled);
           return (
-            <li
+            <DocItem
               key={doc.id}
-              {...dragProps({ kind: "doc", item: doc })}
-              {...dropProps(doc.folderId)}
-              {...panelRowAnchor(active)}
-              className={cn(
-                PANEL_ROW_CLASS,
-                panelRowStateClass(active),
-                "group/row relative",
-              )}
-            >
-              <FileText className="size-4 shrink-0" />
-              <TruncatedTooltip content={title} side="right">
-                {/* Stretched over the row, under its actions, so the whole
-                    row opens the doc. */}
-                <AppLink
-                  href={p.docDetail(doc.id)}
-                  aria-current={active ? "page" : undefined}
-                  {...prefetchDoc(doc.id)}
-                  className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-nav-item focus-visible:after:outline-2 focus-visible:after:outline-ring"
-                >
-                  {title}
-                </AppLink>
-              </TruncatedTooltip>
-              {menu({ kind: "doc", item: doc })}
-            </li>
+              href={p.docDetail(doc.id)}
+              title={doc.title || t(($) => $.untitled)}
+              active={active}
+              dragProps={dragProps({ kind: "doc", item: doc })}
+              dropProps={dropProps(doc.folderId)}
+              linkProps={prefetchDoc(doc.id)}
+              actions={(rowMenu) => menu({ kind: "doc", item: doc }, rowMenu)}
+            />
           );
         })}
     </PanelList>
@@ -570,6 +574,62 @@ export function DocTree() {
   );
 }
 
+function openRowMenu(rowMenu: RowMenu) {
+  return (event: MouseEvent) => {
+    if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
+  };
+}
+
+function DocItem({
+  href,
+  title,
+  active,
+  dragProps,
+  dropProps,
+  linkProps,
+  actions,
+}: {
+  href: string;
+  title: string;
+  active: boolean;
+  dragProps: Record<string, unknown>;
+  dropProps: Record<string, unknown>;
+  linkProps: Record<string, unknown>;
+  actions: (rowMenu: RowMenu) => ReactNode;
+}) {
+  const rowMenu = useRowMenu();
+  return (
+    <li
+      {...dragProps}
+      {...dropProps}
+      {...panelRowAnchor(active)}
+      data-menu-open={rowMenu.menu.open ? "" : undefined}
+      onContextMenu={openRowMenu(rowMenu)}
+      className={cn(
+        PANEL_ROW_CLASS,
+        panelRowStateClass(active),
+        !active && ROW_MENU_OPEN_CLASS,
+        "group/row relative",
+      )}
+    >
+      <FileText className="size-4 shrink-0" />
+      <TruncatedTooltip content={title} side="right">
+        {/* Stretched over the row, under its actions, so the whole
+            row opens the doc. */}
+        <AppLink
+          href={href}
+          aria-current={active ? "page" : undefined}
+          {...linkProps}
+          className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-nav-item focus-visible:after:outline-2 focus-visible:after:outline-ring"
+        >
+          {title}
+        </AppLink>
+      </TruncatedTooltip>
+      <span className={ROW_ACTIONS_CLASS}>{actions(rowMenu)}</span>
+    </li>
+  );
+}
+
 function DocFolderItem({
   folderId,
   title,
@@ -584,10 +644,11 @@ function DocFolderItem({
   isDropTarget: boolean;
   dragProps: Record<string, unknown>;
   dropProps: Record<string, unknown>;
-  actions: ReactNode;
+  actions: (rowMenu: RowMenu) => ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
+  const rowMenu = useRowMenu();
 
   return (
     <Collapsible open={open} render={<li />}>
@@ -595,9 +656,12 @@ function DocFolderItem({
         data-doc-folder={folderId}
         {...dragProps}
         {...dropProps}
+        data-menu-open={rowMenu.menu.open ? "" : undefined}
+        onContextMenu={openRowMenu(rowMenu)}
         className={cn(
           PANEL_ROW_CLASS,
           panelRowStateClass(false),
+          ROW_MENU_OPEN_CLASS,
           "group/row relative transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none",
           isDropTarget && "bg-nav-item-hover ring-1 ring-ring",
         )}
@@ -622,7 +686,7 @@ function DocFolderItem({
             {title}
           </button>
         </TruncatedTooltip>
-        {actions}
+        <span className={ROW_ACTIONS_CLASS}>{actions(rowMenu)}</span>
       </div>
       <CollapsibleContent>
         <div

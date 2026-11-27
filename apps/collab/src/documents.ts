@@ -54,6 +54,10 @@ interface DocState {
   /** Changed since the last store. Serializing the document is the costly
    *  part of a store, and reads flush documents nobody has touched. */
   dirty: boolean;
+  /** The saved Yjs state lacks a stored change already folded into the live
+   *  document. A load from it would insert that text again as new Yjs items,
+   *  repeating it for every client that still holds this document. */
+  stateBehind: boolean;
   /** Serializes persistence and server-side writes per document. */
   queue: Promise<unknown>;
 }
@@ -171,6 +175,7 @@ export class DocumentStore {
       loadedRaw: stored.content,
       contributors: new Map(),
       dirty: false,
+      stateBehind: false,
       queue: Promise.resolve(),
     });
     this.log.info("loaded", {
@@ -349,21 +354,23 @@ export class DocumentStore {
     if (!explicit && !own && !state.dirty) return state.revision;
     state.dirty = false;
     const content = this.codec.ydocToMarkdown(document);
-    if (content === state.persisted && !own) return state.revision;
+    const stateOnly = content === state.persisted && !own;
+    if (stateOnly && !state.stateBehind) return state.revision;
     // Taken now, not cleared after the store: someone typing while it is in
     // flight must be credited in the next one.
-    const taken = explicit ? null : state.contributors;
+    const taken = explicit || stateOnly ? null : state.contributors;
     if (taken) state.contributors = new Map();
     const giveBack = () => {
       if (!taken) return;
       for (const [key, actor] of taken) if (!state.contributors.has(key)) state.contributors.set(key, actor);
     };
-    const contributors = explicit ? [req.actor!] : [...taken!.values()];
+    const contributors = stateOnly ? [] : explicit ? [req.actor!] : [...taken!.values()];
     const body: StoreRequest = {
       base_revision: state.revision,
       content,
       ystate: Buffer.from(Y.encodeStateAsUpdate(document)).toString("base64"),
       contributors: contributors.map(({ type, id }) => ({ type, id })),
+      ...(stateOnly ? { state_only: true } : {}),
       ...(req.title !== undefined ? { title: req.title } : {}),
       ...(req.message ? { message: req.message } : {}),
       ...(req.action ? { action: req.action } : {}),
@@ -396,6 +403,7 @@ export class DocumentStore {
     }
     state.revision = result.revision;
     state.persisted = content;
+    state.stateBehind = false;
     state.loadedRaw = null;
     for (const mention of result.mentions) state.seenMentions.add(mention);
     this.lastTitle.set(name, result.title);
@@ -418,6 +426,7 @@ export class DocumentStore {
     const result = mergeDocuments(this.codec, base, live, stored);
     const origin = serverOrigin({ type: "member", id: "", name: "" });
     state.persisted = this.codec.serialize(stored);
+    state.stateBehind = true;
     if (result.ok) {
       this.applyParsed(document, result.doc, origin);
       return null;

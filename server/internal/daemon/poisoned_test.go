@@ -170,6 +170,28 @@ func TestClassifyPoisonedError(t *testing.T) {
 			wantReason: FailureReasonAPIInvalidRequest,
 		},
 		{
+			// MUL-10116: the Claude backend's refusal marker, as reported for
+			// the captured Claude Code 2.1.280 resume. Every resume of a
+			// refused session is refused again, so it must be retired.
+			name:       "claude safeguards refusal",
+			errMsg:     agent.ClaudeModelRefusalMarker + ": the model declined this conversation, and resuming the session would send the refused message again (API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup).)",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// Only the backend's marker counts. Claude Code's own copy, or an
+			// agent quoting it, keeps the session: a false positive would
+			// throw away a healthy conversation.
+			name:   "refusal prose without the marker",
+			errMsg: "API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup). Try rephrasing the request in a new session or change your model.",
+			wantOK: false,
+		},
+		{
+			name:   "marker quoted mid-message",
+			errMsg: "tool failed: grep output mentioned " + agent.ClaudeModelRefusalMarker,
+			wantOK: false,
+		},
+		{
 			name:       "case insensitive",
 			errMsg:     `api error: 400 {"type":"INVALID_REQUEST_ERROR"}`,
 			wantOK:     true,
@@ -412,5 +434,19 @@ func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 				t.Fatalf("classifyResumeUnsafeTimeout(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+// MUL-10116: the error the Claude backend reports for a refusal has to end in a
+// failure reason the server refuses to resume, or the next comment on the
+// issue resumes the refused session and is refused again.
+func TestClaudeRefusalErrorRetiresSession(t *testing.T) {
+	errMsg := agent.ClaudeModelRefusalMarker + ": the model declined this conversation (API Error: Opus 5.5's safeguards flagged this message)"
+	reason, ok := classifyPoisonedError(errMsg)
+	if !ok {
+		t.Fatalf("refusal error %q was not classified", errMsg)
+	}
+	if !service.ResumeUnsafeFailure(reason, errMsg) {
+		t.Fatalf("failure_reason %q must be resume-unsafe", reason)
 	}
 }
