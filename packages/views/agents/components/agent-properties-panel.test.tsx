@@ -250,6 +250,15 @@ describe("AgentPropertiesPanel", () => {
     expect(screen.getByText("75% success")).toBeInTheDocument();
   });
 
+  it("names cancelled runs, which the success rate leaves out", () => {
+    activityRef.current = new Map([["agent-1", activityToday(293, 34, 0)]]);
+    renderPanel(claude);
+
+    expect(screen.getByText("293")).toBeInTheDocument();
+    expect(screen.getByText("100% success")).toBeInTheDocument();
+    expect(screen.getByText("259 cancelled")).toBeInTheDocument();
+  });
+
   it("shows no success rate before the agent has run", () => {
     renderPanel(claude);
 
