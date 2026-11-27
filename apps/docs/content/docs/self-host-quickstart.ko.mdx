@@ -138,6 +138,8 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 ```text
 app.example.com {
+    encode zstd gzip
+
     # 브라우저 WebSocket을 backend로 직접 전달
     @ws path /ws /ws/*
     handle @ws {
@@ -146,13 +148,23 @@ app.example.com {
         }
     }
 
-    # 나머지 경로는 frontend로 전달하며 frontend가 API와 로그인 요청을 proxy
+    # API 트래픽은 Next.js를 거치지 않고 backend로 직접 전달
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 나머지 경로는 frontend로 전달
     handle {
         reverse_proxy 127.0.0.1:3000
     }
 }
 
 api.example.com {
+    encode zstd gzip
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1
     }
@@ -164,9 +176,15 @@ api.example.com {
 
 ```text
 multica.example.com {
+    encode zstd gzip
+
     # CLI 도달 확인: `multica setup`이 <server-url>/health에 GET을 보내 200을 기대합니다.
     # 구버전 frontend는 이 경로를 전달하지 않으므로 backend로 직접 라우팅합니다
     handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /readyz {
         reverse_proxy 127.0.0.1:8080
     }
 
@@ -185,7 +203,16 @@ multica.example.com {
         }
     }
 
-    # 나머지 경로는 frontend로 전달하며 frontend가 API와 로그인 요청을 proxy
+    # API 트래픽은 Next.js를 거치지 않고 backend로 직접 전달
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 나머지 경로는 frontend로 전달
     handle {
         reverse_proxy 127.0.0.1:3000
     }

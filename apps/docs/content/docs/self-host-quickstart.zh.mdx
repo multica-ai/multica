@@ -138,6 +138,8 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 ```text
 app.example.com {
+    encode zstd gzip
+
     # 浏览器的 WebSocket 直接交给 backend
     @ws path /ws /ws/*
     handle @ws {
@@ -146,13 +148,23 @@ app.example.com {
         }
     }
 
-    # 其余路径交给 frontend；它会转发 API 和登录请求
+    # API 流量直接交给 backend，避免绕道 Next.js 转发
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 其余路径交给 frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }
 }
 
 api.example.com {
+    encode zstd gzip
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1
     }
@@ -164,9 +176,15 @@ api.example.com {
 
 ```text
 multica.example.com {
+    encode zstd gzip
+
     # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
     # 旧版 frontend 不转发这个路径，直接路由到 backend
     handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /readyz {
         reverse_proxy 127.0.0.1:8080
     }
 
@@ -185,7 +203,16 @@ multica.example.com {
         }
     }
 
-    # 其余路径交给 frontend；它会转发 API 和登录请求
+    # API 流量直接交给 backend，避免绕道 Next.js 转发
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 其余路径交给 frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }
