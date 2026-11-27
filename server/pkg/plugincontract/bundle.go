@@ -266,7 +266,7 @@ func validateSurfaceScript(entry string, content []byte) error {
 // line therefore have to follow JavaScript grammar, not a local approximation
 // of it.
 func parseSurfaceScript(source []byte) (bool, error) {
-	ast, err := js.Parse(parse.NewInputBytes(source), js.Options{})
+	ast, err := js.Parse(parse.NewInputBytes(source), js.Options{ClassicScriptFields: true})
 	if err != nil {
 		return false, err
 	}
@@ -298,19 +298,41 @@ func (v *surfaceModuleSyntaxVisitor) Enter(node js.INode) js.IVisitor {
 		}
 	case *js.MethodDecl:
 		js.Walk(v, &node.Name.PropertyName)
+		v.walkOutsideFunction(&node.Params)
 		v.functionDepth++
-		js.Walk(v, &node.Params)
 		js.Walk(v, &node.Body)
 		v.functionDepth--
 		return nil
 	case *js.Field:
 		js.Walk(v, &node.Name.PropertyName)
-		js.Walk(v, node.Init)
+		v.walkOutsideFunction(node.Init)
+		return nil
+	case *js.ClassDecl:
+		js.Walk(v, node.Extends)
+		for _, item := range node.List {
+			switch {
+			case item.StaticBlock != nil:
+				v.walkOutsideFunction(item.StaticBlock)
+			case item.Method != nil:
+				js.Walk(v, item.Method)
+			default:
+				js.Walk(v, &item.Field)
+			}
+		}
 		return nil
 	case *js.FuncDecl, *js.ArrowFunc:
 		v.functionDepth++
 	}
 	return v
+}
+
+// walkOutsideFunction checks syntax in a context where an enclosing
+// function's async status does not permit await.
+func (v *surfaceModuleSyntaxVisitor) walkOutsideFunction(node js.INode) {
+	depth := v.functionDepth
+	v.functionDepth = 0
+	js.Walk(v, node)
+	v.functionDepth = depth
 }
 
 func (v *surfaceModuleSyntaxVisitor) Exit(node js.INode) {

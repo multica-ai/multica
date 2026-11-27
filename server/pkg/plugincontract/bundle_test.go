@@ -292,6 +292,52 @@ func TestSurfaceEntryModuleDetection(t *testing.T) {
 	}
 }
 
+func TestSurfaceEntryClassFieldAndMethodAwait(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		refuse bool
+	}{
+		{"class method parameter", "class C { async m(x = await f()) {} }", true},
+		{"object method parameter", "const c = { async m(x = await f()) {} };", true},
+		{"static block", "async function f() { class C { static { await g(); } } }", true},
+		{"static field in regular function", "function f() { class C { static field = await[1]; } }", true},
+		{"await operand in instance field", "const o = { async m() { class C { field = await g(); } } };", true},
+		{"trailing comma in top-level field index", "class C { field = await[1,]; }", true},
+		{"trailing comma in nested field index", "async function f() { class C { field = await /* index */ [1, /* end */ ]; } }", true},
+		{"instance field index", "class C { field = await[1]; }", false},
+		{"instance field comma expression", "class C { field = await[1, 2]; }", false},
+		{"instance field array literal", "class C { field = await[[1,]]; }", false},
+		{"instance field call", "class C { field = await(1,); }", false},
+		{"tag after index", "class C { field = await[1]`x`; }", false},
+		{"computed field key in async function", "async function f() { class C { [await g()] = await[1]; } }", false},
+		{"async body inside initializer", "class C { field = async () => await [1,]; }", false},
+		{"async function inside method parameter", "class C { async m(x = async () => await f()) {} }", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, dirErr := parseDirBundle(t, tc.source)
+			_, zipErr := plugincontract.ParseBundle(zipBundle(t, map[string]string{
+				plugincontract.ManifestFilename: bundleManifest,
+				"ui/main.js":                    tc.source,
+				"skills/pr-review/SKILL.md":     "Read the diff.\n",
+			}))
+			if !tc.refuse {
+				if dirErr != nil || zipErr != nil {
+					t.Fatalf("valid source refused: directory=%v ZIP=%v", dirErr, zipErr)
+				}
+				return
+			}
+			if dirErr == nil || zipErr == nil {
+				t.Fatalf("invalid source accepted: directory=%v ZIP=%v", dirErr, zipErr)
+			}
+			if dirErr.Error() != zipErr.Error() {
+				t.Fatalf("different rejection diagnostics: directory=%v ZIP=%v", dirErr, zipErr)
+			}
+		})
+	}
+}
+
 func parseDirBundle(t *testing.T, entry string) (plugincontract.Bundle, error) {
 	t.Helper()
 	files := map[string]string{
