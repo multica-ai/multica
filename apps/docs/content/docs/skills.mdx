@@ -29,6 +29,8 @@ On the workspace **Skills** page, choose "New skill". Four options are available
 | **Import from URL** | Import a published skill from GitHub, ClawHub, or Skills.sh. |
 | **Copy from a runtime** | Scan skills on a connected computer and copy the selected ones into the workspace. |
 
+Imports skip binary supporting assets such as PNG images and fonts. If a skill depends on those files, it may not work after import.
+
 Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
 The same archive format works from the CLI:
@@ -50,7 +52,7 @@ multica skill refresh <skill-id>
 The skill is re-downloaded from its source and replaced in place:
 
 - **Preserved**: the skill's identity, including agent assignments, labels, creator, and creation date. Agents keep the skill without re-adding it.
-- **Replaced**: name (if the source renamed it), description, `SKILL.md`, and all supporting files. Local edits to the skill are overwritten.
+- **Replaced**: name (if the source renamed it), description, `SKILL.md`, and the imported set of supporting files. Local edits to the skill are overwritten.
 
 The skill's creator and workspace `owner`s / `admin`s can update from source. Skills created manually, imported from an archive file, or copied from a runtime have no hosted source and can't be updated this way; re-import them instead.
 
