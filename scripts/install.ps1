@@ -1,4 +1,4 @@
-# Multica installer for Windows — one command to get started.
+# Multica installer for Windows - one command to get started.
 #
 # Install CLI (default): connects to multica.ai
 #   irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
@@ -16,6 +16,11 @@ $RepoUrl       = "https://github.com/multica-ai/multica.git"
 $RepoWebUrl    = "https://github.com/multica-ai/multica"
 $DefaultInstallDir = Join-Path $env:USERPROFILE ".multica\server"
 $InstallDir    = if ($env:MULTICA_INSTALL_DIR) { $env:MULTICA_INSTALL_DIR } else { $DefaultInstallDir }
+
+# Host ports Compose reported after `up -d`; set by Setup-Server and reused by
+# the summary so the health check and the printed URLs cannot diverge.
+$script:SelfHostBackendPort  = $null
+$script:SelfHostFrontendPort = $null
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,44 +48,161 @@ function New-RandomHex {
     return -join ($bytes | ForEach-Object { "{0:x2}" -f $_ })
 }
 
-function Get-EnvFileValue {
+# Host port Docker Compose actually published for a service.
+#
+# This is the only authority. Compose's interpolation gives the calling process
+# environment precedence over .env, so an ambient PORT / BACKEND_PORT / API_PORT
+# / SERVER_PORT / FRONTEND_PORT moves the published port without touching the
+# file. Re-deriving the port from .env alone made the installer probe and print
+# a port the stack was never published on (#6145). Must be called from the
+# installation directory, after `up -d`.
+function Get-ComposePublishedPort {
     param(
-        [string]$Path,
-        [string]$Name,
-        [string]$Default
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][int]$ContainerPort
     )
 
-    if (-not (Test-Path $Path)) {
-        return $Default
+    $output = $null
+    try {
+        $output = docker compose -f docker-compose.selfhost.yml port $Service $ContainerPort 2>$null
+    } catch {
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0) {
+        return $null
     }
 
-    $prefix = "$Name="
-    $line = Get-Content $Path |
-        Where-Object { $_.StartsWith($prefix) } |
-        Select-Object -Last 1
+    $line = @($output | Where-Object { $_ }) | Select-Object -Last 1
     if (-not $line) {
-        return $Default
+        return $null
     }
 
-    $value = $line.Substring($prefix.Length).Trim().Trim('"').Trim("'")
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        return $Default
+    $published = ($line -split ":")[-1].Trim()
+    if ($published -notmatch '^[0-9]+$') {
+        return $null
     }
-    return $value
+    return $published
 }
 
-function Get-SelfHostBackendPort {
-    foreach ($name in @("BACKEND_PORT", "API_PORT", "SERVER_PORT", "PORT")) {
-        $value = Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name $name -Default ""
-        if (-not [string]::IsNullOrWhiteSpace($value)) {
-            return $value
+# Host port the compose file is configured to publish for a service, resolved by
+# Compose itself (`docker compose config`) so it follows the same
+# environment-over-.env precedence as `up`. Only used by the occupied-port
+# preflight below; $null when Compose cannot resolve it, in which case the
+# preflight is skipped and `up` behaves as before. Must be called from the
+# installation directory.
+function Get-ComposeConfiguredPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][int]$ContainerPort
+    )
+
+    try {
+        $output = docker compose -f docker-compose.selfhost.yml config --format json 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $output) {
+            return $null
+        }
+        $config = ($output -join "`n") | ConvertFrom-Json
+        foreach ($mapping in @($config.services.$Service.ports)) {
+            $published = "$($mapping.published)"
+            if ([int]$mapping.target -eq $ContainerPort -and $published -match '^[0-9]+$') {
+                return $published
+            }
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+# True when something already accepts connections on 127.0.0.1:<port>, the
+# address the self-host stack publishes on.
+function Test-HostPortInUse {
+    param([Parameter(Mandatory = $true)][int]$Port)
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $attempt = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $attempt.AsyncWaitHandle.WaitOne(1000)) {
+            return $false
+        }
+        $client.EndConnect($attempt)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+# Fail before pulling and starting anything when a host port the stack needs is
+# already taken, instead of letting Docker abort halfway through `up -d` with
+# "port is already allocated" (#883). A port this installation's own running
+# stack already publishes is not a conflict: re-running the installer to
+# upgrade recreates those containers in place.
+function Assert-SelfHostPortsAvailable {
+    $checks = @(
+        @{ Service = "backend"; ContainerPort = 8080; Setting = "PORT=<free port> in $InstallDir\.env (or BACKEND_PORT / API_PORT / SERVER_PORT if you already set one of those)" }
+        @{ Service = "frontend"; ContainerPort = 3000; Setting = "FRONTEND_PORT=<free port> in $InstallDir\.env" }
+    )
+
+    foreach ($check in $checks) {
+        $port = Get-ComposeConfiguredPort -Service $check.Service -ContainerPort $check.ContainerPort
+        if (-not $port) {
+            continue
+        }
+        if ((Get-ComposePublishedPort -Service $check.Service -ContainerPort $check.ContainerPort) -eq $port) {
+            continue
+        }
+        if (Test-HostPortInUse -Port ([int]$port)) {
+            Write-Fail "Port $port is already in use on this machine, so the Multica $($check.Service) cannot be published on it.`n  Stop whatever is listening there (see: netstat -ano | findstr :$port),`n  or pick another port: set $($check.Setting)`n  and re-run the installer."
         }
     }
-    return "8080"
 }
 
-function Get-SelfHostFrontendPort {
-    return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
+# Fail early, with a fix the user can act on, when this machine's Docker Compose
+# cannot run the self-host stack. Without this, a missing Compose v2 plugin or a
+# Compose release too old for the file's top-level `name:` only surfaces once
+# `pull` / `up` runs, as a bare "(root) Additional property name is not allowed"
+# (#1401). `config --quiet` validates the file and .env the same way `up` would,
+# without contacting the Docker daemon. Must be called from the installation
+# directory.
+function Assert-ComposeSupportsSelfHost {
+    $previousPreference = $ErrorActionPreference
+    # Native stderr must be captured, not turned into a terminating error.
+    $ErrorActionPreference = "Continue"
+    try {
+        $version = $null
+        try {
+            $version = docker compose version 2>$null
+        } catch {
+            $version = $null
+        }
+        if ($LASTEXITCODE -ne 0 -or -not $version) {
+            Write-Fail "Docker Compose v2 is required, but 'docker compose' is not available.`n  The legacy standalone 'docker-compose' (v1) is not supported.`n  Install or update Docker Desktop:`n    https://docs.docker.com/desktop/install/windows-install/`n  Then re-run the installer."
+        }
+        $version = (@($version) | Where-Object { $_ } | Select-Object -First 1)
+
+        $failed = $false
+        $output = @()
+        try {
+            $output = @(docker compose -f docker-compose.selfhost.yml config --quiet 2>&1 | ForEach-Object { "$_" })
+            $failed = ($LASTEXITCODE -ne 0)
+        } catch {
+            $output = @("$_")
+            $failed = $true
+        }
+        if (-not $failed) {
+            return
+        }
+
+        $message = ($output | Where-Object { $_ }) -join "`n  "
+        if ($message -match "Additional property") {
+            Write-Fail "Your Docker Compose is too old for Multica's docker-compose.selfhost.yml.`n  Found: $version`n  Compose said: $message`n  Update Docker Desktop to the latest release:`n    https://docs.docker.com/desktop/install/windows-install/`n  Then re-run the installer."
+        }
+        Write-Fail "Docker Compose could not load $InstallDir\docker-compose.selfhost.yml:`n  $message`n  Fix the problem above (for example a malformed line in $InstallDir\.env) and re-run the installer."
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
 }
 
 function Get-LatestVersion {
@@ -287,10 +409,10 @@ function Install-CliBinary {
             }
             Write-Ok "Checksum verified"
         } else {
-            Write-Warn "Could not find checksum entry for $releaseAsset — skipping verification."
+            Write-Warn "Could not find checksum entry for $releaseAsset - skipping verification."
         }
     } catch {
-        Write-Warn "Could not download checksums.txt — skipping verification."
+        Write-Warn "Could not download checksums.txt - skipping verification."
     }
 
     Expand-Archive -Path (Join-Path $tmpDir "multica.zip") -DestinationPath $tmpDir -Force
@@ -438,17 +560,30 @@ function Install-Server {
         Write-Ok "Using existing .env"
     }
 
+    Assert-ComposeSupportsSelfHost
+    Assert-SelfHostPortsAvailable
+
     Write-Info "Pulling official Multica images..."
     Pull-OfficialSelfHostImages
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
     docker compose -f docker-compose.selfhost.yml up -d
 
+    # Read the ports Compose actually published, once, and reuse them for both
+    # the health check and the summary so the two can never disagree.
+    $script:SelfHostBackendPort = Get-ComposePublishedPort -Service "backend" -ContainerPort 8080
+    if (-not $script:SelfHostBackendPort) {
+        Write-Fail "Started the stack but could not read the backend host port from Docker Compose.`n  Check it with: cd $InstallDir; docker compose -f docker-compose.selfhost.yml ps"
+    }
+    $script:SelfHostFrontendPort = Get-ComposePublishedPort -Service "frontend" -ContainerPort 3000
+    if (-not $script:SelfHostFrontendPort) {
+        Write-Fail "Started the stack but could not read the frontend host port from Docker Compose.`n  Check it with: cd $InstallDir; docker compose -f docker-compose.selfhost.yml ps"
+    }
+
     Write-Info "Waiting for backend to be ready..."
-    $backendPort = Get-SelfHostBackendPort
     $ready = $false
     for ($i = 1; $i -le 45; $i++) {
         try {
-            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
+            $null = Invoke-WebRequest -Uri "http://localhost:$($script:SelfHostBackendPort)/health" -UseBasicParsing -TimeoutSec 2
             $ready = $true
             break
         } catch {
@@ -510,10 +645,8 @@ function Start-LocalInstall {
     Write-Host "  [OK] Multica server is running and CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    $frontendPort = Get-SelfHostFrontendPort
-    $backendPort = Get-SelfHostBackendPort
-    Write-Host "  Frontend:  http://localhost:$frontendPort"
-    Write-Host "  Backend:   http://localhost:$backendPort"
+    Write-Host "  Frontend:  http://localhost:$($script:SelfHostFrontendPort)"
+    Write-Host "  Backend:   http://localhost:$($script:SelfHostBackendPort)"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""
     Write-Host "  Next: configure your CLI to connect"

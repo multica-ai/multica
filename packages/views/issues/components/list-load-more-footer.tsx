@@ -27,6 +27,7 @@ export function ListLoadMoreFooter({
   onLoadMore,
   isError = false,
   onRetry,
+  errorLabel,
 }: {
   hasMore: boolean;
   isLoading: boolean;
@@ -34,6 +35,7 @@ export function ListLoadMoreFooter({
   onLoadMore: () => void;
   isError?: boolean;
   onRetry?: () => void;
+  errorLabel?: string;
 }) {
   const { t } = useT("issues");
 
@@ -41,10 +43,10 @@ export function ListLoadMoreFooter({
     return (
       <button
         type="button"
-        className="w-full py-2 text-xs text-destructive hover:underline"
+        className="w-full py-2 text-caption text-destructive hover:underline"
         onClick={onRetry}
       >
-        {t(($) => $.table.load_more_failed_retry)}
+        {errorLabel ?? t(($) => $.table.load_more_failed_retry)}
       </button>
     );
   }
@@ -61,7 +63,7 @@ export function ListLoadMoreFooter({
 
   if (total > PAGINATED_THRESHOLD) {
     return (
-      <div className="py-2 text-center text-xs text-muted-foreground/70">
+      <div className="py-2 text-center text-caption text-muted-foreground">
         {t(($) => $.table.no_more)}
       </div>
     );

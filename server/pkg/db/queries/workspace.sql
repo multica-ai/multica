@@ -1,21 +1,27 @@
 -- name: ListWorkspaces :many
+-- The role narrows what a guest is shown (workspaceResponseFor). A role this
+-- build does not know is no membership (see GetMemberByUserAndWorkspace).
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at,
+       m.role
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY w.created_at ASC;
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
+ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC;
 
 -- name: ListDaemonWorkspaces :many
 -- Daemons only need the membership set and display name to discover which
 -- workspaces should have local runtimes. Keep this projection intentionally
 -- narrow so the periodic consistency check never reads UI-only JSON/text
--- columns such as settings, repos, or context.
+-- columns such as settings, repos, or context. A role this build does not
+-- know is no membership (see GetMemberByUserAndWorkspace).
 SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY w.id ASC;
 
 -- name: GetDaemonWorkspace :one
@@ -62,6 +68,32 @@ UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
+-- name: HealIssueCounter :one
+-- Operator-shaped repair for a workspace whose issue_counter sits below
+-- MAX(issue.number): something persisted a numbered issue row without this
+-- counter ever being advanced for it. Deliberately a separate statement from
+-- IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+-- one workspace.
+--
+-- The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+-- returns no row, unless the counter really is behind — so a collision caused by
+-- anything else is never retried against the same taken number. It returns the
+-- value it wrote, the value it replaced and the highest number the workspace
+-- holds, so a repair can be logged with its before and after instead of leaving
+-- no trace for whoever debugs the next occurrence.
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number;
+
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat
 -- sessions. LockChatSessionsByWorkspace only covers sessions that exist when it
@@ -91,13 +123,16 @@ SELECT id FROM workspace WHERE id = $1 FOR UPDATE;
 SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 
 -- name: DeleteWorkspace :exec
--- The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
--- property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
+-- The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue
+-- property definitions, and quick actions carry NO FK to workspace, so — unlike the CASCADE-backed
 -- tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 -- their workspace-owned rows here so they commit or roll back atomically with
 -- the workspace row.
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
+),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
 ),
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
@@ -111,9 +146,23 @@ cleared_agent_label_assignments AS (
 cleared_skill_label_assignments AS (
     DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
+cleared_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
+),
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
@@ -121,6 +170,12 @@ cleared_outbound_cards AS (
     -- the just-removed chat-session bindings, which still carry the id.
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
+),
+cleared_comment_idempotency_receipts AS (
+    DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
 ),
 cleared_draft_restores AS (
     -- chat_draft_restore is keyed by chat_session_id with no FK (MUL-3515) and has
@@ -137,6 +192,15 @@ cleared_draft_restores AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
 cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
@@ -155,6 +219,23 @@ cleared_installations AS (
 ),
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
+),
+cleared_quick_actions AS (
+    DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
 ),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
@@ -197,3 +278,9 @@ cleared_client_usage_workspace AS (
     UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1;
+
+-- name: SetWorkspacePinned :one
+UPDATE member
+SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE workspace_id = @workspace_id AND user_id = @user_id
+RETURNING pinned_at;

@@ -1,5 +1,11 @@
-export { paths, isGlobalPath } from "./paths";
-export type { WorkspacePaths } from "./paths";
+export {
+  paths,
+  isGlobalPath,
+  isMyAgentsSearch,
+  issueRouteRef,
+  AGENT_FOCUS_CONVERSATION_STARTERS,
+} from "./paths";
+export type { IssueRouteRef, WorkspacePaths } from "./paths";
 export { RESERVED_SLUGS, isReservedSlug } from "./reserved-slugs";
 export {
   WORKSPACE_PAGES,
@@ -13,6 +19,8 @@ export type {
   WorkspacePageKey,
   WorkspacePage,
 } from "./route-icons";
+export { RAIL_SPACES, spaceForPath } from "./spaces";
+export type { AppSpaceId, RailSpaceId } from "./spaces";
 export {
   parseTabSubject,
   tabSubjectKey,
@@ -37,3 +45,5 @@ export {
   useCurrentWorkspace,
   useWorkspacePaths,
 } from "./hooks";
+
+export { isKnownWorkspacePath, workspaceSlugForPath } from "./workspace-slugs";

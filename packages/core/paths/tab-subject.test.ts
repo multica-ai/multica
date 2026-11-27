@@ -10,6 +10,8 @@ describe("parseTabSubject", () => {
     // Collection / tool pages
     ["/acme/issues", { kind: "page", page: "issues" }],
     ["/acme/my-issues", { kind: "page", page: "myIssues" }],
+    ["/acme/my-issues?scope=agents", { kind: "myAgents" }],
+    ["/acme/my-issues?scope=created", { kind: "page", page: "myIssues" }],
     ["/acme/projects", { kind: "page", page: "projects" }],
     ["/acme/autopilots", { kind: "page", page: "autopilots" }],
     ["/acme/agents", { kind: "page", page: "agents" }],
@@ -17,12 +19,14 @@ describe("parseTabSubject", () => {
     ["/acme/usage", { kind: "page", page: "usage" }],
     ["/acme/runtimes", { kind: "page", page: "runtimes" }],
     ["/acme/skills", { kind: "page", page: "skills" }],
+    ["/acme/apps", { kind: "page", page: "apps" }],
     ["/acme/settings", { kind: "page", page: "settings" }],
     // Resource details
     ["/acme/issues/bug-1", { kind: "issue", id: "bug-1" }],
     ["/acme/projects/p1", { kind: "project", id: "p1" }],
     ["/acme/autopilots/a1", { kind: "autopilot", id: "a1" }],
     ["/acme/skills/s1", { kind: "skill", id: "s1" }],
+    ["/acme/apps/gmail", { kind: "app", slug: "gmail" }],
     ["/acme/attachments/att1/preview", { kind: "attachment", id: "att1", filename: null }],
     [
       "/acme/attachments/att1/preview?name=report.pdf",
@@ -45,12 +49,13 @@ describe("parseTabSubject", () => {
       { kind: "runtime", machineId: "machine-1", runtimeId: "rt-2" },
     ],
     // Containers — selection (and archived sub-list) live in the query string
-    ["/acme/inbox", { kind: "inbox", selectedKey: null, archived: false }],
-    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", archived: false }],
-    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, archived: true }],
+    ["/acme/inbox", { kind: "inbox", selectedKey: null, view: "inbox" }],
+    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", view: "inbox" }],
+    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, view: "archived" }],
+    ["/acme/inbox?view=snoozed&issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", view: "snoozed" }],
     [
       "/acme/inbox?view=archived&issue=MUL-9",
-      { kind: "inbox", selectedKey: "MUL-9", archived: true },
+      { kind: "inbox", selectedKey: "MUL-9", view: "archived" },
     ],
     ["/acme/chat", { kind: "chat", sessionId: null }],
     ["/acme/chat?session=sess-1", { kind: "chat", sessionId: "sess-1" }],
@@ -92,16 +97,19 @@ describe("tabSubjectKey", () => {
     expect(tabSubjectKey({ kind: "issue", id: "x" })).toBe("issue:x");
     expect(tabSubjectKey({ kind: "chat", sessionId: null })).toBe("chat:");
     expect(tabSubjectKey({ kind: "chat", sessionId: "s1" })).toBe("chat:s1");
+    expect(tabSubjectKey({ kind: "myAgents" })).not.toBe(
+      tabSubjectKey({ kind: "page", page: "myIssues" }),
+    );
     expect(
       tabSubjectKey({ kind: "actor", actorType: "member", id: "m1" }),
     ).toBe("actor:member:m1");
   });
 
   it("distinguishes archived inbox and the attachment filename", () => {
-    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: false })).toBe(
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", view: "inbox" })).toBe(
       "inbox:inbox:k",
     );
-    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: true })).toBe(
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", view: "archived" })).toBe(
       "inbox:archived:k",
     );
     expect(

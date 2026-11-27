@@ -9,6 +9,23 @@ SELECT * FROM squad WHERE id = $1;
 -- name: GetSquadInWorkspace :one
 SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockSquadForAutopilotAssignment :one
+-- Stabilizes the squad-to-leader resolution while an active Autopilot is
+-- created, retargeted, or resumed. FOR SHARE conflicts with an ordinary
+-- leader_id update, so the caller subsequently locks the same leader Agent
+-- whose row Runtime teardown serializes against.
+SELECT * FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR SHARE;
+
+-- name: LockSquadForUpdate :one
+-- Squad leader changes take the exclusive side of the same lock used by
+-- Autopilot assignment. The handler then locks the proposed leader Agent and
+-- pauses active squad Autopilots when that Agent is unbound.
+SELECT * FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: ListSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC;
 
@@ -42,6 +59,16 @@ ORDER BY
     (sm.member_type = 'agent' AND sm.member_id = s.leader_id) DESC,
     sm.created_at ASC;
 
+-- name: ListInvolvedSquadIDs :many
+-- Squads whose issues count as the user's agents' work: squads led by an agent
+-- the user owns. Must match the squad branch of issueTableInvolvedPredicate.
+SELECT s.id
+  FROM squad s
+  JOIN agent a ON a.id = s.leader_id
+ WHERE s.workspace_id = sqlc.arg(workspace_id)
+   AND a.workspace_id = sqlc.arg(workspace_id)
+   AND a.owner_id     = sqlc.arg(user_id);
+
 -- name: ListAllSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 ORDER BY created_at ASC;
 
@@ -52,6 +79,7 @@ UPDATE squad SET
     leader_id = COALESCE(sqlc.narg('leader_id'), leader_id),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
+    handoff_mode = COALESCE(sqlc.narg('handoff_mode'), handoff_mode),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -69,6 +97,17 @@ RETURNING *;
 -- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3;
+
+-- name: DeleteSquadMembersByMember :exec
+-- Squad membership carries no FK to member, so member removal must prune it in
+-- the same application transaction: a re-invited user must not rejoin squads
+-- silently. Scoped to the workspace so the user's squads elsewhere survive.
+DELETE FROM squad_member AS sm
+USING squad AS s
+WHERE sm.squad_id = s.id
+  AND s.workspace_id = sqlc.arg(workspace_id)
+  AND sm.member_type = 'member'
+  AND sm.member_id = sqlc.arg(user_id);
 
 -- name: ListSquadMembers :many
 SELECT * FROM squad_member WHERE squad_id = $1 ORDER BY created_at ASC;
@@ -100,7 +139,7 @@ ORDER BY s.created_at ASC;
 
 -- name: TransferSquadAssignees :exec
 -- Transfer all issues assigned to a squad to the squad's leader agent.
-UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
+UPDATE issue SET assignee_type = 'agent', assignee_id = $2, revision = revision + 1, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1;
 
 -- name: TransferSquadAutopilotsToLeader :exec
@@ -118,10 +157,12 @@ WHERE assignee_type = 'squad' AND assignee_id = $1;
 
 -- name: ListSquadMemberStatusRows :many
 -- Per-row join used to build the squad-members status view. One row per
--- (squad_member × active_task); members with no active task return a
+-- (squad_member × in_flight_task); members with no in-flight task return a
 -- single row with NULL task_* columns. Human members and agent members
 -- with no agent row also return one row with NULL agent_/runtime_ columns.
--- The handler aggregates rows by member_id.
+-- waiting_local_directory stays in the row set so its issue remains visible,
+-- but the handler only treats dispatched/running rows as working because the
+-- squad status vocabulary has no queued bucket.
 SELECT
     sm.id              AS squad_member_id,
     sm.member_type     AS member_type,

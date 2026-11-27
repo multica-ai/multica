@@ -3,13 +3,65 @@
 package agent
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+// A real cursor-agent reads the prompt from stdin to EOF (see buildCursorArgs).
+// A fake that exits without reading it leaves the prompt write racing the
+// child's exit: win and the ~64 KiB pipe buffer swallows it, lose and the read
+// end is already closed and the write fails with EPIPE.
+//
+// That matters because writeErr outranks both `exitErr` and the generic
+// "stream ended without terminal result" when finalizing the error (cursor.go),
+// so a lost race replaces the failure the test is asserting on with
+// "cursor-agent prompt write failed: broken pipe" — the flake that turned main
+// red on 2026-07-30 (MUL-5536).
+//
+// Draining stdin first makes the fake honour the same contract as the real CLI,
+// which removes the race instead of papering over it. Only fixtures whose
+// expected error ranks below writeErr need it; the scanner-overflow and
+// structured-stream-error cases rank above it and are unaffected.
+const drainStdin = "cat > /dev/null"
+
+func TestCursorExecuteConnectionStalledDiagnostics(t *testing.T) {
+	t.Parallel()
+	script := `#!/bin/sh
+` + drainStdin + `
+i=0
+while [ "$i" -lt 500 ]; do
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-stalled"}'
+  i=$((i + 1))
+done
+printf '%s\n' 'RetriableError: Connection stalled' >&2
+exit 1
+`
+	result := executeFakeCursor(t, script)
+	if result.Status != "failed" || result.Output != "" {
+		t.Fatalf("stalled run must remain a failure without final output: %+v", result)
+	}
+	if result.SessionID != "sess-stalled" {
+		t.Fatalf("session id = %q, want sess-stalled", result.SessionID)
+	}
+	for _, want := range []string{"event_count=500", "cursor stderr: RetriableError: Connection stalled", cursorIncompleteFinalizationWarning} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error = %q, want substring %q", result.Error, want)
+		}
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("adapter error classified as %s, want provider_network", got)
+	}
+	if got := taskfailure.NormalizeDaemonReason(taskfailure.ReasonAgentProviderServerError.String(), result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("legacy daemon reason normalized to %s, want provider_network", got)
+	}
+}
 
 func TestCursorExecuteStopsAfterTerminalResult(t *testing.T) {
 	t.Parallel()
@@ -108,6 +160,7 @@ func TestCursorExecuteReportsSanitizedStderrOnProcessFailure(t *testing.T) {
 	}
 
 	script := `#!/bin/sh
+` + drainStdin + `
 dd if=/dev/zero bs=4096 count=1 2>/dev/null | tr '\000' x >&2
 printf '\nAuthorization: Bearer cursor-secret-token-value\npath=%s/private\n' "$HOME" >&2
 exit 1
@@ -129,10 +182,14 @@ exit 1
 			t.Errorf("error = %q, want substring %q", result.Error, want)
 		}
 	}
-	for _, secret := range []string{"cursor-secret-token-value", homeDir} {
-		if strings.Contains(result.Error, secret) {
-			t.Errorf("error leaked %q: %q", secret, result.Error)
-		}
+	if strings.Contains(result.Error, "cursor-secret-token-value") {
+		t.Errorf("error leaked the bearer token: %q", result.Error)
+	}
+	// Host paths are deliberately NOT masked: a crash diagnostic is only
+	// actionable if the path it names is the real one, and masking a path
+	// segment never was an access-control boundary. See redact.Text.
+	if !strings.Contains(result.Error, homeDir+"/private") {
+		t.Errorf("error = %q, want the home path preserved verbatim", result.Error)
 	}
 	if result.Output != "" {
 		t.Fatalf("output = %q, want empty failed output", result.Output)
@@ -168,11 +225,14 @@ exit 1
 }
 
 func TestCursorExecuteReportsScannerOverflow(t *testing.T) {
-	script := `#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-overflow"}'
-dd if=/dev/zero bs=1048576 count=11 2>/dev/null | tr '\000' x
+	// The oversized event is sized from agentStreamMaxLineBytes so raising
+	// the shared cap cannot silently turn this into a plain oversized-line
+	// pass that never reaches the overflow branch.
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"type":"system","subtype":"init","session_id":"sess-overflow"}'
+dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\000' x
 printf '\n'
-`
+`, agentStreamMaxLineBytes/(1024*1024)+1)
 	result := executeFakeCursor(t, script)
 
 	if result.Status != "failed" {
@@ -196,6 +256,7 @@ printf '\n'
 
 func TestCursorExecuteFailsOnCleanEOFWithoutResult(t *testing.T) {
 	script := `#!/bin/sh
+` + drainStdin + `
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-no-result"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"partial answer"}]}}'
 `
@@ -242,6 +303,20 @@ exit 1
 	}
 	if result.Output != "" {
 		t.Fatalf("output = %q, want empty failed output", result.Output)
+	}
+}
+
+func TestCursorExecuteConnectTimeoutIsResumeSafe(t *testing.T) {
+	t.Parallel()
+	result := executeFakeCursor(t, "#!/bin/sh\n"+drainStdin+"\nprintf '%s\\n' 'Error: [unavailable] connect ETIMEDOUT 192.0.2.1:443' >&2\nexit 1\n")
+	if result.Status != "failed" || result.SessionID != "" {
+		t.Fatalf("expected failure before first session event: %+v", result)
+	}
+	if result.ResumeRejected || result.ResumeRejectedTransient {
+		t.Fatal("a connection timeout does not prove resume was rejected")
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("actual Cursor adapter error classified as %s, want network: %s", got, result.Error)
 	}
 }
 

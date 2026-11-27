@@ -19,7 +19,10 @@ class FakeWebSocket {
     FakeWebSocket.lastInstance = this;
   }
   close() {}
-  send() {}
+  sent: string[] = [];
+  send(frame: string) {
+    this.sent.push(frame);
+  }
 }
 
 describe("WSClient", () => {
@@ -240,6 +243,27 @@ describe("WSClient", () => {
       });
     }
 
+    it("reports connecting, connected, then reconnecting until the next auth ack", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      const listener = vi.fn();
+      ws.onStatusChange(listener);
+      ws.setAuth("tok", "acme");
+      ws.connect();
+      expect(ws.getStatus()).toBe("connecting");
+
+      simulateAuthAck();
+      expect(ws.getStatus()).toBe("connected");
+
+      simulateDisconnect();
+      expect(ws.getStatus()).toBe("reconnecting");
+      vi.runOnlyPendingTimers();
+      expect(ws.getStatus()).toBe("reconnecting");
+
+      simulateAuthAck();
+      expect(ws.getStatus()).toBe("connected");
+      expect(listener).toHaveBeenCalledTimes(3);
+    });
+
     it("uses ~1000ms base delay for the first reconnect attempt", () => {
       // Pin Math.random so jitter is deterministic: random()=0.5 → jitter=0.
       vi.stubGlobal(
@@ -387,6 +411,20 @@ describe("WSClient", () => {
       expect(lastTimerDelay()).toBe(1000);
     });
 
+    it("notifies reconnect when the initial connection succeeds only after a retry", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      const onReconnect = vi.fn();
+      ws.onReconnect(onReconnect);
+      ws.connect();
+
+      simulateDisconnect();
+      vi.runOnlyPendingTimers();
+      simulateAuthAck();
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+
     it("keeps retrying indefinitely with capped delay", () => {
       vi.stubGlobal(
         "Math",
@@ -458,5 +496,59 @@ describe("WSClient", () => {
       simulateDisconnect();
       expect(lastTimerDelay()).toBe(1000);
     });
+  });
+});
+
+// A socket can be reconnecting hours after the provider built this client —
+// long enough for a sliding session to have been renewed. Sending the token
+// captured at construction would authenticate the new connection with a
+// credential on its way out (MUL-7436).
+describe("WSClient session renewal", () => {
+  beforeEach(() => {
+    FakeWebSocket.lastUrl = null;
+    FakeWebSocket.lastInstance = null;
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the current token on every connect", () => {
+    let current = "token-v1";
+    const ws = new WSClient("ws://example.test/ws", {
+      getToken: () => current,
+    });
+    ws.setAuth("token-v1", "acme");
+
+    ws.connect();
+    FakeWebSocket.lastInstance!.onopen!();
+    expect(JSON.parse(FakeWebSocket.lastInstance!.sent[0]!)).toEqual({
+      type: "auth",
+      payload: { token: "token-v1" },
+    });
+
+    // Session renewed between connections.
+    current = "token-v2";
+
+    ws.connect();
+    FakeWebSocket.lastInstance!.onopen!();
+    expect(JSON.parse(FakeWebSocket.lastInstance!.sent[0]!)).toEqual({
+      type: "auth",
+      payload: { token: "token-v2" },
+    });
+  });
+
+  it("sends no auth frame in cookie mode, where the cookie rides the upgrade", () => {
+    const ws = new WSClient("ws://example.test/ws", {
+      cookieAuth: true,
+      getToken: () => "should-not-be-used",
+    });
+    ws.setAuth(null, "acme");
+
+    ws.connect();
+    FakeWebSocket.lastInstance!.onopen!();
+
+    expect(FakeWebSocket.lastInstance!.sent).toEqual([]);
   });
 });

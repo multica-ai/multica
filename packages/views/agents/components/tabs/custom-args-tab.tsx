@@ -8,10 +8,11 @@ import {
   Save,
   Terminal,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
@@ -150,7 +151,7 @@ export function CustomArgsTab({
             ? t(($) => $.tab_body.custom_args.new_argument_aria)
             : t(($) => $.tab_body.custom_args.input_aria, { index })
         }
-        className="font-mono text-xs"
+        className="font-mono text-caption"
       />
       <div className="mt-2 flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={closeEditor}>
@@ -172,7 +173,7 @@ export function CustomArgsTab({
 
   return (
     <div className="space-y-6">
-      <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+      <p className="max-w-2xl text-pretty text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.custom_args.intro)}
       </p>
 
@@ -199,11 +200,8 @@ export function CustomArgsTab({
                 <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <Terminal className="size-4" aria-hidden="true" />
                 </span>
-                <p className="mt-3 text-sm font-medium">
+                <p className="mt-3 text-body font-medium">
                   {t(($) => $.tab_body.custom_args.empty_title)}
-                </p>
-                <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                  {t(($) => $.tab_body.custom_args.empty_hint)}
                 </p>
               </div>
             ) : null}
@@ -215,41 +213,41 @@ export function CustomArgsTab({
                     renderEditor(index + 1)
                   ) : (
                     <div className="group flex min-w-0 items-center gap-3 rounded-lg bg-muted/45 px-3 py-2.5 transition-colors hover:bg-muted/70">
-                      <span className="w-5 shrink-0 text-center text-[11px] font-medium tabular-nums text-muted-foreground">
+                      <span className="w-5 shrink-0 text-center text-micro font-medium tabular-nums text-muted-foreground">
                         {index + 1}
                       </span>
                       <code
-                        className="min-w-0 flex-1 break-all font-mono text-xs leading-5"
+                        className="min-w-0 flex-1 break-all font-mono text-caption leading-5"
                         translate="no"
                       >
                         {entry.value}
                       </code>
                       <div className="flex shrink-0 items-center gap-0.5">
-                        <Button
+                        <IconButton
                           type="button"
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => startEditing(entry)}
                           disabled={editor !== null}
-                          aria-label={t(($) => $.tab_body.custom_args.edit_aria, {
+                          label={t(($) => $.tab_body.custom_args.edit_aria, {
                             index: index + 1,
                           })}
                         >
                           <Pencil className="size-3.5" aria-hidden="true" />
-                        </Button>
-                        <Button
+                        </IconButton>
+                        <IconButton
                           type="button"
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => removeEntry(entry.id)}
                           disabled={editor !== null}
                           className="text-muted-foreground hover:text-destructive"
-                          aria-label={t(($) => $.tab_body.custom_args.remove_aria, {
+                          label={t(($) => $.tab_body.custom_args.remove_aria, {
                             index: index + 1,
                           })}
                         >
                           <Trash2 className="size-3.5" aria-hidden="true" />
-                        </Button>
+                        </IconButton>
                       </div>
                     </div>
                   )}
@@ -270,7 +268,7 @@ export function CustomArgsTab({
                 <Terminal className="size-3.5" aria-hidden="true" />
               </span>
               <code
-                className="min-w-0 break-all pt-1.5 font-mono text-xs leading-5"
+                className="min-w-0 break-all pt-1.5 font-mono text-caption leading-5"
                 translate="no"
               >
                 {launchCommand}
@@ -282,7 +280,7 @@ export function CustomArgsTab({
 
       <div className="flex items-center justify-end gap-3 pt-1">
         {dirty ? (
-          <span role="status" className="text-xs text-muted-foreground">
+          <span role="status" className="text-caption text-muted-foreground">
             {t(($) => $.tab_body.common.unsaved_changes)}
           </span>
         ) : null}

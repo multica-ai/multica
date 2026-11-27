@@ -3,47 +3,70 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Link2,
   Loader2,
+  Pencil,
   Pin,
   PinOff,
   Square,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
-import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
+import {
+  pendingChatTasksOptions,
+  chatKeys,
+  myChatWakeupsOptions,
+  sortChatSessions,
+} from "@multica/core/chat/queries";
 import {
   useDeleteChatSession,
   useSetChatSessionArchived,
   useSetChatSessionPinned,
+  useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
+import {
+  RowActionsMenu,
+  RowActionsPointMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
+import { CLOSED_ROW_MENU, shouldOpenRowMenu, type RowMenuState } from "../../common/point-menu";
+import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
+import { SessionHistoryList } from "./session-history-list";
+import { SessionRenameInput } from "./session-rename-input";
 
 const apiLogger = createLogger("chat.api");
 
 // IM-style timestamp: today → clock, this year → M/D, else full date.
-function formatChatTime(dateStr: string): string {
+function formatChatTime(dateStr: string, locale: string): string {
   const d = new Date(dateStr);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   }
   if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+    return d.toLocaleDateString(locale, { month: "numeric", day: "numeric" });
   }
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(locale);
 }
 
 // Collapse a (possibly markdown / multi-line) message into a one-line preview.
@@ -56,11 +79,12 @@ function toPreview(content: string): string {
 }
 
 /**
- * IM-style conversation list: each row is agent avatar + name + last-message
- * preview + time, with a red unread *count* badge. An in-flight agent shows a
- * "typing…" indicator; a failed last reply shows a destructive hint. Rows are
- * rendered in the server's order (most-recent activity first). Renaming lives
- * in the conversation header's ⋯ menu, not here.
+ * IM-style conversation list: each row is agent avatar + session title + agent
+ * name + last-message preview + time, with a red unread *count* badge. An
+ * in-flight agent shows a "typing…" indicator; a failed last reply shows a
+ * destructive hint. Rows are rendered in the server's order (most-recent
+ * activity first). Renaming lives in the conversation header's ⋯ menu, not
+ * here.
  *
  * Two views, toggled locally: the default "history" view lists active chats and
  * hovering a row reveals pin + archive (or stop, while running) — archiving is
@@ -76,6 +100,7 @@ export function ChatThreadList({
   activeSessionId,
   onSelectSession,
   onArchive,
+  onPrefetchSession,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
@@ -85,9 +110,24 @@ export function ChatThreadList({
   // aware (desktop advances to the next chat; mobile drops back to the list)
   // and routes through the shared controller — see ChatPage.handleArchive.
   onArchive: (session: ChatSession) => void;
+  /** Warm a session's messages and context on pointer hover or keyboard focus. */
+  onPrefetchSession?: (sessionId: string) => void;
 }) {
   const { t } = useT("chat");
+  const { t: tLayout } = useT("layout");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
+  // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
+  // tests outside a workspace route; without a slug the web modifier-click
+  // affordance simply stays off.
+  const slug = useWorkspaceSlug();
+  const sessionHref = (sessionId: string) =>
+    slug ? `${paths.workspace(slug).chat()}?session=${sessionId}` : null;
+  // Optional: the list renders bare in tests; without an adapter the web
+  // modifier-click affordance stays off (desktop keeps selection anyway).
+  const navigation = useOptionalNavigation();
+  const openInNewTab = navigation?.openInNewTab;
+  const getShareableUrl = navigation?.getShareableUrl;
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   // Split the flat cache locally: active chats fill the default history view,
@@ -114,6 +154,14 @@ export function ChatThreadList({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const updateSession = useUpdateChatSession();
+  // One right-click menu for every row; it keeps the session it opened on
+  // through its close animation.
+  const [contextMenu, setContextMenu] = useState<RowMenuState & { sessionId: string | null }>({
+    ...CLOSED_ROW_MENU,
+    sessionId: null,
+  });
   const deleteSession = useDeleteChatSession();
   const setPinned = useSetChatSessionPinned();
   const setArchived = useSetChatSessionArchived();
@@ -121,6 +169,11 @@ export function ChatThreadList({
   const queryClient = useQueryClient();
 
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
+  const { data: myWakeups } = useQuery(myChatWakeupsOptions(wsId));
+  const waitingSessionIds = useMemo(
+    () => new Set((myWakeups ?? []).filter((w) => w.status === "active").map((w) => w.chat_session_id)),
+    [myWakeups],
+  );
   const pendingTaskBySessionId = useMemo(
     () => new Map((pending?.tasks ?? []).map((task) => [task.chat_session_id, task])),
     [pending],
@@ -183,9 +236,98 @@ export function ChatThreadList({
     });
   };
 
+  // One list drives every action surface — the compact menu without hover,
+  // the hover strip with it, and the right-click menu — so they cannot drift.
+  // The archived view is the only place hard-delete lives; the history view
+  // offers the reversible archive instead.
+  const rowActionsFor = (session: ChatSession): RowActionItem[] =>
+    view === "archived"
+      ? [
+          {
+            key: "unarchive",
+            icon: <ArchiveRestore className="size-3.5" />,
+            label: t(($) => $.list.unarchive),
+            onSelect: () =>
+              setArchived.mutate({ sessionId: session.id, archived: false }),
+          },
+          {
+            key: "delete",
+            icon: <Trash2 className="size-3.5" />,
+            label: t(($) => $.session_history.row_delete_aria),
+            danger: true,
+            onSelect: () => setConfirmingDeleteId(session.id),
+          },
+        ]
+      : [
+          {
+            key: "pin",
+            icon: session.pinned ? (
+              <PinOff className="size-3.5" />
+            ) : (
+              <Pin className="size-3.5 -rotate-45" />
+            ),
+            label: session.pinned
+              ? t(($) => $.list.unpin)
+              : t(($) => $.list.pin),
+            onSelect: () =>
+              setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
+          },
+          pendingTaskBySessionId.has(session.id)
+            ? {
+                key: "stop",
+                icon: <Square className="size-3 fill-current" />,
+                label: t(($) => $.session_history.row_stop_aria),
+                danger: true,
+                onSelect: () => setConfirmingStopId(session.id),
+              }
+            : {
+                key: "archive",
+                icon: <Archive className="size-3.5" />,
+                label: t(($) => $.list.archive),
+                onSelect: () => onArchive(session),
+              },
+        ];
+
+  // Menu-only entries: the touch and right-click menus have room for them,
+  // the hover strip keeps its two quick actions.
+  const menuActionsFor = (session: ChatSession): RowActionItem[] => {
+    if (view === "archived") return [];
+    const href = sessionHref(session.id);
+    return [
+      {
+        key: "rename",
+        icon: <Pencil className="size-3.5" />,
+        label: t(($) => $.header.rename),
+        onSelect: () => setRenamingId(session.id),
+      },
+      ...(href && getShareableUrl
+        ? [
+            {
+              key: "copy-link",
+              icon: <Link2 className="size-3.5" />,
+              label: tLayout(($) => $.rail.copy_link),
+              onSelect: () => {
+                void copyText(getShareableUrl(href)).then((ok) => {
+                  if (ok) toast.success(tLayout(($) => $.rail.link_copied));
+                });
+              },
+            },
+          ]
+        : []),
+    ];
+  };
+
+  const commitRename = (session: ChatSession, value: string) => {
+    setRenamingId(null);
+    const title = value.trim();
+    if (!title || title === (session.title ?? "")) return;
+    updateSession.mutate({ sessionId: session.id, title });
+  };
+
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
+    const agentName = agent?.name.trim() || null;
     const pendingTask = pendingTaskBySessionId.get(session.id);
     const isRunning = !!pendingTask;
     // Only "offline" (definitively long-offline) downgrades typing → waiting.
@@ -198,9 +340,12 @@ export function ChatThreadList({
     const isConfirmingDelete = confirmingDeleteId === session.id;
     const isConfirmingStop = confirmingStopId === session.id && !!pendingTask;
     const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
+    const isRenaming = renamingId === session.id;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
     const last = session.last_message ?? null;
-    const timeText = last ? formatChatTime(last.created_at) : formatChatTime(session.updated_at);
+    const timeText = last
+      ? formatChatTime(last.created_at, locale)
+      : formatChatTime(session.updated_at, locale);
 
     // The second line: typing/waiting → failed → preview.
     let previewNode: React.ReactNode;
@@ -222,6 +367,12 @@ export function ChatThreadList({
       );
     } else if (last?.failure_reason) {
       previewNode = <span className="block truncate text-destructive">{t(($) => $.list.failed)}</span>;
+    } else if (last?.message_kind === "wakeup") {
+      previewNode = (
+        <span className="block truncate italic text-muted-foreground">
+          {t(($) => $.list.wakeup_preview)}
+        </span>
+      );
     } else if (last?.message_kind === "no_response") {
       // A no_response turn stores a non-empty English fallback as its content,
       // so the preview is never blank even on older clients; new clients show a
@@ -233,29 +384,69 @@ export function ChatThreadList({
       );
     } else if (last) {
       previewNode = (
-        <span className={cn("block truncate", unread > 0 ? "text-foreground/80" : "text-muted-foreground")}>
+        <span className={cn("block truncate", unread > 0 ? "text-foreground" : "text-muted-foreground")}>
           {last.role === "user" ? t(($) => $.list.you_prefix) : ""}
           {toPreview(last.content)}
         </span>
       );
     } else {
-      previewNode = <span className="block truncate text-muted-foreground/60">{t(($) => $.list.no_messages)}</span>;
+      previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
+
+    const rowActions = rowActionsFor(session);
+    const menuActions = menuActionsFor(session);
 
     return (
       <div
         key={session.id}
+        data-chat-thread-row={session.id}
         aria-current={isCurrent ? "true" : undefined}
         tabIndex={0}
-        onClick={() => {
-          if (isConfirmingAction) return;
+        onPointerEnter={() => {
+          if (!isConfirmingAction) onPrefetchSession?.(session.id);
+        }}
+        onFocus={() => {
+          if (!isConfirmingAction) onPrefetchSession?.(session.id);
+        }}
+        onClick={(e) => {
+          if (isConfirmingAction || isRenaming || e.defaultPrevented) return;
+          // Plain click keeps the master-detail selection. On web, a modifier
+          // click opens the session as its own browser tab. Desktop tabs
+          // dedupe chat by pathname (a session is view state, not a subject —
+          // see tab-store resourceKey), so a second chat tab cannot exist
+          // there; modifier clicks keep the selection behavior instead.
+          const href = sessionHref(session.id);
+          if (
+            href &&
+            getShareableUrl &&
+            !openInNewTab &&
+            resolveClickIntent(e) !== "push"
+          ) {
+            window.open(
+              getShareableUrl(href),
+              "_blank",
+              "noopener,noreferrer",
+            );
+            return;
+          }
           onSelectSession(session);
         }}
-        onKeyDown={(e) => {
-          if (isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
+        onAuxClick={(e) => {
+          if (isConfirmingAction || e.defaultPrevented || e.button !== 1) return;
+          if (openInNewTab) return; // desktop: no second chat tab exists
+          const href = sessionHref(session.id);
+          if (!href || !getShareableUrl) return;
           e.preventDefault();
-          onSelectSession(session);
+          window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
+        }}
+        onKeyDown={(e) => {
+          if (isConfirmingAction || isRenaming) return;
+          handleRowActivationKey(e, () => onSelectSession(session));
+        }}
+        onContextMenu={(e) => {
+          if (isConfirmingAction || isRenaming || !shouldOpenRowMenu(e)) return;
+          e.preventDefault();
+          setContextMenu({ open: true, point: { x: e.clientX, y: e.clientY }, sessionId: session.id });
         }}
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
@@ -282,10 +473,26 @@ export function ChatThreadList({
                 className="size-3 shrink-0 -rotate-45 fill-current text-muted-foreground"
               />
             )}
-            <span className={cn("min-w-0 flex-1 truncate text-sm", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
-              {titleText}
-            </span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{timeText}</span>
+            {waitingSessionIds.has(session.id) && (
+              <AlarmClock
+                aria-label={t(($) => $.list.wakeup_active)}
+                className="size-3 shrink-0 text-brand"
+              />
+            )}
+            {isRenaming ? (
+              <div className="min-w-0 flex-1">
+                <SessionRenameInput
+                  initialValue={session.title ?? ""}
+                  onSubmit={(value) => commitRename(session, value)}
+                  onCancel={() => setRenamingId(null)}
+                />
+              </div>
+            ) : (
+              <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
+                {titleText}
+              </span>
+            )}
+            <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
@@ -318,13 +525,25 @@ export function ChatThreadList({
                 />
               ) : (
                 <>
-                  <div className="min-w-0 flex-1 overflow-hidden text-xs">{previewNode}</div>
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-caption">
+                    {agentName && (
+                      <>
+                        <span className="max-w-[40%] shrink-0 truncate font-medium text-muted-foreground">
+                          {agentName}
+                        </span>
+                        <span aria-hidden="true" className="shrink-0 text-faint-foreground">
+                          ·
+                        </span>
+                      </>
+                    )}
+                    <div className="min-w-0 flex-1 overflow-hidden">{previewNode}</div>
+                  </div>
                   {unread > 0 && (
                     <span
                       aria-label={t(($) => $.session_history.row_subtitle.new_reply)}
                       // Softer, warmer red than the vivid `destructive` token —
                       // an IM unread badge, not an error.
-                      className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[oklch(0.62_0.14_18)] px-1 text-[10.5px] font-semibold text-white"
+                      className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[oklch(0.62_0.14_18)] px-1 text-micro font-semibold text-white"
                     >
                       {unread > 99 ? "99+" : unread}
                     </span>
@@ -334,73 +553,80 @@ export function ChatThreadList({
             </div>
         </div>
 
+        {/* Compact action menu — the touch equivalent of the hover strip
+            below, which a pointer without hover can never reach. It takes real
+            layout space (rather than overlaying the preview) and gives way to
+            the hover strip on a hover-capable pointer. */}
+        {!isConfirmingAction && !isRenaming && (
+          <RowActionsMenu
+            label={t(($) => $.list.row_actions_aria)}
+            groups={[rowActions, menuActions]}
+          />
+        )}
+
         {/* Hover actions — absolutely positioned so showing/hiding them never
-            changes the row height (which was making the list jump). The archived
-            view is the only place hard-delete lives; the history view offers the
-            reversible archive instead. */}
-        {!isConfirmingAction && (
-          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 group-hover/row:flex">
-            {view === "archived" ? (
-              <>
-                <RowAction
-                  icon={<ArchiveRestore className="size-3.5" />}
-                  label={t(($) => $.list.unarchive)}
-                  onClick={() => setArchived.mutate({ sessionId: session.id, archived: false })}
-                />
-                <RowAction
-                  icon={<Trash2 className="size-3.5" />}
-                  label={t(($) => $.session_history.row_delete_aria)}
-                  danger
-                  onClick={() => setConfirmingDeleteId(session.id)}
-                />
-              </>
-            ) : (
-              <>
-                <RowAction
-                  icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
-                  label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
-                  onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
-                />
-                {isRunning ? (
-                  <RowAction
-                    icon={<Square className="size-3 fill-current" />}
-                    label={t(($) => $.session_history.row_stop_aria)}
-                    danger
-                    onClick={() => setConfirmingStopId(session.id)}
-                  />
-                ) : (
-                  <RowAction
-                    icon={<Archive className="size-3.5" />}
-                    label={t(($) => $.list.archive)}
-                    onClick={() => onArchive(session)}
-                  />
-                )}
-              </>
-            )}
+            changes the row height (which was making the list jump). Keyboard
+            focus reveals them too, so they are reachable without a mouse. */}
+        {!isConfirmingAction && !isRenaming && (
+          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
+            {rowActions.map((action) => (
+              <RowAction
+                key={action.key}
+                icon={action.icon}
+                label={action.label}
+                danger={action.danger}
+                onClick={action.onSelect}
+              />
+            ))}
           </div>
         )}
       </div>
     );
   };
 
+  const contextMenuSession = contextMenu.sessionId
+    ? sessions.find((s) => s.id === contextMenu.sessionId)
+    : undefined;
+  const rowContextMenu = (
+    <RowActionsPointMenu
+      menu={contextMenuSession ? contextMenu : CLOSED_ROW_MENU}
+      onOpenChange={(open) => {
+        if (!open) setContextMenu((current) => ({ ...current, open: false }));
+      }}
+      groups={
+        contextMenuSession
+          ? [rowActionsFor(contextMenuSession), menuActionsFor(contextMenuSession)]
+          : []
+      }
+    />
+  );
+
   // Archived view: a back header, then the archived rows. Delete lives only
   // here (via each row's hover actions).
   if (view === "archived") {
     return (
-      <>
+      <div className="flex h-full min-h-0 flex-col">
         <button
           type="button"
           onClick={() => setView("history")}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full shrink-0 items-center gap-1.5 rounded-md px-2 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
-          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
             {archivedSessions.length}
           </span>
         </button>
-        {archivedSessions.map(renderRow)}
-      </>
+        <div className="min-h-0 flex-1">
+          <SessionHistoryList
+            key="archived"
+            sessions={archivedSessions}
+            renderRow={renderRow}
+            animateExit
+          />
+        </div>
+        {rowContextMenu}
+      </div>
     );
   }
 
@@ -409,21 +635,21 @@ export function ChatThreadList({
     <button
       type="button"
       onClick={() => setView("archived")}
-      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="flex size-9 shrink-0 items-center justify-center">
         <Archive className="size-4" />
       </span>
       <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/70">{archivedSessions.length}</span>
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+      <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
+      <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
     </button>
   );
 
   if (historySessions.length === 0) {
     return (
       <>
-        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+        <div className="px-3 py-1.5 text-caption text-muted-foreground">
           {t(($) => $.window.no_previous)}
         </div>
         {archivedEntry}
@@ -433,8 +659,14 @@ export function ChatThreadList({
 
   return (
     <>
-      {historySessions.map(renderRow)}
-      {archivedEntry}
+      <SessionHistoryList
+        key="history"
+        sessions={historySessions}
+        renderRow={renderRow}
+        footer={archivedEntry}
+        animateExit
+      />
+      {rowContextMenu}
     </>
   );
 }
@@ -451,28 +683,32 @@ function RowAction({
   danger?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        onClick();
-      }}
-      className={cn(
-        "inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors focus-visible:outline-none",
-        danger
-          ? "hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
-          : "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground",
-      )}
-    >
-      {icon}
-    </button>
+    <DeferredTooltip
+      content={label}
+      trigger={
+        <button
+          type="button"
+          aria-label={label}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onClick();
+          }}
+          className={cn(
+            "inline-flex size-7 items-center justify-center rounded-xs text-muted-foreground transition-colors focus-visible:outline-none",
+            danger
+              ? "hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+              : "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground",
+          )}
+        >
+          {icon}
+        </button>
+      }
+    />
   );
 }
 
@@ -493,7 +729,7 @@ function ConfirmRow({
 }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="min-w-0 flex-1 truncate text-xs font-medium text-destructive">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-caption font-medium text-destructive">{label}</span>
       <div className="flex shrink-0 items-center gap-1">
         <button
           type="button"
@@ -507,7 +743,7 @@ function ConfirmRow({
             onCancel();
           }}
           disabled={pending}
-          className="inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          className="inline-flex h-6 items-center rounded-xs px-2 text-micro font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
           {cancelText}
         </button>
@@ -523,7 +759,7 @@ function ConfirmRow({
             onConfirm();
           }}
           disabled={pending}
-          className="inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+          className="inline-flex h-6 items-center rounded-xs px-2 text-micro font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
         >
           {confirmText}
         </button>

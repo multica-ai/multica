@@ -14,6 +14,9 @@
  *   labels    →  issue/[id]/picker/label   (multi-select, stays open)
  *   project   →  issue/[id]/picker/project
  *   due_date  →  issue/[id]/picker/due-date
+ *
+ * `readOnly` (a guest, MUL-9420) renders the same chips without pickers and
+ * drops the empty label / due-date placeholders, which only invite an edit.
  */
 import { useMemo } from "react";
 import { View } from "react-native";
@@ -33,16 +36,15 @@ import { AttributeChip } from "./attribute-chip";
 import { useActorLookup } from "@/data/use-actor-name";
 import { findProject, projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import {
-  STATUS_LABEL,
-  PRIORITY_LABEL as PRIORITY_FULL_LABEL,
-} from "@/lib/issue-status";
+import { PRIORITY_LABEL as PRIORITY_FULL_LABEL } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { i18n, useT } from "@/lib/i18n";
 
 // Chip placeholder shortens `none` from "No priority" → "Priority" so the
 // unset chip reads as a placeholder, not as a confusing assigned value.
 const PRIORITY_CHIP_LABEL: Record<IssuePriority, string> = {
   ...PRIORITY_FULL_LABEL,
-  none: "Priority",
+  none: "issues:filters.priority",
 };
 
 /**
@@ -72,13 +74,30 @@ const ISSUE_PICKER_PATHNAMES = {
 // with the viewer's offset. Mirrors web's formatDate in list-row/board-card.
 function formatDueDate(iso: string | null): string | null {
   if (!iso) return null;
-  return formatDateOnly(iso, { month: "short", day: "numeric" }, "en-US") || null;
+  return (
+    formatDateOnly(
+      iso,
+      { month: "short", day: "numeric" },
+      i18n.resolvedLanguage ?? i18n.language,
+    ) || null
+  );
 }
 
-export function AttributeRow({ issue }: { issue: Issue }) {
+export function AttributeRow({
+  issue,
+  readOnly = false,
+}: {
+  issue: Issue;
+  readOnly?: boolean;
+}) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
+  // The chip shows the issue's own status, which may be a custom one — name
+  // and colour come from the workspace catalog, the glyph from its category.
+  // (MUL-6243)
+  const { categoryOf, colorOf, labelOf, iconOf } = useIssueStatuses();
 
   // Project read-only — fetch list to look up the title + icon. Cheap
   // (cached after first issue-detail visit).
@@ -100,30 +119,41 @@ export function AttributeRow({ issue }: { issue: Issue }) {
     : null;
   const dueLabel = formatDueDate(issue.due_date);
 
-  const openPicker = (field: IssuePickerField) => {
-    if (!wsSlug) return;
-    router.push({
-      pathname: ISSUE_PICKER_PATHNAMES[field],
-      params: { workspace: wsSlug, id: issue.id },
-    });
-  };
+  // Undefined for a read-only row: AttributeChip then renders a plain View.
+  const pickerFor = (field: IssuePickerField) =>
+    readOnly
+      ? undefined
+      : () => {
+          if (!wsSlug) return;
+          router.push({
+            pathname: ISSUE_PICKER_PATHNAMES[field],
+            params: { workspace: wsSlug, id: issue.id },
+          });
+        };
 
   return (
     <View className="flex-row flex-wrap gap-2">
       {/* Status — always shown */}
       <AttributeChip
-        icon={<StatusIcon status={issue.status} size={14} />}
-        label={STATUS_LABEL[issue.status]}
+        icon={
+          <StatusIcon
+            status={issue.status}
+            category={categoryOf(issue.status)}
+            icon={iconOf(issue.status)} color={colorOf(issue.status)}
+            size={14}
+          />
+        }
+        label={labelOf(issue.status)}
         variant="filled"
-        onPress={() => openPicker("status")}
+        onPress={pickerFor("status")}
       />
 
       {/* Priority */}
       <AttributeChip
         icon={<PriorityIcon priority={issue.priority} size={14} />}
-        label={PRIORITY_CHIP_LABEL[issue.priority]}
+        label={t(PRIORITY_CHIP_LABEL[issue.priority])}
         variant={issue.priority === "none" ? "dimmed" : "filled"}
-        onPress={() => openPicker("priority")}
+        onPress={pickerFor("priority")}
       />
 
       {/* Assignee */}
@@ -137,18 +167,18 @@ export function AttributeRow({ issue }: { issue: Issue }) {
               showPresence
             />
           }
-          label={assigneeName ?? "Unknown"}
+          label={assigneeName ?? t("picker.unknown")}
           variant="filled"
-          onPress={() => openPicker("assignee")}
+          onPress={pickerFor("assignee")}
         />
       ) : (
         <AttributeChip
           icon={
             <View className="size-4 rounded-full border border-dashed border-muted-foreground/40" />
           }
-          label="Assignee"
+          label={t("filters.assignee")}
           variant="dimmed"
-          onPress={() => openPicker("assignee")}
+          onPress={pickerFor("assignee")}
         />
       )}
 
@@ -167,15 +197,15 @@ export function AttributeRow({ issue }: { issue: Issue }) {
           }
           label={label.name}
           variant="filled"
-          onPress={() => openPicker("label")}
+          onPress={pickerFor("label")}
         />
       ))}
-      {labels.length === 0 ? (
+      {labels.length === 0 && !readOnly ? (
         <AttributeChip
           icon={<Text className="text-xs text-muted-foreground/70">◯</Text>}
-          label="Label"
+          label={t("filters.label")}
           variant="dimmed"
-          onPress={() => openPicker("label")}
+          onPress={pickerFor("label")}
         />
       ) : null}
 
@@ -185,26 +215,28 @@ export function AttributeRow({ issue }: { issue: Issue }) {
           icon={<ProjectIcon icon={project.icon} size="sm" />}
           label={project.title}
           variant="filled"
-          onPress={() => openPicker("project")}
+          onPress={pickerFor("project")}
         />
       ) : (
         <AttributeChip
           icon={
             <View className="size-3.5 rounded-sm border border-dashed border-muted-foreground/40" />
           }
-          label="Project"
+          label={t("filters.project")}
           variant="dimmed"
-          onPress={() => openPicker("project")}
+          onPress={pickerFor("project")}
         />
       )}
 
       {/* Due date */}
-      <AttributeChip
-        icon={<Text className="text-xs text-muted-foreground/80">📅</Text>}
-        label={dueLabel ?? "Due date"}
-        variant={dueLabel ? "filled" : "dimmed"}
-        onPress={() => openPicker("due-date")}
-      />
+      {dueLabel || !readOnly ? (
+        <AttributeChip
+          icon={<Text className="text-xs text-muted-foreground/80">📅</Text>}
+          label={dueLabel ?? t("common:fields.due_date")}
+          variant={dueLabel ? "filled" : "dimmed"}
+          onPress={pickerFor("due-date")}
+        />
+      ) : null}
     </View>
   );
 }

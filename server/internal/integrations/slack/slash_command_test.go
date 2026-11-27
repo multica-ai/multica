@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -50,6 +51,28 @@ type fakeQuickCreate struct {
 	agentID     pgtype.UUID
 	squadID     pgtype.UUID
 	prompt      string
+}
+
+type fakeSlashControlStarter struct {
+	newCalls   int
+	clearCalls int
+	envelopeID string
+	cmd        slack.SlashCommand
+	err        error
+}
+
+func (f *fakeSlashControlStarter) StartSlackDMChat(_ context.Context, _ engine.ResolvedInstallation, _ pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error {
+	f.newCalls++
+	f.cmd = cmd
+	f.envelopeID = envelopeID
+	return f.err
+}
+
+func (f *fakeSlashControlStarter) ClearSlackDMContext(_ context.Context, _ engine.ResolvedInstallation, _ pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error {
+	f.clearCalls++
+	f.cmd = cmd
+	f.envelopeID = envelopeID
+	return f.err
 }
 
 func (f *fakeQuickCreate) EnqueueQuickCreateTask(_ context.Context, workspaceID, requesterID, agentID, squadID pgtype.UUID, prompt, _, _ string, _, _ pgtype.UUID, _ []pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -283,5 +306,76 @@ func TestSlashHandle_IgnoresOtherCommands(t *testing.T) {
 
 	if tasks.calls != 0 || *count != 0 {
 		t.Fatalf("non-/issue command must be ignored: calls=%d replies=%d", tasks.calls, *count)
+	}
+}
+
+func TestSlashHandle_NewDMUsesSharedStarterAndEnvelopeDedup(t *testing.T) {
+	q := &fakeSlashQueries{inst: activeSlashInstallation(), binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)}}
+	tasks := &fakeQuickCreate{}
+	p, captured, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
+	starter := &fakeSlashControlStarter{}
+	p.control = starter
+	cmd := issueSlashCmd()
+	cmd.Command, cmd.ChannelID, cmd.Text = "/new", "D1", "new topic"
+	p.HandleEnvelope(context.Background(), cmd, "env-123")
+	if starter.newCalls != 1 || starter.clearCalls != 0 || starter.envelopeID != "env-123" || starter.cmd.Text != "new topic" {
+		t.Fatalf("starter=%+v", starter)
+	}
+	if tasks.calls != 0 {
+		t.Fatalf("/new must not also enqueue /issue quick-create work, got %d calls", tasks.calls)
+	}
+	if *captured != slashNewStartedText {
+		t.Fatalf("reply=%q", *captured)
+	}
+}
+
+func TestSlashHandle_NewChannelGuidesToMentionWithoutGuessingThread(t *testing.T) {
+	q := &fakeSlashQueries{
+		inst:    activeSlashInstallation(),
+		binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
+	}
+	p, captured, _ := newTestSlashProcessor(q, &fakeQuickCreate{}, &fakeBindingMinter{})
+	starter := &fakeSlashControlStarter{}
+	p.control = starter
+	cmd := issueSlashCmd()
+	cmd.Command, cmd.ChannelID = "/new", "C1"
+	p.HandleEnvelope(context.Background(), cmd, "env-123")
+	if starter.newCalls != 0 || starter.clearCalls != 0 {
+		t.Fatal("channel slash command must not rotate a guessed route")
+	}
+	if *captured != slashNewThreadGuideText {
+		t.Fatalf("reply=%q", *captured)
+	}
+}
+
+func TestSlashHandle_ClearDMUsesSharedStarterAndEnvelopeDedup(t *testing.T) {
+	q := &fakeSlashQueries{inst: activeSlashInstallation(), binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)}}
+	p, captured, _ := newTestSlashProcessor(q, &fakeQuickCreate{}, &fakeBindingMinter{})
+	starter := &fakeSlashControlStarter{}
+	p.control = starter
+	cmd := issueSlashCmd()
+	cmd.Command, cmd.ChannelID, cmd.Text = "/clear", "D1", "start clean"
+	p.HandleEnvelope(context.Background(), cmd, "env-clear-123")
+	if starter.clearCalls != 1 || starter.newCalls != 0 || starter.envelopeID != "env-clear-123" || starter.cmd.Text != "start clean" {
+		t.Fatalf("starter=%+v", starter)
+	}
+	if *captured != slashClearStartedText {
+		t.Fatalf("reply=%q", *captured)
+	}
+}
+
+func TestSlashHandle_ClearChannelGuidesToMentionWithoutGuessingThread(t *testing.T) {
+	q := &fakeSlashQueries{inst: activeSlashInstallation(), binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)}}
+	p, captured, _ := newTestSlashProcessor(q, &fakeQuickCreate{}, &fakeBindingMinter{})
+	starter := &fakeSlashControlStarter{}
+	p.control = starter
+	cmd := issueSlashCmd()
+	cmd.Command, cmd.ChannelID = "/clear", "C1"
+	p.HandleEnvelope(context.Background(), cmd, "env-clear-123")
+	if starter.newCalls != 0 || starter.clearCalls != 0 {
+		t.Fatal("channel slash command must not clear a guessed route")
+	}
+	if *captured != slashClearThreadGuideText {
+		t.Fatalf("reply=%q", *captured)
 	}
 }

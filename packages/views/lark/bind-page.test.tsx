@@ -26,8 +26,11 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("../navigation", () => ({
+// Mock the context module, not the barrel: AppLink stays the real component
+// (the sign-in button renders through it) and reads the mocked adapter.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockNavigatePush }),
+  useOptionalNavigation: () => ({ push: mockNavigatePush }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -60,7 +63,7 @@ describe("LarkBindPage", () => {
     mockAuthState.isLoading = true;
     mockAuthState.user = null;
     renderPage("tok123");
-    expect(screen.getByText(/redeeming binding token/i)).toBeInTheDocument();
+    expect(screen.getByText(/linking your account/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sign in/i })).toBeNull();
   });
 
@@ -95,7 +98,7 @@ describe("LarkBindPage", () => {
     });
     renderPage("tok123");
     await waitFor(() => {
-      expect(screen.getByText(/you're bound/i)).toBeInTheDocument();
+      expect(screen.getByText(/account linked/i)).toBeInTheDocument();
     });
   });
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
@@ -25,6 +27,8 @@ var agentCopyCmd = &cobra.Command{
 
 The source agent is left untouched. By default the copy lands on the same
 runtime as the source; pass --runtime-id to fork it onto a different runtime.
+
+Copied by default without a dedicated override flag: conversation starters.
 
 Copied by default, each overridable with the matching flag: name (suffixed
 " (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
@@ -83,6 +87,15 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 // never read back from the source — GET redacts / masks them anyway — and are
 // set only when supplied explicitly on the command line.
 func runAgentCopy(cmd *cobra.Command, args []string) error {
+	var maxConcurrentTasksOverride *int32
+	if cmd.Flags().Changed("max-concurrent-tasks") {
+		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
+		if err := validateAgentMaxConcurrentTasksFlag(v); err != nil {
+			return err
+		}
+		maxConcurrentTasksOverride = &v
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -139,6 +152,9 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
 	}
+	if conversationStarters, ok := src["conversation_starters"].([]any); ok {
+		body["conversation_starters"] = conversationStarters
+	}
 
 	// Avatar reference travels with the copy (both agents point at the same
 	// uploaded image URL), matching the web Duplicate flow.
@@ -159,12 +175,13 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		body["custom_args"] = ca
 	}
 
-	// max_concurrent_tasks: copy the source's value, override with the flag.
-	if v, ok := src["max_concurrent_tasks"]; ok && v != nil {
-		body["max_concurrent_tasks"] = v
-	}
-	if cmd.Flags().Changed("max-concurrent-tasks") {
-		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
+	// max_concurrent_tasks: a valid source value is portable. Historical rows
+	// may predate the 1-50 invariant; omit those values so create applies its
+	// default instead of turning Duplicate into a 400. An explicit flag is
+	// validated before any API request and remains authoritative.
+	if maxConcurrentTasksOverride != nil {
+		body["max_concurrent_tasks"] = *maxConcurrentTasksOverride
+	} else if v, ok := copiedAgentMaxConcurrentTasks(src["max_concurrent_tasks"]); ok {
 		body["max_concurrent_tasks"] = v
 	}
 
@@ -275,4 +292,15 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Agent copied: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
+}
+
+func copiedAgentMaxConcurrentTasks(value any) (int32, bool) {
+	number, ok := value.(float64)
+	if !ok || number != math.Trunc(number) ||
+		number < float64(agentconfig.MinMaxConcurrentTasks) ||
+		number > float64(agentconfig.MaxMaxConcurrentTasks) {
+		return 0, false
+	}
+	value32 := int32(number)
+	return value32, agentconfig.IsValidMaxConcurrentTasks(value32)
 }

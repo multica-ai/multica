@@ -1,9 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import { chatKeys, sortChatSessions } from "./queries";
+import { chatKeys, sortChatSessions, QUICK_ACTIONS_PENDING_TIMEOUT_MS } from "./queries";
 import { createLogger } from "../logger";
-import type { ChatSession, ChatPinnedAgent, ChatDraftRestoresResponse } from "../types";
+import type {
+  ChatSession,
+  ChatPinnedAgent,
+  ChatWakeup,
+  ChatWakeupTiming,
+  ChatDraftRestoresResponse,
+  ChatQuickActionsPendingState,
+} from "../types";
 
 const logger = createLogger("chat.mut");
 
@@ -40,6 +47,82 @@ export function useConsumeChatDraftRestore() {
       // Exhausted the retries. The draft is safe (it is in the composer) and the
       // ledger keeps the row from being re-offered; the next mount reconciles it.
       logger.warn("consumeChatDraftRestore.error", { sessionId, restoreId, err });
+    },
+  });
+}
+
+/**
+ * Cancel a wakeup an agent created in this conversation. Optimistically drops
+ * it from the active set; chat:wakeup_changed then brings back the ended row.
+ */
+export function useCancelChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.cancelChatWakeup(sessionId, wakeupId),
+    onMutate: async ({ sessionId, wakeupId }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      const prev = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      qc.setQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId), (old) =>
+        old?.map((w) =>
+          w.id === wakeupId
+            ? { ...w, status: "cancelled", end_reason: "cancelled_by_user", ended_at: new Date().toISOString() }
+            : w,
+        ),
+      );
+      return { prev };
+    },
+    onError: (err, { sessionId }, ctx) => {
+      logger.warn("cancelChatWakeup.error", { sessionId, err });
+      if (ctx?.prev) qc.setQueryData(chatKeys.wakeups(sessionId), ctx.prev);
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+/**
+ * Change when an active wakeup runs. Not optimistic: the server applies the
+ * limits, and chat:wakeup_changed plus the refetch bring the new timing.
+ */
+export function useRescheduleChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId, timing }: { sessionId: string; wakeupId: string; timing: ChatWakeupTiming }) =>
+      api.rescheduleChatWakeup(sessionId, wakeupId, timing),
+    onError: (err, { sessionId }) => {
+      logger.warn("rescheduleChatWakeup.error", { sessionId, err });
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+/**
+ * Re-run a wakeup whose report turn failed. The new turn arrives through
+ * chat:wakeup_changed like any other wakeup turn.
+ */
+export function useRetryChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.retryChatWakeup(sessionId, wakeupId),
+    onError: (err, { sessionId }) => {
+      logger.warn("retryChatWakeup.error", { sessionId, err });
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
     },
   });
 }
@@ -150,6 +233,60 @@ export function useMarkChatSessionRead() {
     onError: (err, sessionId, ctx) => {
       logger.error("markChatSessionRead.error.rollback", { sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+class MarkChatSessionsReadError extends Error {
+  constructor(readonly failedIds: string[], total: number) {
+    super(`failed to mark ${failedIds.length} of ${total} chats read`);
+  }
+}
+
+/**
+ * Clears unread on every chat session that has any, one read per session (the
+ * server has no bulk read, and each read broadcasts its own chat:session_read
+ * to other devices). All rows drop to 0 optimistically; if any read fails the
+ * mutation rejects and only the failed rows get their unread back, so the
+ * badge stays right even when the follow-up refetch fails too.
+ */
+export function useMarkAllChatSessionsRead() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: async (sessionIds: string[]) => {
+      logger.info("markAllChatSessionsRead.start", { count: sessionIds.length });
+      const results = await Promise.allSettled(sessionIds.map((id) => api.markChatSessionRead(id)));
+      const failedIds = sessionIds.filter((_, i) => results[i]!.status === "rejected");
+      if (failedIds.length > 0) throw new MarkChatSessionsReadError(failedIds, sessionIds.length);
+    },
+    onMutate: async (sessionIds) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const ids = new Set(sessionIds);
+      const prevUnread = new Map<string, Pick<ChatSession, "has_unread" | "unread_count">>();
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          if (!ids.has(s.id)) return s;
+          prevUnread.set(s.id, { has_unread: s.has_unread, unread_count: s.unread_count });
+          return { ...s, has_unread: false, unread_count: 0 };
+        }),
+      );
+      return { prevUnread };
+    },
+    onError: (err, sessionIds, ctx) => {
+      logger.error("markAllChatSessionsRead.error.rollback", { err });
+      if (!ctx) return;
+      const failed = new Set(err instanceof MarkChatSessionsReadError ? err.failedIds : sessionIds);
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          const prev = failed.has(s.id) ? ctx.prevUnread.get(s.id) : undefined;
+          return prev ? { ...s, ...prev } : s;
+        }),
+      );
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
@@ -364,6 +501,51 @@ export function useDeleteChatSession() {
     onSettled: (_data, _err, sessionId) => {
       logger.debug("deleteChatSession.settled", { sessionId });
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
+ * Refresh the quick-action suggestions for a session's latest assistant turn
+ * (MUL-5149). Optimistically raises the pending marker for that turn — its pills
+ * go inert and the refresh icon spins — and rolls it back on failure. The
+ * refreshed pills arrive over the chat:quick_actions realtime event, which
+ * clears the marker (applyChatQuickActionsToCache). Never retried: a refresh is
+ * an explicit, quota-spending user action.
+ */
+export function useRegenerateChatQuickActions() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, messageId }: { sessionId: string; messageId: string }) =>
+      api.regenerateChatQuickActions(sessionId, messageId),
+    onMutate: ({ sessionId, messageId }) => {
+      const previous = qc.getQueryData<ChatQuickActionsPendingState | null>(
+        chatKeys.quickActionsPending(sessionId),
+      );
+      // The server confirms messageId IS the latest turn (else 409 → onError
+      // rollback), so the marker's message_id is guaranteed to match the
+      // chat:quick_actions that resolves it — no ack reconciliation needed.
+      // task_id is unknown here and unused for resolution (applyChatQuickActionsToCache
+      // matches on message_id).
+      qc.setQueryData<ChatQuickActionsPendingState | null>(
+        chatKeys.quickActionsPending(sessionId),
+        {
+          message_id: messageId,
+          task_id: "",
+          expires_at: Date.now() + QUICK_ACTIONS_PENDING_TIMEOUT_MS,
+        },
+      );
+      return { previous, sessionId };
+    },
+    onError: (error, _vars, ctx) => {
+      logger.error("regenerateChatQuickActions.error", { error });
+      if (ctx) {
+        qc.setQueryData<ChatQuickActionsPendingState | null>(
+          chatKeys.quickActionsPending(ctx.sessionId),
+          ctx.previous ?? null,
+        );
+      }
     },
   });
 }

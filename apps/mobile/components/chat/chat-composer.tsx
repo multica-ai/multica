@@ -9,6 +9,10 @@
  *     session, `sending` flips true and we replace the Send button slot
  *     with a Stop affordance (filled foreground bg + stop glyph). Tap →
  *     `onStop()` cancels the in-flight task.
+ *   - **Send during a reply**: when the server accepts follow-ups
+ *     (`allowSendWhileSending`), typed content swaps Stop for Send, which
+ *     asks to add the message to the running reply, plus a Queue action
+ *     for the next turn. Mirrors web's ChatInput action slot.
  *   - **Mention picker mode=chat**: chat is user ↔ single agent so
  *     @member / @agent / @squad / @all are noise + would notify the
  *     wrong people. Picker route honors `?mode=chat` and surfaces only
@@ -29,12 +33,12 @@
 import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { MessageComposer } from "@/components/composer/message-composer";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   /** Current draft text (controlled). Empty string = no draft. */
@@ -44,12 +48,21 @@ interface Props {
   /** Send the serialised markdown content + the completed attachments'
    *  server ids. Caller resets the input by setting `value=""` after a
    *  successful send. */
-  onSend: (content: string, attachmentIds: string[]) => Promise<void> | void;
+  onSend: (
+    content: string,
+    attachmentIds: string[],
+    options?: { queue?: boolean },
+  ) => Promise<void> | void;
   /** Cancel the in-flight agent task. Only callable while `sending===true`. */
   onStop: () => void;
   /** True while an agent task is running for the active session. The
    *  composer swaps Send for Stop. */
   sending: boolean;
+  /** Queued tasks remain busy, but do not expose Stop without draft restore. */
+  allowStop?: boolean;
+  /** The server accepts sends while `sending` (queue-capable). Older
+   *  servers keep the composer stop-only during a run. */
+  allowSendWhileSending?: boolean;
   /** Hard-disable typing + send. Used when there's no usable agent in the
    *  workspace or the session is archived (legacy). */
   disabled?: boolean;
@@ -65,22 +78,27 @@ export function ChatComposer({
   onSend,
   onStop,
   sending,
+  allowStop = true,
+  allowSendWhileSending = false,
   disabled = false,
   disabledReason,
 }: Props) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("chat");
 
   const onSubmit = useCallback(
     async ({
       content,
       attachmentIds,
+      queue,
     }: {
       content: string;
       attachmentIds: string[];
+      queue: boolean;
     }) => {
       // `onSend` may be sync or async; await is safe in both cases. If it
       // throws, MessageComposer's catch restores text + chips.
-      await onSend(content, attachmentIds);
+      await onSend(content, attachmentIds, queue ? { queue: true } : undefined);
     },
     [onSend],
   );
@@ -101,19 +119,25 @@ export function ChatComposer({
         pathname: "/[workspace]/mention-picker",
         params: { workspace: wsSlug ?? "", mode: "chat" },
       }}
-      placeholder={sending ? "Agent is working…" : "Message…"}
+      placeholder={
+        sending && !allowSendWhileSending
+          ? t("composer.working")
+          : t("composer.message")
+      }
       pillLabel={
         sending
-          ? "Agent is working…"
+          ? t("composer.working")
           : disabled
-            ? (disabledReason ?? "Chat unavailable")
-            : "Message…"
+            ? (disabledReason ?? t("composer.unavailable"))
+            : t("composer.message")
       }
       pillIcon="chatbubble-ellipses-outline"
       disabled={disabled}
       disabledReason={disabledReason}
       isSending={sending}
-      renderStop={() => <StopButton onPress={handleStop} />}
+      renderStop={allowStop ? () => <StopButton onPress={handleStop} /> : undefined}
+      allowSubmitWhileSending={allowSendWhileSending}
+      queueAction={{ accessibilityLabel: t("composer.queue") }}
       manageKeyboard={false}
     />
   );
@@ -121,6 +145,7 @@ export function ChatComposer({
 
 function StopButton({ onPress }: { onPress: () => void }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useT("chat");
   const theme = THEME[colorScheme];
   return (
     <Animated.View
@@ -133,7 +158,7 @@ function StopButton({ onPress }: { onPress: () => void }) {
         className="h-8 w-8 items-center justify-center rounded-full bg-foreground active:opacity-80"
         hitSlop={12}
         accessibilityRole="button"
-        accessibilityLabel="Stop agent"
+        accessibilityLabel={t("composer.stop_agent")}
       >
         <View
           style={{

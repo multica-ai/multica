@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check } from "@multica/ui/icons";
 import {
   Popover,
   PopoverTrigger,
@@ -12,11 +12,21 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
+/**
+ * Marks the fixed empty-value row ("No project", "Unassigned", …). The row is
+ * pinned first for the eye, but it is not a search result — typing a query and
+ * pressing Enter must commit the first real match, never clear the field.
+ */
+const EMPTY_ITEM_ATTR = "data-picker-empty";
+
+const isEmptyItem = (el: HTMLButtonElement | undefined) =>
+  el?.hasAttribute(EMPTY_ITEM_ATTR) === true;
 
 /**
  * Default class of the picker popover trigger. Shared with the deferred
@@ -24,17 +34,16 @@ const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
  * first interaction is pixel-identical.
  */
 export const PICKER_TRIGGER_CLASS =
-  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+  "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
-// ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
-// ---------------------------------------------------------------------------
 
 export function PropertyPicker({
   open,
   onOpenChange,
   trigger,
   triggerRender,
+  nativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -50,6 +59,8 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** False when a compound trigger renders a non-button element. */
+  nativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -74,85 +85,15 @@ export function PropertyPicker({
    */
   footer?: React.ReactNode;
 }) {
-  const { t } = useT("issues");
-  const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
-  const filterAria = t(($) => $.pickers.filter_options_aria);
-  const [query, setQuery] = useState("");
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [tooltipHover, setTooltipHover] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
   // Show the tooltip only while the trigger is hovered AND the popover is
   // closed — avoids the awkward state where the tooltip floats next to (or
   // on top of) the popover that just opened on click.
   const tooltipOpen = !!tooltip && tooltipHover && !open;
 
-  const getItems = useCallback(() => {
-    if (!listRef.current) return [];
-    return Array.from(
-      listRef.current.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR),
-    );
-  }, []);
-
-  // Apply/remove highlight class via DOM when index changes
-  useEffect(() => {
-    const items = getItems();
-    for (const item of items) {
-      item.classList.remove(HIGHLIGHT_CLASS);
-    }
-    if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-      items[highlightedIndex]?.classList.add(HIGHLIGHT_CLASS);
-    }
-  }, [highlightedIndex, getItems, children]); // re-run when children change (filtered list updates)
-
-  const handleOpenChange = useCallback(
-    (v: boolean) => {
-      onOpenChange(v);
-      if (!v) {
-        setQuery("");
-        setHighlightedIndex(-1);
-        onSearchChange?.("");
-      }
-    },
-    [onOpenChange, onSearchChange],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      // IME is composing — Enter/Arrow belong to the IME (Enter commits
-      // composition; Arrow rotates candidates). Don't hijack them.
-      if (isImeComposing(e)) return;
-      const items = getItems();
-      if (items.length === 0) return;
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setHighlightedIndex((prev) => {
-          const next = prev < items.length - 1 ? prev + 1 : 0;
-          items[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setHighlightedIndex((prev) => {
-          const next = prev > 0 ? prev - 1 : items.length - 1;
-          items[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-          items[highlightedIndex]?.click();
-        } else if (items.length === 1) {
-          // Auto-select when only one result
-          items[0]?.click();
-        }
-      }
-    },
-    [getItems, highlightedIndex],
-  );
-
   const popoverTrigger = (
     <PopoverTrigger
+      nativeButton={nativeButton}
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >
@@ -161,7 +102,7 @@ export function PropertyPicker({
   );
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {tooltip ? (
         <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
           <TooltipTrigger render={popoverTrigger} />
@@ -171,34 +112,160 @@ export function PropertyPicker({
         popoverTrigger
       )}
       <PopoverContent align={align} side={side} className={`${width} gap-0 p-0`}>
-        {searchable && (
-          <div className="px-2 py-1.5 border-b">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setHighlightedIndex(0);
-                onSearchChange?.(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              aria-label={filterAria}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-            />
-          </div>
-        )}
-        {header && <div className="border-b">{header}</div>}
-        <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
-        {footer && <div className="border-t p-1">{footer}</div>}
+        <PickerPanel
+          open={open}
+          searchable={searchable}
+          searchPlaceholder={searchPlaceholder}
+          onSearchChange={onSearchChange}
+          header={header}
+          footer={footer}
+        >
+          {children}
+        </PickerPanel>
       </PopoverContent>
     </Popover>
   );
 }
 
-// ---------------------------------------------------------------------------
+// PickerPanel — a picker's search box and keyboard-navigable list, without
+// the popover. PropertyPicker wraps it; menus host it in a submenu.
+
+export function PickerPanel({
+  open = true,
+  searchable = false,
+  searchPlaceholder,
+  onSearchChange,
+  autoFocusSearch = false,
+  header,
+  children,
+  footer,
+}: {
+  /** The surrounding surface's open state; closing it resets the search. */
+  open?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string | undefined;
+  onSearchChange?: (query: string) => void;
+  /** Focus the search box on mount. A popover moves focus in by itself; a
+   *  submenu does not. */
+  autoFocusSearch?: boolean;
+  header?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  const { t } = useT("issues");
+  const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
+  const filterAria = t(($) => $.pickers.filter_options_aria);
+  const [query, setQuery] = useState("");
+  // The highlighted row itself, not its position: rows that load late (the
+  // assignee picker's Recent group) can insert above it, and Enter must still
+  // commit the row the user sees highlighted.
+  const [highlighted, setHighlighted] = useState<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const getItems = useCallback(() => {
+    if (!listRef.current) return [];
+    return Array.from(
+      listRef.current.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR),
+    );
+  }, []);
+
+  // Typing re-highlights the first *real* match. The row can't be resolved
+  // in the input's onChange handler — the filtered list hasn't rendered yet —
+  // so the keystroke raises a flag and this effect resolves it against the
+  // fresh DOM. Guarding on the flag keeps arrow keys free to walk back onto
+  // the empty row: only a keystroke moves the highlight off it.
+  const pendingSearchHighlight = useRef(false);
+  useEffect(() => {
+    if (!pendingSearchHighlight.current) return;
+    pendingSearchHighlight.current = false;
+    // None when the query matches nothing (only the empty row is left), which
+    // leaves Enter inert instead of clearing the field.
+    setHighlighted(getItems().find((item) => !isEmptyItem(item)) ?? null);
+  }, [children, getItems]);
+
+  // Apply/remove highlight class via DOM. A highlighted row that left the list
+  // simply stops matching, so it is neither painted nor committed.
+  useEffect(() => {
+    for (const item of getItems()) {
+      item.classList.toggle(HIGHLIGHT_CLASS, item === highlighted);
+    }
+  }, [highlighted, getItems, children]); // re-run when children change (filtered list updates)
+
+  // Reset the search state on the open -> closed transition rather than inside
+  // an open-change handler. Every picker closes itself after a selection by
+  // calling its own `setOpen(false)`, which flips this `open` prop directly and
+  // never routes through the popover's `onOpenChange` — so a handler-only reset
+  // left the stale query (and the filtered list) in place on the next open.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      setQuery("");
+      setHighlighted(null);
+      onSearchChange?.("");
+    }
+    wasOpen.current = open;
+  }, [open, onSearchChange]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // IME is composing — Enter/Arrow belong to the IME (Enter commits
+      // composition; Arrow rotates candidates). Don't hijack them.
+      if (isImeComposing(e)) return;
+      const items = getItems();
+      if (items.length === 0) return;
+
+      const current = highlighted ? items.indexOf(highlighted) : -1;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next =
+          e.key === "ArrowDown"
+            ? current < items.length - 1 ? current + 1 : 0
+            : current > 0 ? current - 1 : items.length - 1;
+        items[next]?.scrollIntoView({ block: "nearest" });
+        setHighlighted(items[next] ?? null);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (current >= 0) {
+          items[current]?.click();
+        } else if (items.length === 1 && !isEmptyItem(items[0])) {
+          // Auto-select when only one result. The empty row is excluded: a
+          // query with no matches leaves it as the sole item, and Enter there
+          // would clear the field the user was trying to search in.
+          items[0]?.click();
+        }
+      }
+    },
+    [getItems, highlighted],
+  );
+
+  return (
+    <>
+      {searchable && (
+        <div className="px-2 py-1.5 border-b">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              pendingSearchHighlight.current = true;
+              onSearchChange?.(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            aria-label={filterAria}
+            autoFocus={autoFocusSearch}
+            className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
+          />
+        </div>
+      )}
+      {header && <div className="border-b">{header}</div>}
+      <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
+      {footer && <div className="border-t p-1">{footer}</div>}
+    </>
+  );
+}
+
 // PickerItem — single selectable row
-// ---------------------------------------------------------------------------
 
 export function PickerItem({
   selected,
@@ -206,26 +273,43 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  truncationTooltip,
+  emptyValue = false,
   children,
 }: {
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
   hoverClassName?: string;
+  /**
+   * Marks this row as the field's fixed empty value ("No project",
+   * "Unassigned", "No stage"). Such a row is pinned first for the eye but
+   * excluded from search-result keyboard defaults, so typing a query and
+   * pressing Enter commits the first real match instead of clearing the
+   * field. Arrow keys can still reach it. Set this on rows that write
+   * null/undefined — not on a real enum member that happens to read as
+   * "none" (issue priority), which is a value like any other.
+   */
+  emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
-   *  a single line. Wrapped in a real Tooltip component (200ms delay,
+   *  a single line. Wrapped in a real Tooltip component (shared delay,
    *  styled), not a native `title` attribute. */
   tooltip?: React.ReactNode;
+  /** Full text of a row label that may be cut off. Unlike `tooltip`, it only
+   *  opens when the row's content is actually truncated, so short labels
+   *  don't pop a bubble that repeats them. Ignored when `tooltip` is set. */
+  truncationTooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const button = (
     <button
       type="button"
       data-picker-item
+      {...(emptyValue ? { [EMPTY_ITEM_ATTR]: "" } : {})}
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off
@@ -242,7 +326,10 @@ export function PickerItem({
     </button>
   );
 
-  if (!tooltip) return button;
+  if (!tooltip) {
+    if (!truncationTooltip) return button;
+    return <TruncatedTooltip content={truncationTooltip}>{button}</TruncatedTooltip>;
+  }
 
   return (
     <Tooltip>
@@ -252,9 +339,7 @@ export function PickerItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerSection — group header
-// ---------------------------------------------------------------------------
 
 export function PickerSection({
   label,
@@ -265,7 +350,7 @@ export function PickerSection({
 }) {
   return (
     <div>
-      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
       {children}
@@ -273,14 +358,12 @@ export function PickerSection({
   );
 }
 
-// ---------------------------------------------------------------------------
 // PickerEmpty — no results state
-// ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
   const { t } = useT("issues");
   return (
-    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+    <div className="px-2 py-3 text-center text-body text-muted-foreground">
       {t(($) => $.pickers.no_results)}
     </div>
   );

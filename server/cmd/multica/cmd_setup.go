@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -101,13 +104,9 @@ func printConfigLocation(profile string) {
 // config so the user can see the passed flags/env were received rather than
 // silently ignored. Returns true if we should proceed, false if the user
 // declined.
-func confirmOverwrite(profile, newServerURL, newAppURL string) (bool, error) {
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return true, nil // can't load → treat as no config
-	}
+func confirmOverwrite(cfg cli.CLIConfig, newServerURL, newAppURL string) bool {
 	if cfg.ServerURL == "" {
-		return true, nil // no server configured → fresh config
+		return true // no server configured → fresh config
 	}
 
 	fmt.Fprintln(os.Stderr, "Current configuration:")
@@ -117,16 +116,20 @@ func confirmOverwrite(profile, newServerURL, newAppURL string) (bool, error) {
 		fmt.Fprintf(os.Stderr, "  workspace:  %s\n", cfg.WorkspaceID)
 	}
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprint(os.Stderr, "This will reset your configuration. Continue? [y/N] ")
+	if sameSetupBackend(cfg.ServerURL, newServerURL) {
+		fmt.Fprint(os.Stderr, "Keep the existing local settings and sign in again? [y/N] ")
+	} else {
+		fmt.Fprint(os.Stderr, "This will reset your configuration. Continue? [y/N] ")
+	}
 
 	reader := bufio.NewReader(os.Stdin)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
 	if answer != "y" && answer != "yes" {
 		fmt.Fprintln(os.Stderr, "Aborted.")
-		return false, nil
+		return false
 	}
-	return true, nil
+	return true
 }
 
 // formatURLChange renders "old -> new" when setup is about to change the value,
@@ -139,6 +142,9 @@ func formatURLChange(oldVal, newVal string) string {
 }
 
 func runSetupCloud(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("setup"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 
 	cfg := cli.CLIConfig{
@@ -146,15 +152,15 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		AppURL:    defaultCloudAppURL,
 	}
 
-	ok, err := confirmOverwrite(profile, cfg.ServerURL, cfg.AppURL)
+	existing, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
-		return err
+		return fmt.Errorf("read existing profile: %w", err)
 	}
-	if !ok {
+	if !confirmOverwrite(existing, cfg.ServerURL, cfg.AppURL) {
 		return nil
 	}
 
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := saveSetupTarget(profile, cfg.ServerURL, cfg.AppURL, existing); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
@@ -169,9 +175,8 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
-	if err := runDaemonBackground(cmd); err != nil {
-		return fmt.Errorf("start daemon: %w", err)
+	if err := runDaemonAfterSetup(cmd, args); err != nil {
+		return fmt.Errorf("start or restart daemon: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
@@ -179,6 +184,9 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 }
 
 func runSetupSelfHost(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("setup"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 
 	// Resolve the target URLs before confirming the overwrite so the prompt can
@@ -191,7 +199,10 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	// Before this, setup self-host read only the flags, so a self-hoster who set
 	// MULTICA_SERVER_URL still got the localhost default and an "unreachable"
 	// error (GitHub #3912).
-	existing, _ := cli.LoadCLIConfigForProfile(profile)
+	existing, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return fmt.Errorf("read existing profile: %w", err)
+	}
 	serverURL, userProvidedServerURL := resolveSelfHostServerURL(cmd, existing)
 	appURL := resolveSelfHostAppURL(cmd, existing)
 	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
@@ -214,26 +225,27 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ok, err := confirmOverwrite(profile, serverURL, appURL)
-	if err != nil {
-		return err
-	}
-	if !ok {
+	if !confirmOverwrite(existing, serverURL, appURL) {
 		return nil
 	}
 
-	// Probe before persisting anything. A failed setup must never overwrite a
-	// working config or wipe the saved token: persistSelfHostConfigIfReachable
-	// writes only when the server answers, so an unreachable host leaves the
-	// existing config untouched and the user stays logged in.
-	reachable, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
+	// Verify backend health before writing so a failed setup preserves the profile.
+	probeResult, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, existing, probeServer)
 	if err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	if !reachable {
-		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+	if !probeResult.healthy {
+		switch probeResult.statusCode {
+		case 0:
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+		case http.StatusOK:
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s did not return a healthy Multica backend response.\n", serverURL)
+			fmt.Fprintln(os.Stderr, "  A login gateway may be intercepting the request to /health.")
+		default:
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s returned HTTP %d (%s) from /health.\n", serverURL, probeResult.statusCode, http.StatusText(probeResult.statusCode))
+		}
 		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
-		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once it's reachable.")
+		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once the backend is healthy.")
 		return nil
 	}
 
@@ -248,34 +260,122 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
-	if err := runDaemonBackground(cmd); err != nil {
-		return fmt.Errorf("start daemon: %w", err)
+	if err := runDaemonAfterSetup(cmd, args); err != nil {
+		return fmt.Errorf("start or restart daemon: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
 	return nil
 }
 
-// persistSelfHostConfigIfReachable probes serverURL and, only when it answers,
-// overwrites the profile config with the given self-host URLs. When the server
-// is unreachable it leaves any existing config — and its auth token — untouched
-// and returns false, so a failed `setup self-host` never logs the user out or
-// clobbers a working config (the original ordering saved first, then probed,
-// then bailed — wiping the token on every failed probe). The prober is injected
-// so tests can exercise both branches without real network I/O.
-func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) bool) (bool, error) {
-	if !probe(serverURL) {
-		return false, nil
+// runDaemonAfterSetup makes the freshly authenticated profile effective in
+// the daemon process. A daemon reads its server URL and token only at startup,
+// so merely overwriting config.json while one is already running leaves it
+// connected to the previous deployment. Restart that profile when needed;
+// otherwise perform the normal first start.
+func runDaemonAfterSetup(cmd *cobra.Command, args []string) error {
+	profile := resolveProfile(cmd)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, resolveHealthPort(profile))
+
+	return dispatchDaemonAfterSetup(
+		cmd,
+		args,
+		health,
+		func(cmd *cobra.Command, _ []string) error {
+			return runDaemonBackground(cmd)
+		},
+		runDaemonRestart,
+	)
+}
+
+type setupDaemonRunner func(*cobra.Command, []string) error
+
+func dispatchDaemonAfterSetup(
+	cmd *cobra.Command,
+	args []string,
+	health map[string]any,
+	start setupDaemonRunner,
+	restart setupDaemonRunner,
+) error {
+	if daemonAlive(health) {
+		if activeTasks := daemonActiveTaskCount(health); activeTasks > 0 {
+			taskLabel := "tasks"
+			if activeTasks == 1 {
+				taskLabel = "task"
+			}
+			restartCmd := "multica daemon restart"
+			if profile := resolveProfile(cmd); profile != "" {
+				restartCmd += " --profile " + profile
+			}
+			return fmt.Errorf(
+				"daemon has %d active %s; setup saved the new configuration but left the running daemon unchanged to avoid cancelling work. Wait for the active work to finish, then run '%s' to apply the new configuration",
+				activeTasks,
+				taskLabel,
+				restartCmd,
+			)
+		}
+		fmt.Fprintln(os.Stderr, "\nRestarting daemon to apply the new configuration...")
+		return restart(cmd, args)
 	}
-	cfg := cli.CLIConfig{
-		ServerURL: serverURL,
-		AppURL:    appURL,
+
+	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
+	return start(cmd, args)
+}
+
+func daemonActiveTaskCount(health map[string]any) int64 {
+	switch count := health["active_task_count"].(type) {
+	case float64:
+		return int64(count)
+	case int:
+		return int64(count)
+	case int64:
+		return count
+	default:
+		return 0
 	}
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		return false, err
+}
+
+// persistSelfHostConfigIfReachable writes the self-host URLs only after a
+// healthy Multica response, preserving the existing profile on probe failure.
+func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, expected cli.CLIConfig, probe func(string) serverProbeResult) (serverProbeResult, error) {
+	result := probe(serverURL)
+	if !result.healthy {
+		return result, nil
 	}
-	return true, nil
+	if err := saveSetupTarget(profile, serverURL, appURL, expected); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// Only trailing slashes are cosmetic when deciding whether local settings
+// belong to the same backend.
+func sameSetupBackend(old, next string) bool {
+	return old != "" && strings.TrimRight(old, "/") == strings.TrimRight(next, "/")
+}
+
+func saveSetupTarget(profile, serverURL, appURL string, expected cli.CLIConfig) error {
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	// The prompt and health request can both outlive another writer. Never
+	// apply an overwrite approved for an earlier version of the profile.
+	if !reflect.DeepEqual(cfg, expected) {
+		return fmt.Errorf("profile changed during setup; rerun setup")
+	}
+	if sameSetupBackend(cfg.ServerURL, serverURL) {
+		if strings.TrimRight(cfg.AppURL, "/") == strings.TrimRight(appURL, "/") && cfg.Token == "" && cfg.WorkspaceID == "" {
+			return nil
+		}
+	} else {
+		cfg = cli.CLIConfig{}
+	}
+	cfg.Token, cfg.WorkspaceID = "", ""
+	cfg.ServerURL, cfg.AppURL = serverURL, appURL
+	return cli.SaveCLIConfigForProfile(cfg, profile)
 }
 
 // resolveSelfHostServerURL picks the backend URL for `setup self-host`: the
@@ -363,21 +463,44 @@ func promptAppURL(serverURL string) (string, error) {
 	return strings.TrimRight(strings.TrimSpace(line), "/"), nil
 }
 
-// probeServer checks whether a Multica backend is reachable at the given URL.
-func probeServer(baseURL string) bool {
+type serverProbeResult struct {
+	statusCode int
+	healthy    bool
+}
+
+const maxServerHealthResponseBytes = 4 * 1024
+
+// probeServer requires a healthy Multica payload, including after redirects.
+func probeServer(baseURL string) serverProbeResult {
 	url := strings.TrimRight(baseURL, "/") + "/health"
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return false
+		return serverProbeResult{}
 	}
 
 	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
 	if err != nil {
-		return false
+		return serverProbeResult{}
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	result := serverProbeResult{statusCode: resp.StatusCode}
+	if resp.StatusCode != http.StatusOK {
+		return result
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxServerHealthResponseBytes+1))
+	if err != nil || len(body) > maxServerHealthResponseBytes {
+		return result
+	}
+	var health struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil || health.Status != "ok" {
+		return result
+	}
+	result.healthy = true
+	return result
 }

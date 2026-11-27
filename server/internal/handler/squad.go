@@ -3,17 +3,22 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -25,6 +30,7 @@ type SquadResponse struct {
 	Name          string                       `json:"name"`
 	Description   string                       `json:"description"`
 	Instructions  string                       `json:"instructions"`
+	HandoffMode   string                       `json:"handoff_mode"`
 	AvatarURL     *string                      `json:"avatar_url"`
 	LeaderID      string                       `json:"leader_id"`
 	CreatorID     string                       `json:"creator_id"`
@@ -58,14 +64,15 @@ type SquadMemberResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func squadToResponse(s db.Squad) SquadResponse {
+func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 	return SquadResponse{
 		ID:            uuidToString(s.ID),
 		WorkspaceID:   uuidToString(s.WorkspaceID),
 		Name:          s.Name,
 		Description:   s.Description,
 		Instructions:  s.Instructions,
-		AvatarURL:     textToPtr(s.AvatarUrl),
+		HandoffMode:   s.HandoffMode,
+		AvatarURL:     h.resolveAvatarURLPtr(textToPtr(s.AvatarUrl)),
 		LeaderID:      uuidToString(s.LeaderID),
 		CreatorID:     uuidToString(s.CreatorID),
 		CreatedAt:     timestampToString(s.CreatedAt),
@@ -175,7 +182,7 @@ func (h *Handler) loadSquadMemberSummary(ctx context.Context, squadID pgtype.UUI
 }
 
 func (h *Handler) squadToResponseWithPreview(ctx context.Context, squad db.Squad) (SquadResponse, error) {
-	resp := squadToResponse(squad)
+	resp := h.squadToResponse(squad)
 	summary, err := h.loadSquadMemberSummary(ctx, squad.ID)
 	if err != nil {
 		return resp, err
@@ -216,10 +223,37 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]SquadResponse, len(squads))
 	for i, s := range squads {
-		resp[i] = squadToResponse(s)
+		resp[i] = h.squadToResponse(s)
 		applySquadMemberSummary(&resp[i], summaries[uuidToString(s.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListInvolvedSquadIDs returns the ids of the squads whose issues count as the
+// caller's agents' work, so clients can evaluate the "my agents" relation on
+// rows they filter themselves.
+func (h *Handler) ListInvolvedSquadIDs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "workspaceId"), "workspace_id")
+	if !ok {
+		return
+	}
+	ids, err := h.Queries.ListInvolvedSquadIDs(r.Context(), db.ListInvolvedSquadIDsParams{
+		WorkspaceID: wsUUID,
+		UserID:      parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list involved squads")
+		return
+	}
+	squadIDs := make([]string, len(ids))
+	for i, id := range ids {
+		squadIDs[i] = uuidToString(id)
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"squad_ids": squadIDs})
 }
 
 func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +312,11 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 
 	avatarURL := pgtype.Text{}
 	if req.AvatarURL != nil {
-		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, "")
+		if !ok {
+			return
+		}
+		avatarURL = pgtype.Text{String: accepted, Valid: true}
 	}
 
 	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
@@ -354,11 +392,16 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		Name         *string `json:"name"`
 		Description  *string `json:"description"`
 		Instructions *string `json:"instructions"`
+		HandoffMode  *string `json:"handoff_mode"`
 		LeaderID     *string `json:"leader_id"`
 		AvatarURL    *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -372,17 +415,53 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
 	}
-	if req.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+	if req.HandoffMode != nil {
+		if !service.IsValidSquadHandoffMode(*req.HandoffMode) {
+			writeError(w, http.StatusBadRequest, "handoff_mode must be 'leader' or 'direct'")
+			return
+		}
+		params.HandoffMode = pgtype.Text{String: *req.HandoffMode, Valid: true}
 	}
+	if req.AvatarURL != nil {
+		accepted, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, squad.AvatarUrl.String)
+		if !ok {
+			return
+		}
+		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Autopilot assignment takes FOR SHARE on the squad before locking its
+	// leader Agent. Take the exclusive side in the same order so leader
+	// rotation and active Autopilot saves cannot leave an automation pointing
+	// at an unbound effective Agent.
+	if _, err := qtx.LockSquadForUpdate(r.Context(), db.LockSquadForUpdateParams{
+		ID:          squad.ID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+
+	newLeaderRuntimeBound := true
 	if req.LeaderID != nil {
 		lid, ok := parseUUIDOrBadRequest(w, *req.LeaderID, "leader_id")
 		if !ok {
 			return
 		}
-		// Validate new leader is an agent in workspace.
-		newLeader, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: lid, WorkspaceID: wsUUID,
+		// Stabilize runtime_id through commit. Runtime teardown takes FOR UPDATE
+		// on this row and follows the same Agent→Autopilot lock order, so
+		// whichever operation starts first produces a complete result.
+		newLeader, err := qtx.LockAgentForAutopilotAssignment(r.Context(), db.LockAgentForAutopilotAssignmentParams{
+			ID:          lid,
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
@@ -394,19 +473,39 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Ensure new leader is a squad member; auto-add if not.
-		isMember, _ := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+		isMember, err := qtx.IsSquadMember(r.Context(), db.IsSquadMemberParams{
 			SquadID: squad.ID, MemberType: "agent", MemberID: lid,
 		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
 		if !isMember {
-			h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+			if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 				SquadID: squad.ID, MemberType: "agent", MemberID: lid, Role: "leader",
-			})
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update squad")
+				return
+			}
 		}
 		params.LeaderID = lid
+		newLeaderRuntimeBound = newLeader.RuntimeID.Valid
 	}
 
-	updated, err := h.Queries.UpdateSquad(r.Context(), params)
+	updated, err := qtx.UpdateSquad(r.Context(), params)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update squad")
+		return
+	}
+	var pausedAutopilots []db.Autopilot
+	if req.LeaderID != nil && !newLeaderRuntimeBound {
+		pausedAutopilots, err = qtx.PauseAutopilotsByUnrunnableSquad(r.Context(), squad.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update squad")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update squad")
 		return
 	}
@@ -417,6 +516,11 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
+	for _, autopilot := range pausedAutopilots {
+		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+			"autopilot": autopilotToResponse(autopilot, nil),
+		})
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -462,6 +566,16 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("transfer squad autopilots failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}
 
+	// Workflow steps that hand off to this squad follow it to the leader too.
+	movedWorkflows, err := h.Queries.TransferSquadWorkflowStepsToLeader(r.Context(), db.TransferSquadWorkflowStepsToLeaderParams{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     uuidToString(squad.ID),
+		LeaderID:    uuidToString(squad.LeaderID),
+	})
+	if err != nil {
+		slog.Warn("transfer squad workflow steps failed", "squad_id", uuidToString(squad.ID), "error", err)
+	}
+
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
@@ -477,6 +591,9 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),
 	})
+	if movedWorkflows > 0 {
+		h.publishIssueWorkflowChanged(workspaceID, member, "updated")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -525,6 +642,29 @@ type SquadMemberStatusListResponse struct {
 	Members []SquadMemberStatusResponse `json:"members"`
 }
 
+// deriveRuntimeAvailability owns the shared three-state runtime reachability
+// policy. Agent projections use these values directly; squad presence maps an
+// online runtime to its user-facing "idle" bucket after workload precedence.
+func deriveRuntimeAvailability(
+	runtimeStatus pgtype.Text,
+	lastSeen pgtype.Timestamptz,
+	now time.Time,
+) string {
+	if !runtimeStatus.Valid {
+		return "offline"
+	}
+	if runtimeStatus.String == "online" {
+		return "online"
+	}
+	if !lastSeen.Valid {
+		return "offline"
+	}
+	if now.Sub(lastSeen.Time) < 5*time.Minute {
+		return "unstable"
+	}
+	return "offline"
+}
+
 // deriveSquadMemberStatus collapses runtime + task signals into the five
 // status buckets used by the squad UI. Mirrors the workload+availability
 // split in packages/core/agents/derive-presence.ts: working wins over
@@ -547,35 +687,27 @@ func deriveSquadMemberStatus(
 	archived bool,
 	runtimeStatus pgtype.Text,
 	lastSeen pgtype.Timestamptz,
-	hasActiveTask bool,
+	hasWorkingTask bool,
 	now time.Time,
 ) string {
 	if archived {
 		return "archived"
 	}
-	if hasActiveTask {
+	if hasWorkingTask {
 		return "working"
 	}
-	if !runtimeStatus.Valid {
-		return "offline"
-	}
-	if runtimeStatus.String == "online" {
+	availability := deriveRuntimeAvailability(runtimeStatus, lastSeen, now)
+	if availability == "online" {
 		return "idle"
 	}
-	if !lastSeen.Valid {
-		return "offline"
-	}
-	if now.Sub(lastSeen.Time) < 5*time.Minute {
-		return "unstable"
-	}
-	return "offline"
+	return availability
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived
-// status, the issues each agent member is currently running, and the last
-// observed runtime activity. The endpoint is read-only and inherits the
-// workspace-membership guard from the route middleware — any member of the
-// workspace can read it.
+// status, the issues each agent member is currently running or waiting to run,
+// and the last observed runtime activity. The endpoint is read-only and
+// inherits the workspace-membership guard from the route middleware — any
+// member of the workspace can read it.
 func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) {
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
@@ -588,6 +720,24 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Issues in private projects the caller cannot see (MUL-8472) are left
+	// out of active_issues; the member's working status stays.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(squad.WorkspaceID))
+	if !ok {
+		return
+	}
+	var taskIssueIDs []pgtype.UUID
+	for _, row := range rows {
+		if row.TaskIssueID.Valid {
+			taskIssueIDs = append(taskIssueIDs, row.TaskIssueID)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, taskIssueIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+
 	prefix := h.getIssuePrefix(r.Context(), squad.WorkspaceID)
 	now := time.Now()
 
@@ -597,7 +747,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
 		archived       bool
-		hasActiveTask  bool
+		hasWorkingTask bool
 		runtimeStatus  pgtype.Text
 		runtimeSeenAt  pgtype.Timestamptz
 		latestActiveAt pgtype.Timestamptz
@@ -627,15 +777,17 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		// A dispatched/running task occupies an agent slot even when it
-		// has no associated issue (chat / quick-create tasks set
-		// agent_task_queue.issue_id = NULL). The `working` bucket is
-		// defined by task presence, not by whether we can render an
-		// issue link, so flag the agent here regardless of issue_id.
+		// Keep waiting_local_directory rows available for issue visibility,
+		// but only dispatched/running work drives the `working` bucket. A
+		// working task may have no issue (chat / quick-create), so decide the
+		// bucket independently from whether an issue link can be rendered.
 		if row.TaskID.Valid {
-			entry.hasActiveTask = true
+			if row.TaskStatus.Valid &&
+				(row.TaskStatus.String == "dispatched" || row.TaskStatus.String == "running") {
+				entry.hasWorkingTask = true
+			}
 
-			if row.TaskIssueID.Valid {
+			if _, hide := hiddenIssues[row.TaskIssueID]; row.TaskIssueID.Valid && !hide {
 				brief := SquadActiveIssueBrief{
 					IssueID:    uuidToString(row.TaskIssueID),
 					Identifier: prefix + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
@@ -667,7 +819,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				entry.archived,
 				entry.runtimeStatus,
 				entry.runtimeSeenAt,
-				entry.hasActiveTask,
+				entry.hasWorkingTask,
 				now,
 			)
 			entry.response.Status = &status
@@ -730,12 +882,19 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the member belongs to this workspace.
+	params := db.AddSquadMemberParams{
+		SquadID:    squad.ID,
+		MemberType: req.MemberType,
+		MemberID:   memberUUID,
+		Role:       req.Role,
+	}
+	var sm db.SquadMember
+	var err error
 	if req.MemberType == "agent" {
-		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, lookupErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 			ID: memberUUID, WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if lookupErr != nil {
 			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
 			return
 		}
@@ -746,22 +905,16 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "you can only add an agent you have access to")
 			return
 		}
+		sm, err = h.Queries.AddSquadMember(r.Context(), params)
 	} else {
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-			UserID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		sm, err = h.addHumanSquadMember(r.Context(), wsUUID, params)
+	}
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "member not found in this workspace")
 			return
 		}
-	}
-
-	sm, err := h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
-		SquadID:    squad.ID,
-		MemberType: req.MemberType,
-		MemberID:   memberUUID,
-		Role:       req.Role,
-	})
-	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "member already in squad")
 			return
@@ -774,6 +927,40 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
+}
+
+func (h *Handler) addHumanSquadMember(ctx context.Context, workspaceID pgtype.UUID, params db.AddSquadMemberParams) (db.SquadMember, error) {
+	var empty db.SquadMember
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return empty, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	// Revocation prunes the roster under this lock. Take it before checking
+	// workspace membership so the insert cannot land after the prune.
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+	if _, err := qtx.LockActiveMember(ctx, db.LockActiveMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      params.MemberID,
+	}); err != nil {
+		return empty, err
+	}
+
+	sm, err := qtx.AddSquadMember(ctx, params)
+	if err != nil {
+		return empty, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return empty, err
+	}
+	return sm, nil
 }
 
 func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
@@ -885,6 +1072,17 @@ func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) 
 // RecordSquadLeaderEvaluation records a squad leader's evaluation decision
 // into the unified activity_log. Called by the leader agent via CLI after
 // each trigger to record whether it took action, stayed silent, or failed.
+//
+// The leader-turn check is task-provenance based (is_leader_task + squad_id on
+// the X-Task-ID row), the SAME source the claim path uses to inject the squad
+// briefing and the mandatory-recording instruction. The target issue's own
+// assignee is deliberately NOT consulted: leaders legitimately run on issues
+// that are not squad-assigned. See MUL-6622 / GH #7487.
+//
+// Two authorization gates, in this order: the caller must own the task, and must
+// still be the squad's leader. The first is what makes it safe to quote the
+// task's issue id in an error; the second is what keeps a claim-downgraded run
+// (see the comment at gate 2) from writing a leader verdict.
 func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -905,14 +1103,78 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// The issue must be assigned to a squad.
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		writeError(w, http.StatusBadRequest, "issue is not assigned to a squad")
+	// Authority for "is this run a squad leader turn" is the TASK ROW, not the
+	// target issue's assignee (MUL-6622 / GH #7487). is_leader_task + squad_id
+	// are stamped at enqueue time and are exactly what the claim path keys the
+	// squad briefing and the mandatory-`squad activity` instruction off
+	// (handler/daemon.go, daemon/prompt.go taskIsSquadLeader). Gating this
+	// endpoint on issue.assignee_type == "squad" instead made the recording
+	// call unsatisfiable on the paths where a leader legitimately runs on a
+	// non-squad-assigned issue — a `@squad` mention on an issue owned by a
+	// plain agent, or a leader task bound to a child issue — and because the
+	// no_action instruction forbids substituting a comment, the decision left
+	// no trace at all.
+	//
+	// Check ORDER is load-bearing. Every rejection below the ownership gate may
+	// quote task-derived ids; every rejection above it must not. `GetAgentTask`
+	// is a global lookup by id, so tenant scoping (GetAgentTaskInWorkspace,
+	// which joins the owning agent's workspace) and the "caller owns this task"
+	// gate both come first — otherwise an unrelated task id, probed through an
+	// issue the caller can legitimately read, would echo back a foreign
+	// workspace's issue id.
+	taskID := r.Header.Get("X-Task-ID")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
+	if !ok {
+		return
+	}
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID:          taskUUID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !task.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "task does not belong to issue")
+		return
+	}
+
+	// Security gate 1: the caller must be the agent this task was enqueued for.
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != "agent" || !task.AgentID.Valid || actorID != uuidToString(task.AgentID) {
+		writeError(w, http.StatusForbidden, "only the squad leader agent can record evaluations")
+		return
+	}
+
+	// Past the ownership gate, naming the task's own issue is safe — and useful:
+	// a leader woken by a stage barrier / child-done callback runs on the PARENT
+	// issue, so recording against the child it just read is the common mistake.
+	if uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusBadRequest,
+			"task does not belong to issue; record the evaluation on issue "+uuidToString(task.IssueID)+" (the issue this task is running on)")
+		return
+	}
+	// Narrowing vs. the old behavior: a leader agent running a NON-leader task
+	// on a squad-assigned issue (for example a same-squad worker task) used to
+	// be accepted here. It is rejected now — it is not running as the leader,
+	// and the runtime only mandates this call when taskIsSquadLeader(task).
+	if !task.IsLeaderTask {
+		writeError(w, http.StatusBadRequest, "task is not a squad leader task")
+		return
+	}
+	if !task.SquadID.Valid {
+		// Pre-MUL-3730 rows can be leader tasks without a stamped squad. Log it
+		// rather than failing silently from the operator's point of view.
+		slog.Warn("squad leader evaluation: leader task has no squad_id",
+			append(logger.RequestAttrs(r),
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+			)...)
+		writeError(w, http.StatusBadRequest, "leader task has no squad_id")
 		return
 	}
 
 	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
+		ID:          task.SquadID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
@@ -920,23 +1182,23 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Security: only the squad leader agent can record evaluations.
-	workspaceID := uuidToString(issue.WorkspaceID)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if actorType != "agent" || actorID != uuidToString(squad.LeaderID) {
+	// Security gate 2: the caller must still be this squad's leader.
+	//
+	// `is_leader_task` on the row records the enqueue-time INTENT, which is not
+	// always the role the claim actually delivered: when the leader was swapped
+	// between enqueue and claim, the claim path clears resp.IsLeaderTask and the
+	// run proceeds as an ordinary agent turn, while the row keeps
+	// is_leader_task = true (handler/daemon.go, "claim delivered as a non-leader
+	// task"). Trusting the row alone would let such a downgraded run write a
+	// leader verdict — and, on no_action, suppress its own comment. Until the
+	// delivered role is persisted, the live leader check is the only thing that
+	// distinguishes the two, so it stays.
+	//
+	// Cost of the conservative choice: a leader rotated away MID-run is refused
+	// here. That no longer means silence — the injected rules now tell a leader
+	// whose recording call failed to leave a short comment instead.
+	if actorID != uuidToString(squad.LeaderID) {
 		writeError(w, http.StatusForbidden, "only the squad leader agent can record evaluations")
-		return
-	}
-
-	taskID := r.Header.Get("X-Task-ID")
-	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
-	if !ok {
-		return
-	}
-	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-	if err != nil || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
-		writeError(w, http.StatusBadRequest, "task does not belong to issue")
 		return
 	}
 
@@ -948,12 +1210,17 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 	})
 
 	activity, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     issue.ID,
 		ActorType:   pgtype.Text{String: "agent", Valid: true},
-		ActorID:     squad.LeaderID,
-		Action:      "squad_leader_evaluated",
-		Details:     details,
+		// task.AgentID, not squad.LeaderID: the no_action comment suppression
+		// lookup matches actor_id against task.agent_id
+		// (service.HasSquadLeaderNoActionEvaluationForTask), so this column has
+		// to carry the task's agent for suppression to find the row at all.
+		ActorID: task.AgentID,
+		Action:  "squad_leader_evaluated",
+		Details: details,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record evaluation")
@@ -1028,15 +1295,14 @@ func commentMentionsAnyone(content string) bool {
 // to a squad. Assign and backlog-promotion paths use this directly; comment
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
-// enqueueSquadLeaderTask returns true when it actually enqueued a leader task
-// (so the caller can record a handoff trace only on a real run start).
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
+// It reports whether a leader task was enqueued and, if not, why.
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, workflowHandoff bool) (DispatchStatus, DispatchReasonCode) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return false
+		return DispatchBlocked, ReasonTargetUnavailable
 	}
 
 	// The gate must judge the SAME top-of-chain human the enqueue path will
@@ -1056,32 +1322,99 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID)) {
-		return false
+		return DispatchBlocked, ReasonInvocationNotAllowed
 	}
 
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: squad.LeaderID,
-		// Key dedup on the reviewed head (TEN-356).
-		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID),
-	})
-	if err != nil || hasPending {
-		return false
+	if !workflowHandoff {
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: squad.LeaderID,
+			// Key dedup on the reviewed head (TEN-356).
+			HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID),
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "issue write: squad leader pending lookup failed",
+				"issue_id", uuidToString(issue.ID),
+				"squad_id", uuidToString(squad.ID),
+				"leader_id", uuidToString(squad.LeaderID),
+				"error", err,
+			)
+			return DispatchBlocked, ReasonInternalError
+		}
+		if hasPending {
+			return DispatchCoalesced, ReasonCoalesced
+		}
 	}
 
-	// triggerCommentID is always empty on the assign/promote path; the handoff
-	// note rides its own task column, never trigger_comment_id.
-	_ = triggerCommentID
 	// The member who performed the assign/promote is the accountable human for the
 	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent
 	// author is not a human, so only a member actor is threaded.
-	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID)); err != nil {
-		slog.Warn("enqueue squad leader task failed",
-			"issue_id", uuidToString(issue.ID),
-			"squad_id", uuidToString(squad.ID),
-			"leader_id", uuidToString(squad.LeaderID),
-			"error", err)
-		return false
+	if workflowHandoff {
+		_, err = h.TaskService.EnqueueTaskForWorkflowSquadLeader(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID))
+	} else {
+		_, err = h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID))
 	}
-	return true
+	if err != nil {
+		return issueEnqueueFailure(issue, squad.LeaderID, err)
+	}
+	return DispatchQueued, ReasonQueued
+}
+
+type SquadBriefResponse struct {
+	MemberType string `json:"member_type"`
+	MemberID   string `json:"member_id"`
+	IsLeader   bool   `json:"is_leader"`
+	Brief      string `json:"brief"`
+}
+
+type SquadBriefsResponse struct {
+	HandoffMode string               `json:"handoff_mode"`
+	Briefs      []SquadBriefResponse `json:"briefs"`
+}
+
+// ListSquadBriefs previews the squad context each agent of the squad receives
+// on an issue assigned to the squad: the leader briefing for the leader, the
+// member brief for every other non-archived agent member. Limited to the
+// people who can edit the squad — it is a configuration aid, and the roster it
+// renders names agents a regular member may not otherwise see.
+func (h *Handler) ListSquadBriefs(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if !canManageSquad(member, squad) {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+	members, err := h.Queries.ListSquadMembers(r.Context(), squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad members")
+		return
+	}
+	resp := SquadBriefsResponse{HandoffMode: squad.HandoffMode, Briefs: []SquadBriefResponse{{
+		MemberType: "agent",
+		MemberID:   uuidToString(squad.LeaderID),
+		IsLeader:   true,
+		Brief:      buildSquadLeaderBriefing(r.Context(), h.Queries, squad, true, leaderNoWorkflow, true),
+	}}}
+	for _, m := range members {
+		if m.MemberType != "agent" || m.MemberID == squad.LeaderID {
+			continue
+		}
+		agent, err := h.Queries.GetAgent(r.Context(), m.MemberID)
+		if err != nil || agent.ArchivedAt.Valid {
+			continue
+		}
+		resp.Briefs = append(resp.Briefs, SquadBriefResponse{
+			MemberType: "agent",
+			MemberID:   uuidToString(m.MemberID),
+			Brief:      buildSquadMemberBriefing(r.Context(), h.Queries, squad, agent),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

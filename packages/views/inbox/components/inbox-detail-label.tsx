@@ -1,12 +1,15 @@
 "use client";
 
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { StatusIcon, PriorityIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
+import { PriorityIcon } from "../../issues/components/priority-icon";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
-import { getQuickCreateFailureDetail } from "./inbox-display";
-import { useT } from "../../i18n";
+import { getQuickCreateOutcomeDetail } from "./inbox-display";
+import { useLocale, useT } from "../../i18n";
+import { useStatusLabel } from "../../issues/utils/status-label";
+import { priorityLabel } from "../../issues/utils/priority-label";
 
 // Hook returning the inbox-item type → human label map. Replaces the
 // previous static `typeLabels` const so the labels can flow through
@@ -16,6 +19,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
   return {
     issue_assigned: t(($) => $.types.issue_assigned),
     issue_subscribed: t(($) => $.types.issue_subscribed),
+    issue_created: t(($) => $.types.issue_created),
     unassigned: t(($) => $.types.unassigned),
     assignee_changed: t(($) => $.types.assignee_changed),
     status_changed: t(($) => $.types.status_changed),
@@ -24,6 +28,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
+    doc_comment: t(($) => $.types.doc_comment),
+    doc_mentioned: t(($) => $.types.doc_mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
     task_failed: t(($) => $.types.task_failed),
@@ -32,40 +38,68 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
+    quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
+    autopilot_paused: t(($) => $.types.autopilot_paused),
+    autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    app_tool_calls_quota_exceeded: t(($) => $.types.app_tool_calls_quota_exceeded),
+    children_done: t(($) => $.types.children_done),
+    blockers_done: t(($) => $.types.blockers_done),
+    project_owner_joined: t(($) => $.types.project_owner_joined),
+    app_action_requested: t(($) => $.types.app_action_requested),
+    app_action_reminder: t(($) => $.types.app_action_reminder),
+    app_connect_requested: t(($) => $.types.app_connect_requested),
+    app_action_result: t(($) => $.types.app_action_result),
   };
 }
 
 // start_date / due_date are calendar days — format timezone-safely so the day
 // never shifts with the viewer's offset (see @multica/core/issues/date).
-function shortDate(dateStr: string): string {
-  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
+function shortDate(dateStr: string, locale: string): string {
+  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, locale);
 }
+
+// The label sits in a one-line, ellipsis-truncated row. Keep it plain inline
+// content with the icon flowing in the text: an `inline-flex` wrapper is a
+// single atomic box, and when it does not fit the browser hides the whole box
+// behind the ellipsis, leaving only "Name …" on the row. (MUL-9407)
+const INLINE_ICON_CLASS = "inline-block h-3 w-3 align-[-0.125em]";
 
 export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
+  const { t: tIssues } = useT("issues");
+  const locale = useLocale();
   const typeLabels = useTypeLabels();
   const { getActorName } = useActorName();
+  // Inbox is a cross-workspace surface, so the catalog is read per item's own
+  // workspace rather than from the route. (MUL-6243)
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
+  const statusLabelOf = useStatusLabel(item.workspace_id);
   const details = item.details ?? {};
 
   switch (item.type) {
     case "status_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = STATUS_CONFIG[details.to as IssueStatus]?.label ?? details.to;
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_status_to)}
-          <StatusIcon status={details.to as IssueStatus} className="h-3 w-3" />
-          {label}
+        <span>
+          {t(($) => $.labels.set_status_to)}{" "}
+          <StatusIcon
+            status={details.to as IssueStatus}
+            category={categoryOf(details.to)}
+            color={colorOf(details.to)}
+            icon={iconOf(details.to)}
+            className={INLINE_ICON_CLASS}
+          />{" "}
+          {statusLabelOf(details.to)}
         </span>
       );
     }
     case "priority_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = PRIORITY_CONFIG[details.to as IssuePriority]?.label ?? details.to;
+      const label = priorityLabel(details.to, tIssues);
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_priority_to)}
-          <PriorityIcon priority={details.to as IssuePriority} className="h-3 w-3" />
+        <span>
+          {t(($) => $.labels.set_priority_to)}{" "}
+          <PriorityIcon priority={details.to as IssuePriority} className={INLINE_ICON_CLASS} />{" "}
           {label}
         </span>
       );
@@ -85,11 +119,11 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{typeLabels[item.type]}</span>;
     }
     case "start_date_changed": {
-      if (details.to) return <span>{t(($) => $.labels.set_start_date_to, { date: shortDate(details.to) })}</span>;
+      if (details.to) return <span>{t(($) => $.labels.set_start_date_to, { date: shortDate(details.to, locale) })}</span>;
       return <span>{t(($) => $.labels.removed_start_date)}</span>;
     }
     case "due_date_changed": {
-      if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to) })}</span>;
+      if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to, locale) })}</span>;
       return <span>{t(($) => $.labels.removed_due_date)}</span>;
     }
     case "new_comment": {
@@ -107,8 +141,25 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{typeLabels[item.type]}</span>;
     }
     case "quick_create_failed": {
-      const detail = getQuickCreateFailureDetail(item);
+      const detail = getQuickCreateOutcomeDetail(item);
       if (detail) return <span>{t(($) => $.labels.failed_with_detail, { detail })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "quick_create_unconfirmed": {
+      // Deliberately NOT the failed_with_detail label: the outcome is unknown,
+      // so the detail is shown as-is with no "Failed:" framing.
+      const detail = getQuickCreateOutcomeDetail(item);
+      if (detail) return <span>{detail}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "autopilot_quota_exceeded":
+      return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "app_tool_calls_quota_exceeded":
+      return <span>{t(($) => $.labels.app_tool_calls_quota_blocked)}</span>;
+    case "children_done": {
+      // The stage arrives as a JSON number; details are typed as strings.
+      const stage = details.stage != null ? String(details.stage) : "";
+      if (stage) return <span>{t(($) => $.labels.children_done_stage, { stage })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     default:

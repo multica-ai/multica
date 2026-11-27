@@ -2,6 +2,13 @@ import { create } from "zustand";
 import type { StorageAdapter } from "../types";
 import type { Attachment } from "../types/attachment";
 import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";
+import { registerDraftCleanup } from "../drafts/cleanup-registry";
+import {
+  normalizeStoredUploads,
+  attachmentToDraftUpload,
+  type DraftUpload,
+  type PendingDraftUpload,
+} from "../drafts/draft-upload";
 import { createLogger } from "../logger";
 
 const logger = createLogger("chat.store");
@@ -67,6 +74,56 @@ const OPEN_KEY = "multica:chat:isOpen";
  * be turned off from the Settings → Chat tab.
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
+/**
+ * The agent Ask Multica starts a new chat with, per workspace. Missing key =
+ * no preference: a new chat goes to the agent last chatted with.
+ */
+const QUICK_CHAT_AGENT_KEY = "multica:chat:quickChatAgentId";
+/**
+ * The chats kept as chips in the bottom bar, per workspace:
+ * `{ kept: sessionId[], dismissed: { [sessionId]: activity } }`.
+ *
+ * `kept` is every chat opened in the quick-chat window and not closed from the
+ * bar since, newest first. `dismissed` records the chat's last activity at the
+ * moment its chip was closed, so the chip stays away until the chat moves
+ * again; without it, closing the chip of an unread chat would do nothing.
+ */
+const CHAT_BAR_KEY = "multica:chat:bar";
+/** Chips are a working set, not a history: the oldest fall off. */
+const CHAT_BAR_MAX_KEPT = 12;
+const CHAT_BAR_MAX_DISMISSED = 50;
+
+interface ChatBarSlots {
+  kept: string[];
+  dismissed: Record<string, string>;
+}
+
+function readChatBar(storage: StorageAdapter, key: string): ChatBarSlots {
+  const empty: ChatBarSlots = { kept: [], dismissed: {} };
+  const raw = storage.getItem(key);
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as { kept?: unknown; dismissed?: unknown };
+    if (typeof parsed !== "object" || parsed === null) return empty;
+    const kept = Array.isArray(parsed.kept)
+      ? parsed.kept.filter((id): id is string => typeof id === "string")
+      : [];
+    const dismissed: Record<string, string> = {};
+    if (typeof parsed.dismissed === "object" && parsed.dismissed !== null) {
+      for (const [id, activity] of Object.entries(parsed.dismissed)) {
+        if (typeof activity === "string") dismissed[id] = activity;
+      }
+    }
+    return { kept, dismissed };
+  } catch {
+    return empty;
+  }
+}
+
+function writeChatBar(storage: StorageAdapter, key: string, slots: ChatBarSlots) {
+  if (slots.kept.length === 0 && Object.keys(slots.dismissed).length === 0) storage.removeItem(key);
+  else storage.setItem(key, JSON.stringify(slots));
+}
 
 function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
   const raw = storage.getItem(key);
@@ -92,6 +149,7 @@ function writeDrafts(storage: StorageAdapter, key: string, drafts: Record<string
   }
 }
 
+/** Shape check for server Attachment rows inside persisted restores. */
 function isAttachmentDraft(value: unknown): value is Attachment {
   return (
     typeof value === "object" &&
@@ -101,17 +159,21 @@ function isAttachmentDraft(value: unknown): value is Attachment {
   );
 }
 
-function readDraftAttachments(storage: StorageAdapter, key: string): Record<string, Attachment[]> {
+function readDraftAttachments(storage: StorageAdapter, key: string): Record<string, DraftUpload[]> {
   const raw = storage.getItem(key);
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
-    const out: Record<string, Attachment[]> = {};
+    const out: Record<string, DraftUpload[]> = {};
     for (const [draftKey, value] of Object.entries(parsed)) {
       if (!Array.isArray(value)) continue;
-      const attachments = value.filter(isAttachmentDraft);
-      if (attachments.length > 0) out[draftKey] = attachments;
+      // Normalize on every load (MUL-5181 L2): bare Attachment rows persisted
+      // by pre-L2 builds become `uploaded` placeholders, and an upload still
+      // `uploading` at load time is dropped (bytes are gone, and nothing in the
+      // body references it).
+      const uploads = normalizeStoredUploads(value);
+      if (uploads.length > 0) out[draftKey] = uploads;
     }
     return out;
   } catch {
@@ -184,9 +246,9 @@ function writePendingSendRestores(
 function writeDraftAttachments(
   storage: StorageAdapter,
   key: string,
-  drafts: Record<string, Attachment[]>,
+  drafts: Record<string, DraftUpload[]>,
 ) {
-  const pruned: Record<string, Attachment[]> = {};
+  const pruned: Record<string, DraftUpload[]> = {};
   for (const [k, v] of Object.entries(drafts)) {
     if (v.length > 0) pruned[k] = v;
   }
@@ -244,7 +306,7 @@ function loadDraftSlots(
   draftsKey: string,
   attachmentsKey: string,
   selectedAgentId: string | null,
-): { inputDrafts: Record<string, string>; inputDraftAttachments: Record<string, Attachment[]> } {
+): { inputDrafts: Record<string, string>; inputDraftAttachments: Record<string, DraftUpload[]> } {
   const drafts = migrateLegacyNewChatSlots(readDrafts(storage, draftsKey), selectedAgentId);
   const attachments = migrateLegacyNewChatSlots(
     readDraftAttachments(storage, attachmentsKey),
@@ -297,10 +359,19 @@ export interface ChatState {
   /** Project context for the next session. Existing sessions remain bound to
    *  their server-persisted project_id. */
   selectedProjectId: string | null;
+  /** Settings preference: the agent Ask Multica starts a new chat with. */
+  quickChatAgentId: string | null;
+  /** Bumped by `startNewChat`; the window focuses its composer on each bump. */
+  newChatRequest: number;
+  /** Chats kept as chips in the bottom bar, newest first. */
+  chatBarKept: string[];
+  /** Chips closed from the bar: sessionId → the chat's activity at that moment. */
+  chatBarDismissed: Record<string, string>;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Attachment rows referenced by each input draft. */
-  inputDraftAttachments: Record<string, Attachment[]>;
+  /** Coordinator-owned uploads per draft slot (placeholders + completed). */
+  inputDraftAttachments: Record<string, DraftUpload[]>;
   /** Durable draft restores already written into a composer (#5219). */
   appliedDraftRestoreIds: string[];
   /** Server-less restores waiting for their session's composer, per session (#5219). */
@@ -315,10 +386,28 @@ export interface ChatState {
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
+  setQuickChatAgentId: (id: string | null) => void;
+  /** Ask Multica: open the window on a new chat with the quick-chat agent and no project. */
+  startNewChat: () => void;
+  /** Give a chat a chip in the bottom bar. No-op when it already has one. */
+  keepChatInBar: (sessionId: string) => void;
+  /** Close a chat's chip until the chat moves past `activity`. */
+  dismissChatFromBar: (sessionId: string, activity: string) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
-  setInputDraftAttachments: (sessionId: string, attachments: Attachment[]) => void;
+  /** Append a markdown fragment to a draft slot's text (upload write-back). */
+  appendToInputDraft: (sessionId: string, markdown: string) => void;
+  setInputDraftAttachments: (sessionId: string, uploads: DraftUpload[]) => void;
+  /** Record a completed server row as an uploaded entry (restore paths). */
   addInputDraftAttachment: (sessionId: string, attachment: Attachment) => void;
+  /** Record a placeholder the moment a file is picked (coordinator-owned). */
+  addInputDraftUpload: (sessionId: string, upload: DraftUpload) => void;
+  /** Swap a placeholder for its completed attachment. No-op if it's gone. */
+  settleInputDraftUpload: (sessionId: string, clientUploadId: string, attachment: Attachment) => void;
+  /** Mark a placeholder failed. No-op if it's gone. */
+  failInputDraftUpload: (sessionId: string, clientUploadId: string, error?: string) => void;
+  /** Drop a placeholder (dismiss a failure / interrupted). */
+  removeInputDraftUpload: (sessionId: string, clientUploadId: string) => void;
   clearInputDraft: (sessionId: string) => void;
   /** Record that a durable restore reached the composer; survives a reload. */
   markDraftRestoreApplied: (restoreId: string) => void;
@@ -364,12 +453,18 @@ export function createChatStore(options: ChatStoreOptions) {
     initialAgentId,
   );
 
+  const initialChatBar = readChatBar(storage, wsKey(CHAT_BAR_KEY));
+
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
+    quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
+    newChatRequest: 0,
+    chatBarKept: initialChatBar.kept,
+    chatBarDismissed: initialChatBar.dismissed,
     inputDrafts: initialDraftSlots.inputDrafts,
     inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
@@ -415,6 +510,45 @@ export function createChatStore(options: ChatStoreOptions) {
       if (id) storage.setItem(wsKey(PROJECT_STORAGE_KEY), id);
       else storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
       set({ selectedProjectId: id });
+    },
+    setQuickChatAgentId: (id) => {
+      logger.info("setQuickChatAgentId", { from: get().quickChatAgentId, to: id });
+      if (id) storage.setItem(wsKey(QUICK_CHAT_AGENT_KEY), id);
+      else storage.removeItem(wsKey(QUICK_CHAT_AGENT_KEY));
+      set({ quickChatAgentId: id });
+    },
+    startNewChat: () => {
+      const { quickChatAgentId, setSelectedAgentId, setSelectedProjectId, setActiveSession, setOpen } =
+        get();
+      if (quickChatAgentId) setSelectedAgentId(quickChatAgentId);
+      setSelectedProjectId(null);
+      setActiveSession(null);
+      setOpen(true);
+      set((state) => ({ newChatRequest: state.newChatRequest + 1 }));
+    },
+    keepChatInBar: (sessionId) => {
+      const { chatBarKept, chatBarDismissed } = get();
+      const wasDismissed = sessionId in chatBarDismissed;
+      if (chatBarKept.includes(sessionId) && !wasDismissed) return;
+      const kept = [sessionId, ...chatBarKept.filter((id) => id !== sessionId)].slice(
+        0,
+        CHAT_BAR_MAX_KEPT,
+      );
+      const dismissed = { ...chatBarDismissed };
+      delete dismissed[sessionId];
+      writeChatBar(storage, wsKey(CHAT_BAR_KEY), { kept, dismissed });
+      set({ chatBarKept: kept, chatBarDismissed: dismissed });
+    },
+    dismissChatFromBar: (sessionId, activity) => {
+      const { chatBarKept, chatBarDismissed } = get();
+      const kept = chatBarKept.filter((id) => id !== sessionId);
+      // Re-insert so the entry is the newest, then drop the oldest over the cap.
+      const rest = Object.entries(chatBarDismissed).filter(([id]) => id !== sessionId);
+      const dismissed = Object.fromEntries(
+        [...rest, [sessionId, activity] as const].slice(-CHAT_BAR_MAX_DISMISSED),
+      );
+      writeChatBar(storage, wsKey(CHAT_BAR_KEY), { kept, dismissed });
+      set({ chatBarKept: kept, chatBarDismissed: dismissed });
     },
     // Append-only until the server confirms. There is deliberately no capacity
     // cap: every entry in here is an UNconfirmed consume, and evicting one
@@ -476,10 +610,20 @@ export function createChatStore(options: ChatStoreOptions) {
       writeDrafts(storage, wsKey(DRAFTS_KEY), next);
       set({ inputDrafts: next });
     },
-    setInputDraftAttachments: (sessionId, attachments) => {
-      logger.debug("setInputDraftAttachments", { sessionId, count: attachments.length });
+    appendToInputDraft: (sessionId, markdown) => {
+      const existing = get().inputDrafts[sessionId] ?? "";
+      const draft = existing.trim()
+        ? `${existing.replace(/\s+$/, "")}\n\n${markdown}`
+        : markdown;
+      logger.debug("appendToInputDraft", { sessionId, length: draft.length });
+      const next = { ...get().inputDrafts, [sessionId]: draft };
+      writeDrafts(storage, wsKey(DRAFTS_KEY), next);
+      set({ inputDrafts: next });
+    },
+    setInputDraftAttachments: (sessionId, uploads) => {
+      logger.debug("setInputDraftAttachments", { sessionId, count: uploads.length });
       const next = { ...get().inputDraftAttachments };
-      if (attachments.length > 0) next[sessionId] = attachments;
+      if (uploads.length > 0) next[sessionId] = uploads;
       else delete next[sessionId];
       writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
       set({ inputDraftAttachments: next });
@@ -488,10 +632,65 @@ export function createChatStore(options: ChatStoreOptions) {
       if (!attachment.id) return;
       const current = get().inputDraftAttachments;
       const existing = current[sessionId] ?? [];
-      const nextForKey = existing.some((a) => a.id === attachment.id)
-        ? existing.map((a) => (a.id === attachment.id ? attachment : a))
-        : [...existing, attachment];
+      const wrapped = attachmentToDraftUpload(attachment);
+      const nextForKey = existing.some(
+        (u) => u.status === "uploaded" && u.attachment.id === attachment.id,
+      )
+        ? existing.map((u) =>
+            u.status === "uploaded" && u.attachment.id === attachment.id ? wrapped : u,
+          )
+        : [...existing, wrapped];
       const next = { ...current, [sessionId]: nextForKey };
+      writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
+      set({ inputDraftAttachments: next });
+    },
+    addInputDraftUpload: (sessionId, upload) => {
+      const current = get().inputDraftAttachments;
+      const existing = current[sessionId] ?? [];
+      if (existing.some((u) => u.clientUploadId === upload.clientUploadId)) return;
+      const next = { ...current, [sessionId]: [...existing, upload] };
+      writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
+      set({ inputDraftAttachments: next });
+    },
+    settleInputDraftUpload: (sessionId, clientUploadId, attachment) => {
+      const current = get().inputDraftAttachments;
+      const existing = current[sessionId] ?? [];
+      if (!existing.some((u) => u.clientUploadId === clientUploadId)) return;
+      const nextForKey = existing.map((u) =>
+        u.clientUploadId === clientUploadId
+          ? { ...attachmentToDraftUpload(attachment), clientUploadId }
+          : u,
+      );
+      const next = { ...current, [sessionId]: nextForKey };
+      writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
+      set({ inputDraftAttachments: next });
+    },
+    failInputDraftUpload: (sessionId, clientUploadId, error) => {
+      const current = get().inputDraftAttachments;
+      const existing = current[sessionId] ?? [];
+      const target = existing.find((u) => u.clientUploadId === clientUploadId);
+      if (!target) return;
+      const failed: PendingDraftUpload = {
+        clientUploadId,
+        status: "failed",
+        filename: target.filename,
+        size: target.size,
+        contentType: target.contentType,
+        error,
+      };
+      const nextForKey = existing.map((u) => (u.clientUploadId === clientUploadId ? failed : u));
+      const next = { ...current, [sessionId]: nextForKey };
+      writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
+      set({ inputDraftAttachments: next });
+    },
+    removeInputDraftUpload: (sessionId, clientUploadId) => {
+      const current = get().inputDraftAttachments;
+      const existing = current[sessionId] ?? [];
+      if (!existing.some((u) => u.clientUploadId === clientUploadId)) return;
+      const remaining = existing.filter((u) => u.clientUploadId !== clientUploadId);
+      const next = { ...current };
+      if (remaining.length > 0) next[sessionId] = remaining;
+      else delete next[sessionId];
       writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
       set({ inputDraftAttachments: next });
     },
@@ -530,10 +729,39 @@ export function createChatStore(options: ChatStoreOptions) {
     },
   }));
 
+  // Self-register the chat draft persist keys so logout / workspace-delete
+  // clear them like every other draft store (previously leaked — the chat
+  // drafts, their attachments, and the applied-restore ledger survived a
+  // client-side logout into the next login on the same tab). All are
+  // workspace-scoped (persisted through `wsKey`, i.e. `${base}:${slug}`), and
+  // each entry resets only its own in-memory slice. The server-less restore
+  // queue is registered too so its recoverable text does not outlive the user.
+  registerDraftCleanup({
+    storageKey: DRAFTS_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ inputDrafts: {} }),
+  });
+  registerDraftCleanup({
+    storageKey: DRAFT_ATTACHMENTS_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ inputDraftAttachments: {} }),
+  });
+  registerDraftCleanup({
+    storageKey: APPLIED_RESTORES_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ appliedDraftRestoreIds: [] }),
+  });
+  registerDraftCleanup({
+    storageKey: PENDING_SEND_RESTORES_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ pendingSendRestores: {} }),
+  });
+
   registerForWorkspaceRehydration(() => {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
     const nextProject = storage.getItem(wsKey(PROJECT_STORAGE_KEY));
+    const nextChatBar = readChatBar(storage, wsKey(CHAT_BAR_KEY));
     // Drafts are namespaced per workspace, so the workspace being switched TO
     // has its own legacy slots to fold — migrate against that workspace's own
     // persisted agent, not the one we are leaving.
@@ -557,6 +785,9 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
+      quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
+      chatBarKept: nextChatBar.kept,
+      chatBarDismissed: nextChatBar.dismissed,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),

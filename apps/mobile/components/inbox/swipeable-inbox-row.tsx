@@ -42,6 +42,7 @@ import * as Haptics from "expo-haptics";
 import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { InboxRow } from "./inbox-row";
+import { useT } from "@/lib/i18n";
 
 const ACTION_WIDTH = 80;
 
@@ -82,6 +83,7 @@ function ArchiveAction({
   onPress: () => void;
   drag: SharedValue<number>;
 }) {
+  const { t } = useT("inbox");
   // One-shot haptic when the drag crosses the action width threshold.
   // useAnimatedReaction runs on the UI thread; runOnJS bridges to the
   // Haptics.impactAsync call which has to live on JS.
@@ -99,12 +101,12 @@ function ArchiveAction({
     <Animated.View style={{ width: ACTION_WIDTH }}>
       <Pressable
         onPress={onPress}
-        accessibilityLabel="Archive"
+        accessibilityLabel={t("actions.archive")}
         className="flex-1 items-center justify-center bg-destructive"
       >
         <View className="items-center gap-0.5">
           <Ionicons name="archive-outline" size={20} color="white" />
-          <Text className="text-xs text-white">Archive</Text>
+          <Text className="text-xs text-white">{t("actions.archive")}</Text>
         </View>
       </Pressable>
     </Animated.View>

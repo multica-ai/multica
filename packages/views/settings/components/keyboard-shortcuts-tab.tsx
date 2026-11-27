@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Keyboard, RotateCcw, Search, X } from "lucide-react";
+import { Keyboard, RotateCcw, Search, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   AlertDialog,
@@ -16,12 +17,15 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  canStartShortcutSequence,
   findShortcutConflict,
   createShortcutChord,
   isReservedShortcut,
   isShortcutAllowedForAction,
+  isShortcutModifierKey,
   isPlainShortcut,
   resolveShortcut,
+  shortcutFirstStep,
   shortcutFromEvent,
   SHORTCUT_ACTIONS,
   useShortcutStore,
@@ -45,12 +49,15 @@ type CaptureError =
   | { kind: "reserved" }
   | { kind: "send" }
   | { kind: "unsafe" }
+  | { kind: "unrecognized" }
   | null;
 
 export function KeyboardShortcutsTab() {
   const { t } = useT("settings");
   const [query, setQuery] = useState("");
   const [recording, setRecording] = useState<ShortcutActionId | null>(null);
+  // The first key of a sequence being recorded, waiting for the second.
+  const [pendingFirst, setPendingFirst] = useState<ShortcutChord | null>(null);
   const [captureError, setCaptureError] = useState<CaptureError>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const overrides = useShortcutStore((state) => state.overrides);
@@ -72,27 +79,66 @@ export function KeyboardShortcutsTab() {
     });
   }, [query, t]);
 
-  const groups: readonly ShortcutCategory[] = ["general", "navigation"];
+  const groups: readonly ShortcutCategory[] = ["general", "issue", "navigation"];
+
+  const stopRecording = () => {
+    setRecording(null);
+    setPendingFirst(null);
+    setCaptureError(null);
+  };
 
   const capture = (actionId: ShortcutActionId, event: React.KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat || isImeComposing(event)) return;
     if (event.key === "Escape") {
-      setRecording(null);
-      setCaptureError(null);
+      stopRecording();
       return;
     }
+
+    if (pendingFirst) {
+      // Backspace takes the first key back; Enter keeps it as a single key.
+      if (event.key === "Backspace" || event.key === "Delete") {
+        setPendingFirst(null);
+        setCaptureError(null);
+        return;
+      }
+      if (event.key === "Enter") {
+        commit(actionId, pendingFirst);
+        return;
+      }
+      const then = shortcutFromEvent(event.nativeEvent);
+      if (!then) {
+        if (!isShortcutModifierKey(event.key)) setCaptureError({ kind: "unrecognized" });
+        return;
+      }
+      commit(actionId, { ...pendingFirst, then });
+      return;
+    }
+
     if (event.key === "Backspace" || event.key === "Delete") {
       setShortcut(actionId, null);
-      setRecording(null);
-      setCaptureError(null);
+      stopRecording();
       return;
     }
 
     const shortcut = shortcutFromEvent(event.nativeEvent);
-    if (!shortcut) return;
-    if (isReservedShortcut(shortcut)) {
+    if (!shortcut) {
+      if (!isShortcutModifierKey(event.key)) {
+        setCaptureError({ kind: "unrecognized" });
+      }
+      return;
+    }
+    if (canStartShortcutSequence(actionId, shortcut)) {
+      setPendingFirst(shortcut);
+      setCaptureError(null);
+      return;
+    }
+    commit(actionId, shortcut, event.nativeEvent);
+  };
+
+  const commit = (actionId: ShortcutActionId, shortcut: ShortcutChord, event?: KeyboardEvent) => {
+    if (isReservedShortcut(shortcutFirstStep(shortcut))) {
       setCaptureError({ kind: "reserved" });
       return;
     }
@@ -100,21 +146,21 @@ export function KeyboardShortcutsTab() {
       setCaptureError({ kind: actionId === "send" ? "send" : "unsafe" });
       return;
     }
-    const conflict = findShortcutConflict(actionId, shortcut);
+    const conflict = findShortcutConflict(actionId, shortcut, event);
     if (conflict) {
       setCaptureError({ kind: "conflict", actionId: conflict });
       return;
     }
 
     setShortcut(actionId, shortcut);
-    setRecording(null);
-    setCaptureError(null);
+    stopRecording();
   };
 
   return (
     <SettingsTab
       title={t(($) => $.shortcuts.title)}
       description={t(($) => $.shortcuts.description)}
+      scope="device"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
@@ -147,6 +193,7 @@ export function KeyboardShortcutsTab() {
           <SettingsSection
             key={category}
             title={t(($) => $.shortcuts.categories[category])}
+            description={category === "issue" ? t(($) => $.shortcuts.issue_scope) : undefined}
           >
             <SettingsCard>
               {actions.map((action) => (
@@ -159,15 +206,14 @@ export function KeyboardShortcutsTab() {
                     action.id,
                   )}
                   recording={recording === action.id}
+                  pendingFirst={recording === action.id ? pendingFirst : null}
                   error={recording === action.id ? captureError : null}
                   onStartRecording={() => {
                     setRecording(action.id);
+                    setPendingFirst(null);
                     setCaptureError(null);
                   }}
-                  onCancelRecording={() => {
-                    setRecording(null);
-                    setCaptureError(null);
-                  }}
+                  onCancelRecording={stopRecording}
                   onCapture={(event) => capture(action.id, event)}
                   onDisable={() => {
                     setShortcut(action.id, null);
@@ -185,7 +231,7 @@ export function KeyboardShortcutsTab() {
       })}
 
       {visibleActions.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-body text-muted-foreground">
           {t(($) => $.shortcuts.no_results)}
         </div>
       ) : null}
@@ -195,7 +241,10 @@ export function KeyboardShortcutsTab() {
         description={t(($) => $.shortcuts.fixed.description)}
       >
         <SettingsCard>
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.open_settings)} shortcut={createShortcutChord(",", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.close_tab)} shortcut={createShortcutChord("W", { primary: true })} />
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_tab_1_to_8)} shortcut={createShortcutChord("1–8", { primary: true })} />
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_last_tab)} shortcut={createShortcutChord("9", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_in)} shortcut={createShortcutChord("Plus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_out)} shortcut={createShortcutChord("Minus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.reset_zoom)} shortcut={createShortcutChord("0", { primary: true })} />
@@ -221,8 +270,7 @@ export function KeyboardShortcutsTab() {
               variant="destructive"
               onClick={() => {
                 resetAll();
-                setCaptureError(null);
-                setRecording(null);
+                stopRecording();
                 setResetConfirmOpen(false);
               }}
             >
@@ -240,6 +288,7 @@ function ShortcutRow({
   shortcut,
   customized,
   recording,
+  pendingFirst,
   error,
   onStartRecording,
   onCancelRecording,
@@ -251,6 +300,7 @@ function ShortcutRow({
   shortcut: ShortcutChord | null;
   customized: boolean;
   recording: boolean;
+  pendingFirst: ShortcutChord | null;
   error: CaptureError;
   onStartRecording: () => void;
   onCancelRecording: () => void;
@@ -260,13 +310,31 @@ function ShortcutRow({
 }) {
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
-  const description = t(($) => $.shortcuts.actions[action.id].description);
+  // Keep descriptions in the search index, but only show non-obvious behavior.
+  const description = [
+    "openSearch",
+    "toggleRightSidebar",
+    "archiveInboxItem",
+    "unsubscribeArchiveInboxItem",
+    "snoozeInboxItem",
+    "markInboxUnread",
+    "nextInboxItem",
+    "prevInboxItem",
+    "undoInboxAction",
+    "runIssueQuickAction",
+    "replyToIssue",
+    "send",
+  ].includes(action.id)
+    ? t(($) => $.shortcuts.actions[action.id].description)
+    : undefined;
   const errorText = error?.kind === "reserved"
     ? t(($) => $.shortcuts.reserved_error)
     : error?.kind === "send"
       ? t(($) => $.shortcuts.send_error)
     : error?.kind === "unsafe"
       ? t(($) => $.shortcuts.unsafe_error)
+    : error?.kind === "unrecognized"
+      ? t(($) => $.shortcuts.unrecognized_error)
     : error?.kind === "conflict"
       ? t(($) => $.shortcuts.conflict_error, {
           action: t(($) => $.shortcuts.actions[error.actionId].label),
@@ -297,56 +365,66 @@ function ShortcutRow({
             onKeyDown={recording ? onCapture : undefined}
             onBlur={onCancelRecording}
             className={cn(
-              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-xs font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-caption font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
               recording && "border-brand bg-brand/5 text-brand ring-2 ring-brand/20",
               error && "border-destructive text-destructive ring-destructive/20",
             )}
             aria-label={t(($) => $.shortcuts.record_aria, { action: label })}
             aria-pressed={recording}
+            data-shortcut-recorder={recording ? "" : undefined}
           >
-            {recording ? (
+            {pendingFirst ? (
+              <span className="inline-flex items-center gap-1.5 font-sans">
+                <ShortcutKeycaps shortcut={pendingFirst} layout="split" decorative />
+                {t(($) => $.shortcuts.then)}…
+              </span>
+            ) : recording ? (
               <span className="inline-flex items-center gap-1.5 font-sans">
                 <Keyboard className="size-3.5" />
                 {t(($) => $.shortcuts.recording)}
               </span>
             ) : shortcut ? (
-              <ShortcutKeycaps shortcut={shortcut} decorative />
+              <ShortcutKeycaps shortcut={shortcut} layout="split" decorative thenLabel={t(($) => $.shortcuts.then)} />
             ) : (
               <span className="font-sans font-normal text-muted-foreground">
                 {t(($) => $.shortcuts.unassigned)}
               </span>
             )}
           </button>
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onReset}
             disabled={!customized}
-            aria-label={t(($) => $.shortcuts.reset_action, { action: label })}
-            title={t(($) => $.shortcuts.reset)}
+            label={t(($) => $.shortcuts.reset_action, { action: label })}
           >
             <RotateCcw className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onDisable}
             disabled={shortcut === null}
-            aria-label={t(($) => $.shortcuts.disable_action, { action: label })}
-            title={t(($) => $.shortcuts.disable)}
+            label={t(($) => $.shortcuts.disable_action, { action: label })}
           >
             <X className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
         {errorText ? (
-          <span role="alert" className="max-w-72 text-right text-xs text-destructive">
+          <span role="alert" className="max-w-72 text-right text-caption text-destructive">
             {errorText}
           </span>
+        ) : pendingFirst ? (
+          <span className="max-w-72 text-right text-micro text-muted-foreground">
+            {t(($) => $.shortcuts.record_then_hint)}
+          </span>
         ) : recording ? (
-          <span className="text-right text-[11px] text-muted-foreground">
-            {t(($) => $.shortcuts.record_hint)}
+          <span className="max-w-72 text-right text-micro text-muted-foreground">
+            {action.category === "navigation"
+              ? t(($) => $.shortcuts.record_sequence_hint)
+              : t(($) => $.shortcuts.record_hint)}
           </span>
         ) : null}
       </div>
@@ -357,7 +435,7 @@ function ShortcutRow({
 function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" className="justify-end" />
     </SettingsRow>
   );
 }

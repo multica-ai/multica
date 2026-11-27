@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,10 +41,38 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
-		"--disallowedTools", "AskUserQuestion",
+		// CodeBuddy's interactive tools have no UI to render in under the
+		// daemon's headless stream-json transport. AskUserQuestion and
+		// ExitPlanMode are both exempted from CodeBuddy's permission-mode
+		// finalization, so --permission-mode bypassPermissions does NOT
+		// auto-approve them — they always reach the permission bridge and
+		// stall the turn waiting for a confirmation nobody can give
+		// (GitHub #6012). EnterPlanMode is denied alongside them: leaving it
+		// enabled would let the model enter a plan mode it then has no tool
+		// to leave. Plan-shaped work still happens — the plan is written as
+		// ordinary assistant output instead of behind an approval gate.
+		//
+		// Pass one value per tool: --disallowedTools is variadic and
+		// CodeBuddy compares each entry against the tool name exactly
+		// (PermissionUtils.matchPermissionRules), so a comma-joined string
+		// would match nothing despite what the CLI's own help text claims.
+		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 	}
+	// NOTE: --strict-mcp-config is deliberately never passed. It means "only
+	// use servers from --mcp-config", which drops CodeBuddy's user, project
+	// AND local scopes. Measured against CodeBuddy 2.x with one real MCP
+	// server registered per scope, using process spawns as the oracle:
+	//
+	//	--mcp-config only ....... managed + user + local  <- what we want
+	//	--mcp-config + strict ... managed only
+	//	strict only ............. nothing at all
+	//
+	// The union is also what mergeRuntimeAndAgentMcpConfig promises: adding
+	// one managed server must not disable the user's own. CodeBuddy applies
+	// it natively, and a managed entry already wins a same-name collision
+	// (verified), so the daemon does not pre-merge — see the codebuddy note
+	// in loadRuntimeMcpServerConfigs.
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -80,11 +107,18 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 	args := buildCodebuddyArgs(opts, b.cfg.Logger)
 
-	// If the caller provided an MCP config, write it to a temp file and pass
-	// --mcp-config <path> so the agent uses a controlled set of MCP servers.
+	// A managed agent config is written to a temp file and added with
+	// --mcp-config, which ADDS to whatever CodeBuddy loads from its own user,
+	// project and local scopes — buildCodebuddyArgs never passes
+	// --strict-mcp-config, so those stay on. A managed entry wins a same-name
+	// collision natively.
+	//
+	// Three-state, as everywhere else: a JSON `null` means "inherit the runtime
+	// configuration" and skips the flag entirely, while an explicitly empty
+	// object is a managed set that happens to contain no servers.
 	var mcpConfigPath string
 	var mcpFileCleanup func()
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
@@ -101,14 +135,18 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	// Multica closes stdin after the first result and cannot wait for
+	// cross-turn task_notification events. Force CodeBuddy's documented
+	// headless disable so Bash/PowerShell/Agent never take the background
+	// path (CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS; see CLI headless docs).
+	cmd.Env = buildCodebuddyEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -126,7 +164,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start codebuddy: %w", err)
@@ -165,14 +203,21 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		startTime := time.Now()
 		var lastAssistantText string
 		var finalResultText string
+		var resultErrorText string
 		sawResult := false
 		resultIsError := false
+		sawBackgroundTask := false
+		sawStartedEvent := false
+		topLevelError := ""
+		fatalStartupError := false
 		var sessionID string
 		usage := make(map[string]TokenUsage)
+		seenUsage := make(map[string]struct{})
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
 		toolUseCount := 0
+		unreadableAssistantCount := 0
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -181,8 +226,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		countedStdout := &byteCountingReader{Reader: stdout}
+		scanner := newAgentStreamScanner(countedStdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -199,32 +244,63 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 			switch msg.Type {
 			case "assistant":
+				sawStartedEvent = true
 				assistantEventCount++
-				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
-				toolUseCount += tools
-				if tools == 0 {
-					lastAssistantText = assistantText
-				} else {
-					// A turn that invokes a tool is intermediate even when it also
-					// contains narration. Do not use it as an empty-result fallback.
-					lastAssistantText = ""
+				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				toolUseCount += turn.toolUses
+				if !turn.understood {
+					unreadableAssistantCount++
 				}
+				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
+				sawStartedEvent = true
 				b.handleUser(msg, msgCh)
 			case "system":
+				sawStartedEvent = true
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
+				}
+				// CodeBuddy background lifecycle rides on system subtypes
+				// (task_started / task_progress / task_updated /
+				// task_notification), not Claude's async_launched tool_result.
+				// With CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS these should
+				// never appear; if they do, fail rather than report success.
+				if codebuddySystemIsBackgroundTask(msg.Subtype) {
+					sawBackgroundTask = true
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
+				resultErrorText = ""
+				if msg.IsError {
+					resultErrorText = codebuddyResultError(msg)
+				}
 				sessionID = msg.SessionID
-				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+				if resultUsage := codebuddyResultUsage(msg, opts.Model, opts.ResumeSessionID != ""); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
 				closeStdin()
+			case "error":
+				// Startup failures can leave CodeBuddy alive and silent (issue
+				// #9200). Once a run has emitted system/assistant activity, the
+				// same event can be recoverable, so keep the process running.
+				if sawResult || fatalStartupError {
+					break
+				}
+				topLevelError = strings.TrimSpace(msg.Error)
+				if topLevelError == "" {
+					topLevelError = "codebuddy emitted a top-level error event without details"
+				}
+				if !sawStartedEvent && runCtx.Err() == nil {
+					fatalStartupError = true
+					// Cancel only before the run starts; this also releases the
+					// scanner and cmd.Wait when the CLI remains alive.
+					cancel()
+				} else {
+					trySend(msgCh, Message{Type: MessageLog, Level: "error", Content: topLevelError})
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -248,12 +324,17 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
+		completionGuardError := ""
+		if sawBackgroundTask {
+			completionGuardError = "codebuddy emitted a background task system event; Multica-managed runs require foreground execution (set CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS=1)"
+		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"codebuddy",
 			timeout,
@@ -262,19 +343,32 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: resultErrorText,
 			},
-			"",
+			completionGuardError,
 		)
-
-		if finalError != "" {
-			finalError = withAgentStderr(finalError, "codebuddy", stderrBuf.Tail())
+		// A startup error explains our own cancellation. After the run has
+		// started, use its last error only if it exited without a result;
+		// preserve an external cancellation or timeout otherwise.
+		if topLevelError != "" && !sawResult && (fatalStartupError || runCtx.Err() == nil) {
+			finalStatus = "failed"
+			finalOutput = ""
+			finalError = topLevelError
 		}
-		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+
+		// cmd.Wait() has returned — stderrBuf.Tail() is complete. Resume
+		// rejection phrases often land only on stderr (mirror Claude MUL-4966).
+		stderrTail := stderrBuf.Tail()
+		if finalError != "" {
+			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
+		}
+		// Context shutdown closes stdout itself; exclude that read error.
+		observation := streamProtocolObservation{
 			provider:                   "codebuddy",
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
@@ -287,14 +381,19 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			resultIsError:              resultIsError,
 			resultBytes:                len(finalResultText),
 			lastAssistantBytes:         len(lastAssistantText),
-			scannerError:               scanErr != nil,
+			scannerError:               scanErr != nil && runCtx.Err() == nil,
+			unreadableAssistantCount:   unreadableAssistantCount,
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
-		})
+		}
+		logStreamProtocolObservation(b.cfg.Logger, observation)
+		if finalError != "" {
+			finalError = codebuddyFailureDiagnostic(finalError, observation, countedStdout.bytes, stderrBuf.TotalBytes())
+		}
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
 		if resumeRejected {
 			b.cfg.Logger.Info("codebuddy resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
@@ -316,19 +415,35 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int) {
+func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return "", 0
+		// Unreadable body: understood stays false so the caller drops any
+		// fallback rather than let an older turn stand in for this one.
+		return assistantTurn{}
 	}
+	turn := assistantTurn{understood: true}
 	var assistantText strings.Builder
 	toolUseCount := 0
 
-	// Accumulate token usage per model.
-	if content.Usage != nil && content.Model != "" {
+	// CodeBuddy is a Claude Code fork and emits the same stream-json shapes, so
+	// it inherits the same accounting rule: one response can emit several
+	// assistant blocks carrying the same message ID and the same usage. Count
+	// its input/cache tokens once, without dropping any of the blocks below.
+	// Missing IDs retain best-effort per-event accounting. This fallback covers
+	// only the main loop: assistant output_tokens is a placeholder, and subagent
+	// totals require the final result's modelUsage. Mirrors claude.go.
+	// https://code.claude.com/docs/en/agent-sdk/cost-tracking#track-per-step-usage
+	_, counted := seenUsage[content.ID]
+	if msg.ParentToolUseID == "" && content.Usage != nil && content.Model != "" &&
+		(content.ID == "" || !counted) && codebuddyUsageHasTokens(
+		content.Usage.InputTokens, 0, content.Usage.CacheReadInputTokens, content.Usage.CacheCreationInputTokens,
+	) {
+		if content.ID != "" {
+			seenUsage[content.ID] = struct{}{}
+		}
 		u := usage[content.Model]
 		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
@@ -357,9 +472,17 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 				CallID: block.ID,
 				Input:  input,
 			})
+		default:
+			// A block type we do not render may be carrying the model's answer
+			// in a shape we cannot read, so we must not claim this turn was
+			// silent. Recognising a new no-text block is a deliberate one-line
+			// addition here, not an accident of falling through.
+			turn.understood = false
 		}
 	}
-	return assistantText.String(), toolUseCount
+	turn.text = assistantText.String()
+	turn.toolUses = toolUseCount
+	return turn
 }
 
 func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
@@ -397,6 +520,10 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
+	// Do not rewrite run_in_background here: under bypassPermissions most
+	// tools never emit control_request, and CodeBuddy does not use Claude's
+	// async_launched tool_result shape. Background work is disabled via
+	// CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS before tool execution.
 
 	response := map[string]any{
 		"type": "control_response",
@@ -404,6 +531,11 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 			"subtype":    "success",
 			"request_id": msg.RequestID,
 			"response": map[string]any{
+				// CodeBuddy's SdkPermissionClient reads `allowed` and treats a
+				// missing key as a denial; `behavior` is Claude Code's spelling,
+				// which the fork still honours on its other permission paths.
+				// Send both so an approval is never read as a silent reject.
+				"allowed":      true,
 				"behavior":     "allow",
 				"updatedInput": inputMap,
 			},
@@ -445,18 +577,69 @@ func writeCodebuddyInput(w io.Writer, prompt string) error {
 	return nil
 }
 
+const codebuddyDisableBackgroundTasksEnv = "CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS"
+
+// CodeBuddy's PowerShell tool moves a command to the background when it hits
+// its foreground timeout and only honors this variable — the headless
+// background-task disable above does not stop it (issue #9200).
+const codebuddyDisableBashAutoBackgroundEnv = "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED"
+
+// A user-scope SERVER__PORT (shared by several tools' configs) pins every
+// codebuddy run's internal HTTP server to one port; a second concurrent run
+// then dies with EADDRINUSE before doing any work (issue #9200). Port 0 lets
+// the OS assign a free port per run.
+const codebuddyInternalPortEnv = "SERVER__PORT"
+
+// buildCodebuddyEnv merges task env and always forces background tasks off,
+// a random internal HTTP port and the PowerShell auto-background disable.
+// Multica's adapter closes stdin after the first result; CodeBuddy's
+// background lifecycle can push task_notification after that point, which we
+// cannot observe. The official CLI documents the disable variable for exactly
+// that headless shape (https://www.codebuddy.ai/docs/cli/headless).
+//
+// Append the forced entries last so os/exec's platform-aware dedup
+// (case-insensitive on Windows, last-wins) keeps them even when the
+// inherited or custom_env key differs only by case.
+func buildCodebuddyEnv(extra map[string]string) []string {
+	return append(buildEnv(extra),
+		codebuddyInternalPortEnv+"=0",
+		codebuddyDisableBashAutoBackgroundEnv+"=1",
+		codebuddyDisableBackgroundTasksEnv+"=1",
+	)
+}
+
+// codebuddySystemIsBackgroundTask reports CodeBuddy's real background-task
+// system subtypes (not Claude's async_launched tool_result).
+func codebuddySystemIsBackgroundTask(subtype string) bool {
+	switch strings.TrimSpace(subtype) {
+	case "task_started", "task_progress", "task_updated", "task_notification":
+		return true
+	default:
+		return false
+	}
+}
+
 // ── Codebuddy SDK JSON types ──
 
 type codebuddySDKMessage struct {
-	Type      string          `json:"type"`
-	Message   json.RawMessage `json:"message,omitempty"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type            string          `json:"type"`
+	Message         json.RawMessage `json:"message,omitempty"`
+	Subtype         string          `json:"subtype,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 
-	// result fields
+	// Top-level error events can be fatal during startup or recoverable once
+	// the run has begun; the message is inline rather than in a result event.
+	Error string `json:"error,omitempty"`
+
+	// result fields — CodeBuddy failures use is_error + errors/errors_info;
+	// there is no Claude-style terminal_reason=prompt_too_long signal in the
+	// shipped @tencent-ai/codebuddy-code 2.150.0 protocol.
 	ResultText string                               `json:"result,omitempty"`
 	IsError    bool                                 `json:"is_error,omitempty"`
+	Errors     json.RawMessage                      `json:"errors,omitempty"`
+	ErrorsInfo json.RawMessage                      `json:"errors_info,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`
 	NumTurns   int                                  `json:"num_turns,omitempty"`
 	Usage      *codebuddyUsage                      `json:"usage,omitempty"`
@@ -476,6 +659,7 @@ type codebuddyLogEntry struct {
 }
 
 type codebuddyMessageContent struct {
+	ID      string                  `json:"id"`
 	Role    string                  `json:"role"`
 	Model   string                  `json:"model"`
 	Content []codebuddyContentBlock `json:"content"`
@@ -512,7 +696,7 @@ type codebuddyControlRequestPayload struct {
 	Input    json.RawMessage `json:"input,omitempty"`
 }
 
-func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[string]TokenUsage {
+func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string, isResume bool) map[string]TokenUsage {
 	if len(msg.ModelUsage) > 0 {
 		usage := make(map[string]TokenUsage, len(msg.ModelUsage))
 		for model, u := range msg.ModelUsage {
@@ -529,6 +713,13 @@ func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[str
 		if len(usage) > 0 {
 			return usage
 		}
+	}
+
+	// CodeBuddy's modelUsage is per execution, but usage includes earlier
+	// executions in a resumed session. Without modelUsage, retain this run's
+	// assistant-event accounting rather than replacing it with session totals.
+	if isResume {
+		return nil
 	}
 
 	model := msg.Model

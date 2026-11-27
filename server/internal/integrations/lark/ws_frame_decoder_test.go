@@ -429,7 +429,7 @@ func TestLarkJSONFrameDecoderMessageContentEmptyOnInvalidContentJSON(t *testing.
 	}
 }
 
-func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
+func TestLarkJSONFrameDecoderMediaMessageKeepsPlaceholderAndContent(t *testing.T) {
 	t.Parallel()
 	raw := []byte(`{
 		"type":"event_callback",
@@ -443,8 +443,11 @@ func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
-	if msg.Body != "" {
-		t.Errorf("Body = %q; non-text messages should have empty body in MVP", msg.Body)
+	if msg.Body != "[Image]" {
+		t.Errorf("Body = %q; want media placeholder", msg.Body)
+	}
+	if msg.Content != `{"image_key":"img1"}` {
+		t.Errorf("Content = %q; want raw media content", msg.Content)
 	}
 	if msg.MessageID == "" {
 		t.Error("MessageID should still be populated for non-text events")
@@ -608,5 +611,28 @@ func TestLarkJSONFrameDecoderNonThreadHasEmptyThreadID(t *testing.T) {
 	}
 	if msg.ThreadID != "" {
 		t.Errorf("ThreadID = %q want empty for non-thread message", msg.ThreadID)
+	}
+}
+
+func TestPeekEventType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"empty payload", "", ""},
+		{"malformed json", "not json", ""},
+		{"heartbeat", "{}", ""},
+		{"handled event", `{"schema":"2.0","header":{"event_type":"im.message.receive_v1"}}`, "im.message.receive_v1"},
+		{"unhandled event", `{"schema":"2.0","header":{"event_type":"im.chat.access_event_v1"}}`, "im.chat.access_event_v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := PeekEventType([]byte(tc.payload)); got != tc.want {
+				t.Errorf("PeekEventType(%q) = %q, want %q", tc.payload, got, tc.want)
+			}
+		})
 	}
 }

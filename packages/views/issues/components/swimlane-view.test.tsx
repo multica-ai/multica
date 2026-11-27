@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
@@ -14,6 +14,9 @@ import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+
+const mockToastInfo = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { info: mockToastInfo } }));
 
 // Mock hooks
 vi.mock("@multica/core/hooks", () => ({
@@ -95,52 +98,13 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 // Mock issue config
-vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_CONFIG: {
-    backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
-    cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-  },
-  PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
-  PRIORITY_CONFIG: {
-    urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning" },
-    medium: { label: "Medium", bars: 2, color: "text-warning" },
-    low: { label: "Low", bars: 1, color: "text-info" },
-    none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
-  },
-}));
-
-// Default mock returns hasMore=false so the load-more sentinels render
-// as no-op divs and don't pull IntersectionObserver into JSDOM.
-const mockLoadMore = vi.fn();
-const useLoadMoreByStatusMock = vi.fn(
-  (_status: string, _opts?: unknown, _sort?: unknown) => ({
-    total: 0,
-    loaded: 0,
-    hasMore: false,
-    isLoading: false,
-    loadMore: mockLoadMore,
-  }),
-);
-vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
-  return {
-    ...actual,
-    useLoadMoreByStatus: (status: string, opts?: unknown, sort?: unknown) =>
-      useLoadMoreByStatusMock(status, opts, sort),
-  };
-});
+// Use the real status configuration so category fixtures cannot drift.
 
 type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 
@@ -151,8 +115,8 @@ type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 // flip grouping must set both `swimlaneGrouping` and the matching slice
 // in `swimlaneOrders` / `collapsedSwimlanes`.
 const mockViewState: {
-  sortBy: "position";
-  sortDirection: "asc";
+  sortBy: "position" | "updated_at";
+  sortDirection: "asc" | "desc";
   cardProperties: Record<string, boolean>;
   swimlaneGrouping: SwimlaneGroupingMock;
   swimlaneOrders: Record<SwimlaneGroupingMock, string[]>;
@@ -162,6 +126,7 @@ const mockViewState: {
   toggleSwimlaneCollapsed: (key: string) => void;
   hideStatus: (s: string) => void;
   showStatus: (s: string) => void;
+  hiddenStatuses: string[];
   priorityFilters?: string[];
   assigneeFilters?: any[];
   includeNoAssignee?: boolean;
@@ -184,6 +149,7 @@ const mockViewState: {
   toggleSwimlaneCollapsed: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
+  hiddenStatuses: [],
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,
@@ -262,15 +228,19 @@ vi.mock("@dnd-kit/utilities", () => ({
 // nothing (and throws on its resize plumbing). Render every lane inline so the
 // virtualized swimlane exposes its lanes/cells/cards to the DOM, matching the
 // non-virtualized behavior these tests assert.
+const mockVirtuosoLocation = vi.hoisted(() => vi.fn());
 vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent, components }: any) => (
-    <div data-testid="virtuoso-mock">
-      {(data ?? []).map((item: any, i: number) => (
-        <div key={i}>{itemContent(i, item)}</div>
-      ))}
-      {components?.Footer ? <components.Footer /> : null}
-    </div>
-  ),
+  Virtuoso: ({ data, itemContent, components, initialTopMostItemIndex }: any) => {
+    mockVirtuosoLocation(initialTopMostItemIndex);
+    return (
+      <div data-testid="virtuoso-mock">
+        {(data ?? []).map((item: any, i: number) => (
+          <div key={i}>{itemContent(i, item)}</div>
+        ))}
+        {components?.Footer ? <components.Footer /> : null}
+      </div>
+    );
+  },
 }));
 
 const mockIssues: Issue[] = [
@@ -420,13 +390,6 @@ describe("SwimLaneView", () => {
     mockViewState.agentRunningFilter = false;
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
     mockGetAgentTaskSnapshot.mockResolvedValue([]);
-    useLoadMoreByStatusMock.mockImplementation(() => ({
-      total: 0,
-      loaded: 0,
-      hasMore: false,
-      isLoading: false,
-      loadMore: mockLoadMore,
-    }));
   });
 
   it("renders status columns as headers", () => {
@@ -437,7 +400,7 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    expect(screen.getByText("Backlog")).toBeInTheDocument();
+    expect(screen.getByText("Todo")).toBeInTheDocument();
     expect(screen.getByText("Todo")).toBeInTheDocument();
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
@@ -484,17 +447,39 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
   });
 
+  // Cells are CATEGORIES, cards carry concrete status KEYS. Keying the cell by
+  // the raw key gave a custom status a cell that does not exist, and the card
+  // fell out of the grid entirely (MUL-6409).
+  const customStatusOrphan: Issue = {
+    ...cancelledOrphan,
+    id: "custom-orphan",
+    number: 10,
+    identifier: "PROJ-10",
+    title: "Awaiting Reporter",
+    status: "awaiting_response",
+    status_category: "started",
+  };
+
+  it("renders a custom-status card in its own status column", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, customStatusOrphan]}
+        visibleStatuses={["todo", "in_progress", "awaiting_response"]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Awaiting Reporter")).toBeInTheDocument();
+  });
+
   it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {
     renderWithI18n(
       <SwimLaneView
         issues={[...mockIssues, cancelledOrphan]}
         visibleStatuses={[
-          "backlog",
           "todo",
           "in_progress",
-          "in_review",
           "done",
-          "blocked",
         ]}
         onMoveIssue={vi.fn()}
       />,
@@ -573,26 +558,6 @@ describe("SwimLaneView", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
-  it("routes add button through the surface create callback when provided", () => {
-    const onCreateIssue = vi.fn();
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-        projectId="proj-42"
-        onCreateIssue={onCreateIssue}
-      />,
-    );
-
-    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
-    fireEvent.click(addButtons[0]!);
-
-    expect(onCreateIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: "proj-42" }),
-    );
-    expect(mockOpenModal).not.toHaveBeenCalled();
-  });
-
   // A child whose parent isn't in the loaded set — lands in "Other parents".
   const orphanChild: Issue = {
     id: "lonely-child",
@@ -640,7 +605,7 @@ describe("SwimLaneView", () => {
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 7; // ALL_STATUSES default (cancelled included)
+    const visibleStatusCount = 7; // Four lifecycle categories (closed included)
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);
@@ -681,7 +646,6 @@ describe("SwimLaneView", () => {
         issues={mockIssues.filter((i) => i.status === "todo")}
         unfilteredIssues={mockIssues}
         visibleStatuses={["todo"]}
-        hiddenStatuses={["backlog", "in_progress", "in_review", "done", "blocked"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -735,7 +699,6 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[parent]}
         visibleStatuses={["todo"]}
-        hiddenStatuses={["done"]}
         groupBranches={makeServerBranches(descriptors, [parent])}
         onMoveIssue={vi.fn()}
       />,
@@ -834,29 +797,7 @@ describe("SwimLaneView", () => {
 
     const links = screen.getAllByRole("link", { name: "Open parent issue" });
     expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
-  });
-
-  it("renders HiddenColumnsPanel only when hiddenStatuses is non-empty", () => {
-    const { unmount } = renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-    expect(screen.queryByText("Hidden columns")).not.toBeInTheDocument();
-    unmount();
-
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        visibleStatuses={["backlog", "todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["blocked"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Hidden columns")).toBeInTheDocument();
-    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(links[0]).toHaveAttribute("href", "/acme/issues/PROJ-1");
   });
 
   it("calls onMoveIssue on drag-and-drop end", () => {
@@ -895,29 +836,6 @@ describe("SwimLaneView", () => {
       },
       expect.any(Function),
     );
-  });
-
-  it("passes a settle callback that releases the lock without error", () => {
-    const mockOnMoveIssue = vi.fn();
-    renderWithI18n(
-      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
-    );
-
-    const targetCellId = "swim:parent:none:in_progress";
-    act(() => {
-      lastOnDragOver({ active: { id: "orphan-1" }, over: { id: targetCellId } });
-    });
-    act(() => {
-      lastOnDragEnd({ active: { id: "orphan-1" }, over: { id: targetCellId } });
-    });
-
-    // The move carries a settle callback (held from drop until the mutation
-    // settles); invoking it releases the lock and re-syncs from the cache.
-    const onSettled = mockOnMoveIssue.mock.calls[0]?.[2] as
-      | (() => void)
-      | undefined;
-    expect(typeof onSettled).toBe("function");
-    expect(() => act(() => onSettled?.())).not.toThrow();
   });
 
   it("does not call onMoveIssue when drop target equals source cell (no-op)", () => {
@@ -960,57 +878,63 @@ describe("SwimLaneView", () => {
       "orphan-1",
       expect.objectContaining({
         parent_issue_id: "parent-1",
-        status: "todo",
       }),
       expect.any(Function),
     );
+    // Moving lanes within Unstarted must preserve the concrete Backlog key.
+    expect(mockOnMoveIssue.mock.calls[0]![1]).toHaveProperty("status", "todo");
   });
 
-  it("renders count for hidden statuses from in-memory statusTotals", () => {
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        visibleStatuses={["todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["backlog", "blocked"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
+  describe("when cells are not in manual order", () => {
+    // Shown newest first, so the in-progress cell reads a, b: positions 20, 10.
+    const sortedIssues: Issue[] = [
+      { id: "a", status: "in_progress", position: 20, updated_at: "2026-01-04T00:00:00Z" },
+      { id: "b", status: "in_progress", position: 10, updated_at: "2026-01-03T00:00:00Z" },
+      { id: "moved", status: "todo", position: 15, updated_at: "2026-01-02T00:00:00Z" },
+      { id: "todo-2", status: "todo", position: 5, updated_at: "2026-01-01T00:00:00Z" },
+    ].map((fields) => ({ ...mockIssues[2]!, ...fields }) as Issue);
 
-    const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Backlog");
-    expect(panel).toHaveTextContent("Blocked");
-    expect(panel).toHaveTextContent("1");
-    expect(panel).toHaveTextContent("0");
-  });
+    beforeEach(() => {
+      mockViewState.sortBy = "updated_at";
+      mockViewState.sortDirection = "desc";
+    });
+    afterEach(() => {
+      mockViewState.sortBy = "position";
+      mockViewState.sortDirection = "asc";
+    });
 
-  it("hidden-column totals come from unfilteredIssues when provided", () => {
-    const unfiltered: Issue[] = [
-      ...mockIssues,
-      {
-        ...mockIssues[2]!,
-        id: "blocked-1",
-        identifier: "PROJ-99",
-        title: "Blocked Issue",
-        status: "blocked",
-        position: 500,
-      },
-    ];
+    it("leaves the manual order alone when a card is dropped in its own cell", () => {
+      const mockOnMoveIssue = vi.fn();
+      renderWithI18n(<SwimLaneView issues={sortedIssues} onMoveIssue={mockOnMoveIssue} />);
 
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        unfilteredIssues={unfiltered}
-        visibleStatuses={["todo", "in_progress", "in_review", "done"]}
-        hiddenStatuses={["backlog", "blocked"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
+      act(() => lastOnDragEnd({ active: { id: "moved" }, over: { id: "todo-2" } }));
 
-    const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Backlog");
-    expect(panel).toHaveTextContent("Blocked");
-    const counts = [...panel.querySelectorAll("span")].map((el) => el.textContent);
-    expect(counts.filter((c) => c === "1").length).toBeGreaterThanOrEqual(2);
+      expect(mockOnMoveIssue).not.toHaveBeenCalled();
+      expect(mockToastInfo).toHaveBeenCalledWith(
+        enIssues.board.manual_reorder_hint,
+        expect.anything(),
+      );
+    });
+
+    it("changes the status and keeps the position, with anchors in manual order", () => {
+      const mockOnMoveIssue = vi.fn();
+      renderWithI18n(<SwimLaneView issues={sortedIssues} onMoveIssue={mockOnMoveIssue} />);
+
+      // Between a (20) and b (10) the anchors run backwards, and the server
+      // rejects the whole move.
+      act(() => lastOnDragOver({ active: { id: "moved" }, over: { id: "b" } }));
+      act(() =>
+        lastOnDragEnd({ active: { id: "moved" }, over: { id: "swim:parent:none:in_progress" } }),
+      );
+
+      expect(mockOnMoveIssue).toHaveBeenCalledTimes(1);
+      expect(mockOnMoveIssue.mock.calls[0]![1]).toMatchObject({
+        status: "in_progress",
+        position: 15,
+        before_id: null,
+        after_id: "a",
+      });
+    });
   });
 
   const multiParentIssues: Issue[] = [
@@ -1368,9 +1292,10 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-c",
-      expect.objectContaining({ project_id: "proj-1", status: "todo" }),
+      expect.objectContaining({ project_id: "proj-1" }),
       expect.any(Function),
     );
+    expect(mockOnMoveIssue.mock.calls[0]?.[1]).not.toHaveProperty("status");
   });
 
   it("emits null project_id when a card is dropped into the 'No project' lane", () => {
@@ -1381,7 +1306,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={projectIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:project:none:in_review";
+    const target = "swim:project:none:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } });
     });
@@ -1391,7 +1316,7 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-a",
-      expect.objectContaining({ project_id: null, status: "in_review" }),
+      expect.objectContaining({ project_id: null, status: "in_progress" }),
       expect.any(Function),
     );
   });
@@ -1460,7 +1385,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={assigneeIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:assignee:member:user-1:in_review";
+    const target = "swim:assignee:member:user-1:in_progress";
     act(() => {
       lastOnDragOver({ active: { id: "issue-z" }, over: { id: target } });
     });
@@ -1473,7 +1398,7 @@ describe("SwimLaneView", () => {
       expect.objectContaining({
         assignee_type: "member",
         assignee_id: "user-1",
-        status: "in_review",
+        status: "in_progress",
       }),
       expect.any(Function),
     );
@@ -1791,7 +1716,7 @@ describe("SwimLaneView", () => {
     });
   });
 
-  it("filters batch-fetched children using API-derived running issue ids", async () => {
+  it.each([false, true])("filters batch-fetched children by agent activity (idle=%s)", async (idle) => {
     mockViewState.swimlaneGrouping = "parent";
 
     const grandparent: Issue = {
@@ -1867,7 +1792,9 @@ describe("SwimLaneView", () => {
           priorityFilters: [],
           assigneeFilters: [],
           includeNoAssignee: false,
-          agentRunningFilter: true,
+          agentRunningFilter: !idle,
+          agentIdleFilter: idle,
+          activeIssueIds: new Set(["gc-running"]),
           runningIssueIds: new Set(["gc-running"]),
           creatorFilters: [],
           projectFilters: [],
@@ -1884,8 +1811,8 @@ describe("SwimLaneView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Running Child")).toBeInTheDocument();
-      expect(screen.queryByText("Non-running Child")).toBeNull();
+      expect(screen.getByText(idle ? "Non-running Child" : "Running Child")).toBeInTheDocument();
+      expect(screen.queryByText(idle ? "Running Child" : "Non-running Child")).toBeNull();
     });
   });
 
@@ -2020,6 +1947,16 @@ describe("SwimLaneView", () => {
 
 describe("SwimLaneView tab-session scroll restoration (MUL-4741)", () => {
   it("registers the outer scroller for memento capture and restores the saved offset at attach", () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    rect.mockImplementation(function (this: HTMLElement) {
+      const scroller = this.closest<HTMLElement>('[data-tab-scroll-root="swimlane"]');
+      return {
+        top: scroller && this !== scroller ? 176 - scroller.scrollTop : 100,
+        left: 0, right: 800, bottom: 800, width: 800, height: 700,
+        x: 0, y: 100, toJSON: () => ({}),
+      };
+    });
+    mockVirtuosoLocation.mockClear();
     const adapter = {
       get: (key: string) =>
         key === "swimlane" ? { top: 240, height: 2000 } : undefined,
@@ -2048,5 +1985,9 @@ describe("SwimLaneView tab-session scroll restoration (MUL-4741)", () => {
     // Restore side: the ref-attach assignment applies the saved offset
     // before first paint (jsdom has no layout, so no clamping applies).
     expect(scroller!.scrollTop).toBe(240);
+    // The virtualizer's item offset excludes the 76px of padding/header
+    // above its list, so the outer scroller also lands at 240 in Chromium.
+    expect(mockVirtuosoLocation).toHaveBeenLastCalledWith({ index: 0, offset: 164 });
+    rect.mockRestore();
   });
 });

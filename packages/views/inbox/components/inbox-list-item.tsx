@@ -1,16 +1,31 @@
 "use client";
 
-import { StatusIcon } from "../../issues/components";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
+import { StatusIcon } from "../../issues/components/status-icon";
 import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, ArchiveRestore } from "lucide-react";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
+import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
-import { InboxDetailLabel } from "./inbox-detail-label";
-import { getInboxDisplayTitle } from "./inbox-display";
+import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
+import {
+  getInboxDisplayTitle,
+  inboxIssueRef,
+  isQuotaNotice,
+} from "./inbox-display";
+import { useInboxContextMenu } from "./inbox-context-menu";
+import { useStatusLabel } from "../../issues/utils/status-label";
+import { InboxRowMenu } from "./inbox-row-menu";
+import { handleRowActivationKey } from "../../common/row-actions-menu";
 import { useT } from "../../i18n";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { resolveClickIntent, useIntentNavigate } from "../../navigation";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather
@@ -45,8 +60,27 @@ export function InboxListItem({
   onAction: () => void;
 }) {
   const { t } = useT("inbox");
+  const reduceMotion = useReducedMotion();
   const timeAgo = useTimeAgo();
-  const displayTitle = getInboxDisplayTitle(item);
+  const typeLabels = useTypeLabels();
+  // Inbox is a cross-workspace surface, so the catalog is read against the
+  // item's OWN workspace rather than the route's. (MUL-6243)
+  const { categoryOf: statusCategoryOf, colorOf: statusColorOf, iconOf: statusIconOf } =
+    useIssueStatuses(item.workspace_id);
+  const statusLabelOf = useStatusLabel(item.workspace_id);
+  const openContextMenu = useInboxContextMenu();
+  // Null-safe slug (not useWorkspacePaths, which throws): the row renders in
+  // tests and could render outside a workspace route; without a slug the
+  // modifier-click affordance simply stays off.
+  const slug = useWorkspaceSlug();
+  const issueHref =
+    slug && item.issue_id
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
+      : null;
+  const intentNavigate = useIntentNavigate();
+  const displayTitle = isQuotaNotice(item.type)
+    ? typeLabels[item.type]
+    : getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
   // Archiving deliberately leaves `read` untouched so unarchiving restores the
   // real unread state, so archived rows would otherwise keep an unread marker
@@ -57,13 +91,53 @@ export function InboxListItem({
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
   const actorType = item.actor_type ?? item.recipient_type;
+  // The glyph is per CATEGORY, so it alone cannot tell "In Review" from a
+  // custom "Human Review" — moving between two statuses of the same category
+  // left this row pixel-identical and read as "the inbox never updated"
+  // (MUL-6395). Colour is what carries a custom status's own identity, exactly
+  // as the status-changed detail label already renders it. `colorOf` returns
+  // null for a built-in, which keeps it on its semantic token.
+  const statusColor = item.issue_status ? statusColorOf(item.issue_status) : null;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors ${
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
+    // A div, not a <button>: the row carries its own controls (the action
+    // button, the compact menu), and interactive descendants of a <button>
+    // are invalid HTML that screen readers cannot reach. `role="button"` plus
+    // the Enter/Space handler keeps the row's own keyboard behavior.
+    <div
+      data-mc="inbox-item"
+      data-read={item.read === true ? "true" : "false"}
+      data-selected={isSelected ? "true" : "false"}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        // Plain click keeps the master-detail selection; a modifier click on
+        // a row that references an issue opens that issue as its own tab.
+        if (issueHref) {
+          const intent = resolveClickIntent(e);
+          if (intent !== "push") {
+            intentNavigate(issueHref, intent);
+            return;
+          }
+        }
+        onClick();
+      }}
+      onKeyDown={(e) => handleRowActivationKey(e, onClick)}
+      onAuxClick={(e) => {
+        if (e.defaultPrevented || e.button !== 1 || !issueHref) return;
+        e.preventDefault();
+        intentNavigate(issueHref, "background-tab");
+      }}
+      // Right-click opens the list's shared menu (mark read/unread, archive).
+      // `select-none` mirrors what Base UI's own trigger used to merge in, so
+      // right-clicking a row never starts a text selection.
+      onContextMenu={
+        openContextMenu ? (e) => openContextMenu(item, e) : undefined
+      }
+      className={`group flex w-full cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
+        isSelected
+          ? "bg-accent"
+          : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
       }`}
     >
       <ActorAvatar
@@ -75,42 +149,55 @@ export function InboxListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            {showUnread && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-            )}
+            <AnimatePresence initial={false}>
+              {showUnread && (
+                <motion.span
+                  key="unread-dot"
+                  data-mc="unread-dot"
+                  initial={false}
+                  animate={{ opacity: 1, scale: 1, width: 6 }}
+                  exit={{
+                    opacity: 0,
+                    scale: 0,
+                    width: 0,
+                    transition: { duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT },
+                  }}
+                  className="h-1.5 shrink-0 rounded-full bg-brand"
+                />
+              )}
+            </AnimatePresence>
             <span
-              className={`truncate text-sm ${showUnread ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-body transition-colors ${showUnread ? "font-medium" : "text-muted-foreground"}`}
             >
               {displayTitle}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <span
-              role="button"
-              tabIndex={-1}
-              title={actionLabel}
-              aria-label={actionLabel}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAction();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation();
-                  onAction();
-                }
-              }}
-              className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
-            >
-              <ActionIcon className="h-3.5 w-3.5" />
-            </span>
-            {item.issue_status && (
-              <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
-            )}
+            {/* Pointer-only affordance: revealed on hover, and on keyboard
+                focus anywhere in the row so it is reachable by Tab. Touch has
+                neither, so it stays hidden on a pointer that cannot hover and
+                the compact menu below carries the same action. */}
+            <DeferredTooltip
+              content={actionLabel}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={actionLabel}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAction();
+                  }}
+                  className="hidden rounded-xs p-0.5 text-muted-foreground outline-none transition-opacity duration-100 hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:inline-flex [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:opacity-100"
+                >
+                  <ActionIcon className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+            <InboxRowMenu item={item} view={view} />
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
             <InboxDetailLabel item={item} />
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -125,12 +212,31 @@ export function InboxListItem({
                 hoverCard={false}
               />
             )}
-            <span className={`text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+            {/* On the detail line rather than the title's, so the title keeps
+                the whole first line to itself. */}
+            {item.issue_status && (
+              // Icon-only, like every other issue row — but a colour is not a
+              // name, and this row has no space for the CustomStatusChip the
+              // board card and list row carry. `title` is that name.
+              <span
+                title={statusLabelOf(item.issue_status)}
+                className="flex shrink-0 items-center"
+              >
+                <StatusIcon
+                  status={item.issue_status}
+                  category={statusCategoryOf(item.issue_status)}
+                  color={statusColor}
+                  icon={item.issue_status ? statusIconOf(item.issue_status) : null}
+                  className="h-3.5 w-3.5 shrink-0"
+                />
+              </span>
+            )}
+            <span className={`text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
               {timeAgo(item.created_at)}
             </span>
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }

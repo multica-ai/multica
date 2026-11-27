@@ -11,9 +11,9 @@ import (
 // arrived. Lark splits large event payloads across multiple binary
 // Frames with the headers:
 //
-//   sum        — total number of chunks (>=2 means multi-frame)
-//   seq        — 0-based index of THIS chunk within the message
-//   message_id — common key across the N chunks
+//	sum        — total number of chunks (>=2 means multi-frame)
+//	seq        — 0-based index of THIS chunk within the message
+//	message_id — common key across the N chunks
 //
 // The SDK reference (larksuite/oapi-sdk-go/v3/ws/client.go combine())
 // uses a 5-second TTL on partial state — anything older than that is
@@ -87,6 +87,12 @@ func (a *chunkAssembler) admit(messageID string, sum, seq int, payload []byte) (
 			deadline: a.now().Add(a.ttl),
 		}
 		a.buf[messageID] = entry
+	} else if len(entry.chunks) != sum {
+		// A pending message has a fixed chunk count. A resend with a
+		// different sum is malformed: indexing outside the buffered slice
+		// would panic, and an in-range index would corrupt the counter.
+		// Ignore it and keep the original assembly intact.
+		return nil, false
 	}
 	// Duplicate chunk (network retry / out-of-order Lark resend): we
 	// silently overwrite. Lark guarantees the payload bytes are stable

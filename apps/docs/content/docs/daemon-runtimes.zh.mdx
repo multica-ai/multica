@@ -1,160 +1,405 @@
 ---
 title: 守护进程与运行时
-description: 智能体不在 Multica 服务器上运行——它们跑在你自己的机器上。
+description: 了解 Multica 如何连接电脑、发现 AI 编程工具并运行。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
-import { Mermaid } from "@/components/mermaid";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { RuntimeOfflineDemo } from "@/components/demos/runtime-offline-demo";
 
-在 Multica 里，[智能体](/agents) **不**在我们的服务器上运行——它们跑在你自己的机器上，由一个叫**守护进程**（daemon）的小程序调用本地安装的 [AI 编程工具](/providers)。Multica 服务器只做协调：存 [issue](/issues)、排 [任务](/tasks)、派发给正确的**运行时**（runtime = 守护进程 × 一款 AI 编程工具）。
+Multica 记录和协调工作，连接上来的电脑负责执行：电脑上的**守护进程**（daemon）领取运行，再调用本机安装的 AI 编程工具。
 
-这个结构带来 Multica 和 Linear / Jira 最大的差别：**你的 API 密钥、工具链、代码目录都留在本地**，Multica 服务器一个都看不到。"我的智能体不工作"类问题几乎都是本地问题——守护进程没启动、某款 AI 工具没装、密钥过期——请先从本地查起；定位指引见 [故障排查](/troubleshooting)。
+## 概念区分
+
+- **守护进程**是运行在一台电脑上的 Multica 后台程序。它负责连接服务器、发现本机工具、领取运行和回传结果。
+- **运行时**代表一个工作区可以使用的具体执行环境。它对应一台电脑，以及这台电脑上的一款 AI 编程工具或自定义运行时配置。
+
+例如，一台电脑装了 Claude Code 和 Codex，连接了两个工作区，守护进程就为每个工作区各注册一条 Claude Code 运行时和一条 Codex 运行时。重启守护进程会更新原有记录，不会为同一个组合反复创建新运行时。
+
+## 执行位置与数据边界
+
+本地运行时调用的 AI 编程工具、这些工具自己的登录凭据和本地代码目录，都留在连接的电脑上。Multica 服务器不替本地工具执行命令，也不会自动上传整个工作目录。
+
+为了让团队能够协作，服务器会保存任务、评论、智能体配置、运行上下文、执行记录和智能体写回的结果。这些内容可能包含智能体主动读取并写入回复的代码片段或其他项目上下文。
+
+<Callout type="warning">
+"本地执行"不等于所有 secret 都只存在本机。智能体的自定义环境变量和 MCP 配置保存在服务器侧，展示时受敏感信息规则限制；自定义环境变量会在执行时发送给运行时。
+</Callout>
 
 ## 启动守护进程
 
-守护进程是 Multica CLI 的一部分。装好 [Multica CLI](/cli) 后，在自己机器上跑：
+<Tabs items={["Desktop", "CLI"]}>
+<Tab value="Desktop">
+
+Multica Desktop 会自动启动守护进程，不需要额外运行命令。
+
+</Tab>
+<Tab value="CLI">
+
+使用 Web、远程电脑或无界面环境时，先[安装 Multica CLI](/cli)，再运行：
 
 ```bash
 multica daemon start
 ```
 
-启动后它会做四件事：
+</Tab>
+</Tabs>
 
-1. 读取你登录时保存的凭证
-2. 探测本机 `PATH` 上已安装的 AI 编程工具（内置支持 16 款：[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok)）
-3. 向服务器注册自己，以及每款检测到的工具对应的运行时
-4. 持续**每 3 秒轮询一次**是否有任务要领，**每 15 秒发一次心跳**
-
-常用命令：
+守护进程默认在后台运行。常用命令：
 
 | 命令 | 作用 |
+| --- | --- |
+| `multica daemon status` | 查看守护进程和连接状态，以及跳过已检测到的智能体的原因 |
+| `multica daemon logs -f` | 持续查看日志 |
+| `multica daemon restart` | 重启守护进程并重新检测本机工具 |
+| `multica daemon stop` | 停止守护进程 |
+| `multica daemon start --foreground` | 在当前终端中运行，便于调试 |
+
+如需把执行工作目录放到其他磁盘，可用 `multica config set workspaces_root <path>` 为当前 profile 持久化根目录，也可在 `daemon start` 或 `daemon restart` 中传入 `--workspaces-root <path>`。flag 的优先级高于 `MULTICA_WORKSPACES_ROOT`，环境变量又高于 profile 配置。修改根目录不会迁移已有的执行目录。
+
+启动时，守护进程检测 `PATH` 中受支持的 AI 编程工具，为你有权连接的工作区注册运行时。工具刚安装或刚登录时，重启守护进程就会重新检测。
+
+守护进程至少需要检测到一款内置支持的 AI 编程工具才能启动。安装方法和可执行文件名见[安装 AI 编程工具](/install-agent-runtime)。
+
+### 在 Linux 容器中运行 [#linux-container]
+
+在镜像中安装 Multica CLI 和至少一种受支持的编程工具。以非 root 用户运行容器。将 `MULTICA_SERVER_URL` 设置为容器内可访问的 API 地址。将个人访问令牌作为密钥挂载，并通过标准输入传给登录命令。将 `my-workspace` 替换为你的工作区 slug。
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+初始化 profile 时执行登录和工作区选择。要在替换容器后继续使用同一个运行时，必须将容器用户的 `~/.multica` 挂载到可写的持久存储上。此目录保存 profile 的访问令牌和守护进程 ID。如果替换容器时丢失此目录，你需要重新登录，守护进程也会注册一个新的运行时。分配到原运行时的智能体无法在新容器中领取任务。
+
+将工作目录根路径挂载到可写的持久存储上，即可在替换容器后保留运行目录和 `.repos` 缓存。使用 `--profile container` 时，默认的工作目录根路径是 `~/multica_workspaces_container`。
+
+单独配置编程工具的认证。由容器管理器重启前台守护程序，并通过替换镜像升级 CLI。
+
+### 开机自启 [#autostart]
+
+用 CLI 启动的守护进程默认不会随电脑重启自动恢复。需要的话，为当前 profile 登记开机自启：
+
+```bash
+multica daemon autostart enable
+multica daemon autostart status
+multica daemon autostart disable
+```
+
+登记的命令是这个 profile 的 `multica daemon start --foreground`，由系统在登录时拉起：Windows 写入当前用户的 Run 注册表项，macOS 写入 `~/Library/LaunchAgents` 下的 LaunchAgent，Linux 写入 systemd 用户单元，没有 systemd 用户会话时改用 XDG autostart 条目。使用命名 profile 时加 `--profile <name>`，每个 profile 单独登记。
+
+- 只有 `enable` 会创建登记。`multica daemon start` 不会自己登记，只在没有登记时提示一行；已有 Multica 创建的登记时，它会顺手更新其中的可执行文件路径，升级或挪动 CLI 后不必重新 `enable`。
+- 在 macOS 和 Linux 上，登录会话只带上 `enable` 时 shell 里的 `PATH`，shell 导出的其他变量（API key、`HTTPS_PROXY` 等）都不会带过去。守护进程配置用 `multica config set` 持久化，其他变量放进用户级环境。
+- Linux 的 systemd 用户单元在登录时启动。要在开机后不登录也启动，按 `enable` 输出的提示运行 `loginctl enable-linger <用户名>`。
+- `multica daemon stop` 只停止当前进程，不删除登记。
+- 同一位置已有不是 Multica 创建的文件（例如你自己写的 systemd 单元）时，`enable` 和 `disable` 都会拒绝修改它。
+- Desktop 拉起的守护进程由 Desktop 管理，`daemon start` 不会为它提示或更新登记。
+
+### 在运行时页面更新 CLI [#updating-cli]
+
+独立运行的 CLI 守护进程有新版本时，运行时所有者和工作区管理员可以在**运行时**页面点击**更新**。如果机器正在执行任务且守护进程支持排队更新，这次更新会被暂存，不中断或暂停当前工作；**运行时**页面会在该机器的所有运行时上显示**空闲后更新**、当前运行数和**取消**按钮。
+
+最后一个运行中的任务结束后，安装会自动开始。每台机器同一时间只允许一个未完成的更新；如果机器持续 24 小时未能空闲，排队会自动失效；在开始安装前随时可以取消。不支持排队的旧版守护进程在忙碌时会直接拒绝远程更新，需等空闲后重试。由 Multica 桌面端拉起的守护进程归桌面端管理，随桌面端一起升级。
+
+## 派发与在线状态
+
+运行时注册后保持连接。新运行入队时，服务器通知对应的守护进程；守护进程也会定期轮询，防止连接中断时漏掉通知。所以运行时在线、又有空闲容量时，运行通常立即开始。
+
+守护进程每 15 秒发送一次心跳。服务端综合心跳与连接状态判断运行时是否在线；守护进程意外退出后，最迟约 3 分钟会被判为离线。**运行时**页面在失联的头 5 分钟里显示"最近失联"，之后显示"离线"。
+
+
+运行时离线时：
+
+- 已经排队的运行等待运行时恢复，不会转到其他电脑。只有运行时心跳缺席超过重连宽限期，**并且**这条运行自己也已排队满这么久，它才会失败。运行时只是忙的话，积压会一直保留；指派给已离线运行时的工作，也有完整的一个宽限期可以等。
+- 正在执行的运行不会马上失败。运行时心跳缺席超过重连宽限期（`MULTICA_RUNTIME_RECONNECT_GRACE`，默认 3 小时）后，它们才以 `runtime_offline` 失败；符合条件的任务或对话运行可以自动重试。
+- 守护进程重新启动后，会重新注册运行时，并回收上一次没有正常结束的运行。
+- 离线超过 7 天且没有活跃用户智能体或未完成任务的运行时会自动清理，已归档智能体和任务历史会保留。旧自定义配置未绑定机器时，仅保留配置创建者本人机器上的实例，直到管理员选择归属机器。
+
+下面的演示里，电脑离线时分配的运行一直在队列里等，电脑重新上线后才被领取。
+
+<RuntimeOfflineDemo />
+
+详细状态和重试规则见[运行](/tasks)。
+
+## 并发限制
+
+一台守护进程默认最多同时执行 20 次运行；每个智能体默认最多同时执行 6 次。实际并发取两者中的较小值。
+
+等待直接修改模式本地目录的运行不占用守护进程执行槽位。开始前会重新获取槽位；等待期间仍由守护进程持有，关闭和更新时的安全检查仍会计入这些运行。
+
+达到上限后，新运行继续排队。单个智能体的并发数在智能体设置中调整，整台电脑的上限用 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` 调整。并行执行会同时占用机器性能、工具账号额度和同一工作目录。
+
+运行消耗的 token、费用和失败情况在[统计](/analytics)页按工作区汇总；单条运行时的 token 用量也可以用 `multica runtime usage <runtime-id>` 查看。
+
+Claude Code 和 Codex 运行时的页面上还有**额度**：CLI 账号在套餐的 5 小时会话和每周窗口里已经用了多少、什么时候重置，以及用量是否跑在时间前面。这些数据由 CLI 在执行任务时上报，反映的是这个运行时最近一次运行时的状态。API Key 账号没有套餐额度。
+
+## 本机 MCP 配置 [#local-mcp]
+
+智能体没有保存 MCP 配置时，Multica 不向工具传任何 MCP 设置，工具照常读取这台电脑上它自己的配置。
+
+智能体有 MCP 配置后（哪怕是空配置），Multica 会为每次运行生成一份专用配置交给工具，例如 Claude Code 会以严格模式只加载这份配置。为了不让本机已有的服务器因此失效，守护进程会在运行时所在的电脑上读取该工具的用户级 MCP 配置，再和智能体的配置合并。同名服务器按以下顺序取第一个：
+
+1. 智能体 **MCP** 标签页中由 Multica 管理或从工作区 MCP 库分配的服务器；
+2. 工具的用户级配置文件；
+3. 仅 Claude Code：已启用的 Claude Code 插件自带的 MCP 服务器。插件取自 `~/.claude/settings.json` 的 `enabledPlugins`，读取插件目录下的 `.mcp.json` 和插件清单里声明的 MCP 文件。
+
+| 工具 | 读取的用户级配置 |
 |---|---|
-| `multica daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
-| `multica daemon stop` | 停止 |
-| `multica daemon restart` | 重启 |
-| `multica daemon status` | 查看状态 |
-| `multica daemon logs` | 查看日志（加 `-f` 跟随）|
+| Claude Code | `~/.claude.json` 的 `mcpServers`，以及已启用插件的 MCP 服务器 |
+| Codex | `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`）的 `mcp_servers` |
+| Cursor Agent | `~/.cursor/mcp.json` 的 `mcpServers` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json` 和同目录下 `opencode.jsonc` 的 `mcp`（默认目录为 `~/.config/opencode/`）。JSONC 文件优先。 |
+| OpenClaw | `$CLAWDBOT_CONFIG_PATH`，或 `$OPENCLAW_STATE_DIR/openclaw.json`（默认 `~/.openclaw/openclaw.json`）的 `mcp.servers` |
+| CodeArts | `~/.codeartsdoer/codearts_cli.json` 或 `codearts_cli.jsonc` 的 `mcp` |
 
-完整 CLI 参考见 [CLI 命令速查](/cli)。
+CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Multica 下发的配置合并，守护进程不再预先合并，否则同一个服务器会启动两次。CodeBuddy 遇到同名服务器时以 Multica 下发的为准。表外的其他工具只收到智能体的配置。
 
-**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `multica daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
+合并在运行时所在的电脑上完成，本机服务器的命令、URL、请求头和环境变量不会上传。智能体 **MCP** 标签页的"从运行时继承"一栏只显示服务器名称、传输方式、来源和是否启用；被智能体同名服务器覆盖的会标为"已由 Multica 覆盖"。本机配置文件无法解析时，守护进程记一条警告日志，这次运行只使用智能体的配置。
 
-## 为什么一台机器会有多个运行时
+### Cursor 的 MCP 登录 [#cursor-mcp-login]
 
-运行时不是一个服务器，也不是一个容器——它是「**守护进程 × 一款 AI 编程工具**」的组合。举例：你在一台 MacBook 上启动守护进程，本机装了 Claude Code 和 Codex；你是两个工作区的成员。那么 Multica 会注册 4 个运行时：
+Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己的目录。因此 daemon 会在运行时所在电脑上为每个 Cursor 智能体保留一份登录文件，即 Multica 配置目录下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，并给每次运行一份它的副本。daemon 每隔几秒以及运行结束时，会把 Cursor 对副本的改动合并回智能体的登录文件，所以一次运行刷新的 token，这个智能体之后的运行也能拿到。对 Mobbin 这样的服务登录一次，这个智能体之后在这台电脑上的运行都能用。它和你自己各个 Cursor 项目里的登录分开，运行不会把你那边挤下线。这个智能体在这台电脑上的所有运行都会用到它，包括其他成员触发的运行。
 
-<Mermaid chart={`
-graph TD
-    D["你的守护进程<br/>MacBook"]
-    D --> R1["运行时<br/>工作区 A × Claude Code"]
-    D --> R2["运行时<br/>工作区 A × Codex"]
-    D --> R3["运行时<br/>工作区 B × Claude Code"]
-    D --> R4["运行时<br/>工作区 B × Codex"]
-`} />
+智能体有 MCP 配置时，每次运行都有自己的 Cursor 数据目录，运行在那里的 `mcp-auth.json` 就是这份副本。没有 MCP 配置时，运行使用你自己的 Cursor 数据目录（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中配置的 MCP 服务；daemon 只把 Cursor 在 `projects/` 下为运行目录保存的 `mcp-auth.json` 换成智能体登录文件的副本。运行的目录被清理时，这份副本会一并删除。
 
-关键的点：
+没有 MCP 配置时，有两种运行不放副本，因为它们对应的 Cursor 项目你自己也在用，副本会替换掉你在那里的登录：在项目本地目录里原地工作的运行，以及目录外层套着一个 git 仓库的运行，例如主目录下的 dotfiles 仓库（Cursor 会把这个仓库当作项目）。这些运行使用 Cursor 在该目录下已有的登录，运行记录里也不会给出登录命令；需要时自己在该目录里执行 `cursor-agent mcp login <server>` 登录。
 
-- **一个守护进程可以对应多个运行时**——装了多款工具、加入了多个工作区，每个组合就各一个
-- **同一个守护进程在同一个工作区同一款工具上只会有一条运行时**——重启守护进程不会产生重复记录
-- Multica 界面的 **Runtimes** 页面列的就是这些行
+如果某个服务仍需登录，运行记录里会写明是哪个服务，并给出要在运行时所在电脑上执行的命令。有 MCP 配置的智能体，例如：
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+没有 MCP 配置的智能体，命令使用你自己的 Cursor 数据目录：
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+两种命令都在登录文件旁边一个单独保留的登录目录里执行，所以运行自己的目录被清理后也仍然可用。
+
+登录从这个智能体的下一次运行开始生效，那次运行开始前会从登录目录取回这份登录；当前这次运行用不上。如果想改用你自己的登录文件，在智能体的环境变量里把 `CURSOR_MCP_AUTH_SOURCE` 设为某个 `mcp-auth.json` 的绝对路径，或包含它的 Cursor 项目目录；它优先于按智能体保留的文件。同一个智能体的两次运行如果恰好同时刷新同一个 token，仍可能把对方挤下线，出现时重新登录即可。
+
+## 清理与保留 [#cleanup]
+
+守护进程启动约 30 秒后清理一次，之后每 2 小时一次。正在执行的运行用到的目录不会被清理。`multica daemon disk-usage` 可以按工作区或按运行查看占用。下文的时长都是默认值，对应的 `MULTICA_GC_*` 变量见[环境变量](/environment-variables#gc)。
+
+逐次运行表的 `MODE` 列用 `in place` 标记直接运行。如果运行元数据记录了该模式，JSON 输出会在对应条目中包含 `local_directory: true`。
+
+### 运行目录
+
+每次运行在工作目录根目录（默认 `~/multica_workspaces`）下有一个目录，放检出的代码、输出和日志；同一任务的后续运行会续用它。
+
+下表说明 Multica 管理的目录何时会被整个删除。在项目本地目录中直接执行的运行会保留独立的运行记录目录，详见下文。
+
+| 运行来源 | 删除时机 |
+|---|---|
+| 任务 | 任务进入 `done` 或 `closed` 分类的状态，并且超过 24 小时没有更新 |
+| 聊天 | 会话归档 24 小时后；会话被删除后的下一轮清理。会话未归档时一直保留 |
+| 自动化（仅运行）、快速创建 | 运行结束后的下一轮清理 |
+| 找不到归属（目录缺少元数据，或服务器上已没有对应记录） | 目录 72 小时没有改动 |
+
+任务仍未关闭时，运行完成 12 小时后只删可以重新生成的内容：目录中的 `node_modules`、`.next`、`.turbo`，以及 `codex-home` 下的四个精确路径：`.sandbox-bin`、`.tmp/plugins`、`.tmp/marketplaces`、`cache/remote_plugin_catalog`。其他文件（包括 SQLite 数据库和 WAL 文件）保留。托管的任务运行目录默认还会在运行完成 14 天后整体删除，不论任务是否关闭。
+
+未归档的聊天如果使用 Multica 管理的工作目录，守护进程默认会在最后一次运行结束 12 小时后按同样的规则清理可重新生成的内容。清理成功后，守护进程会跳过该次运行的重复扫描。后续运行结束后，经过同样的等待时间便可再次清理。聊天直接在项目本地目录中运行时，只清理上述精确路径中的 Codex 缓存。
+
+直接运行时，项目的本地目录就是工作目录。守护进程清理时会保留这个目录。运行记录目录保留 daemon 日志和 `output/`。运行完成超过 `MULTICA_GC_COMPLETED_TASK_TTL`（默认 14 天）后，如果会话记录保存在记录目录外，就删除整个 `codex-home`；仍保存任务本地会话记录的 home 会保留。将该变量设为 `0` 可关闭 home 到期清理。后续运行会重建 home 并重新连接会话存储；会话存储仍遵循下文独立的保留策略。
+
+因此，即使运行已经结束，`multica daemon disk-usage --by-task` 仍可能列出运行记录目录。已完成任务的保留期不会删除运行记录目录，也不会让其他提供方的 home 到期，例如仍保留的 `hermes-home`。
+
+### 共享的仓库缓存
+
+守护进程为每个工作区的仓库保留一份裸仓库缓存，位置在工作目录根目录下的 `.repos/<工作区 ID>/`。这台电脑上同一工作区的运行共用这份缓存：每次检出从缓存创建 git worktree，只拉取新提交，不重新克隆。Linux 和 Windows 上的 Codex 运行例外，会从缓存得到一份 `.git` 在工作目录内的独立克隆，因为在 Codex 的 workspace-write 沙箱下，工作目录外的 Git 元数据是只读的。
+
+新缓存目录名采用仓库名中最多 16 个 ASCII 字符加 12 位哈希，避免长远端地址拉长 Windows 上的 Git 元数据路径。同步或检出时，已有缓存若在清理失效记录后没有已注册的 worktree，且目标目录不存在，就会迁移到短名称，保留全部内容，无需重新克隆。仍有 worktree 注册的缓存保留原路径，确保关联检出继续可用。迁移失败时，守护进程会记录警告并继续使用已有缓存，后续操作可重试迁移。
+
+缓存在三个条件同时满足时删除：已经没有工作区或项目引用这个仓库，没有剩余 worktree，并且 30 天内没有运行从它检出。之后需要时会重新克隆。清理删掉过期的智能体分支后，守护进程会在没有运行执行时对缓存运行 `git reflog expire --expire=30.days --all` 和 `git gc --prune=30.days`。
+
+### 会话、记忆与临时目录
+
+| 数据 | 位置 | 保留 |
+|---|---|---|
+| Codex 会话记录（每个智能体、每个任务一份） | Codex 目录（默认 `~/.codex`）下的 `multica-sessions/` | 14 天未使用后删除；之后这个任务的运行无法续接原来的 Codex 会话 |
+| Hermes 会话记录 | Multica 配置目录（默认 `~/.multica`，命名 profile 为 `~/.multica/profiles/<name>`）下的 `hermes-sessions/` | 14 天未使用后删除 |
+| Hermes 记忆（每个智能体一份） | 同一目录下的 `hermes-state/` | 90 天未使用后删除 |
+| Cursor 的 MCP 登录（每个智能体一份） | 同一目录下的 `cursor-mcp-auth/` | 保留 |
+| 每次运行的私有临时目录（`TMPDIR`） | 系统临时目录下的 `multica-task-*` | 运行结束后删除，守护进程被强制结束时由之后的清理补删 |
+
+Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HERMES_HOME`，`state.db` 及其 SQLite 日志文件均为目录内的普通文件。这个布局同时支持旧版进程内 ACP 和新版由 Gateway 执行的 ACP。已有会话记录会直接复用，旧运行目录中的会话历史会在下次运行前迁移。
+
+Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
+
+### Codex 原生记忆与子智能体 [#codex-memory]
+
+守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。
+
+Codex 原生子智能体同样默认关闭：父线程结束时，Multica 就把这次运行判为结束，仍在执行的子智能体的结果会丢失。接受这个风险的话，设置 `MULTICA_CODEX_MULTI_AGENT=1`。
+
+## 运行时共享 [#私有与公开]
+
+本地运行时默认是**私有**的：只有运行时所有者可以在它上面创建智能体，工作区的 owner、admin 也不例外。运行时是别人的电脑，在上面跑智能体，用的是对方的机器和工具凭据。
+
+也只有所有者可以把它改为**公开**。管理员可以重命名或删除运行时，但要不要共享由所有者决定。公开后，工作区中的其他成员也可以选择这条运行时，把智能体的执行路由到这台电脑；底层 AI 编程工具的登录凭据不会因此共享。
+
+**运行时**列表中的每一行都会显示当前的可见范围，所有者可以直接点击行上的可见范围图标在**私有**、**公开**和**指定成员**之间切换，也可以在运行时详情页修改。只想开放给部分成员时，在列表或运行时详情中选择**指定成员**，勾选一位或多位工作区成员，然后**保存**。这些成员可以选择该运行时并在上面创建智能体。只有所有者能修改名单；在名单上不代表可以重命名、删除或管理这条运行时。
+
+所有者移除共享成员、把公开运行时改为指定成员，或重新设为**私有**时，Multica 会先展示受影响的智能体和活动运行，包括智能体构建会话。确认后会解绑其他成员的这些智能体，以 `runtime_access_revoked` 取消其排队中、已调度、执行中、等待本地目录和延迟中的运行，并暂停分配给这些智能体的已启用自动化。所有者和仍有权限的成员，其智能体与运行不受影响。影响范围变化时需要重新确认；遇到并发聊天写入时可能需要重试。恢复工作时，请先将智能体绑定到可用的运行时，再手动恢复已暂停的自动化。
+
+取消会保留聊天历史，并在服务端保存草稿和附件恢复数据。网页端和桌面端沿用现有的草稿恢复入口；移动端暂未提供该入口。已开始但尚无输出的运行，会等待守护进程确认取消或服务端收尾宽限期结束，再决定是否恢复输入。已连接的守护进程通过常规检查接收取消。电脑离线时，服务端仍会立即撤销访问，但本地进程可能继续执行，直到重新连接并收到取消；服务端无法保证立即远程停止。
+
+### 删除内置本地运行时 [#remove-a-runtime]
+
+在运行时详情页打开操作菜单，选择删除运行时。如果还有智能体绑定在此运行时上，请查看列表并确认解绑。智能体的指令、对话和运行历史会保留，排队中和进行中的运行会取消。分配给这些智能体或由它们带领的小队的已启用自动化也会暂停。分配新任务前，请先把智能体绑定到其他运行时。重新绑定后，请手动恢复已暂停的自动化。如果守护进程仍能检测到该工具，就可能重新注册它。
 
 ## 自定义运行时配置
 
-内置 provider 探测覆盖常见工具；如果团队的 AI CLI 兼容 Multica 已支持的协议族、但需要不同的启动命令，可以定义**自定义运行时配置（custom runtime profile）**。常见场景包括：给 Codex 套一层团队内部 wrapper、固定使用某个版本的可执行文件，或者为团队 CLI 预设模型参数。
+如果团队使用内部 wrapper、固定版本的可执行文件，或需要为一款兼容工具追加固定参数，可以创建**自定义运行时配置**。
 
-如果只是按默认命令使用 Claude Code、Codex、Kimi 或其他内置 provider，不需要创建自定义配置；守护进程会自动探测它们。
+自定义配置不增加新的通信协议。创建时要选择一种 Multica 已支持的协议族（工具的对接协议类型，见 [AI 编程工具对照](/providers)）；命令本身必须与该协议兼容。
 
-### 创建前确认
+### Task 运行时环境
 
-- 至少在一台运行 Multica 守护进程的机器上安装好自定义命令，并确认同一条命令能在这台机器的终端中运行。
-- 确认这个工具实现了界面中某一种基础协议。选择协议族只是告诉 Multica 如何与进程通信，并不能让不兼容的 CLI 自动变得兼容。
-- 只有工作区所有者或管理员可以创建、编辑和删除自定义运行时配置。
+守护进程启动智能体 task 时，会把 task 上下文注入运行时进程。这些值由守护进程管理；智能体的自定义环境无法覆盖任何 `MULTICA_` 变量或 task 临时目录变量。
 
-### 从 Runtimes 界面创建
+下表列出自定义运行时目前可以使用的变量。它不是完整清单，也不是有版本保证的 API。集成只能依赖标为**集成契约**的 5 个变量；其余变量仅供参考，后续可能变化。
 
-1. 打开 **运行时（Runtimes）**，进入已经安装该命令的机器。
+| 变量 | task 中的值 | 稳定性 |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | task 级 `mat_` API 凭据 | **集成契约** |
+| `MULTICA_TASK_ID` | 当前 task 的 ID | **集成契约** |
+| `MULTICA_AGENT_ID` | 被指派智能体的 ID | **集成契约** |
+| `MULTICA_WORKSPACE_ID` | task 所属工作区的 ID | **集成契约** |
+| `MULTICA_SERVER_URL` | 守护进程选定的 Multica 服务地址 | **集成契约** |
+| `MULTICA_TASK_CONFIG_ROOT` | 私有的 task 本地 Multica CLI 配置根目录 | 仅供参考 |
+| `MULTICA_TASK_WORKSPACES_ROOT` | 守护进程管理的 task 工作区根目录 | 仅供参考 |
+| `MULTICA_AGENT_NAME` | 被指派智能体的显示名称 | 仅供参考 |
+| `MULTICA_DAEMON_PORT` | 本地守护进程的健康检查/API 端口，供 `multica repo checkout` 等仅限 task 的命令使用 | 仅供参考 |
+| `MULTICA_TASK_SLOT` | 守护进程全局并发池中的槽位，可用于 GPU 等按槽位编号的资源 | 仅供参考 |
+| `MULTICA_REPO_CHECKOUT_MODE` | 只在 Linux 和 Windows 的 Codex 运行中设为 `isolated`，让 `multica repo checkout` 生成 `.git` 在工作目录内的独立克隆；其他运行不设置 | 仅供参考 |
+| `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供，但在 Windows 上 task 会继承用户临时路径以维持 Git Bash 的共享 `/tmp`；Windows 上的 Claude Code 会将 `CLAUDE_CODE_TMPDIR` 默认设为 task 临时目录 | 仅供参考 |
+
+使用 `MULTICA_TOKEN` 发起请求时，作者身份由服务端决定；任务评论等写入操作会归属到被指派的智能体和当前 task。令牌的完整绑定关系、权限、归属方式、最长 24 小时的有效期和清理规则见[智能体执行的临时令牌](/auth-tokens#智能体执行的临时令牌)。
+
+<Callout type="info">
+内置的 **Codex** 和 **Claude Code** 运行时默认开启会话进程池以复用跟进轮进程。在进程池模式下，每轮都会变化的任务变量（`MULTICA_TOKEN`、`MULTICA_TASK_ID`、`MULTICA_TASK_CONFIG_ROOT`、`MULTICA_TASK_SLOT`）改由守护进程通过私有的单轮覆盖文件提供给 `multica` CLI，不再写入常驻进程的静态环境变量，因此不保证出现在 provider 进程环境或任意子脚本中。以 worktree 模式运行的本地目录任务和自定义运行时配置命令会启动新进程，并直接在进程环境中接收全部任务变量。如果内置 Codex 或 Claude Code 的工作流需要旧的直接环境变量行为，可在守护进程环境中设置 `MULTICA_WARM_POOL=0`。
+</Callout>
+
+<Callout type="warning">
+当这些值直接注入进程环境时（包括自定义运行时配置，以及设置了 `MULTICA_WARM_POOL=0` 的运行），它们存在于运行时进程的实际环境中。运行时启动的任何子进程默认都会继承全部变量，包括 `MULTICA_TOKEN`。子进程不应持有该凭据时，必须显式移除，进程之间没有自动隔离。反过来，有些工具会过滤自己的子进程环境，这时可能需要显式放行变量。例如，Codex 的 shell 工具会丢弃名称中含有 `TOKEN`、`KEY` 或 `SECRET` 的变量，所以守护进程会安装托管的 shell 策略，放行所需的 task 变量。令牌只能存在于进程环境中，不得写入 prompt、日志、仓库文件或持久配置。子进程与父 task 共享身份和权限，不会获得新的独立作用域身份。
+</Callout>
+
+### 通过密钥管理工具启动 [#secrets-managers]
+
+有些团队会通过密钥管理工具启动智能体，例如命令写成 `doppler run -- claude`。密钥管理工具在守护进程之后启动，会用密钥项目里的值重建智能体的环境。如果这个项目里也存了 `MULTICA_TOKEN`（常见的是给脚本用的个人 `mul_` 令牌），它会覆盖 task 令牌，task 里所有 Multica CLI 调用都会失败，报错 `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`。CLI 发现 `MULTICA_TASK_ID` 旁边是 `mul_` 令牌时，报错会指向本节。
+
+让守护进程注入的值优先：
+
+- **Doppler**：在 `--` 前加 `--preserve-env=MULTICA_TOKEN`，例如 `doppler run --preserve-env=MULTICA_TOKEN -- claude`。项目里还定义了其他 `MULTICA_` 变量时，用逗号分隔一并列出：`--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`。Doppler 只接受 `=` 写法，用空格隔开的 `--preserve-env MULTICA_TOKEN` 不生效；与 `--mount` 一起使用时该选项不起作用。
+- **其他工具**：使用该工具让已有环境变量优先的选项，或者从智能体运行所用的密钥项目中删除 `MULTICA_` 变量。
+
+`~/.zshrc` 等 shell 配置文件导出 `MULTICA_TOKEN` 时，智能体的 shell 加载它也会同样覆盖 task 令牌。删除这条导出，或者只在 `MULTICA_TASK_ID` 为空时设置。
+
+### 创建配置
+
+只有工作区 owner 和 admin 可以创建、修改或删除自定义运行时配置：
+
+1. 打开 **运行时**，进入已经安装该命令的电脑。
 2. 点击**添加自定义运行时**。
-3. 选择这个命令实际实现的基础协议类型。
-4. 填写显示名称，以及你会在终端中执行的命令；命令可以带固定参数。建议补充用途描述，方便其他成员识别。
-5. 点击**创建运行时**。
+3. 选择命令实际兼容的协议族。
+4. 填写名称、命令和固定参数，然后保存。
 
-配置定义属于整个工作区，会同步到所有已连接的守护进程；每台机器只有在本机能找到对应命令时，才会注册自己的运行时。从哪台机器发起创建，该机器就会先显示一条临时的**注册中**记录。如果它迟迟没有变成在线，请确认命令已安装，并且该机器的守护进程能找到它。
+新配置只属于创建时选中的电脑。只有这台电脑的守护进程会拉取并注册它；其他电脑即使装了同名命令也不受影响。命令无法解析时，失败提示也只显示在选中的电脑上。创建配置不会自动安装命令或完成工具登录。
 
-创建配置不会自动安装 CLI、完成登录，也不会把命令复制到其他机器。每一台需要提供该运行时的机器，都必须单独安装并登录底层工具。
+旧配置在**编辑自定义运行时**中的**归属机器（可选）**默认选中**保留现有机器**，可以只修改名称、命令或其他设置。选择归属机器后，保存时会移除其他机器上未使用的副本；如果仍有活跃智能体或未完成任务，绑定操作会被阻止。已归档智能体和任务历史会保留。配置完成绑定前，仅保留创建者本人机器上的实例，确保守护进程重新上线后仍能注册；其他成员的闲置副本照常在离线超过 7 天后自动清理。
 
-### 使用 CLI 管理
+这里填写的是可执行文件和参数，不是 shell 脚本。可以使用普通参数、引号和反斜杠转义，但不能使用管道、重定向、`&&`、`;`、反引号或环境变量展开。需要这些行为时，把它们放进 wrapper script，再把该脚本作为命令填写。
 
-同一组工作区配置也可以通过 CLI 管理：
+版本检查和 Pi 模型探测会在空临时目录中运行，以兼容禁止从主目录启动的沙箱包装器。主目录环境和用户级配置仍然可用。固定参数中的脚本或配置文件请使用绝对路径；探测不再读取相对于 daemon 启动目录的配置。任务执行仍使用任务的工作目录。
 
-```bash
-multica runtime profile list
-multica runtime profile create --display-name "Composer" --protocol-family codex --command-name agent
-multica runtime profile update <profile-id> --command-name agent
-multica runtime profile delete <profile-id>
+### 参数的排列顺序
+
+命令字段里填写的内容会紧跟在可执行文件之后，排在 Multica 追加的参数之前：
+
+```text
+<你的命令> <你的固定参数> <Multica 的协议参数> <Agent 的自定义参数>
 ```
 
-内置和自定义运行时都显示在同一份机器列表里。打开自定义运行时所在行的操作菜单，即可编辑或删除配置。删除配置后，各机器上由它注册的运行时实例会在守护进程同步后移除；如果仍有智能体依赖它，删除操作可能会被阻止。
+带子命令的 wrapper 靠这个顺序工作。命令是 `ccms start q36` 时，工具先看到 `start q36`，在 Multica 的 `-p` 等参数到达之前选好子命令；这类 wrapper 只接受这一种顺序。
 
-这里填写的是 argv 风格命令，不是 shell 字符串。Multica 存的是可执行文件名和固定参数，守护进程会直接用 `exec.Command(command_name, fixed_args...)` 启动。支持普通参数、引号和反斜杠转义；不支持管道、重定向、`&&`、`;`、反引号、`$VAR` / `$(...)` 展开。需要 shell 行为时，用 wrapper script 包一层。
-目前命令和参数的解析入口在 Runtimes UI；CLI 的 profile 命令负责管理 profile 记录和本机路径覆盖。
+这里的参数以前追加在最后。多数 flag 形式的命令在两种位置下解析结果相同，但区分全局 flag 和子命令 flag 的命令会在意位置。已经配置了带固定参数的 profile 的，升级后请发起一次运行，确认它仍能正常启动。
 
-如果桌面应用拉起的守护进程找不到你在终端里能运行的命令，可以在这台机器上固定绝对路径：
+另外：
+
+- **冲突时以 Multica 的值为准。** 如果固定参数设置了 Multica 也会设置的 flag，Multica 的值排在后面并最终生效。最典型的是：在 Agent 上选择的模型会覆盖 profile 里固定的 `--model`。若要为所有人固定模型，请把 Agent 的模型字段留空。
+- **协议关键 flag 会被忽略。** `-p`、`--output-format`、`--input-format`、`--permission-mode` 以及其他协议族的对应 flag 会从固定参数中被剔除，因为覆盖它们会切断 daemon 与工具之间的通信。子命令和其他位置参数始终原样传递。
+
+如果 Desktop 启动的守护进程找不到终端里能够执行的命令，可以为当前电脑设置绝对路径：
 
 ```bash
-multica runtime profile set-path <profile-id> --path /abs/path/to/agent
+multica runtime profile set-path <profile-id> --path /absolute/path/to/command
+```
+
+移除路径覆盖：
+
+```bash
 multica runtime profile unset-path <profile-id>
 ```
 
-修改 profile 的命令或参数后，已开始的任务仍使用启动时的参数；守护进程重新注册后，新领取的任务才会使用新配置。混合版本部署时，建议先升级 server，再逐步升级 daemon：`fixed_args` 的录入在 server 侧 Runtimes UI，`failed_profiles` 注册报告也由 server 展示。旧组件可能会忽略自己不认识的字段，而不是明确报错；先升 server 能让 rollout 更可观察。
+修改配置只影响之后领取的运行。
 
-<Callout type="info">
-**云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
-</Callout>
+- **停用一台机器。** 自定义配置仍存在时，不能直接删除它的运行时实例。请停止该机器上的守护进程，以免重新注册实例。实例离线满 7 天且没有活动智能体或未完成任务后，即可自动清理。如果旧版配置仍在创建者的机器上保留实例，请编辑配置并选择要保留实例的机器。
+- **停用整个配置。** 删除配置会移除所有已注册机器上的对应运行时。请先把活动智能体移到不属于该配置的运行时，或归档不再使用的智能体。如果你无法管理阻止删除的智能体，请让其所有者迁移或归档。
 
-## 运行时什么时候被判定为离线
+## Qoder Cloud Agents 远端运行时
 
-Multica 用心跳判断运行时是否在线。三个关键数字：
+Qoder Cloud Agents 通过远端会话执行分配的任务。Multica 服务端管理桥接进程，复用现有守护进程任务协议，无需用户启动本地守护进程。
 
-| 事件 | 阈值 |
-|---|---|
-| 守护进程心跳频率 | 每 **15 秒** |
-| 标记为失联 | 超过 **45 秒** 没心跳（漏了 3 次）|
-| 自动删除 | 失联且无关联智能体超过 **7 天** |
+### 准备工作
 
-失联不是永久的——守护进程只要再次发出心跳就立刻回到在线，运行时记录也会保留。重启守护进程不会丢运行时。
+- 需要工作区管理员权限。每个工作区只有一个 Qoder 连接。
+- 创建 Qoder 个人访问令牌（PAT）、至少一个运行环境，以及要在 Qoder Cloud Agents 中使用的智能体。模型、工具和 skill 都在 Qoder Cloud Agents 中的远端智能体上配置，不在 Multica 中配置。
+- 自托管部署需在服务端设置 `MULTICA_VCS_SECRET_KEY`：一个 base64 编码的 32 字节密钥，重启前后必须保持不变。未设置时，**添加**菜单中不会出现 Qoder Cloud Agents。
 
-<Callout type="warning">
-**失联的运行时上正在跑的执行任务会被标记为失败**（失败原因 `runtime_offline`）。对可重试的来源（issue、chat），Multica 会自动重新排队；Autopilots 触发的任务不自动重试。详见 [执行任务 → 哪些失败会自动重试](/tasks#哪些失败会自动重试哪些不会)。
-</Callout>
+### 连接 Qoder
 
-## 一次能并发跑多少任务
+1. 在**运行时**页面点击**添加**，在**云服务**下选择 **Qoder Cloud Agents**。
+2. 在**服务区域**中选择签发 PAT 的站点：**国际站**（qoder.com）或**中国站**（qoder.com.cn）。PAT 只在签发它的站点有效；如果被拒绝，可点击按钮改用另一站点重试。
+3. 将 PAT 粘贴到**个人访问令牌**。验证通过后会从 Qoder 加载**运行环境**列表；只有一个环境时自动选中，否则手动选择。
+4. 可选：展开 **GitHub 仓库授权**，为智能体需要克隆的每个仓库填写仓库 URL 和令牌。智能体只能克隆这里授权过的仓库。
+5. 可选：展开**执行设置**，设置并发运行数（默认 3，最多 10）和运行超时（默认 60 分钟，可设 5 到 240 分钟）。
+6. 点击**连接**。Qoder Cloud Agents 会出现在运行时页面的云服务分组中，几秒内上线。
 
-Multica 对并发有两层限额：
+### 添加智能体
 
-- **守护进程层**：默认 **20 个执行任务并发**（环境变量 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` 可调）
-- **智能体层**：每个智能体默认 **6 个执行任务并发**（智能体配置里改）
+在运行时页面打开 Qoder Cloud Agents，点击**用它创建智能体**；也可以照常创建智能体并选择 Qoder 运行时。在智能体表单的 **远端智能体**中选择远端智能体。已有智能体可在**Qoder Cloud Agents** 标签页中修改关联的 Qoder Cloud Agents 智能体或默认仓库。多个 Multica 智能体可以共用同一个连接，各自关联不同的 Qoder Cloud Agents 智能体。
 
-两层中更紧的那层生效。如果你的守护进程已经在跑 20 个任务，即使某个智能体还有余量，新的任务也要等。
+连接凭证加密保存，在工作区内共享。管理员管理连接，成员可以选择可访问的 Qoder Cloud Agents 智能体。项目选择仓库和起始分支；创建编码会话时，对应仓库的令牌会传给 Qoder Cloud Agents。保存后的 PAT 不会返回浏览器。
 
-如果你看到执行任务卡在 `queued` 状态不 `dispatched`，通常就是这两层里某一层打满了。
+管理员可以在 Qoder Cloud Agents 页面编辑连接和仓库；点击**暂停**停止下发新任务，凭证和智能体保留；点击**断开连接**删除已保存的令牌、移除该运行时并解绑其智能体。
 
-## 守护进程崩溃后，没跑完的任务会怎样
+### 运行方式
 
-守护进程崩溃或被强行结束时，它领走的执行任务会停在 `dispatched` 或 `running` 状态。下次启动时，守护进程会告诉服务器：「这些任务不是我的了，请标记失败。」服务器把它们改成 `failed`，失败原因 `runtime_recovery`——对可重试的来源，任务自动重新排队。
+超出并发上限的任务会排队等待。同一任务的后续运行会在上一会话空闲时继续使用该 Qoder 会话。智能体可以设置默认仓库，在任务所属项目未绑定仓库时使用。智能体会被要求以任务标识命名分支，并在 PR 标题前加上任务标识，以便 PR 自动关联到任务。
 
-即使这一步因网络问题没完成，还有**每 30 秒**一次的服务器端扫描作为后备：超过 45 秒没心跳的运行时会被统一标记为失联，上面的任务也一并回收。
+首版支持任务运行、聊天、担任小队队长、通过智能体创建任务、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置。任务和聊天消息里的附件和图片会交给远端会话，包括 PDF 和 Office 文档，每个文件不超过 5 MB；更大的文件不会传过去，智能体只知道有这些文件。聊天中智能体用 DeliverArtifacts 交付的文件（每个不超过 10 MB）会作为附件随回复发出。暂不支持本地目录，也不支持从 Multica 创建远端 Qoder Cloud Agents 智能体。运行时页面分别展示远端运行时和电脑。
 
-## Agent 不工作怎么排查
+独立桥接进程的配置与限制见 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
 
-遇到「我的智能体不工作」类问题，先过一遍这三步：
+## 运行时离线的排查
 
-1. 跑 `multica daemon status`，确认守护进程在运行且在线
-2. 跑 `multica daemon logs -f`，看是否有错误
-3. 去 Multica 界面的 **Runtimes** 页面，确认你的运行时显示「在线」
+按以下顺序检查：
 
-更多场景见 [Troubleshooting](/troubleshooting)。
+1. 运行 `multica daemon status`，确认守护进程已经启动。
+2. 运行 `multica daemon logs -f`，查看登录、网络或工具检测错误。
+3. 在同一运行环境中执行 `command -v <工具命令>`，确认守护进程能够找到它。
+4. 打开 Multica 的**运行时**页面，检查目标电脑和对应的 AI 编程工具是否显示在线。
+5. 工具刚安装、路径刚修改或配置刚更新时，运行 `multica daemon restart`。
 
-## 下一步
+仍未解决时，参见[故障排查](/troubleshooting)。
 
-- [执行任务](/tasks) —— 守护进程领到任务后，它的完整生命周期
-- [Providers Matrix](/providers) —— 16 款 AI 编程工具的能力差异对照
+## 接下来
+
+- [安装 AI 编程工具](/install-agent-runtime) — 安装并验证一款受支持的 AI 编程工具。
+- [AI 编程工具对照](/providers) — 比较模型、会话恢复、MCP 和 skill 支持。
+- [运行](/tasks) — 了解排队、停止和重试。

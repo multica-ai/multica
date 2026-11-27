@@ -5,11 +5,109 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
+	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
+	// worktree mode for local_directory resources (execution_mode=worktree).
+	//
+	// This is a CAPABILITY rather than a version check on purpose. The failure
+	// mode of getting it wrong is not a missing field — a daemon without the
+	// implementation json-skips execution_mode and runs the task IN PLACE,
+	// editing the working copy the user asked to isolate. Version strings
+	// cannot answer that reliably: a git-describe dev build ("v0.4.21-24-g…")
+	// is deliberately exempted from the version floor so `make daemon` stays
+	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
+	// that implements the mode says so; one that does not, cannot.
+	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
+	// two-section quick-create prompt that keeps a new instruction separate
+	// from immutable historical source context.
+	DaemonCapabilitySourceContextQuickCreateV1 = "source_context_quick_create_v1"
+
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityClaimPollHintsV1 advertises that the daemon understands
+	// the batch-claim response's safety-poll metadata. The server only performs
+	// the extra deferred-task lookup for clients that opt in, and an older
+	// server's missing fields make a newer daemon retain its short fallback.
+	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
+	// DaemonCapabilityForceRecheckV1 requests presence-aware batch claim
+	// acknowledgements on both HTTP and WebSocket.
+	DaemonCapabilityForceRecheckV1 = "force-recheck-v1"
+
+	// DaemonCapabilityPlatformSkillV1 advertises that the daemon's runtime
+	// brief names the merged `multica-platform` skill instead of the
+	// per-domain built-ins it replaced (MUL-6986).
+	//
+	// The brief is assembled by the daemon, so a backend upgrade does not
+	// rewrite it: a daemon released before that merge still tells the agent to
+	// "read the `multica-working-on-issues` skill", a name this server no
+	// longer ships. Without this gate the pointer dangles and the agent is left
+	// hunting for a skill that is not installed. When it is absent the server
+	// ships a redirect stub under the old name; when it is present it ships
+	// nothing extra, so the stub retires itself as daemons update.
+	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
+
+	// DaemonCapabilityCheckoutKeepsWorkV1 advertises that the daemon's
+	// `multica repo checkout` keeps an existing checkout that holds work
+	// (uncommitted changes, untracked files, unpushed commits) instead of
+	// resetting it (MUL-7284).
+	//
+	// The server hands an automatic retry that must start a fresh session its
+	// parent's workdir only when this is present (MUL-7034). That session has no
+	// memory of the work in the directory and will fetch its repositories again.
+	// An older daemon's checkout resets an existing checkout and deletes that
+	// work, so such a daemon keeps getting a fresh directory and the parent's
+	// stays untouched on disk.
+	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
+	// DaemonCapabilityJoinedWakeupsV1 advertises that the daemon renders the
+	// claim's wakeup_joined field into the prompt. Only such a claim takes
+	// along the inputs of wakeup rules that waited for this run; for any other
+	// daemon those rules keep their inputs and start a run of their own.
+	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
+	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
+	// an additional text instruction without cancelling or starting a task.
+	// It is persisted when this exact task enters running; absence always means
+	// unsupported so mixed server/daemon versions fail closed.
+	DaemonCapabilityTaskSupplementV1 = "task-supplement-v1"
+	// DaemonCapabilityPiProcessCleanupV1 promises that this Pi/omp run joins
+	// descendant cleanup and explicitly confirms its cancellation outcome.
+	// Persist only at start; old daemons must retain their cancellation contract.
+	DaemonCapabilityPiProcessCleanupV1 = "pi-process-cleanup-v1"
+	// Muse workers run outside the daemon process tree and must acknowledge
+	// execution shutdown before cancellation can release subsequent work.
+	DaemonCapabilityMuseAppProcessCleanupV1 = "museapp-process-cleanup-v1"
+	// DaemonCapabilityWorkflowStatusRulesV1 advertises that the daemon's
+	// runtime brief drops its built-in in_progress / in_review rules for an
+	// issue whose claim carries a project workflow (MUL-8145). Only then may
+	// the server leave out the workflow brief's lines that override those
+	// rules; an older daemon still states them, so it keeps getting them.
+	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
+	// DaemonCapabilityWorkflowStatusMapV1 advertises that the daemon's
+	// runtime brief states the status-map rules for an issue whose claim
+	// carries a status-map workflow brief (MUL-9913). Without it the server
+	// keeps sending the per-step command brief those daemons point at.
+	DaemonCapabilityWorkflowStatusMapV1 = "workflow-status-map-v1"
+	// DaemonCapabilityTaskSupplementAuthorV1 is sent when claiming a
+	// supplement: the daemon renders the claim's author_type, so an agent's
+	// message is presented as an agent's. Without it the server marks an
+	// agent's message in its content instead.
+	DaemonCapabilityTaskSupplementAuthorV1 = "task-supplement-author-v1"
+	// DaemonCapabilityCLICommentSteerV1 advertises that the multica CLI this
+	// daemon puts on the agent's PATH has `issue comment add --steer`. The
+	// server tells a squad leader about steering only then.
+	DaemonCapabilityCLICommentSteerV1 = "cli-comment-steer-v1"
+	// DaemonCapabilityDocCommentV1 advertises that the daemon runs doc
+	// discussion tasks (MUL-9933): it renders their prompt and brief, and its
+	// CLI has `doc comment add`. An older daemon would treat such a task as an
+	// issue run with no issue, so the claim fails it before launch instead.
+	DaemonCapabilityDocCommentV1 = "doc-comment-v1"
+
+	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
+	TaskSupplementFailureProviderRejected = "provider_rejected"
+	TaskSupplementFailureTimeout          = "timeout"
+	TaskSupplementFailureTurnEnded        = "turn_ended"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
@@ -19,7 +117,22 @@ const (
 	// synchronous restore — a client without this capability would silently
 	// drop the user's prompt, and keeps the legacy synchronous restore instead.
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
+
+	// AppCapabilityWorkspaceGuestsV1 is advertised (X-Client-Capabilities) by
+	// clients that can render the guest member role. Workspace member and
+	// invitation lists leave guest rows out for any other caller: clients
+	// released before guests index their role tables by role and crash on an
+	// unknown one. Authorization never depends on it.
+	AppCapabilityWorkspaceGuestsV1 = "workspace-guests-v1"
 )
+
+// ChatQuickAction is a server-validated follow-up attached to one assistant
+// reply. Label is the concise chip text; Prompt is the full next user turn.
+type ChatQuickAction struct {
+	Label   string `json:"label"`
+	Prompt  string `json:"prompt"`
+	Primary bool   `json:"primary,omitempty"`
+}
 
 // RPCRequestPayload is the generic daemon→server request envelope carried in a
 // protocol.Message of type EventDaemonRPCRequest. RequestID correlates the
@@ -63,8 +176,9 @@ type TaskDispatchPayload struct {
 	Description string `json:"description"`
 }
 
-// TaskAvailablePayload is sent from server to daemon as a wakeup hint. The
-// daemon still claims work through the existing HTTP claim endpoint.
+// TaskAvailablePayload carries content-free task and supplement wakeup hints.
+// Supplement hints require an exact task ID; the daemon claims durable input
+// through the corresponding HTTP endpoint.
 type TaskAvailablePayload struct {
 	RuntimeID string `json:"runtime_id"`
 	TaskID    string `json:"task_id,omitempty"`
@@ -84,12 +198,60 @@ type RuntimeProfilesChangedPayload struct {
 // no workspace data is embedded in the event.
 type WorkspacesChangedPayload struct{}
 
+// PendingWorkKind values carried by PendingWorkPayload.Kind. The kind is
+// advisory only — the daemon reacts identically to every kind (one immediate
+// heartbeat, which claims whatever is queued) — so an unknown value from a
+// newer server stays safe on an older daemon.
+const (
+	PendingWorkKindModelList        = "model_list"
+	PendingWorkKindLocalSkills      = "local_skills"
+	PendingWorkKindLocalSkillImport = "local_skill_import"
+	// PendingWorkKindEnvironmentCommand asks a daemon that supports it to claim
+	// its queued environment commands instead of heartbeating. Older daemons
+	// heartbeat as for any kind, which claims nothing.
+	PendingWorkKindEnvironmentCommand = "environment_command"
+)
+
+// PendingWorkPayload is sent from server to daemon as a wakeup hint when a
+// heartbeat-carried request is enqueued for a runtime. The daemon responds by
+// sending one immediate heartbeat for RuntimeID instead of waiting for its next
+// scheduled tick; the request itself is still claimed through the normal
+// heartbeat path, so this event carries no work and is safe to lose, duplicate,
+// or ignore (MUL-5444).
+type PendingWorkPayload struct {
+	RuntimeID string `json:"runtime_id"`
+	Kind      string `json:"kind,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`
 	Summary string `json:"summary"`
 	Step    int    `json:"step,omitempty"`
 	Total   int    `json:"total,omitempty"`
+}
+
+// TaskUsageUpdatedPayload invalidates cached usage after a successful report.
+// It carries no usage values; clients refetch through their authorized APIs.
+type TaskUsageUpdatedPayload struct {
+	TaskID string `json:"task_id"`
+}
+
+// TaskFailRequest reports the terminal failure of a daemon task.
+type TaskFailRequest struct {
+	Error          string `json:"error"`
+	SessionID      string `json:"session_id,omitempty"`
+	WorkDir        string `json:"work_dir,omitempty"`
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
+	// A worktree can produce a branch even when its task fails.
+	BranchName string `json:"branch_name,omitempty"`
+	// A missing rollout invalidates the withheld session's resume pointer.
+	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
+	// A known unresumable session must also be retired for subsequent tasks.
+	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// Older daemons and incomplete transcripts leave this proof unset.
+	NoToolCallsStarted bool `json:"no_tool_calls_started,omitempty"`
 }
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
@@ -99,17 +261,42 @@ type TaskCompletedPayload struct {
 	Output string `json:"output,omitempty"`
 }
 
+// ChatQuickActionsPayload supplements one completed chat turn with the
+// sanitized follow-up actions from the daemon's suggestion pass. An empty
+// QuickActions list is a meaningful terminal state — it resolves the
+// pending skeleton with "no suggestions this turn".
+type ChatQuickActionsPayload struct {
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id"`
+	QuickActions  []ChatQuickAction `json:"quick_actions"`
+	// Failed marks a supplement that resolves the client's refresh spinner
+	// because the regeneration FAILED (the provider pass or its delivery), not
+	// because it produced new suggestions. QuickActions then carries the turn's
+	// unchanged pills; the client shows a "couldn't refresh" notice instead of
+	// treating unchanged content as a silent success (MUL-5149). Omitted (false)
+	// on the normal success path and for the automatic best-effort pass.
+	Failed bool `json:"failed,omitempty"`
+}
+
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
-	TaskID    string         `json:"task_id"`
-	IssueID   string         `json:"issue_id,omitempty"`
-	Seq       int            `json:"seq"`
-	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
-	Content   string         `json:"content,omitempty"` // text content
-	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
-	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
-	CreatedAt string         `json:"created_at,omitempty"`
+	// CallID is an opaque tool-call identity scoped to one backend execution.
+	CallID  string         `json:"call_id,omitempty"`
+	TaskID  string         `json:"task_id"`
+	IssueID string         `json:"issue_id,omitempty"`
+	Seq     int            `json:"seq"`
+	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
+	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content string         `json:"content,omitempty"` // text content
+	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
+	// OutputTruncated reports whether Output is the whole tool output that ran
+	// (tool_result only). Tri-state: omitted means no daemon ever measured this
+	// record — historical rows and older installed daemons — which clients must
+	// present as unknown rather than as complete.
+	OutputTruncated *bool  `json:"output_truncated,omitempty"`
+	CreatedAt       string `json:"created_at,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.
@@ -145,6 +332,20 @@ const (
 	// without any text reply — a visible, deliberate terminal outcome rather
 	// than a silently-dropped turn (MUL-4351).
 	ChatMessageKindNoResponse = "no_response"
+	// ChatMessageKindOnboardingKickoff is the server-authored, hidden first
+	// turn used to start Mika's onboarding conversation. It is persisted so
+	// the runtime receives a normal immutable chat input batch. User-facing
+	// APIs filter it out; clients also ignore the kind defensively.
+	ChatMessageKindOnboardingKickoff = "onboarding_kickoff"
+	// ChatMessageKindOnboardingOpening marks the assistant reply produced by
+	// the onboarding kickoff. The kickoff row itself never reaches clients, so
+	// the opening self-describes: chat renders the starter cards under this
+	// kind instead of quick-action chips (MUL-5765).
+	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindWakeup is the server-authored input of a turn a chat
+	// wakeup started. Its content is for the runtime; clients render a
+	// divider naming the wakeup (wakeup_id) instead of the text.
+	ChatMessageKindWakeup = "wakeup"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
@@ -161,13 +362,34 @@ const (
 // the omitempty tags only elide fields for the legacy paths that broadcast
 // without a row.
 type ChatDonePayload struct {
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id,omitempty"`
+	Content       string            `json:"content,omitempty"`
+	ElapsedMs     int64             `json:"elapsed_ms,omitempty"`
+	CreatedAt     string            `json:"created_at,omitempty"`
+	MessageKind   string            `json:"message_kind,omitempty"`
+	QuickActions  []ChatQuickAction `json:"quick_actions,omitempty"`
+	// QuickActionsPending tells clients a chat:quick_actions supplement will
+	// follow for this turn (render a placeholder). Never true when
+	// QuickActions is already populated.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+	// Present only for a completed direct-chat reply eligible for an OS alert.
+	// Older clients ignore it; older servers omit it without affecting chat.
+	Notification *ChatReplyNotification `json:"notification,omitempty"`
+}
+
+type ChatReplyNotification struct {
+	WorkspaceID string `json:"workspace_id"`
+	Title       string `json:"title"`
+}
+
+type ChatReplyNotificationPayload struct {
+	WorkspaceID   string `json:"workspace_id"`
 	ChatSessionID string `json:"chat_session_id"`
-	TaskID        string `json:"task_id"`
-	MessageID     string `json:"message_id,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	MessageKind   string `json:"message_kind,omitempty"`
+	MessageID     string `json:"message_id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.
@@ -215,6 +437,22 @@ type ChatSessionReadPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+type ChatSessionCreatedPayload struct {
+	WorkspaceID           string                   `json:"workspace_id"`
+	ChatSessionID         string                   `json:"chat_session_id"`
+	AgentID               string                   `json:"agent_id"`
+	CreatorID             string                   `json:"creator_id"`
+	Title                 string                   `json:"title"`
+	ChannelSource         ChatSessionChannelSource `json:"channel_source"`
+	IsCurrentChannelRoute bool                     `json:"is_current_channel_route"`
+}
+
+type ChatSessionChannelSource struct {
+	ChannelType    string `json:"channel_type"`
+	InstallationID string `json:"installation_id"`
+	RouteRevision  int64  `json:"route_revision"`
+}
+
 // ChatSessionDeletedPayload is broadcast when a chat session is hard-deleted
 // so other tabs/devices drop it from their session lists and reset the active
 // pointer if it referenced the deleted session.
@@ -226,6 +464,16 @@ type ChatSessionDeletedPayload struct {
 // chat session changes (today: title via inline rename). Other tabs/devices
 // patch the session row in their cached list so the dropdown stays in sync
 // without a full refetch.
+// ChatWakeupChangedPayload says one chat wakeup was created, changed, fired or
+// ended. Receivers refetch the session's wakeups; TaskID is set when the
+// change started a turn, so they can also pick up its hidden input row.
+type ChatWakeupChangedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	WakeupID      string `json:"wakeup_id"`
+	Status        string `json:"status"`
+	TaskID        string `json:"task_id,omitempty"`
+}
+
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
@@ -248,6 +496,9 @@ type ChatSessionUpdatedPayload struct {
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// SupportsQueuedUpdate: the daemon can hold a deferrable update while
+	// busy and install it once idle (see DaemonHeartbeatPendingUpdate).
+	SupportsQueuedUpdate bool `json:"supports_queued_update,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -287,6 +538,12 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+	// Deferrable: a busy daemon should hold this update, report "scheduled",
+	// and install it once idle — only after the server accepts its "running"
+	// report, which it refuses once the update was cancelled or expired. The
+	// offer repeats on every heartbeat until then. Without it, the update
+	// is running from delivery and a busy daemon fails it.
+	Deferrable bool `json:"deferrable,omitempty"`
 }
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to

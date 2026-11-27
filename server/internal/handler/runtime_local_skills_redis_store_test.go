@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 )
 
 const redisTestDB = 14
+
+var redisACLTestUserSequence atomic.Uint64
 
 // newRedisTestClient connects to the Redis instance indicated by REDIS_TEST_URL
 // and flushes this package's logical test DB so each test starts from a clean
@@ -42,6 +45,37 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 		rdb.Close()
 	})
 	return rdb
+}
+
+func newRedisTestClientWithoutMulti(t *testing.T) *redis.Client {
+	t.Helper()
+	admin := newRedisTestClient(t)
+	ctx := context.Background()
+	username := fmt.Sprintf("runtime-no-multi-%d", redisACLTestUserSequence.Add(1))
+	const password = "runtime-no-multi-test-password"
+
+	if err := admin.Do(
+		ctx,
+		"ACL", "SETUSER", username,
+		"reset", "on", ">"+password, "~*", "+@all", "-multi", "-exec",
+	).Err(); err != nil {
+		t.Fatalf("create restricted Redis user: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := admin.Do(context.Background(), "ACL", "DELUSER", username).Err(); err != nil {
+			t.Errorf("delete restricted Redis user: %v", err)
+		}
+	})
+
+	opts := *admin.Options()
+	opts.Username = username
+	opts.Password = password
+	restricted := redis.NewClient(&opts)
+	t.Cleanup(func() { _ = restricted.Close() })
+	if err := restricted.Ping(ctx).Err(); err != nil {
+		t.Fatalf("connect as restricted Redis user: %v", err)
+	}
+	return restricted
 }
 
 func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
@@ -94,6 +128,31 @@ func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
 	}
 	if !got.McpSupported || len(got.McpServers) != 1 || got.McpServers[0].Name != "fetch" {
 		t.Fatalf("MCP inventory not persisted: %+v", got.McpServers)
+	}
+}
+
+func TestRedisLocalSkillListStore_CreateWithoutMultiPermission(t *testing.T) {
+	rdb := newRedisTestClientWithoutMulti(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillListStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-no-multi")
+	if err != nil {
+		t.Fatalf("create without MULTI permission: %v", err)
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get created request: %v", err)
+	}
+	if got == nil || got.ID != req.ID {
+		t.Fatalf("created request was not persisted: %+v", got)
+	}
+	pending, err := store.HasPending(ctx, "runtime-no-multi")
+	if err != nil {
+		t.Fatalf("check pending request: %v", err)
+	}
+	if !pending {
+		t.Fatal("created request was not queued")
 	}
 }
 
@@ -273,6 +332,35 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 	}
 	if got.TargetSkillID != "target-skill-99" {
 		t.Fatalf("target_skill_id lost round trip: %q", got.TargetSkillID)
+	}
+}
+
+func TestRedisLocalSkillImportStore_CreateWithoutMultiPermission(t *testing.T) {
+	rdb := newRedisTestClientWithoutMulti(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-no-multi",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create without MULTI permission: %v", err)
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get created request: %v", err)
+	}
+	if got == nil || got.ID != req.ID {
+		t.Fatalf("created request was not persisted: %+v", got)
+	}
+	pending, err := store.HasPending(ctx, "runtime-no-multi")
+	if err != nil {
+		t.Fatalf("check pending request: %v", err)
+	}
+	if !pending {
+		t.Fatal("created request was not queued")
 	}
 }
 

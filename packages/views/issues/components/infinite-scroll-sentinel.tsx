@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
 
 /** Sentinel that triggers once per visibility transition. Callback/loading
  * changes are read through refs/props without rebuilding the observer, so a
@@ -42,7 +42,7 @@ export function InfiniteScrollSentinel({
         <>
           <Loader2 className="size-3 animate-spin text-muted-foreground" />
           {label && (
-            <span className="text-xs text-muted-foreground">{label}</span>
+            <span className="text-caption text-muted-foreground">{label}</span>
           )}
         </>
       )}

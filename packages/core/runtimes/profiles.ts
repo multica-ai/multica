@@ -11,8 +11,8 @@ import { runtimeKeys } from "./queries";
 // Query keys for the workspace-scoped custom runtime profile catalog. Kept
 // separate from `runtimeKeys` (which key the registered runtime *instances*)
 // because the two resources invalidate on different events — but a profile
-// delete can archive bound agents and therefore must also invalidate the
-// instance list, so the mutations below touch both.
+// delete removes its registered instances and can unbind their agents, so it
+// must also invalidate the instance list; the mutations below touch both.
 export const runtimeProfileKeys = {
   all: (wsId: string) => ["runtime-profiles", wsId] as const,
   list: (wsId: string) => [...runtimeProfileKeys.all(wsId), "list"] as const,

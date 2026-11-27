@@ -1,16 +1,231 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents issue and pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
+- issue templates, pull request requirements, and review evidence
 - first-time setup
+- environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
 - isolated worktree development
 - the shared PostgreSQL model
 - testing and verification
 - full-stack isolated testing (backend + frontend + daemon from source)
 - troubleshooting and destructive reset options
+
+## Contribution Terms
+
+By submitting a contribution to Multica — a pull request, a patch, or any
+other work — you agree to condition 2 of the [Multica License](LICENSE):
+
+- your contribution is submitted under the Multica License as a whole (the
+  additional conditions in Part I together with the incorporated Apache
+  License 2.0 text in Part II), not under the Apache License 2.0 alone;
+- your contributed code may be used for commercial purposes, including the
+  producer's cloud business operations;
+- the producer can adjust the Multica License to be more strict or relaxed
+  as deemed necessary.
+
+See the [LICENSE](LICENSE) file for the full terms.
+
+## Opening an Issue
+
+Choose the form that fits your report:
+
+- **[Feature request](.github/ISSUE_TEMPLATE/feature_request.yml):** Explain the
+  **Problem** and **Goal**. A high-level **Proposal**, **Alternatives**, and
+  **Screenshots** are optional; you can raise a problem without designing its
+  solution.
+- **[Bug report](.github/ISSUE_TEMPLATE/bug_report.yml):** Describe the
+  **Problem**, **Expected behavior**, and **Steps to reproduce**. For intermittent
+  bugs, explain what you tried and how often it happens. Screenshots, logs, and
+  environment details are optional supporting information.
+
+Select the affected area so we can route the report. Bug reports also ask for
+the deployment type. Screenshots are optional for issues; the mandatory
+screenshot rule below applies to PRs that change UI or interactions.
+
+## Pull Request Requirements
+
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections:
+
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal.
+   Make it understandable to a reader without much project background. Keep
+   implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches
+   and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots or a
+   screen recording from the running app showing the affected screens and
+   states. Before/after comparisons are strongly preferred; for a new screen,
+   show the after state. If there is no UI or interaction impact, write "N/A"
+   and explain why.
+
+End the description with `Closes #<issue>` when the PR resolves an issue.
+The title and description become the squash commit on `main`; credit
+co-authors with `Co-authored-by:` lines at the end of the description. Report
+security vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
+not in a pull request or issue.
+
+**UI or interaction PRs without screenshots or a recording are rejected by
+default.** Reviewers should request changes or close the PR until one is
+provided. PRs
+missing the problem, goal, or high-level proposal are also not ready for review.
+
+Do not add or translate docs in `apps/docs/content/docs/` or root `README*.md`
+for features gated behind a default-off flag in
+`server/internal/featureflags/keys.go` (permanently enabled compat keys do not
+count); note why docs were skipped in the PR description instead. When a PR
+flips a flag to default-on or removes it for general availability, add the docs
+across all locales in the same PR.
+
+### Screenshots and Recordings
+
+Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+Their URLs do not depend on a temporary Git branch and have no preset expiry;
+GitHub does not promise permanent archival. Keep visual-test reference images
+with their tests, and use CI artifacts for temporary debugging reports. Actions
+artifacts expire, so they are unsuitable as the only copy of PR evidence.
+
+From the repository root, upload files to an existing PR with Node.js 22+ and
+[GitHub CLI 2.103.2+](https://github.com/cli/cli/releases/tag/v2.103.2):
+
+```bash
+scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
+```
+
+By default, the script appends attachments at the end of the PR description
+(after any closing issue reference), preserves its existing content, and prints
+the resulting attachment Markdown to stdout. A PR URL can replace the number;
+`--repo` is optional when `gh` can identify the repository. Diagnostics
+go to stderr. Files are identified by SHA-256 in hidden comments next to the
+attachments in the PR body, so retries and renamed files reuse uploaded content
+across checkouts. Keep those comments if you want that retry behavior. Changed
+file content produces a new attachment.
+
+The attachments are already in the PR description; do not paste another copy
+of the stdout Markdown into it. To place an attachment under Screenshots, move
+its entire block from the end of the description: the hidden hash comment,
+blank lines, and image Markdown or video URL together.
+
+Uploads run one file at a time and stop at the first failure. Already confirmed
+files remain saved; stderr identifies the failed and unattempted files. The
+script reads back the PR even when `gh` exits nonzero, because a write may have
+succeeded. Re-run the same command to reuse confirmed attachments and upload
+the missing ones. Run one uploader per PR at a time and avoid editing the
+description during an upload; GitHub body edits are not conditional writes.
+
+To migrate an existing screenshot while keeping its caption and position, use
+`--replace` with exactly one image file. The old URL must occur in a standalone
+Markdown image, such as `![Original caption](https://example.com/old.png)`:
+
+```bash
+scripts/pr-shots --repo multica-ai/multica \
+  --replace https://example.com/old.png 123 ./after.png
+```
+
+Verify the new attachments render and remain accessible to the PR's reviewers
+before deleting old storage. Check other PRs and repository references before
+removing a shared evidence branch. Preserve old links for any failed migration.
+
+You can also use the native CLI directly, including during PR creation:
+
+```bash
+gh pr create --body-file ./pr.md --attach ./before.png --attach ./after.png
+gh pr edit 123 --attach ./demo.mp4
+```
+
+In `pr.md`, write `![Before](./before.png)` and `![After](./after.png)` where
+the images should appear. For video, put `![](./demo.mp4)` in its own paragraph.
+The CLI replaces these local references with uploaded URLs; unreferenced
+attachments are appended. Native `gh --attach` does not deduplicate retries.
+
+CLI uploads require **push access to the target repository** and a credential
+accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
+which GitHub App tokens can upload; it does not guarantee support for every App
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Contributors
+without upstream push access can use a public fork as described below, upload
+through the PR editor in GitHub's web interface, or ask a maintainer in the PR
+to upload their files. Opening a fork PR alone does not grant upload permission
+on the upstream repo. `scripts/pr-shots` targets GitHub.com, not GitHub
+Enterprise Server.
+
+Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
+limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
+Use H.264 MP4 for broad playback support. Public-repository attachments are
+publicly accessible: use test data and inspect captures before uploading.
+
+Capture the affected screens from the running application and record the
+commit, viewport, theme, and reproduction steps with the evidence. Use the
+local environment workflow below; for Desktop recording, see
+[Scripting Desktop over CDP](#scripting-desktop-over-cdp). For stable screenshots:
+
+```js
+await page.screenshot({ path: "after.png", animations: "disabled" });
+```
+
+This completes finite CSS/Web Animations and resets infinite ones to their
+initial frame during capture. To compare a particular animation frame, pause
+`document.getAnimations()` and set each animation's `currentTime` to the same
+timestamp on both versions instead. Hold a loading state with a controlled
+local API response, rather than relying on a fixed sleep. Include a short
+recording when the motion or sequence itself is the change under review.
+
+#### CLI uploads from an external contributor's fork
+
+With GitHub CLI 2.103.2+, you can upload to a public fork or evidence repository
+you control, then use its native attachment URLs in your upstream PR. Choose a
+repository where your credential has push access and an issue you can use for
+contribution evidence. Forks may need Issues enabled in their repository
+settings. Review every capture before publishing and use synthetic test data
+suitable for public access.
+
+Save `evidence.md` beside the images, with the source commit for each capture,
+viewport, theme, and reproduction steps. Include local image references where
+the images should appear, for example `![Before](./before.png)` and
+`![After](./after.png)`.
+
+Replace `OWNER/EVIDENCE-REPO` with your public repository and `1` with the
+evidence issue's number. Run this from the directory containing the files.
+
+```bash
+gh issue comment 1 --repo OWNER/EVIDENCE-REPO --body-file ./evidence.md \
+  --attach ./before.png --attach ./after.png
+```
+
+The command prints the new comment's URL. Replace `COMMENT-ID` below with the
+number after `#issuecomment-` in that URL and read back that exact comment. The
+saved body contains the uploaded image Markdown.
+
+```bash
+gh api repos/OWNER/EVIDENCE-REPO/issues/comments/COMMENT-ID \
+  --jq .body > ./uploaded-evidence.md
+```
+
+Copy the relevant image Markdown into the Screenshots section of your upstream
+PR body, retaining captions and capture metadata. Keep the canonical
+`https://github.com/user-attachments/assets/...` URLs returned by GitHub. Raw-file
+URLs follow repository file retention, and Actions artifacts have expiry dates.
+To update an existing PR, replace `123` with your PR number, read its current
+body, and edit `pr.md` to add the evidence. Retain its other sections and closing
+issue references when saving it.
+
+```bash
+gh pr view 123 --repo multica-ai/multica --json body --jq .body > ./pr.md
+# Edit pr.md to add the uploaded image Markdown under Screenshots.
+gh pr edit 123 --repo multica-ai/multica --body-file ./pr.md
+```
+
+Check the upstream PR's rendered images and verify the URLs open while signed
+out. Keep the public evidence repository, issue, and original captures available
+for review. These native attachment URLs are independent of a source branch.
+
+Native `gh --attach` has no content-hash retry tracking. If it exits nonzero,
+inspect its output and read back the exact comment before retrying. A partial
+upload can still post the comment with the successful attachments. Reuse those
+URLs and attach only missing files in a new comment on the same evidence issue.
 
 ## Development Model
 
@@ -26,10 +241,44 @@ This keeps Docker simple while still isolating schema and data.
 
 ## Prerequisites
 
-- Node.js `v20+`
-- `pnpm` `v10.28+`
-- Go `v1.26+`
+- Node.js `22`
+- `pnpm` `10.28.2`
+- Go `1.26.9`
 - Docker
+
+Outside mobile, `pnpm typecheck` uses the native TypeScript 7 compiler (`tsc`,
+provided by the `@typescript/native` npm alias). The `typescript` dependency
+aliases `@typescript/typescript6` so ESLint, Next.js builds, and repository
+scripts retain the compatible TypeScript 6 API. Use `tsc6` to check with that
+compiler explicitly. Keep both dependencies when updating the toolchain;
+replacing the API package with TypeScript 7 breaks API consumers.
+Mobile keeps its own TypeScript dependency.
+When removing TS6 compatibility, update the `typescript` peer range in
+`packages/eslint-config/package.json` together with TypeScript API support in
+`typescript-eslint`.
+
+### Editor TypeScript SDK
+
+The compatibility package provides the compiler API but does not include
+`node_modules/typescript/lib/tsserver.js`. An existing workspace SDK selection
+or `typescript.tsdk` setting pointing to `node_modules/typescript/lib` can
+therefore become invalid or fall back to the editor's bundled TypeScript.
+
+To keep TS6 in VS Code with the repository root open:
+
+1. After `pnpm install`, set the SDK directory to
+   `node_modules/@typescript/old/lib`, the real TS6 installation in this
+   repository's pnpm layout. Use `typescript.tsdk`, or `js/ts.tsdk.path` in
+   versions using that setting name. The selected directory must contain
+   `tsserver.js`.
+2. Open a TypeScript file, run **TypeScript: Select TypeScript Version**, and
+   select the workspace version. Confirm TS6 is selected in the language
+   status item. See [VS Code's SDK selection instructions](https://code.visualstudio.com/docs/typescript/typescript-transpiling#_using-newer-typescript-versions).
+
+To use the TS7 language server instead, remove the TS6 SDK override, install
+the [official TypeScript 7 extension](https://marketplace.visualstudio.com/items?itemName=TypeScriptTeam.native-preview),
+and run **TypeScript: Enable TypeScript 7**. The editor language server is
+selected separately from the CLI compiler used by `pnpm typecheck`.
 
 ## Important Rules
 
@@ -92,6 +341,63 @@ To regenerate a worktree env file:
 ```bash
 FORCE=1 make worktree-env
 ```
+
+## Environments
+
+An environment is the database, ports, CLI profile and processes that belong to
+one checkout. It is a named object: it can be listed, inspected and deleted.
+
+```bash
+make up                      # start this checkout's environment (api + collab + web)
+make up C=api,collab,web,daemon  # choose the components
+make status                  # what is running, and whether it is yours
+make list                    # every environment on this machine
+make down                    # stop the processes, keep the data
+make down C=daemon           # stop only the listed components
+make destroy                 # stop, then drop the database and free the slot
+make gc                      # collect expired environments or ones whose checkout is gone
+```
+
+Components are `api` (Go backend), `collab` (live doc co-editing), `web`
+(Next.js), `daemon` (agent daemon) and `desktop` (Electron). Selecting any of
+them implies `api`. `collab` gets its own port and a secret generated for the
+environment, and the API is wired to it only while it runs, so leaving it out
+(`make up C=api,web`) just turns docs back to saving through the API. `make up` is
+idempotent: re-running it against a live environment reuses the database, the
+profile and any component already healthy.
+
+Three properties are worth knowing because the old flow lacked them:
+
+- **API, Web and Desktop renderer ports, database names and profiles are allocated, not recomputed.** The
+  allocator starts from this directory's path hash, so a checkout keeps the
+  numbers it has always had, and moves only when the registry or a live
+  listener says the slot is taken. The registry lives in `~/.multica/dev/`;
+  deleting it and re-running `make up` is a supported recovery.
+- **Nothing reports success for something it has not reached.** The database is
+  created and verified through `DATABASE_URL` — the same string the backend
+  uses — and `GET /health` reports `pid`, `commit` and `started_at` so `make up`
+  can prove the process answering is the one it just started rather than a
+  leftover on the same port.
+- **`down` and `destroy` differ deliberately.** `down` stops processes and
+  keeps the database, profile and slot, so the next `make up` is seconds.
+  `destroy` consumes the database, profile, daemon task workspaces, Desktop
+  userData and slot. If any deletion fails, it keeps the manifest and exits
+  non-zero so cleanup can be retried instead of losing the deletion recipe.
+- **Temporary environments have a best-effort fallback.** `make up
+  ARGS=--ephemeral` records a 24-hour TTL. The next `make up` automatically
+  collects expired and directory-less environments; `make gc` runs the same
+  collection explicitly. Use `make up ARGS="--ttl 48"` to renew a checkout
+  whose environment is still registered, even after expiry. The command keeps
+  that environment's data and gives it a new 48-hour TTL.
+
+Run any command inside an environment's variables without repeating them:
+
+```bash
+make env-exec ARGS="-- pnpm exec playwright test"
+```
+
+`make dev` (below) still runs backend and frontend in the foreground of your
+terminal, which is the right thing when you want Ctrl-C to stop everything.
 
 ## First-Time Setup
 
@@ -176,6 +482,54 @@ make stop-worktree    # stop
 make check-worktree   # verify
 ```
 
+### Git Identity in Managed Task Checkouts
+
+`multica repo checkout` uses the user's system/global Git identity, including
+conditional includes evaluated in the checkout. Agent names determine branch
+names, not commit authors. The optional `Co-authored-by` trailer is independent
+of author and committer identity.
+
+Linked worktrees mask the shared cache's `user`, `author`, and `committer`
+name/email settings with private defaults in `multica-identity.config`, included
+first by their `config.worktree`. Repeating checkout refreshes these defaults;
+explicit worktree settings and Git command/environment overrides take precedence.
+Conditional identities are snapshots: switching branches or changing global
+config takes effect in these defaults on the next checkout call, not at commit time.
+Use `git config --worktree user.name "Your Name"` and
+`git config --worktree user.email "you@example.com"` for an intentional checkout
+override. Plain `git config` and `--local` write to the shared cache in linked
+worktrees. Isolated clones already have private config and retain it unchanged.
+If no user identity is configured, commits fail instead of using a stale cache
+identity; configure an explicit worktree identity before committing.
+
+Existing linked checkouts receive the protection on their next checkout call,
+including calls that keep local work. Residual shared identity is masked, not
+deleted: changing it would change other running tasks. Existing tasks that never
+repeat checkout remain unprotected until they do. Enabling `worktreeConfig`
+moves `core.bare`/`core.worktree` to the bare repository's own `config.worktree`
+without changing other worktrees' effective settings. The files are standard Git
+config; older daemons leave them in place, but do not refresh identity defaults
+or protect newly created worktrees. No pushed commit history is rewritten.
+
+### Removing a Worktree
+
+Git does not provide a `pre-worktree-remove` hook. Use the repository wrapper
+from another checkout so database cleanup happens before Git removes the
+worktree directory:
+
+```bash
+make remove-worktree WORKTREE=../multica-feature
+```
+
+The command refuses to remove the primary checkout, the current checkout, a
+locked worktree, or a worktree with uncommitted changes. If the target contains
+`.env.worktree`, it shows the database name and asks for `y/N` confirmation,
+drops that database, and only then runs `git worktree remove`. A worktree that
+was never set up has no `.env.worktree`, so database cleanup is skipped.
+
+Running `git worktree remove` directly bypasses this cleanup and can leave an
+orphaned local database.
+
 ## Running Main and Worktree at the Same Time
 
 This is a first-class workflow.
@@ -255,6 +609,32 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+`make test` prepares and migrates the database before running the Go tests. In a worktree without `.env`, `make` automatically selects `.env.worktree`; you can also select it explicitly with `make test ENV_FILE=.env.worktree`.
+
+Before `make test`, `make check`, or `make check-worktree`, stop any development API using the same database so its background workers cannot pick up test jobs. Use the stop command that matches how you started it:
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → press Ctrl-C in its terminal.
+
+### Dev Toolbar
+
+Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
+
+```bash
+VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
+```
+
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle. In Desktop, **View → Show Dev Toolbar** turns it off and on without a restart, and the choice is remembered; while it is off, nothing is recorded, and turning it back on starts a new recording.
+
+Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+For realtime and agent bugs:
+
+- **Events** lists WebSocket events, filterable by type and searchable by issue key, ID or payload text. Each event shows which query keys its handling wrote, invalidated, removed or refetched, including the refreshes realtime sync debounces onto a timer (work after an `await` is not followed). A reconnect shows how long the socket was down and how many queries it refetched; **Drop connection** closes the socket to try it. **Replay locally** runs a recorded event through realtime sync's handlers again, without other subscribers, and any write request made while handling it is refused.
+- **Cache** lists the TanStack Query cache, stale and fetching entries, searchable by key, with a button to invalidate one query.
+- **Runtimes** shows each runtime's status and CLI version; **Tasks** lists the workspace's queued and running agent tasks, and clicking one opens its issue.
+
 ## How Database Creation Works
 
 Database creation is automatic.
@@ -311,218 +691,229 @@ It registers runtimes for all watched workspaces from the CLI config.
 
 ## Full-Stack Isolated Testing
 
-This section covers running the complete stack (backend, frontend, daemon) from
-source in a fully isolated environment. Useful for testing end-to-end changes
-that span multiple components, or for automated CI/AI workflows that need zero
-human intervention.
-
-### Why Not Just `make daemon`?
-
-`make daemon` uses the system-installed CLI's stored token and connects to
-whatever server is configured in `~/.multica/config.json`. That's fine for
-day-to-day development against a shared server, but for fully isolated testing
-you need:
-
-- a local backend and frontend (from source)
-- a local daemon (from source) with its own profile
-- automated authentication (no browser login)
-- no interference with your production CLI config
-
-### Dynamic Profile Naming
-
-Each worktree must use a unique daemon profile to avoid collisions when
-multiple features run in parallel.
-
-The profile name is derived from the worktree directory using the same
-slug + hash pattern as `scripts/init-worktree-env.sh`:
+Running the complete stack — backend, frontend and daemon — from source, with
+its own database and CLI profile, is one command:
 
 ```bash
-WORKTREE_DIR="$(basename "$PWD")"
-SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-OFFSET=$((HASH % 1000))
-PROFILE="dev-${SLUG}-${OFFSET}"
+make up C=api,web,daemon
 ```
 
-Example: worktree at `../multica-feat-auth` produces profile
-`dev-multica_feat_auth-347`, matching that worktree's port and database
-allocation.
+It creates the environment if needed, sets the fixed local verification code
+before the first launch, logs in as `dev@localhost`, mints a personal access
+token, creates a workspace, writes the CLI profile, builds `server/bin/multica`
+and starts the daemon from that binary. It then prints the URL, the login, the
+commit, and the stop command.
 
-### Start the Isolated Environment
+Two constraints are enforced rather than documented:
 
-Run all steps from the worktree root (where the Makefile is).
+- **The daemon runs from a built binary, never `go run`.** The daemon records
+  its own executable path at startup and re-execs it as the
+  execution-environment helper for every task; `go run` deletes that binary when
+  the launcher exits, so the daemon would register, heartbeat, and then fail
+  every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
+- **Under a daemon-managed task, only the environment's own daemon starts.** A
+  checkout below a `.multica/daemon_task_context.json` marker is an agent's
+  workdir, and the CLI refuses `daemon start`, `stop` and `status` there so a
+  task never operates your own daemon or profile. It makes one exception: an
+  explicit `--profile` that the dev-env registry assigns to an environment (its
+  CLI profile, or the `desktop-localhost-<backend port>` profile its Desktop
+  signs in), pointed at that environment's API, from a process the task's
+  `MULTICA_*` identity was stripped from. `make up` launches the daemon and
+  Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
+  test a real agent run. `make destroy` stops the daemon and removes its profile.
 
-#### 1. Start backend, frontend, and database
+### An environment that outlives the agent's run
+
+When a reviewer should open the app after the run ends, an agent inside a
+Multica task starts an environment this repository declares in
+`.multica/environments.toml`:
 
 ```bash
-make dev
+multica env start web          # make up C=api,web
+multica env start desktop      # make up C=desktop ARGS=--cdp
+multica env stop web
 ```
 
-Wait for the backend to be healthy:
+The daemon lists each one in the issue sidebar and stops it after 24 hours.
+
+- `web` has the URL `http://localhost:$MULTICA_PORT`, which redirects to the web
+  app on the port `make up` allocated.
+- `desktop` has no URL. The sidebar shows it as an app, and Desktop on the same
+  machine brings its window forward.
+
+Both are this checkout's `make up` environment, so they share one API and
+database, and `make status` and `make env-exec` work as usual. Stopping one
+leaves the other running; stopping the last one, or the last one's app going
+away, runs `make destroy`. A component started with a plain `make up` counts
+as in use too, and an environment that existed before `multica env start` is
+left in place, with its own owner and TTL. See
+[Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
+
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
 
 ```bash
-PORT=$(grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env | head -1 | cut -d= -f2)
-PORT=${PORT:-8080}
-SERVER="http://localhost:${PORT}"
-
-for i in $(seq 1 30); do
-  curl -sf "$SERVER/health" > /dev/null 2>&1 && break
-  sleep 2
-done
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar guest, --json
+make destroy ARGS="--yes"
 ```
 
-#### 2. Create a test user and token (automated auth)
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
 
-For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
-in your env file before starting the backend:
+`sidebar` makes the Work panel look used, for sidebar mocks and screenshots. It
+creates 11 issues across three projects, pins three of them and the Desktop 2.0
+project, and adds two saved views. Three agents (Atlas, Nova and Sage) then
+comment, mention, assign, change dates and priorities, and react through their
+own task tokens, so every inbox row comes from the server's notification
+listeners: 11 notified issues, 6 of them unread, enough for "Show 6 more". The
+notifications are then backdated with `psql` to read from minutes to days old;
+without `psql` they keep their real times. `all` leaves `sidebar` out. Running
+it again adds new issues and notifications and reuses the agents, projects and
+views.
+
+`guest` is for checking a change as a guest. It signs `guest@localhost` in
+with the dev verification code, invites it as a guest of three projects and
+accepts: Client portal (visible to the workspace), Client contracts (private)
+and Client portal v1 (archived), each with an issue. The guest sees those and
+nothing else; the Internal planning project and its issue stay hidden from it.
+In Client portal, `dev@localhost` mentions the guest on one issue, replies to
+the guest's comment on its sub-issue and assigns it a third, which leaves three
+unread issues in the guest's Inbox. `--json` prints `guest_token` and
+`guest_user_id` with the project and issue URLs; set the token as
+`multica_token` to open the app as the guest. The token is kept in the
+environment's profile directory, so running it again signs in only when that
+token stopped working, keeps the membership and adds new issues and
+notifications. `--guest-email` signs in someone else as the guest, which is
+how `e2e/guest.spec.ts` gets a fresh guest on every run. `all` leaves `guest`
+out.
+
+`task` is for UI and CLI work that needs an agent mid-run: agent status,
+the issue's execution log, Working / Idle filters, task panels. It assigns a new
+issue to the `Fixture Worker` agent, claims and starts the task, writes a few
+execution log entries and moves the issue to In Progress, then leaves the task
+running. `--queued` adds a second task queued behind it on the same issue.
+With `--json` it also prints `task_id`, `agent_id` and the task's `mat_`
+`auth_token`, which is what the CLI needs to run as that agent inside a task
+checkout:
 
 ```bash
-curl -s -X POST "$SERVER/auth/send-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost"}'
-
-JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
-
-PAT=$(curl -s -X POST "$SERVER/api/tokens" \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "auto-dev", "expires_in_days": 365}' | jq -r '.token')
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --hold"   # Ctrl-C to stop
 ```
 
-#### 3. Create a workspace
+Nothing heartbeats for the fixture runtime by default, so it shows offline
+about 150 seconds after the run. The held tasks are unaffected: the server
+fails them only once the runtime has been silent for its reconnect grace
+(`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default), and an API restart does
+not touch them. When a screenshot needs the runtime or agent shown online, add
+`--hold`: the script then keeps heartbeating until Ctrl-C instead of exiting. A
+new environment, or `make destroy`, drops every held task with its database;
+run `task` again there. The fixture runtime reports the checkout's
+`git describe` version as its CLI version.
+
+### Desktop
 
 ```bash
-WS=$(curl -s -X POST "$SERVER/api/workspaces" \
-  -H "Authorization: Bearer $PAT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Dev", "slug": "dev"}' | jq -r '.id')
+make up C=desktop
 ```
 
-#### 4. Compute profile name and write CLI config
+This writes a marked `apps/desktop/.env.development.local` pointing at this
+environment's backend, starts Electron with the renderer port and app name from
+the environment registry, and waits until that renderer is actually serving.
+Several checkouts can therefore run Desktop side by side without maintaining a
+second path-derived identity. `make destroy` removes the marked env file and
+this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
+path-derived fallback when it is run outside `make up`.
+
+Log in with `dev@localhost` and `888888`.
+
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
 
 ```bash
-# Compute profile (see Dynamic Profile Naming above)
-WORKTREE_DIR="$(basename "$PWD")"
-SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-OFFSET=$((HASH % 1000))
-PROFILE="dev-${SLUG}-${OFFSET}"
-
-FRONTEND_PORT=$(grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env | head -1 | cut -d= -f2)
-FRONTEND_PORT=${FRONTEND_PORT:-3000}
-
-CONFIG_DIR="$HOME/.multica/profiles/$PROFILE"
-mkdir -p "$CONFIG_DIR"
-
-cat > "$CONFIG_DIR/config.json" << EOF
-{
-  "server_url": "$SERVER",
-  "app_url": "http://localhost:${FRONTEND_PORT}",
-  "token": "$PAT",
-  "workspace_id": "$WS",
-  "watched_workspaces": [{"id": "$WS", "name": "Dev"}]
-}
-EOF
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
 ```
 
-#### 5. Start the daemon from source
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
+#### Capturing the native window
+
+A renderer screenshot has no title bar or traffic lights. To capture the real
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
 
 ```bash
-make cli ARGS="daemon start --profile $PROFILE"
+make up C=desktop ARGS="--ephemeral --cdp"
+node scripts/desktop-window-capture.mjs window.png
+node scripts/desktop-window-capture.mjs --compare origin/main shots/ -- apps/desktop packages/views
+make destroy ARGS="--yes"
 ```
 
-The daemon runs from the current worktree's Go source, connecting to the
-local backend. Agent-executed `multica` commands automatically use the same
-binary (the daemon prepends its own directory to `PATH`).
+The script finds the window by its owner PID, the process listening on the
+CDP port that `make status` has verified for this environment. It never matches
+by app name or window title: a dev build is also called "Multica Canary", and
+its title is the current page, so either could pick up your own Desktop window.
+Transparent rounded corners are flattened onto white, and the colour profile is
+kept. The app running the command needs Screen Recording permission.
 
-### Stop the Isolated Environment
+`--compare BASE` writes `before.png` with BASE's version of the changed files
+and `after.png` with the worktree's. Desktop is stopped and relaunched for each
+state, because swapping files under HMR can leave the app stuck loading. The
+index is never touched, and the files are restored on success, failure and
+interrupt. A pathspec after `--` limits which files are swapped.
 
-```bash
-# Compute profile (same formula)
-PROFILE="dev-$(printf '%s' "$(basename "$PWD")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')-$(( $(printf '%s' "$PWD" | cksum | awk '{print $1}') % 1000 ))"
-
-# 1. Stop daemon
-make cli ARGS="daemon stop --profile $PROFILE"
-
-# 2. Stop backend + frontend
-make stop            # main checkout
-make stop-worktree   # worktree checkout
-
-# 3. (Optional) Stop shared PostgreSQL
-make db-down
-
-# 4. (Optional) Clean build artifacts
-make clean
-
-# 5. (Optional) Remove profile config
-rm -rf "$HOME/.multica/profiles/$PROFILE"
-```
-
-### Desktop App Local Testing
-
-To test the Electron desktop app against a local backend:
-
-```bash
-# After backend is running (make dev)
-pnpm dev:desktop
-```
-
-This automatically:
-
-1. Compiles the `multica` CLI from `server/cmd/multica` into
-   `apps/desktop/resources/bin/multica`
-2. Creates an isolated profile named `desktop-localhost-<PORT>`
-3. Starts and manages its own daemon instance
-4. Connects to the local backend
-
-Login in the Desktop UI with `dev@localhost` and the generated code from the
-backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
-the backend, you can use `888888` instead.
-
-If the backend runs on a non-default port (worktree), create
-`apps/desktop/.env.development.local`:
-
-```bash
-VITE_API_URL=http://localhost:<backend-port>
-VITE_WS_URL=ws://localhost:<backend-port>/ws
-```
-
-#### Running multiple worktrees side-by-side
-
-`pnpm dev:desktop` auto-isolates a worktree so several worktrees can run their
-own desktop dev instance at once — no extra setup. From a linked worktree it
-derives, from the worktree path (same `cksum % 1000` offset as the backend /
-frontend ports in `.env.worktree`):
-
-- `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`)
-- `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
-  `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
-  distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that
-  share a folder name at different paths.
-
-The primary checkout is left untouched (`5173`, `Multica Canary`). Set either
-env var explicitly to override the derived value. Which backend each instance
-talks to is still controlled only by `apps/desktop/.env*` above — point each
-worktree's desktop at its own backend to also isolate the daemon profile.
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `multica` or the default
 `~/.multica/config.json`:
 
-| Resource | System / Production | Local Dev (per-worktree) |
+| Resource | System / Production | Local Dev (per environment) |
 |---|---|---|
-| Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<hash>/config.json` |
-| Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<hash>/daemon.pid` |
-| Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
-| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
-| Database | remote / production | local Docker: `multica_<slug>_<hash>` |
+| Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<offset>/config.json` |
+| Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<offset>/daemon.pid` |
+| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<offset>/` |
+| Database | remote / production | local: `multica_<slug>_<offset>` |
+| Registry | — | `~/.multica/dev/envs/<name>/` |
 | Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
 
-Multiple worktrees can run simultaneously without conflict.
+Multiple environments run simultaneously without conflict; `make list` shows
+all of them.
 
 ## Troubleshooting
 
@@ -626,6 +1017,19 @@ make start
 - only affects the current env's database; other worktree databases are untouched
 - refuses to run if `DATABASE_URL` points at a remote host
 - pass `ENV_FILE=.env.worktree` to target a specific worktree
+
+To permanently drop the current worktree database without recreating it:
+
+```bash
+make db-drop ENV_FILE=.env.worktree
+```
+
+The command prints the selected database and environment file, then requires a
+`y/N` confirmation. It only operates on the local Docker PostgreSQL service,
+protects PostgreSQL system databases, and refuses to drop the default main
+database `multica` unless `ALLOW_MAIN_DB_DROP=1` is explicitly supplied.
+Declining the confirmation is a successful no-op; when called by
+`make remove-worktree`, it also leaves the worktree in place.
 
 If you want to wipe all local PostgreSQL data for this repo:
 

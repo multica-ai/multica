@@ -1,11 +1,31 @@
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import {
+  bucketDiagnosticPath,
+  setDiagnosticRoute,
+} from "@multica/core/diagnostics";
 import {
   NavigationProvider,
+  type LinkClickIntent,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+import { useT } from "@multica/views/i18n";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
+
+/**
+ * Hand an app page this single-route window cannot host to the browser.
+ *
+ * Shared by content links and the adapter's push/replace, so a non-issue
+ * destination (e.g. workspace settings from the issue workflow card, MUL-8098)
+ * is never silently dropped.
+ */
+function openInBrowser(
+  path: string,
+  runtimeConfig: typeof window.desktopAPI.runtimeConfig,
+) {
+  if (!runtimeConfig.ok) return;
+  void window.desktopAPI.openExternal(`${runtimeConfig.config.appUrl}${path}`);
+}
 
 /**
  * Answer the `multica:navigate` event inside a dedicated issue window (MUL-5208).
@@ -23,30 +43,41 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 function useContentLinkHandler(
   navigate: ReturnType<typeof useNavigate>,
   runtimeConfig: typeof window.desktopAPI.runtimeConfig,
+  issueWindowTitle: string,
 ) {
   useEffect(() => {
     const handler = (e: Event) => {
-      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      const detail = (
+        e as CustomEvent<{ path?: string; disposition?: LinkClickIntent }>
+      ).detail;
+      const path = detail?.path;
       if (!path) return;
       const issuePath = parseIssueWindowPath(path);
       if (issuePath) {
+        if (detail?.disposition && detail.disposition !== "push") {
+          // A modifier click asks for a separate surface; this window has no
+          // tabs, so its "new tab" is a detached issue window — the same
+          // thing the adapter's openInNewTab produces.
+          void window.desktopAPI.openIssueWindow({
+            path: issuePath.path,
+            title: issueWindowTitle,
+          });
+          return;
+        }
         void navigate(issuePath.path);
         return;
       }
-      if (!runtimeConfig.ok) return;
-      void window.desktopAPI.openExternal(
-        `${runtimeConfig.config.appUrl}${path}`,
-      );
+      openInBrowser(path, runtimeConfig);
     };
     window.addEventListener("multica:navigate", handler);
     return () => window.removeEventListener("multica:navigate", handler);
-  }, [navigate, runtimeConfig]);
+  }, [navigate, runtimeConfig, issueWindowTitle]);
 }
 
 /**
  * Navigation bridge for a dedicated issue window. Unlike the main Desktop
- * shell, this window owns a tiny MemoryRouter and intentionally accepts only
- * issue-detail routes. Keeping the bridge in the platform layer preserves the
+ * shell, this window owns a tiny MemoryRouter and hosts only issue-detail
+ * routes; every other destination is opened in the browser. Keeping the bridge in the platform layer preserves the
  * MUL-4741 boundary around direct router navigation.
  */
 export function IssueWindowNavigationProvider({
@@ -56,24 +87,37 @@ export function IssueWindowNavigationProvider({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const workspace = useCurrentWorkspace();
   const runtimeConfig = window.desktopAPI.runtimeConfig;
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const { t } = useT("layout");
+  // Seed title for a new issue window; its page replaces it once it loads.
+  const issueWindowTitle = t(($) => $.tab.issue);
 
   useEffect(() => {
+    // Both freeze observers need the route: main for a hang this window never
+    // returns from, the in-renderer watchdog for one it survives (its
+    // `location.pathname` is the packaged index.html path).
+    // Bucketed template only — this payload ends up in a freeze report, so the
+    // workspace slug and the issue id must not travel with it.
+    const bucketed = bucketDiagnosticPath(currentPath);
+    setDiagnosticRoute(bucketed);
     window.desktopAPI.setRendererRouteContext({
       surface: "tab",
-      path: currentPath,
-      ...(workspace?.slug ? { workspaceSlug: workspace.slug } : {}),
+      path: bucketed,
     });
-  }, [currentPath, workspace?.slug]);
+  }, [currentPath]);
 
-  useContentLinkHandler(navigate, runtimeConfig);
+  useContentLinkHandler(navigate, runtimeConfig, issueWindowTitle);
 
   const adapter = useMemo<NavigationAdapter>(() => {
+    // Another issue opens in place; any other page goes to the browser, the
+    // same split the content-link handler applies.
     const navigateToIssue = (path: string, replace = false) => {
       const issuePath = parseIssueWindowPath(path);
-      if (!issuePath) return;
+      if (!issuePath) {
+        openInBrowser(path, runtimeConfig);
+        return;
+      }
       void navigate(issuePath.path, { replace });
     };
 
@@ -83,16 +127,24 @@ export function IssueWindowNavigationProvider({
       back: () => void navigate(-1),
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
+      hash: location.hash,
       openInNewTab: (path, title) => {
         void window.desktopAPI.openIssueWindow({
           path,
-          title: title ?? "Issue",
+          title: title?.trim() || issueWindowTitle,
         });
       },
       getShareableUrl: (path) =>
         runtimeConfig.ok ? `${runtimeConfig.config.appUrl}${path}` : path,
     };
-  }, [location.pathname, location.search, navigate, runtimeConfig]);
+  }, [
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    runtimeConfig,
+    issueWindowTitle,
+  ]);
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
 }

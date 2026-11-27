@@ -2,20 +2,16 @@ import { source } from "@/lib/source";
 import { DocsPage, DocsBody } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { ImageZoom, type ImageZoomProps } from "fumadocs-ui/components/image-zoom";
 import type { Metadata } from "next";
 import { DocsHero } from "@/components/hero";
-import { Byline, NumberedCards, NumberedCard, NumberedSteps, Step } from "@/components/editorial";
+import { NumberedCards, NumberedCard, NumberedSteps, Step } from "@/components/editorial";
 import { VideoEmbed } from "@/components/video-embed";
-import { i18n, type Lang } from "@/lib/i18n";
+import { CommunityLinks } from "@/components/community-links";
+import { asLang, i18n } from "@/lib/i18n";
 import { homeCopy } from "@/lib/translations";
 import { docsAlternates } from "@/lib/site";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
-
-function asLang(lang: string): Lang {
-  return (i18n.languages as readonly string[]).includes(lang)
-    ? (lang as Lang)
-    : (i18n.defaultLanguage as Lang);
-}
 
 // A layout's `generateStaticParams` does NOT cascade — every page that
 // wants SSG must declare its own. Without this, both `/docs/` and
@@ -52,18 +48,20 @@ export default async function Page({
         }
         subtitle={page.data.description}
       />
-      <Byline items={[...copy.byline]} />
       <DocsBody>
         <DocsLocaleProvider lang={lang}>
           <MDX
             components={{
               ...defaultMdxComponents,
+              // Same lightbox mapping as [...slug]/page.tsx — keep in sync.
+              img: (props) => <ImageZoom {...(props as ImageZoomProps)} />,
               a: LocaleLink,
               NumberedCards,
               NumberedCard,
               NumberedSteps,
               Step,
               VideoEmbed,
+              CommunityLinks,
             }}
           />
         </DocsLocaleProvider>

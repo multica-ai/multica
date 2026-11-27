@@ -211,6 +211,61 @@ func TestWebhookHandler_AllowsDeclaredEvent(t *testing.T) {
 	}
 }
 
+func TestWebhookHandler_PayloadConditionsGateRuns(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookConditions Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerWithFilters(t, apID, []WebhookEventFilter{{
+		Event:   "issues",
+		Actions: []string{"labeled"},
+		Conditions: []WebhookPayloadCondition{
+			{Path: "label.name", Op: payloadOpEquals, Value: "agent"},
+			{Path: "sender.type", Op: payloadOpNotEquals, Value: "Bot"},
+		},
+	}})
+	if len(trig.EventFilters) != 1 || len(trig.EventFilters[0].Conditions) != 2 {
+		t.Fatalf("conditions should round-trip on create, got %#v", trig.EventFilters)
+	}
+	headers := map[string]string{"X-GitHub-Event": "issues"}
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "labeled", "label": map[string]any{"name": "bug"}, "sender": map[string]any{"type": "User"},
+	}, headers)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if w.Code != http.StatusOK || resp["status"] != "ignored" || resp["reason"] != "payload_filtered" {
+		t.Fatalf("expected ignored/payload_filtered, got %d %#v", w.Code, resp)
+	}
+
+	w = postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "labeled", "label": map[string]any{"name": "agent"}, "sender": map[string]any{"type": "User"},
+	}, headers)
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
+	if delivery.Status != deliveryStatusDispatched || !delivery.AutopilotRunID.Valid {
+		t.Fatalf("expected worker dispatch, got status=%s run=%v", delivery.Status, delivery.AutopilotRunID.Valid)
+	}
+}
+
+func TestCreateAutopilotTrigger_RejectsInvalidPayloadCondition(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ConditionInvalid Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind": "webhook",
+		"event_filters": []map[string]any{{
+			"event":      "issues",
+			"conditions": []map[string]any{{"path": "label.name", "op": "matches", "value": "agent"}},
+		}},
+	})
+	req = withURLParam(req, "id", apID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on unknown op, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestWebhookHandler_EmptyFiltersAllowsAll(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "WebhookEmptyFilter Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
@@ -324,7 +379,7 @@ func TestUpdateWebhookTrigger_ExplicitEmptyArrayClearsFilters(t *testing.T) {
 		Event:        "github.something_else.opened",
 		EventPayload: json.RawMessage(`{"action":"opened"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(row.EventFilters, env) {
+	if !evaluateWebhookTriggerScope(row.EventFilters, env).Allowed {
 		t.Fatal("after clear, matcher should allow all events")
 	}
 }
@@ -949,26 +1004,6 @@ func TestWebhookHandler_AbsoluteIPRateLimitRetainsEmergencyCeiling(t *testing.T)
 	if second.Header().Get("Retry-After") == "" {
 		t.Fatal("absolute ceiling 429 must include Retry-After")
 	}
-}
-
-func TestWebhookHandler_DBErrorOnTokenLookupReturns500(t *testing.T) {
-	// Inject a fake Queries-like wrapper via a shadow type isn't simple
-	// here because Handler.Queries is a *db.Queries struct, not an
-	// interface. Instead, simulate the path by deleting the trigger row
-	// out from under a known-valid token AND swapping in a stub limiter
-	// that always allows. The handler will then call
-	// GetWebhookTriggerByToken with a non-existent value → pgx.ErrNoRows
-	// → 404. So this test alone can't drive the 500 branch without
-	// breaking the DB connection. The 500 branch is exercised via the
-	// unit tests in this package's TestRedactWebhookPath /
-	// TestRequestLogger_*; we leave a regression marker here so a future
-	// refactor that collapses ErrNoRows into 500 (or vice versa) is
-	// caught by a code review rather than a missing test.
-	//
-	// The real verification for this branch is: the file diff for
-	// autopilot_webhook.go must show `errors.Is(err, pgx.ErrNoRows)` —
-	// see PR #2348 review item Blocking #2.
-	t.Skip("500-branch requires injecting a stub Queries; left as a code-review-protected invariant")
 }
 
 func TestCreateAutopilotTrigger_RejectsAPIKind(t *testing.T) {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigationStore } from "@multica/core/navigation";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -10,8 +9,10 @@ import {
   useCurrentWorkspace,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { workspaceListOptions } from "@multica/core/workspace";
+import { useWorkspaceList } from "@multica/core/workspace";
+import { useIsGuest } from "@multica/core/permissions";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentVisitsStore } from "@multica/core/command-bar";
 import { useNavigation } from "../navigation";
 
 /**
@@ -25,14 +26,9 @@ import { useNavigation } from "../navigation";
  *    `resolvePostAuthDestination(list, hasOnboarded)` (workspace-presence first;
  *    see paths/resolve.ts for the full table)
  *
- * The "un-onboarded but in workspace" state IS valid now — it's the
- * mid-flow window between "user picked a runtime on the onboarding screen
- * and got dropped into the workspace" and "user picked a starter prompt in
- * the workspace OnboardingHelperModal, which fires BootstrapOnboardingRuntime
- * and marks onboarded". This guard deliberately does NOT redirect that
- * state out: it only redirects when the URL slug doesn't resolve,
- * regardless of onboarded. The blocking modal inside the workspace shell
- * handles completion.
+ * This guard only redirects when the URL slug doesn't resolve. Onboarding
+ * itself marks the user onboarded before navigating into a workspace, so
+ * entering the dashboard no longer depends on a follow-up Helper modal.
  *
  * (Older comment claimed this state was physically impossible because
  * CreateWorkspace and AcceptInvitation atomically marked onboarded.
@@ -44,14 +40,17 @@ import { useNavigation } from "../navigation";
  * from "slug not found". Otherwise users could see a transient redirect
  * before their workspace list arrives.
  */
+// The workspace sections a guest (MUL-9420) may open; every other section is
+// about agents or workspace administration, which the server refuses it.
+const GUEST_SECTIONS = new Set(["inbox", "my-issues", "issues", "projects", "settings"]);
+
 export function useDashboardGuard() {
   const { pathname, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useCurrentWorkspace();
   const hasOnboarded = useHasOnboarded();
-  const { data: workspaces = [], isFetched: workspaceListFetched } = useQuery({
-    ...workspaceListOptions(),
+  const { workspaces, ready: workspaceListReady } = useWorkspaceList({
     enabled: !!user,
   });
 
@@ -61,11 +60,18 @@ export function useDashboardGuard() {
       replace(paths.login());
       return;
     }
-    if (!workspaceListFetched) return;
+    if (!workspaceListReady) return;
     if (!workspace) {
       replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [user, isLoading, workspaceListFetched, workspace, workspaces, hasOnboarded, replace]);
+  }, [user, isLoading, workspaceListReady, workspace, workspaces, hasOnboarded, replace]);
+
+  const guest = useIsGuest(workspace?.id);
+  const section = pathname.split("/")[2] ?? "";
+  const guestBlocked = guest && !!workspace && !GUEST_SECTIONS.has(section);
+  useEffect(() => {
+    if (guestBlocked && workspace) replace(paths.workspace(workspace.slug).inbox());
+  }, [guestBlocked, workspace, replace]);
 
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);
@@ -75,11 +81,11 @@ export function useDashboardGuard() {
   // Runs once the workspace list resolves, and again whenever membership
   // changes (workspace deleted, user kicked, user left).
   useEffect(() => {
-    if (!workspaceListFetched) return;
-    useRecentIssuesStore
-      .getState()
-      .pruneWorkspaces(workspaces.map((w) => w.id));
-  }, [workspaceListFetched, workspaces]);
+    if (!workspaceListReady) return;
+    const activeWsIds = workspaces.map((w) => w.id);
+    useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
+    useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
+  }, [workspaceListReady, workspaces]);
 
-  return { user, isLoading, workspace };
+  return { user, isLoading, workspace, guestBlocked };
 }

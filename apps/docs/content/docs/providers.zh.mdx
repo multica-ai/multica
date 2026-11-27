@@ -1,154 +1,173 @@
 ---
-title: AI 编程工具对照
-description: Multica 支持 16 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+title: 支持的 AI 编程工具
+description: Multica 支持的 31 款 AI 编程工具，包括 Claude Code、Codex、Cursor 和 Copilot，以及检测、模型、MCP、会话、插话和 Skill 的差异。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica 内置支持 **16 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 支持 31 款 AI 编程工具。它不替代你在用的工具：运行时调用电脑上已经安装并登录的工具，再把执行进度和结果写回任务。已经在用其中一款的，通常直接沿用就行。还没定的话，看四件事：
 
-创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
+- 电脑上是否已经安装；
+- 账号可以使用哪些模型；
+- 是否需要由 Multica 配置 MCP；
+- 团队要复用哪些 skill。
 
-## 能力对照矩阵
+安装方法见 [安装 AI 编程工具](/install-agent-runtime)。
 
-| 工具 | 厂商 | 会话恢复 | MCP | Skill 注入路径 | 模型选择 |
-|---|---|---|---|---|---|
-| **Antigravity** | Google | ✅（`--conversation <id>`）| ❌ | `.agents/skills/` | 动态发现（`agy models`）|
-| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静态 + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.codebuddy/skills/` | 动态发现 |
-| **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静态 |
-| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
-| **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 动态发现 |
-| **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/` （单次任务 home）| 动态发现 |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 动态发现 |
-| **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 动态发现 |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 动态发现 + variant |
-| **DevEco Code** | 华为 | ✅ | ❌ | `.deveco/skills/` | 动态发现（`deveco models`）|
-| **OpenClaw** | 开源项目 | ✅ | ✅ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
-| **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
-| **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 动态发现 |
-| **Trae CLI** | ByteDance | ✅（ACP `session/load`）| ✅ | `.traecli/skills/` | 动态发现 |
-| **Grok** | xAI | ✅（ACP `session/load`）| ✅ | `.grok/skills/` | 动态发现（ACP `session/new`）|
+## 支持的工具
 
-## 每款工具的定位
+<ProviderPickerDemo />
 
-### Antigravity
+| 工具 | 检测命令 | 会话恢复 | Multica 管理 MCP | 在 Multica 选模型 | Skill 注入位置 |
+|---|---|---:|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | ✓ | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | ✓ | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | ✓ | 单次执行的 `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | — | `.minimax/skills/` |
+| Muse Code | `muse` | ✓ | — | ✓ | `.agents/skills/` |
+| Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | — | 单次执行的工作区 `skills/` |
+| Amp | `amp` | ✓ | — | 模式 | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | ✓ | — |
+| ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
-Google 出品。CLI 二进制名为 `agy`，搭配 Google Antigravity 服务，默认走 Gemini 系列模型。Multica 使用 `agy -p` 启动 Antigravity，因为这是适合 daemon 后台任务的一次性非交互模式；`agy -i` 需要连接 TTY，不适合后台执行。当前 Antigravity CLI 在 `agy -p` 下仍可执行工具，但 stdout 是纯文本而非结构化事件流，所以 Multica 会把 transcript 作为 text 转发，暂时无法展示逐工具 telemetry。**会话恢复真用**——通过 `--conversation <id>`，守护进程从 CLI 的日志文件里抓取 conversation UUID。**模型选择真用**——通过 `--model` flag（agy 1.0.6 新增）：守护进程用 `agy models` 枚举可选项，并把选中的值原样传入。注意这些是 `Claude Opus 4.6 (Thinking)` 这样的人类可读显示名，而非 `provider/model` slug；而且 agy 遇到无法识别的值会静默空跑，所以优先从发现列表里挑选，不要手填。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 迁移文档](https://antigravity.google/docs/gcli-migration)）。
-
-### Claude Code
-
-Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用，会读 MCP 配置，支持 `--max-turns`、`--append-system-prompt` 等细调参数。需要一个 Anthropic API 密钥。
-
-### CodeBuddy
-
-Tencent 出品。一款兼容 Claude Code 的 CLI agent——Multica 用和 Claude Code 一样的 stream-json 协议驱动它，所以会话恢复可用（通过 `--resume`），MCP 配置通过 `--mcp-config` 传入。CodeBuddy 使用自己原生的配置目录，而不是复用 Claude 的，所以 skill 放在 `.codebuddy/skills/`，运行时说明写入 `CODEBUDDY.md`。模型为动态发现。
-
-### Codex
-
-OpenAI 出品。使用 JSON-RPC 2.0 协议，状态化更强，approve 机制更细（手动批准 `exec_command` 和 `patch_apply`）。MCP 配置会写入单次任务的 `$CODEX_HOME/config.toml`。**会话恢复可用**——Multica 通过 Codex app-server 的 `thread/resume` 续接；如果已保存的 thread 不存在或过期，会回退到新 thread，让任务继续执行。
-
-### Copilot
-
-GitHub 出品。模型路由走你的 GitHub 账号权益——工具自己不做模型选择，由 GitHub 决定给你用哪个模型。skill 放 `.github/skills/` 是 GitHub CLI 的原生发现机制。
-
-### Cursor
-
-Anysphere 出品，Cursor 编辑器的 CLI 对应物。**会话恢复可用**——当前 Cursor Agent 的 stream-json 事件会返回 `session_id`，Multica 会在下一次运行时通过 `--resume <id>` 传回去。MCP 配置会写入任务工作区的 `.cursor/mcp.json`，Cursor 的项目 approval 文件写在单次任务的 `CURSOR_DATA_DIR` 下，因此托管的 MCP server 不依赖用户全局 Cursor approvals。
-
-### Hermes
-
-Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用，MCP 配置通过 ACP `mcpServers` 传入。Hermes 只从自己的 home 目录（`~/.hermes/skills/`）和配置的 `skills.external_dirs` 发现 skill，没有工作区相对发现。因此，**只有当智能体分配了 skill 时**，Multica 才会把 `HERMES_HOME` 指向你 `~/.hermes/` 的单次任务 overlay：真实 home 用软链镜像（含 auth／密钥，令牌刷新可传播），派生的 `config.yaml` 把你已有的 skill 作为只读 external root 引用，只有被分配的 skill 写入它的 `skills/` 目录并具更高优先级。你的全局 skill 照常可用。Multica 不会直接写你的共享 `~/.hermes/`（只读取并链接进去），但 Hermes 自己通过被镜像的软链写入时（如刷新令牌）会传播。`custom_args` 里的 `-p`/`--profile` 选择会被尊重：overlay 从该 profile 的 home 播种，且该标志会从启动命令里消费掉，无法绕过 overlay。任务记忆按任务隔离：一个全新的 `memories/` 目录，外加在派生配置里禁用外部 `memory.provider` 后端，所以磁盘上的笔记和共享的 Supermemory/Hindsight 之类记忆库都不会在任务间串用（受管、按 agent 隔离的记忆后端是后续单独决策）。`state.db` SQLite 会话库及其日志文件也按任务隔离，由 Hermes 在 overlay 内创建；宿主会话历史不会被链接或复制，Windows 上运行中的 WAL 锁也不会阻塞环境准备。没有分配 skill 的 Hermes 任务按真实 home 原样运行。另外,home 的平台默认值在原生 Windows 上是 `%LOCALAPPDATA%\hermes`。
-
-**指定 Hermes profile。** 要让 Hermes 使用某个 profile 启动，把智能体的 `custom_args` 设成 profile flag 和 profile 名两个独立条目。例如使用名为 `research` 的 profile：
-
-```json
-["-p", "research"]
-```
-
-不要合成一个字符串 `"-p research"`；Multica 会把数组里的每一项作为一个独立 argv 参数传给工具。`custom_args` 是按智能体配置的——见 [创建和配置智能体](/agents-create)。
-
-### Kimi
-
-Moonshot 出品，中国市场向。和 Hermes 共享 ACP 协议，MCP 配置同样通过 ACP `mcpServers` 传入；但 skill 路径 `.kimi/skills/` 是 Kimi CLI 的原生发现机制——和 Hermes 的 fallback 不一样。
-
-### Kiro CLI
-
-Amazon 出品。通过 `kiro-cli acp` 使用 ACP stdio 协议。会话恢复走 ACP `session/load`，MCP 配置通过 ACP `mcpServers` 传入，模型选择走 `session/set_model`，skill 会复制到 `.kiro/skills/` 让 Kiro 做项目级原生发现。
-
-### OpenCode
-
-SST 出品，开源。动态发现可用模型和模型 variant（扫 CLI 的配置文件）。会话恢复真用，会消费智能体的 `mcp_config` 字段——Multica 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联注入，让智能体的 MCP server 直接到达 OpenCode，**不会去碰任务工作目录里的 `opencode.json`**（那个文件归智能体或用户所有）。当模型暴露 variant 时，Multica 会把它显示成智能体的思考强度选择，并通过 `opencode run --variant` 传给 OpenCode。**适合爱折腾、想自定义模型目录**的开发者。
-
-### DevEco Code
-
-**DevEco Code** 是华为面向鸿蒙开发的独立编程智能体（`deveco` CLI，[gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code)）。它基于 OpenCode 引擎构建，自身已是一款完整成熟的产品——自带模型目录与 provider（内置 `deveco/GLM-5.1`）、自带华为账号认证、自有配置与 skill 体系（`~/.config/deveco/` 与 `.deveco/skills/`）。Multica 通过 `deveco run --format json` 驱动它，解析其 NDJSON 事件流。**会话恢复可用**（`--session <id>`），模型通过 `deveco models` 动态发现，系统上下文通过单次任务的 `AGENTS.md` 投递。MCP server 通过 DevEco 原生的 `DEVECO_CONFIG_CONTENT` 通道配置；Multica 侧的 `mcp_config` 透传正在开发中，因此目前 DevEco 智能体的 MCP 标签页暂先隐藏。认证用 `deveco auth login`（华为账号）。
-
-### OpenClaw
-
-开源项目，CLI agent 编排器。MCP 配置通过 Multica 的单次任务配置 wrapper 写入。**模型绑定在智能体层**（`openclaw agents add --model`）——不能在单次任务里覆盖。配置严格受控：用户不能传 `--model` 或 `--system-prompt`，由智能体注册时的配置决定。
-
-### Pi
-
-Inflection AI 出品，极简主义。**会话恢复机制特殊**——session ID 是磁盘上的文件路径（`~/.pi/...`），而不是字符串 ID。其他工具里，resume id 是 CLI 返回的字符串；Pi 里，resume id 就是会话文件本身。
-
-### Qoder
-
-Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Kimi、Kiro CLI 共享传输层）。会话恢复通过 ACP `session/resume` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现，skill 复制到 `.qoder/skills/` 做原生发现。
-
-### Trae
-
-ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `bytedance/trae-agent`）。它是 ACP 原生工具，Multica 通过 `traecli acp serve --yolo` 在 stdio 上驱动它，传输层和 Kiro、Qoder 相同。会话恢复通过 ACP `session/load` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现并可通过 `session/set_model` 在任务中切换，skill 复制到 `.traecli/skills/`。
-
-### Grok
-
-xAI 的 Grok Build CLI（`grok`）。Multica 通过 `grok --no-auto-update agent --always-approve stdio` 接入 ACP。`initialize` 返回后，Multica 从 CLI 公布的认证方式中选择 `xai.api_key`（已设置 `XAI_API_KEY` 时优先）或 `cached_token`，等待 `authenticate` 成功后才创建或加载会话；没有可用方式时会明确失败。会话续接走 ACP `session/load`，模型从 `session/new` 动态发现并通过 `session/set_model` 切换。`grok-4.5` 的 reasoning effort 只提供官方支持的 `low`、`medium`、`high`。MCP 配置通过 ACP `mcpServers` 传入。Skill 文件写入 `.grok/skills/`；用户 skill 从 `$GROK_HOME/skills/`（默认 `~/.grok/skills/`）和通用目录 `~/.agents/skills/` 发现。
-
-## 会话恢复：谁真的支持
-
-会话恢复的机制在 [执行任务](/tasks#任务能接着上次的上下文继续吗) 里讲过。**所有支持的工具都能恢复会话**——传 resume id，任务就会从上次的上下文接着继续。唯一的特例是 Pi：它的 resume id 是磁盘上的会话文件路径，而不是字符串 ID（见上文 [Pi](#pi)）。
-
-## MCP 配置：按工具不同
-
-**16 款工具里有 12 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI、Grok**。其他 4 款（Antigravity、Copilot、DevEco Code、Pi）会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
-
-各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder、Trae CLI、Grok 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
-
-<Callout type="warning">
-如果你在智能体配置里设置了 `mcp_config`，但选了矩阵 MCP 列没有标 ✅ 的工具，你的 MCP server 对这个智能体**没有效果**。MCP 集成是按工具实现的。
+<Callout type="info">
+不支持 Gemini CLI。它已从内置工具中移除，把 Gemini 列为 Multica 可运行工具的页面信息已经过时。
 </Callout>
 
-## skill 文件该放哪儿
+对于 Claude Code，如果守护进程环境中的 `CLAUDE_CONFIG_DIR` 是绝对路径，Multica 会从该目录列出和导入用户及插件技能。扫描器无法读取仅在启动包装脚本中设置的路径。
 
-每款工具用**自己**的 skill 发现路径。Multica 的守护进程在执行任务前把 workspace 的 skill 文件复制到对应路径下：
+Amp 的模型字段用于选择 Amp **模式**（如 `high`），而不是底层模型 ID。留空则使用 Amp 的默认模式。
 
-| 工具 | 路径 | 是否原生发现 |
-|---|---|---|
-| Claude Code | `.claude/skills/` | ✅ 原生 |
-| CodeBuddy | `.codebuddy/skills/` | ✅ 原生 |
-| Codex | `$CODEX_HOME/skills/` | ✅ 原生 |
-| Copilot | `.github/skills/` | ✅ 原生 |
-| Cursor | `.cursor/skills/` | ✅ 原生 |
-| Kimi | `.kimi/skills/` | ✅ 原生 |
-| Kiro CLI | `.kiro/skills/` | ✅ 原生 |
-| OpenCode | `.opencode/skills/` | ✅ 原生 |
-| DevEco Code | `.deveco/skills/` | ✅ 原生 |
-| Pi | `.pi/skills/` | ✅ 原生 |
-| Qoder | `.qoder/skills/` | ✅ 原生 |
-| Trae CLI | `.traecli/skills/` | ✅ 原生 |
-| Grok | `.grok/skills/` | ✅ 原生 |
-| Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
-| Hermes | `HERMES_HOME/skills/` （单次任务 home）| ✅ 原生（每个任务从 `~/.hermes/` 播种）|
-| OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |
+Amp 还需要在守护进程或智能体环境中设置 `AMP_API_KEY`，仅有交互式登录记录不够。
 
-fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 OpenClaw 没起效，先查这个问题。
+"Multica 管理 MCP"指可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。这一列只说明 Multica 能否代为配置，不说明工具自身有没有别的 MCP 配置方式。
 
-对原生项目级路径来说，repo-scoped discovery 是预期行为：如果检出的仓库已经包含对应目录，底层工具可以自己发现这些提交在仓库里的 Skill。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica。Multica 会保持这些仓库文件不变。如果某个工作区 Skill 的自然目录名相同，守护进程会把工作区副本写到类似 `review-helper-multica` 的无冲突 sibling 目录。
+"在 Multica 选模型"为 — 的工具，模型要在工具自己的配置里选，见[模型来源](#模型来源)。
 
-skill 的创建和使用详见 [技能](/skills)。
+## 接入工具
 
-## 下一步
+表中每款工具的接入方式都一样：电脑上的 Multica 守护进程在 `PATH` 中查找各工具的命令，每找到一款就注册一个运行时。运行在这台电脑上执行，使用工具自己的登录和订阅；Multica 不附带这些工具，也不代理它们的模型调用。
 
-- [创建和配置智能体](/agents-create) —— 给你的智能体挑一款工具
-- [执行任务](/tasks) —— 任务的生命周期和会话恢复机制
-- [守护进程与运行时](/daemon-runtimes) —— 工具跑在哪里、怎么连进 Multica
+1. 按工具自己的文档安装并登录。
+2. 在同一台电脑上打开 [Multica 桌面端](/desktop-app)，它会自动接入这台电脑；或者安装 CLI 并启动守护进程：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Windows 上第一行换成 `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`。自托管实例使用[自托管快速上手](/self-host-quickstart)里的命令。
+3. 在 **运行时** 页面这台电脑下确认工具已经出现，也可以运行 `multica runtime list`。之后再装新工具，运行 `multica daemon restart` 或重新打开桌面端。
+4. 在这个运行时上[创建智能体](/agents-create)，再给它分配任务。
+
+工具装在守护进程 `PATH` 找不到的位置时，用 `MULTICA_<PREFIX>_PATH` 指向它，见[环境变量](/environment-variables#守护进程配置)。一台电脑可以挂多款工具，一个工作区也可以接入多台电脑，所以团队可以在同一个看板上让一台机器跑 Claude Code，另一台跑 Codex 或 Kimi。
+
+## 插话支持
+
+你可以[给仍在工作的运行插话](/mentioning-agents#给正在运行的智能体插话)，不必等下一轮。这需要 AI 编程工具支持，且版本不低于下表：
+
+| 工具 | 最低版本 |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+其他工具或更低版本不会出现"插话到当前运行"：回复会在当前运行结束后作为新一轮处理，或者你停止当前运行、从头开始。
+
+## 模型来源
+
+Devin 通过本机 ACP 运行，支持 stdio MCP；只有 CLI 声明支持时才会传入 HTTP/SSE 配置。全局 skill 依次从 `$XDG_CONFIG_HOME/devin/skills`（默认 `~/.config/devin/skills`，Windows 为 `%APPDATA%\devin\skills`）、旧版 `cognition/skills`、`~/.codeium/<channel>/skills`（依次为 `windsurf`、`windsurf-next`、`windsurf-insiders`）和 `~/.agents/skills` 导入。同名 skill 在列表和导入时都以前面的目录为准。
+
+Devin 模型列表可能包含当前账号无权使用的模型。可以选择完整模型 ID、无歧义的会话模型名称或目录中的系列 slug/别名（如 `opus`），也可以留空使用 CLI 默认模型。Multica 会在发送任务前确认实际模型，拒绝回退到其他系列；有歧义的名称、任意截断名称或不可用的变体需要改选完整 ID，不会猜测匹配。用量按实际返回的模型归属；Adaptive 按返回的 Adaptive 路由 ID 记录，不推测底层模型。
+
+Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存的凭据；未知的 ACP 认证方式不会阻断已保存的登录。Multica 保留 Devin 配置的会话模式，不自动提升权限。如果默认为 `plan`，请先在 Devin 中切换到可编辑模式，再派发需要修改文件的任务。
+
+创建智能体时，模型列表来自对应的运行时。有的工具给出固定的模型名称，有的按本机配置、登录账号和订阅权益返回可用模型。
+
+不选择模型时，Multica 使用该工具的默认设置。列表为空时，先确认运行时在线并且工具已经登录，再刷新模型列表。
+
+使用 Kiro CLI 时，创建和设置智能体页面中的**思考**选项来自所选模型支持的 effort 档位，选择会应用到新建和恢复的会话。不选择时沿用 Kiro 自身的 effort 设置。模型或 CLI 版本未返回 effort 选项时，不显示该选择器。
+
+QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
+
+Antigravity 会把 `agy models` 中的推理变体显示为独立模型。在模型选择器中选用完整的变体名称，包括后缀。Multica 不为 Antigravity 提供单独的**思考**设置。如果在自定义参数中传入 `--effort`，Antigravity 会检查它能否与所选模型同时使用。
+
+DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multica --list-models`）。它的模型 id 采用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），请从列表中选择完整 id。
+
+<Callout type="info">
+各工具的模型名称不通用。更换 AI 编程工具后，原来的模型值在新工具中无效，需要重新选择。
+</Callout>
+
+## 会话恢复
+
+表格中标 ✓ 的工具支持在后续执行中继续已有会话，前提是原会话还在，并且运行由能访问它的运行时执行。MiniMax Code 0.1.2 尚未通过 ACP 声明会话加载能力，因此后续执行会新建 MCode 会话。
+
+Multica 保存工具返回的会话标识。下次在同一任务中继续工作时，运行时先尝试恢复这段会话，恢复不了就新建会话接着执行。Pi 保存的是本地会话文件路径，所以更依赖原来的电脑和文件。
+
+有关重试和会话恢复的规则，见 [运行](/tasks#手动重试)。
+
+## MCP 配置
+
+Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暂不读取智能体中的 MCP 配置，创建智能体时不显示这一项。
+
+向 Pi 下发受管 MCP 配置需要 Pi 0.99.0 或更高版本。旧版 Pi 仍可运行未配置 MCP 的智能体。
+
+<Callout type="warning">
+MCP server 的命令、参数和环境变量会随智能体配置保存在服务器端。不要把不需要共享的本地凭据直接写入配置。
+</Callout>
+
+运行时所在电脑上已经配置的 MCP server，会在那台电脑上和智能体的配置合并，见[本机 MCP 配置](/daemon-runtimes#local-mcp)。
+
+## Skill 注入方式
+
+执行开始前，Multica 把智能体绑定的 skill 写入上表对应的位置，工具用自己的原生机制发现它们。
+
+仓库里原有的 skill 不会被覆盖。名称冲突时，Multica 给注入的副本换一个目录名；执行结束后，只清理自己创建的文件。
+
+Codex、Hermes 和 OpenClaw 的处理稍有不同：
+
+- Codex 使用单次执行的 `CODEX_HOME`，不会把 skill 写进系统级 Codex 目录。
+- Hermes 使用单次执行的 `HERMES_HOME`。已有的本地配置仍然可以被读取，但绑定的 skill 与会话数据按运行隔离。这套隔离只在智能体绑定了 skill 时启用，没有绑定 skill 的运行使用本机原有的 Hermes 主目录。
+- OpenClaw 使用当前执行工作目录下的 `skills/`，并由单次执行配置把该目录设为工作区。
+
+如何创建和绑定 skill，见 [Skills](/skills)。
+
+## 接下来
+
+- [创建和配置智能体](/agents-create) — 模型与思考强度设置。
+- [安装 AI 编程工具](/install-agent-runtime) — 安装与检测步骤。
+- [守护进程与运行时](/daemon-runtimes) — 运行时注册与并发。
+
+## ZCode
+
+ZCode 使用原生 NDJSON `app-server` 协议，支持会话创建、续接、取消、模型发现、思考强度和 MCP。任务通过 yolo 模式执行，无需等待交互式工具审批。每个模型的思考档位来自运行时目录，创建智能体时会保留对应默认值。
+
+macOS 可自动发现 ZCode Desktop 内置的 CLI；需要本机已安装 Node.js。Linux 也可自动发现 ZCode Desktop，在后台运行内置 CLI，不打开桌面窗口，无需额外安装 Node.js 或手动配置环境变量。运行时读取桌面端已启用的 API-key/Coding Plan 连接，为当前进程生成独占临时配置，退出后删除，原配置不变。Start Plan 登录身份令牌不作为 API key 导入，目前不支持这条账号鉴权路径。若模型列表为空，请先在桌面端配置一个可用的 API 连接。

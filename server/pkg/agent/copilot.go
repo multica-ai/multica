@@ -1,21 +1,25 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 // copilotBackend implements Backend by spawning the GitHub Copilot CLI
 // with --output-format json and parsing its JSONL event stream.
 //
-// The v1 integration uses the -p (pipe) mode which is the stable
-// automation/CI channel. The prompt is passed as a CLI argument (not stdin).
+// The integration runs Copilot non-interactively with the prompt piped on
+// stdin and no -p, never as a CLI argument: an argv prompt dies at fork/exec
+// once it clears the OS argument size limit (#9362; see buildCopilotArgs).
 // Events arrive as newline-delimited JSON on stdout in the Copilot CLI's
 // own envelope format: { "type": "dotted.event.name", "data": {...}, ... }
 type copilotBackend struct {
@@ -26,20 +30,160 @@ type copilotBackend struct {
 // event stream. It is shared between production (Execute) and tests via
 // handleCopilotEvent, so the parsing logic is never duplicated.
 type copilotEventState struct {
-	output      strings.Builder
-	sessionID   string
-	activeModel string
-	finalStatus string
-	finalError  string
-	usage       map[string]TokenUsage
+	// output holds the latest COMPLETE assistant turn, not every turn joined:
+	// Result.Output is "final user-facing output selected by the backend"
+	// (agent.go), and a tool-using run's earlier turns are narration around the
+	// work, not the deliverable (GH #6006). Every turn still reaches the
+	// transcript through the emitted MessageText.
+	output strings.Builder
+	// pendingDelta buffers the turn currently streaming. It is cleared when that
+	// turn's authoritative assistant.message lands, so it is non-empty only when
+	// the process died mid-turn — the one case where a partial beats the
+	// previous turn's complete text.
+	pendingDelta strings.Builder
+	sessionID    string
+	activeModel  string
+	finalStatus  string
+	finalError   string
+	// sawResult records that the terminal "result" event arrived, i.e. the CLI
+	// consumed the whole stdin prompt and ran to completion.
+	sawResult bool
+
+	// Token usage arrives from up to four sources, so each is accumulated
+	// separately and resolved once at the end by resolveUsage.
+	//
+	//	session.shutdown       per-model session totals, full breakdown
+	//	--usage-output-file    the same session totals, written on exit
+	//	assistant.usage        per model call, full breakdown
+	//	assistant.message      outputTokens only — legacy, older CLIs
+	//
+	// They must never be summed together: all four describe the same tokens.
+	callUsage     map[string]TokenUsage
+	msgUsage      map[string]TokenUsage
+	shutdownUsage map[string]TokenUsage
+	fileUsage     map[string]TokenUsage
+	// resumed marks a run that continued an existing Copilot session, which is
+	// what disqualifies the session.shutdown totals — see resolveUsage.
+	resumed bool
 }
 
-func newCopilotEventState(seedModel string) *copilotEventState {
-	return &copilotEventState{
-		activeModel: seedModel,
-		finalStatus: "completed",
-		usage:       make(map[string]TokenUsage),
+// resolveUsage picks the single best usage source this run produced, most
+// complete first.
+//
+// On a fresh session, session.shutdown is the CLI's own final accounting for
+// the whole session — which here IS this run — so it is the most complete
+// source available and cannot be short-changed by an individual model call
+// that failed to report. It is unusable on a resumed run: the CLI restores its
+// accumulators from a checkpoint, so it also carries every earlier turn's
+// tokens, and reporting that on a follow-up would bill the same tokens once per
+// turn. Under-reporting beats double-billing, so a resumed run falls through.
+//
+// The --usage-output-file summary is the source modern CLIs actually deliver,
+// since they filter session.shutdown out of the JSON stream. It holds the same
+// session totals, so it follows the same rule and is skipped on resume.
+//
+// assistant.usage is per model call, so it measures exactly this run either
+// way. assistant.message is last: it only ever carries output tokens, so
+// letting it win over a source with the full breakdown would silently drop the
+// input and cache tiers.
+func (st *copilotEventState) resolveUsage() map[string]TokenUsage {
+	if !st.resumed && hasTokens(st.shutdownUsage) {
+		return st.shutdownUsage
 	}
+	if !st.resumed && hasTokens(st.fileUsage) {
+		return st.fileUsage
+	}
+	if hasTokens(st.callUsage) {
+		return st.callUsage
+	}
+	if hasTokens(st.msgUsage) {
+		return st.msgUsage
+	}
+	return map[string]TokenUsage{}
+}
+
+// hasTokens reports whether a source carries any real numbers. Presence alone
+// is not enough: every token field on assistant.usage is optional upstream, so
+// a usage event that names only a model would otherwise mark that source
+// "populated" and shadow one that actually has tokens.
+func hasTokens(usage map[string]TokenUsage) bool {
+	for _, u := range usage {
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// addUsage folds one usage record into dst under model, ignoring records that
+// carry no tokens at all so an empty one never creates an entry.
+//
+// Copilot reports cached tokens INSIDE inputTokens (its own event-log reducer
+// derives uncached input as inputTokens - cacheRead - cacheWrite), whereas
+// TokenUsage.InputTokens is the uncached remainder that prices at the input
+// rate. Subtract here so the cache tiers are not billed twice. reasoningTokens
+// are deliberately ignored: they are already part of outputTokens.
+func addUsage(dst map[string]TokenUsage, model string, input, output, cacheRead, cacheWrite int64) {
+	cacheRead = nonNegativeTokens(cacheRead)
+	cacheWrite = nonNegativeTokens(cacheWrite)
+	output = nonNegativeTokens(output)
+	uncachedInput := nonNegativeTokens(input - cacheRead - cacheWrite)
+	if uncachedInput == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 {
+		return
+	}
+	u := dst[model]
+	u.InputTokens += uncachedInput
+	u.OutputTokens += output
+	u.CacheReadTokens += cacheRead
+	u.CacheWriteTokens += cacheWrite
+	dst[model] = u
+}
+
+func nonNegativeTokens(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// finalOutput is the deliverable for Result.Output: the last complete assistant
+// turn, or the partial turn that was still streaming when the process died.
+func (st *copilotEventState) finalOutput() string {
+	if st.pendingDelta.Len() > 0 {
+		return st.pendingDelta.String()
+	}
+	return st.output.String()
+}
+
+func newCopilotEventState(seedModel string, resumed bool) *copilotEventState {
+	return &copilotEventState{
+		activeModel:   seedModel,
+		finalStatus:   "completed",
+		callUsage:     make(map[string]TokenUsage),
+		msgUsage:      make(map[string]TokenUsage),
+		shutdownUsage: make(map[string]TokenUsage),
+		fileUsage:     make(map[string]TokenUsage),
+		resumed:       resumed,
+	}
+}
+
+// applyUsageFile folds the JSON summary Copilot writes to --usage-output-file
+// into fileUsage. Only modelMetrics is read: agentMetrics breaks the same
+// totals down by sub-agent, so adding it would count every token twice. A
+// missing or malformed file leaves fileUsage empty, and the run stays
+// unreported rather than recording zero.
+func (st *copilotEventState) applyUsageFile(raw []byte) error {
+	var summary copilotShutdownData
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		return err
+	}
+	for model, m := range summary.ModelMetrics {
+		if model == "" {
+			model = st.activeModel
+		}
+		addUsage(st.fileUsage, model, m.Usage.InputTokens, m.Usage.OutputTokens, m.Usage.CacheReadTokens, m.Usage.CacheWriteTokens)
+	}
+	return nil
 }
 
 // handleCopilotEvent processes a single parsed copilotEvent, updates state,
@@ -68,9 +212,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	case "assistant.message_delta":
 		var delta copilotMessageDelta
 		if err := json.Unmarshal(evt.Data, &delta); err == nil && delta.DeltaContent != "" {
-			// Write to output as defense-in-depth: if the process is killed
-			// before the final assistant.message arrives, we still have text.
-			st.output.WriteString(delta.DeltaContent)
+			// Buffer deltas as defense-in-depth: if the process is killed before
+			// this turn's assistant.message arrives, we still have its text.
+			st.pendingDelta.WriteString(delta.DeltaContent)
 			msgs = append(msgs, Message{Type: MessageText, Content: delta.DeltaContent})
 		}
 
@@ -79,26 +223,31 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		if err := json.Unmarshal(evt.Data, &msg); err != nil {
 			return nil
 		}
-		// assistant.message carries the full turn content. Since deltas
-		// already wrote to output incrementally, we reset and write the
-		// authoritative content once to avoid double-counting.
+		// assistant.message carries the full turn content and supersedes both the
+		// deltas that streamed it and whatever earlier turn output held: a run
+		// that narrates, calls a tool, then answers must deliver the answer, not
+		// the pair joined together.
 		if msg.Content != "" {
-			// Separator between turns.
-			trimmed := strings.TrimSuffix(st.output.String(), msg.Content)
 			st.output.Reset()
-			st.output.WriteString(trimmed)
-			if st.output.Len() > 0 && !strings.HasSuffix(st.output.String(), "\n\n") {
-				st.output.WriteString("\n\n")
-			}
 			st.output.WriteString(msg.Content)
+		}
+		// Clear unconditionally — this event IS the turn boundary. A tool-only
+		// turn reports content:"" (the toolRequests below are the whole turn), and
+		// leaving its deltas buffered would let them be stitched onto the NEXT
+		// turn's partial text if the process then died mid-stream.
+		st.pendingDelta.Reset()
+		// The message names the model that produced it. Without this the first
+		// turn's tokens land under the seed model — the literal string
+		// "copilot" when no model was configured — which no price table maps,
+		// so a run that DID report tokens still estimated $0.00.
+		if msg.Model != "" {
+			st.activeModel = msg.Model
 		}
 		if msg.ReasoningText != "" {
 			msgs = append(msgs, Message{Type: MessageThinking, Content: msg.ReasoningText})
 		}
 		if msg.OutputTokens > 0 {
-			u := st.usage[st.activeModel]
-			u.OutputTokens += msg.OutputTokens
-			st.usage[st.activeModel] = u
+			addUsage(st.msgUsage, st.activeModel, 0, msg.OutputTokens, 0, 0)
 		}
 		for _, tr := range msg.ToolRequests {
 			var input map[string]any
@@ -111,6 +260,36 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 				CallID: tr.ToolCallID,
 				Input:  input,
 			})
+		}
+
+	case "assistant.usage":
+		// One record per model API call, with the full token breakdown. This is
+		// the only event that reports input and cache tokens at all.
+		var u copilotUsageData
+		if err := json.Unmarshal(evt.Data, &u); err != nil {
+			return nil
+		}
+		model := u.Model
+		// The CLI writes "unknown" when it cannot name the model; keep whatever
+		// the session already resolved rather than opening a bogus usage row.
+		if model == "" || model == "unknown" {
+			model = st.activeModel
+		} else {
+			st.activeModel = model
+		}
+		addUsage(st.callUsage, model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
+	case "session.shutdown":
+		// Session-wide per-model totals, emitted once as the session tears down.
+		var sd copilotShutdownData
+		if err := json.Unmarshal(evt.Data, &sd); err != nil {
+			return nil
+		}
+		for model, m := range sd.ModelMetrics {
+			if model == "" {
+				model = st.activeModel
+			}
+			addUsage(st.shutdownUsage, model, m.Usage.InputTokens, m.Usage.OutputTokens, m.Usage.CacheReadTokens, m.Usage.CacheWriteTokens)
 		}
 
 	case "assistant.reasoning", "assistant.reasoning_delta":
@@ -168,6 +347,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		}
 
 	case "result":
+		st.sawResult = true
 		if evt.SessionID != "" {
 			st.sessionID = evt.SessionID
 		}
@@ -202,15 +382,38 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("copilot executable not found at %q: %w", execName, err)
 	}
 
+	// Without -p the CLI takes its prompt from stdin; an empty stdin would
+	// leave it nothing to run, so refuse before spawning anything.
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("copilot: empty prompt")
+	}
+
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
-	argv0, cmdArgs := chooseCopilotInvocation(execName, lookedUp, args, b.cfg.Logger)
+	// The task prompt is delivered on stdin, never argv (see buildCopilotArgs).
+	args := buildCopilotArgs(opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	// Modern CLIs keep token counts out of the JSON stream and only write them
+	// to --usage-output-file on exit, so give each run its own file to read.
+	// Without it the run still works; it just reports no usage, as before.
+	usageFile := ""
+	if copilotUsageFileSupported(b.cfg) {
+		if dir, err := os.MkdirTemp("", "multica-copilot-usage-"); err != nil {
+			b.cfg.Logger.Warn("copilot usage file unavailable", "error", err)
+		} else {
+			usageFile = filepath.Join(dir, "usage.json")
+			args = append(args, "--usage-output-file", usageFile)
+		}
+	}
+	removeUsageFile := func() {
+		if usageFile != "" {
+			_ = os.RemoveAll(filepath.Dir(usageFile))
+		}
+	}
+	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseCopilotInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
+	b.cfg.logAgentCommandWithPrompt(cmd, newAgentCommandLogArgs(args), len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -220,15 +423,37 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		removeUsageFile()
 		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		removeUsageFile()
+		return nil, fmt.Errorf("copilot stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		closeStdin()
 		cancel()
+		removeUsageFile()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
+
+	// Write the prompt from its own goroutine so it cannot deadlock against the
+	// stdout reader: a prompt larger than the OS pipe buffer blocks mid-write
+	// until Copilot drains it, and Copilot cannot drain while nobody consumes
+	// its stdout. Closing stdin is what ends the prompt, so close on every path.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
 
 	b.cfg.Logger.Info("copilot started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -239,21 +464,23 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer removeUsageFile()
 
 		startTime := time.Now()
 		seedModel := opts.Model
 		if seedModel == "" {
 			seedModel = "copilot"
 		}
-		st := newCopilotEventState(seedModel)
+		st := newCopilotEventState(seedModel, opts.ResumeSessionID != "")
 
 		go func() {
 			<-runCtx.Done()
+			// Release a prompt write still blocked on a full stdin pipe.
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -276,7 +503,24 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
+		if usageFile != "" {
+			// Written on exit, so it is complete once Wait returns. A process
+			// that was killed or crashed may leave none; that run stays unreported.
+			if raw, err := os.ReadFile(usageFile); err == nil {
+				if err := st.applyUsageFile(raw); err != nil {
+					b.cfg.Logger.Warn("copilot usage file unreadable", "error", err)
+				}
+			} else if !os.IsNotExist(err) {
+				b.cfg.Logger.Warn("copilot usage file unreadable", "error", err)
+			}
+			removeUsageFile()
+		}
 		duration := time.Since(startTime)
+
+		// Wait closes the process pipes, so a prompt write still blocked when
+		// Copilot exited has returned by now. The writer sends exactly once.
+		writeErr := <-writeErrCh
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			st.finalStatus = "timeout"
@@ -287,6 +531,19 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		} else if exitErr != nil && st.finalStatus == "completed" {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
+		} else if writeErr != nil && !st.sawResult {
+			// A broken prompt write is benign only once the run is proven to have
+			// finished: Copilot reads stdin to EOF before it starts, so a run that
+			// reached its terminal "result" event received the whole prompt and a
+			// late EPIPE just means the pipe closed on the way out. Without that
+			// proof the prompt may never have landed — never report that as a
+			// clean success.
+			st.finalStatus = "failed"
+			if st.finalError == "" {
+				st.finalError = fmt.Sprintf("copilot prompt write failed: %v", writeErr)
+			} else {
+				st.finalError = fmt.Sprintf("%s; copilot prompt write failed: %v", st.finalError, writeErr)
+			}
 		}
 		if st.finalError != "" {
 			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())
@@ -294,13 +551,36 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		usage := st.resolveUsage()
+		// A run that produced output but no tokens is a silent billing hole:
+		// the daemon skips reporting empty usage, so nothing surfaces anywhere
+		// downstream. The JSON stream has carried no usable tokens since Copilot
+		// CLI 1.0.77 (see copilotUsageData), which went unnoticed until a user
+		// reported it — log it so the next regression is visible from the
+		// daemon log alone.
+		if len(usage) == 0 && st.finalStatus == "completed" {
+			hint := "Copilot CLI filters assistant.usage and session.shutdown out of --output-format json; token counts come only from --usage-output-file"
+			switch {
+			case usageFile == "":
+				hint += ", which is passed to the built-in Copilot CLI " + copilotUsageFileMinVersion + " or newer"
+			case st.resumed:
+				hint += ", which holds session totals and is not reported on a resumed session"
+			default:
+				hint += ", which this run did not write"
+			}
+			b.cfg.Logger.Warn("copilot reported no token usage",
+				"session", st.sessionID,
+				"model", st.activeModel,
+				"hint", hint)
+		}
+
 		resCh <- Result{
 			Status:     st.finalStatus,
-			Output:     st.output.String(),
+			Output:     st.finalOutput(),
 			Error:      st.finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  st.sessionID,
-			Usage:      st.usage,
+			Usage:      usage,
 		}
 	}()
 
@@ -341,13 +621,50 @@ type copilotSessionStart struct {
 }
 
 // copilotAssistantMessage is data payload for "assistant.message".
+//
+// OutputTokens is optional in the CLI's own event schema and is the ONLY token
+// field that survives onto the `--output-format json` stream — see the
+// suppression note on copilotUsageData.
 type copilotAssistantMessage struct {
 	MessageID     string               `json:"messageId"`
+	Model         string               `json:"model"`
 	Content       string               `json:"content"`
 	ToolRequests  []copilotToolRequest `json:"toolRequests"`
 	OutputTokens  int64                `json:"outputTokens"`
 	InteractionID string               `json:"interactionId"`
 	ReasoningText string               `json:"reasoningText,omitempty"`
+}
+
+// copilotUsageData is data payload for "assistant.usage": one record per model
+// API call, carrying the only complete token breakdown the CLI produces.
+//
+// InputTokens INCLUDES the cached tiers; addUsage subtracts them back out. The
+// payload also carries reasoningTokens, deliberately not parsed here: those are
+// a subset of outputTokens, so counting them would double-bill reasoning.
+//
+// NOTE (Copilot CLI 1.0.77): the CLI's JSONL writer drops a fixed set of event
+// types before writing stdout, and both "assistant.usage" and
+// "session.shutdown" are on that list — so on a current CLI neither reaches us
+// and Copilot runs report no tokens at all. Everything here is still parsed
+// because older CLIs, and any future build that stops filtering them, deliver
+// real numbers through exactly these events. The `result` event we already
+// parse carries premiumRequests and durations but no token counts.
+type copilotUsageData struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"inputTokens"`
+	OutputTokens     int64  `json:"outputTokens"`
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+}
+
+// copilotShutdownData is data payload for "session.shutdown": session-wide
+// totals keyed by model.
+type copilotShutdownData struct {
+	ModelMetrics map[string]copilotShutdownModelMetric `json:"modelMetrics"`
+}
+
+type copilotShutdownModelMetric struct {
+	Usage copilotUsageData `json:"usage"`
 }
 
 // copilotToolRequest is one tool invocation inside assistant.message.
@@ -421,25 +738,53 @@ type copilotCodeChanges struct {
 // copilotBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var copilotBlockedArgs = map[string]blockedArgMode{
-	"-p":                blockedWithValue,
-	"--output-format":   blockedWithValue,
-	"--allow-all":       blockedStandalone, // tools + paths + URLs
-	"--allow-all-tools": blockedStandalone,
-	"--allow-all-paths": blockedStandalone,
-	"--allow-all-urls":  blockedStandalone,
-	"--yolo":            blockedStandalone,
-	"--no-ask-user":     blockedStandalone,
-	"--resume":          blockedWithValue,  // managed via ExecOptions.ResumeSessionID
-	"--acp":             blockedStandalone, // prevent switching to ACP mode
+	"-p":                  blockedWithValue,
+	"--prompt":            blockedWithValue,
+	"--output-format":     blockedWithValue,
+	"--allow-all":         blockedStandalone, // tools + paths + URLs
+	"--allow-all-tools":   blockedStandalone,
+	"--allow-all-paths":   blockedStandalone,
+	"--allow-all-urls":    blockedStandalone,
+	"--yolo":              blockedStandalone,
+	"--no-ask-user":       blockedStandalone,
+	"--resume":            blockedWithValue,  // managed via ExecOptions.ResumeSessionID
+	"--acp":               blockedStandalone, // prevent switching to ACP mode
+	"--usage-output-file": blockedWithValue,  // the daemon reads its own per-run file
+}
+
+// copilotUsageFileMinVersion is the oldest Copilot CLI whose changelog
+// documents --usage-output-file (1.0.81 extended it with per-agent metrics).
+// An older CLI may reject the unknown flag and fail every run, so it keeps
+// today's argv.
+const copilotUsageFileMinVersion = "1.0.81"
+
+// copilotUsageFileSupported reports whether this run may pass
+// --usage-output-file: only to GitHub's own Copilot binary, at a detected
+// version known to accept the flag. A custom runtime profile that speaks the
+// Copilot protocol is a different program and keeps the standard argv.
+func copilotUsageFileSupported(cfg Config) bool {
+	if !cfg.BuiltinRuntime {
+		return false
+	}
+	version, err := parseSemver(cfg.CLIVersion)
+	floor, _ := parseSemver(copilotUsageFileMinVersion)
+	return err == nil && !version.lessThan(floor)
 }
 
 // buildCopilotArgs assembles the argv for a one-shot copilot invocation.
 //
-//	copilot -p "<prompt>" --output-format json --allow-all --no-ask-user
+//	copilot --output-format json --allow-all --no-ask-user
 //	        [--resume <session-id>] [--model <model>]
-func buildCopilotArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+//
+// The prompt is NOT on argv: Copilot CLI enters non-interactive mode when its
+// stdin is piped and no -p is given, running the piped text as the entire
+// prompt (verified on Copilot CLI 1.0.98, including --resume). Inlining it as
+// `-p <prompt>` fails at fork/exec with E2BIG on Linux once the prompt clears
+// MAX_ARG_STRLEN (131,072 bytes) — a long issue thread is enough (#9362) — and
+// hits the 32,767-character CreateProcess ceiling on Windows. "-p" stays in
+// copilotBlockedArgs so custom_args cannot reintroduce that path.
+func buildCopilotArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"-p", prompt,
 		"--output-format", "json",
 		"--allow-all", // tools + paths + URLs — full headless mode
 		"--no-ask-user",

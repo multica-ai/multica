@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
@@ -35,7 +38,7 @@ var runtimeUsageCmd = &cobra.Command{
 
 var runtimeActivityCmd = &cobra.Command{
 	Use:   "activity <runtime-id>",
-	Short: "Get hourly task activity for a runtime",
+	Short: "Get hourly run activity for a runtime",
 	Args:  exactArgs(1),
 	RunE:  runRuntimeActivity,
 }
@@ -57,12 +60,23 @@ var runtimeRenameCmd = &cobra.Command{
 	RunE: runRuntimeRename,
 }
 
+var runtimeConcurrencyCmd = &cobra.Command{
+	Use:   "concurrency <runtime-id> <limit|none>",
+	Short: "Set or clear a runtime-wide concurrency limit",
+	Long: "Limit how many runs may be in progress at once across every agent bound to this runtime.\n\n" +
+		"Each agent's own limit still applies; this caps their combined work, e.g. when several " +
+		"agents share one local GPU. Pass \"none\" to remove the limit.",
+	Args: exactArgs(2),
+	RunE: runRuntimeConcurrency,
+}
+
 var runtimeDeleteCmd = &cobra.Command{
 	Use:   "delete <runtime-id>",
 	Short: "Delete a runtime from the workspace",
 	Long: "Delete a runtime registration from the workspace.\n\n" +
 		"By default this refuses when active agents are still bound to the runtime. " +
-		"Pass --cascade to archive those agents, cancel their queued/running tasks, and delete the runtime.",
+		"Pass --cascade to unbind those agents, cancel their queued or active runs, and delete the runtime. " +
+		"Unbound agents keep their configuration, chats and run history; bind them to another runtime to run them again.",
 	Args: exactArgs(1),
 	RunE: runRuntimeDelete,
 }
@@ -73,6 +87,7 @@ func init() {
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
 	runtimeCmd.AddCommand(runtimeRenameCmd)
+	runtimeCmd.AddCommand(runtimeConcurrencyCmd)
 	runtimeCmd.AddCommand(runtimeDeleteCmd)
 
 	// runtime list
@@ -94,14 +109,15 @@ func init() {
 	runtimeRenameCmd.Flags().Bool("machine", false, "Apply the name to every runtime on the same machine")
 	runtimeRenameCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// runtime concurrency
+	runtimeConcurrencyCmd.Flags().String("output", "table", "Output format: table or json")
+
 	// runtime delete
-	runtimeDeleteCmd.Flags().Bool("cascade", false, "Archive active agents bound to the runtime, cancel their tasks, then delete the runtime")
+	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their runs, then delete the runtime")
 	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Runtime commands
-// ---------------------------------------------------------------------------
 
 func runRuntimeList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -221,23 +237,29 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	err = client.DeleteJSON(ctx, "/api/runtimes/"+runtimeID)
-	if err == nil {
+	var conflict runtimeDeleteConflictPayload
+	hadConflict := false
+	err = client.DeleteJSONWithConflict(ctx, "/api/runtimes/"+runtimeID, func(body io.Reader) error {
+		hadConflict = true
+		return readRuntimeDeleteConflict(body, &conflict)
+	})
+	if err != nil {
+		if hadConflict {
+			return err
+		}
+		return fmt.Errorf("delete runtime: %w", err)
+	}
+	if !hadConflict {
 		return printRuntimeDeleteResult(cmd, map[string]any{
 			"id":      runtimeID,
 			"deleted": true,
 		})
 	}
 
-	conflict, ok := runtimeDeleteConflict(err)
-	if !ok {
-		return fmt.Errorf("delete runtime: %w", err)
-	}
-
 	cascade, _ := cmd.Flags().GetBool("cascade")
 	if !cascade {
 		return fmt.Errorf(
-			"delete runtime: runtime has active agents bound to it (%s); archive or reassign them first, or rerun with --cascade to archive them and delete the runtime",
+			"delete runtime: runtime has active agents bound to it (%s); rebind them to another runtime first, or rerun with --cascade to unbind them and delete the runtime (the agents and their history are kept)",
 			strings.Join(conflict.AgentDisplays(), ", "),
 		)
 	}
@@ -246,7 +268,19 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 		"expected_active_agent_ids": conflict.AgentIDs(),
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/archive-agents-and-delete", body, &result); err != nil {
+	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete", body, &result); err != nil {
+		var httpErr *cli.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
+			// A changed plan includes fresh agent instructions. Do not retain
+			// that body in the error chain, even for --debug output.
+			var refusal struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal([]byte(httpErr.Body), &refusal) == nil && refusal.Error != "" {
+				return fmt.Errorf("cascade delete runtime: %s", refusal.Error)
+			}
+			return errors.New("cascade delete runtime: server refused confirmation; recheck active-agent bindings and retry")
+		}
 		return fmt.Errorf("cascade delete runtime: %w", err)
 	}
 	result["id"] = runtimeID
@@ -283,6 +317,51 @@ func runRuntimeRename(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Custom name cleared; runtime is now %q.\n", strVal(rt, "name"))
 	} else {
 		fmt.Fprintf(os.Stderr, "Runtime renamed to %q.\n", strVal(rt, "custom_name"))
+	}
+	return nil
+}
+
+// parseRuntimeConcurrencyArg maps the CLI argument onto the PATCH value:
+// "none" clears the limit (JSON null), otherwise an integer in the agent
+// limit range.
+func parseRuntimeConcurrencyArg(arg string) (any, error) {
+	if strings.EqualFold(strings.TrimSpace(arg), "none") {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(arg))
+	if err != nil || n < int(agentconfig.MinMaxConcurrentTasks) || n > int(agentconfig.MaxMaxConcurrentTasks) {
+		return nil, fmt.Errorf("limit must be \"none\" or an integer between %d and %d", agentconfig.MinMaxConcurrentTasks, agentconfig.MaxMaxConcurrentTasks)
+	}
+	return n, nil
+}
+
+func runRuntimeConcurrency(cmd *cobra.Command, args []string) error {
+	limit, err := parseRuntimeConcurrencyArg(args[1])
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var rt map[string]any
+	body := map[string]any{"max_concurrent_tasks": limit}
+	if err := client.PatchJSON(ctx, "/api/runtimes/"+args[0], body, &rt); err != nil {
+		return fmt.Errorf("set runtime concurrency: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, rt)
+	}
+	if limit == nil {
+		fmt.Fprintln(os.Stderr, "Runtime concurrency limit removed.")
+	} else {
+		fmt.Fprintf(os.Stderr, "Runtime concurrency limit set to %d.\n", limit)
 	}
 	return nil
 }
@@ -336,17 +415,55 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		status := strVal(update, "status")
 		if status == "completed" || status == "failed" || status == "timeout" {
 			output, _ := cmd.Flags().GetString("output")
+			if status != "completed" {
+				// main prints the returned error, so printing the same sentence here
+				// would show the failure twice. JSON stays on stdout for scripts.
+				if output == "json" {
+					if err := cli.PrintJSON(os.Stdout, update); err != nil {
+						return err
+					}
+				}
+				return fmt.Errorf("runtime update %s: %s", status, strVal(update, "error"))
+			}
 			if output == "json" {
 				return cli.PrintJSON(os.Stdout, update)
 			}
-			if status == "completed" {
-				fmt.Printf("Update completed: %s\n", strVal(update, "output"))
-			} else {
-				fmt.Printf("Update %s: %s\n", status, strVal(update, "error"))
-			}
+			fmt.Printf("Update completed: %s\n", strVal(update, "output"))
 			return nil
 		}
 	}
+}
+
+// serverConflictMessage pulls the server's own sentence out of a 409 body.
+//
+// The refusals behind runtime and profile deletion are written to be read by
+// the person who ran the command — they name the machine, the profile and what
+// to do instead. HTTPError.Error() would bury that sentence inside a raw JSON
+// dump of the whole response, which is what a blocked user used to see.
+func serverConflictMessage(err error) (code string, message string, ok bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return "", "", false
+	}
+	body := strings.TrimSpace(httpErr.Body)
+	if body == "" {
+		return "", "", false
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &payload) != nil {
+		// Not JSON. An older or proxied server can still put a readable
+		// sentence here, and swallowing it would be worse than passing it
+		// through — there is nothing to leak when the body was never
+		// structured in the first place.
+		return "", body, true
+	}
+	if strings.TrimSpace(payload.Error) == "" {
+		return payload.Code, "", false
+	}
+	return payload.Code, payload.Error, true
 }
 
 type runtimeDeleteConflictPayload struct {
@@ -358,19 +475,29 @@ type runtimeDeleteConflictPayload struct {
 	} `json:"active_agents"`
 }
 
-func runtimeDeleteConflict(err error) (runtimeDeleteConflictPayload, bool) {
-	var httpErr *cli.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
-		return runtimeDeleteConflictPayload{}, false
+func readRuntimeDeleteConflict(body io.Reader, payload *runtimeDeleteConflictPayload) error {
+	// This response contains full agent representations. Read the entire
+	// snapshot within a bounded budget; never confirm a truncated list.
+	const maxSnapshotBytes = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(body, maxSnapshotBytes+1))
+	if err != nil || len(data) > maxSnapshotBytes {
+		return errors.New("delete runtime: cannot read the complete active-agent snapshot; rebind agents before retrying")
 	}
-	var payload runtimeDeleteConflictPayload
-	if json.Unmarshal([]byte(httpErr.Body), &payload) != nil {
-		return runtimeDeleteConflictPayload{}, false
+	if err := json.Unmarshal(data, payload); err != nil {
+		// An invalid response can still contain agent instructions. Do not
+		// print it as plain text or confirm a partial snapshot.
+		return errors.New("delete runtime: invalid conflict response; no agents were unbound")
 	}
-	if payload.Code != "runtime_has_active_agents" || len(payload.ActiveAgents) == 0 {
-		return runtimeDeleteConflictPayload{}, false
+	if payload.Code != "runtime_has_active_agents" {
+		if payload.Error != "" {
+			return errors.New(payload.Error)
+		}
+		return errors.New("delete runtime: server refused the request without an explanation")
 	}
-	return payload, true
+	if len(payload.ActiveAgents) == 0 || len(payload.AgentIDs()) != len(payload.ActiveAgents) {
+		return errors.New("delete runtime: incomplete active-agent snapshot; no agents were unbound")
+	}
+	return nil
 }
 
 func (p runtimeDeleteConflictPayload) AgentIDs() []string {
@@ -404,8 +531,18 @@ func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 
+	if agentsUnbound, ok := result["agents_unbound"]; ok {
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; unbound %v agent(s)", strVal(result, "id"), agentsUnbound)
+		if paused, ok := result["autopilots_paused"]; ok {
+			fmt.Fprintf(os.Stderr, " and paused %v autopilot(s)", paused)
+		}
+		fmt.Fprintln(os.Stderr, ".")
+		return nil
+	}
+	// Compatibility fallback for an older server that only returns the
+	// pre-MUL-5559 mirror.
 	if agentsArchived, ok := result["agents_archived"]; ok {
-		fmt.Fprintf(os.Stderr, "Runtime %s deleted; archived %v agent(s).\n", strVal(result, "id"), agentsArchived)
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; processed %v agent(s).\n", strVal(result, "id"), agentsArchived)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))

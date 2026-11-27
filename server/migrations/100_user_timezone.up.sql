@@ -1,5 +1,5 @@
 -- Per-user IANA timezone for *viewing* reports — the third leg of the
--- Operational / Scheduling / Viewing trio (see docs/timezone-architecture-rfc.md).
+-- Operational / Scheduling / Viewing trio.
 --
 -- Distinct from:
 --   * agent_runtime.timezone (Operational): where a runtime physically runs.

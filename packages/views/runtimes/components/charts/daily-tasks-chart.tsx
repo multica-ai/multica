@@ -11,13 +11,15 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
-import { useT } from "../../../i18n";
+import { useLocale, useT } from "../../../i18n";
 
-// Two-segment stack — completed runs at the bottom (chart-1, primary
-// brand), failed runs on top (chart-5 for distinct emphasis). Lets the
-// user see day-over-day failure-rate trend without a separate chart.
+// Three-segment stack — completed runs at the bottom (chart-1, primary
+// brand), then cancelled (chart-3, muted: a manual stop is an outcome, not
+// an error), failed on top (chart-5 for distinct emphasis). Lets the user
+// see day-over-day failure-rate trend without a separate chart.
 const tasksChartConfig = {
   completed: { label: "Completed", color: "var(--chart-1)" },
+  cancelled: { label: "Cancelled", color: "var(--chart-3)" },
   failed: { label: "Failed", color: "var(--chart-5)" },
 } satisfies ChartConfig;
 
@@ -26,10 +28,12 @@ export interface DailyTasksData {
   label: string;
   completed: number;
   failed: number;
+  cancelled: number;
 }
 
 export function DailyTasksChart({ data }: { data: DailyTasksData[] }) {
   const { t } = useT("runtimes");
+  const locale = useLocale();
   return (
     <ChartContainer config={tasksChartConfig} className="aspect-[3/1] w-full">
       <BarChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
@@ -46,7 +50,7 @@ export function DailyTasksChart({ data }: { data: DailyTasksData[] }) {
           axisLine={false}
           tickMargin={8}
           allowDecimals={false}
-          width={40}
+          width="auto"
         />
         <ChartTooltip
           content={
@@ -63,7 +67,7 @@ export function DailyTasksChart({ data }: { data: DailyTasksData[] }) {
                   <div className="flex items-center justify-between gap-2 font-medium">
                     <span>{t(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
-                      {total.toLocaleString()}
+                      {total.toLocaleString(locale)}
                     </span>
                   </div>
                 );
@@ -75,6 +79,12 @@ export function DailyTasksChart({ data }: { data: DailyTasksData[] }) {
           dataKey="completed"
           stackId="tasks"
           fill="var(--color-completed)"
+          radius={[0, 0, 0, 0]}
+        />
+        <Bar
+          dataKey="cancelled"
+          stackId="tasks"
+          fill="var(--color-cancelled)"
           radius={[0, 0, 0, 0]}
         />
         <Bar

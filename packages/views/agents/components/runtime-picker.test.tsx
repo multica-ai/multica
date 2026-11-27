@@ -72,7 +72,7 @@ function renderPicker(props: Partial<React.ComponentProps<typeof RuntimePicker>>
 }
 
 function trigger(container: HTMLElement): HTMLButtonElement {
-  const element = container.querySelector<HTMLButtonElement>('[data-slot="popover-trigger"]');
+  const element = container.querySelector<HTMLButtonElement>('[data-trigger="popover"]');
   if (!element) throw new Error("runtime picker trigger not rendered");
   return element;
 }
@@ -80,6 +80,17 @@ function trigger(container: HTMLElement): HTMLButtonElement {
 describe("RuntimePicker (creation studio)", () => {
   beforeEach(() => cleanup());
   afterEach(() => cleanup());
+
+  it("keeps an overlong runtime name ellipsized inside the trigger instead of overflowing", () => {
+    // Same flex-row truncation contract as ModelDropdown: the label needs
+    // min-w-0 or it overflows the picker when names grow long.
+    const longName = `Claude (${"very-long-host-name-".repeat(12)}.local)`;
+    const runtimes = [makeRuntime({ id: "rt-long", name: longName })];
+    const { container } = renderPicker({ runtimes, selectedRuntimeId: "rt-long" });
+    const label = trigger(container).querySelector("span.truncate");
+    expect(label?.textContent).toBe(longName);
+    expect(label?.className).toContain("min-w-0");
+  });
 
   it("opens the runtime list on click", () => {
     const { container } = renderPicker();
@@ -111,7 +122,7 @@ describe("RuntimePicker (creation studio)", () => {
       disabled: true,
     });
     const filters = [...container.querySelectorAll("button")].filter(
-      (button) => button.getAttribute("data-slot") !== "popover-trigger",
+      (button) => button.getAttribute("data-trigger") !== "popover",
     );
     expect(filters.length).toBeGreaterThan(0);
     for (const button of filters) {

@@ -1,0 +1,78 @@
+{
+  "location": {
+    "directory": "/workspace/project"
+  },
+  "data": [
+    {
+      "id": "deepseek-v4.1-flash",
+      "modelID": "deepseek-v4.1-flash",
+      "providerID": "opencode-go",
+      "name": "deepseek-v4.1-flash",
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "high",
+          "body": {
+            "reasoning_effort": "high"
+          }
+        },
+        {
+          "id": "low",
+          "body": {
+            "reasoning_effort": "low"
+          }
+        },
+        {
+          "id": "fast-mode",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      }
+    },
+    {
+      "id": "plain",
+      "modelID": "plain",
+      "providerID": "opencode-go",
+      "name": "plain",
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [],
+      "time": {
+        "released": 0
+      },
+      "cost": [],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      }
+    }
+  ]
+}

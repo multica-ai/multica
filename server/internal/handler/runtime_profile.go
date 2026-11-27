@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -10,31 +11,33 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Custom Runtime Profiles (MUL-3284)
 //
-// A runtime_profile is a workspace-level, team-shared definition of a custom
-// runtime — e.g. an in-house Codex wrapper. Daemons pull the enabled profiles
-// for their workspace, resolve command_name on PATH, and register an
-// agent_runtime instance carrying the profile_id. The profile only changes how
-// a runtime is launched/displayed; the underlying protocol_family must be a
-// backend Multica officially supports (validated against agent.SupportedTypes).
+// A runtime_profile defines a custom runtime on one machine in a workspace.
+// Its daemon pulls the enabled profiles bound to that machine, resolves
+// command_name on PATH, and registers an agent_runtime instance carrying the
+// profile_id. The profile only changes how
+// a runtime is launched/displayed. runtime_type selects a supported compatibility
+// target, and its descriptor determines the underlying protocol_family.
 //
 // Iron rule: a profile carries NO generic per-agent args. Per-agent launch args
 // stay on agent.custom_args. The only args field is fixed_args — args every
 // agent on this runtime must inherit to enter a compatible mode.
-// ---------------------------------------------------------------------------
 
 type RuntimeProfileResponse struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
+	DaemonID       *string  `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
+	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
@@ -56,8 +59,10 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 	return RuntimeProfileResponse{
 		ID:             uuidToString(p.ID),
 		WorkspaceID:    uuidToString(p.WorkspaceID),
+		DaemonID:       textToPtr(p.DaemonID),
 		DisplayName:    p.DisplayName,
 		ProtocolFamily: p.ProtocolFamily,
+		RuntimeType:    agent.ProfileRuntimeType(p.RuntimeType, p.ProtocolFamily),
 		CommandName:    p.CommandName,
 		Description:    textToPtr(p.Description),
 		FixedArgs:      args,
@@ -114,15 +119,17 @@ func validateRuntimeProfileCommandName(commandName string) error {
 }
 
 type createRuntimeProfileRequest struct {
+	DaemonID       string   `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
+	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Enabled        *bool    `json:"enabled"`
 }
 
-// CreateRuntimeProfile creates a workspace runtime profile. Admin-gated by the
+// CreateRuntimeProfile creates a machine-bound runtime profile. Admin-gated by the
 // router. protocol_family is validated against the agent backend whitelist.
 func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	wsID := strings.TrimSpace(chi.URLParam(r, "id"))
@@ -149,10 +156,25 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "display_name is required")
 		return
 	}
-	if !agent.IsSupportedType(req.ProtocolFamily) {
-		writeError(w, http.StatusBadRequest, "unsupported protocol_family: must be one of "+strings.Join(agent.SupportedTypes, ", "))
+	req.RuntimeType = agent.ProfileRuntimeType(strings.TrimSpace(req.RuntimeType), req.ProtocolFamily)
+	// museapp is a builtin HTTP backend, not a CLI that can be wrapped
+	// in a custom profile. Reject it here with 400 instead of letting
+	// it hit the DB CHECK constraint (which doesn't list museapp) and
+	// return a confusing 500.
+	if req.RuntimeType == "museapp" {
+		writeError(w, http.StatusBadRequest, "runtime_type 'museapp' is a builtin backend and cannot be used for custom profiles; create a builtin museapp agent instead")
 		return
 	}
+	family, supported := agent.RuntimeProtocolFamily(req.RuntimeType)
+	if !supported {
+		writeError(w, http.StatusBadRequest, "unsupported runtime_type: "+req.RuntimeType)
+		return
+	}
+	if req.ProtocolFamily != "" && req.ProtocolFamily != family {
+		writeError(w, http.StatusBadRequest, "protocol_family does not match runtime_type")
+		return
+	}
+	req.ProtocolFamily = family
 	if req.CommandName == "" {
 		writeError(w, http.StatusBadRequest, "command_name is required")
 		return
@@ -171,10 +193,38 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
+	// Older clients omit the machine. Prefer the caller's sole local machine;
+	// never guess between multiple machines owned by that caller.
+	req.DaemonID = strings.TrimSpace(req.DaemonID)
+	machineParams := db.ListRuntimeProfileMachinesParams{WorkspaceID: wsUUID}
+	if req.DaemonID != "" {
+		machineParams.DaemonID = strToText(req.DaemonID)
+	} else {
+		machineParams.OwnerID = member.UserID
+	}
+	machines, err := h.Queries.ListRuntimeProfileMachines(r.Context(), machineParams)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
+		return
+	}
+	if req.DaemonID == "" && len(machines) == 0 {
+		machines, err = h.Queries.ListRuntimeProfileMachines(r.Context(), db.ListRuntimeProfileMachinesParams{WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
+			return
+		}
+	}
+	if len(machines) != 1 {
+		writeError(w, http.StatusBadRequest, "daemon_id must select a registered local machine; upgrade your client or pass daemon_id explicitly")
+		return
+	}
+
 	profile, err := h.Queries.CreateRuntimeProfile(r.Context(), db.CreateRuntimeProfileParams{
 		WorkspaceID:    wsUUID,
+		DaemonID:       machines[0],
 		DisplayName:    req.DisplayName,
 		ProtocolFamily: req.ProtocolFamily,
+		RuntimeType:    req.RuntimeType,
 		CommandName:    req.CommandName,
 		Description:    ptrToText(req.Description),
 		FixedArgs:      fixedArgs,
@@ -252,14 +302,17 @@ func (h *Handler) GetRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRuntimeProfileRequest struct {
-	DisplayName *string   `json:"display_name"`
-	CommandName *string   `json:"command_name"`
-	Description *string   `json:"description"`
-	FixedArgs   *[]string `json:"fixed_args"`
-	Enabled     *bool     `json:"enabled"`
+	DaemonID       *string   `json:"daemon_id"`
+	RuntimeType    *string   `json:"runtime_type"`
+	ProtocolFamily *string   `json:"protocol_family"`
+	DisplayName    *string   `json:"display_name"`
+	CommandName    *string   `json:"command_name"`
+	Description    *string   `json:"description"`
+	FixedArgs      *[]string `json:"fixed_args"`
+	Enabled        *bool     `json:"enabled"`
 }
 
-// UpdateRuntimeProfile applies a partial update. protocol_family is immutable
+// UpdateRuntimeProfile applies a partial update. runtime_type and protocol_family are immutable
 // (changing it would silently repoint bound agents onto a different backend).
 // Admin-gated by the router.
 func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +333,11 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	var req updateRuntimeProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.RuntimeType != nil || req.ProtocolFamily != nil {
+		writeError(w, http.StatusBadRequest, "runtime_type and protocol_family are immutable; create a new profile")
 		return
 	}
 
@@ -315,8 +373,30 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
 	}
 
-	profile, err := h.Queries.UpdateRuntimeProfile(r.Context(), params)
+	var profile db.RuntimeProfile
+	var err error
+	var binding profileMachineBindingResult
+	if req.DaemonID != nil {
+		machine := strings.TrimSpace(*req.DaemonID)
+		if machine == "" {
+			writeError(w, http.StatusBadRequest, "daemon_id cannot be empty")
+			return
+		}
+		params.DaemonID = strToText(machine)
+		binding, err = h.bindRuntimeProfileMachine(r.Context(), params)
+		profile = binding.profile
+	} else {
+		profile, err = h.Queries.UpdateRuntimeProfile(r.Context(), params)
+	}
 	if err != nil {
+		if errors.Is(err, errProfileMachineUnavailable) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, errProfileMachineImmutable) || errors.Is(err, errProfileMachineInUse) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": "runtime_profile_machine_conflict"})
+			return
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "runtime profile not found")
 			return
@@ -331,6 +411,12 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profileID := uuidToString(profile.ID)
+	for _, runtime := range binding.removed {
+		h.NotifyRuntimeGone(uuidToString(runtime.ID))
+	}
+	for _, teardown := range binding.teardowns {
+		h.publishRuntimeTeardown(r.Context(), teardown, wsID, uuidToString(member.UserID))
+	}
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"runtime_profile_id": profileID,
@@ -339,11 +425,120 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runtimeProfileToResponse(profile))
 }
 
+// maxNamedBlockingAgents caps how many agents the refusal spells out before it
+// falls back to a count. Enough to recognise the machine they sit on without
+// turning a CLI error into a wall of text.
+const maxNamedBlockingAgents = 5
+
+// maxReportedBlockingAgents caps both the rows read inside the delete
+// transaction and the entries put on the response. A profile accumulates agents
+// across every machine that registered it, and neither the sentence nor any
+// client needs the whole set to do its job — the exact size travels separately
+// as active_agent_count.
+const maxReportedBlockingAgents = 20
+
+// profileDeleteBlockedByAgents explains which agents are keeping this profile
+// alive and, crucially, which machine each one is on.
+//
+// A profile is workspace-wide, so its bound agents are frequently on a
+// different machine than the stale instance the user is actually trying to
+// clean up. The old message said only "active agents are still bound to its
+// runtimes", which left that user with no way to tell whether the blocker was
+// the dead machine or the healthy one — and the natural next move, unbinding
+// agents that were working fine, is exactly the damage worth preventing
+// (GH #8456).
+// agents is the bounded sample the query returned; its first row carries the
+// full-set totals every caller here needs.
+//
+// The recovery paths come from those totals, never from the sample. Which rows
+// survive the LIMIT is arbitrary with respect to class — twenty ordinary agents
+// sorting first push the one Mika to position 21 — so advice derived from the
+// visible rows would tell the user to archive blockers that cannot be archived,
+// which is the defect this whole change set removes.
+func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow) map[string]any {
+	if len(agents) == 0 {
+		// Caller only builds a refusal when there is at least one blocker.
+		return map[string]any{
+			"error": "cannot delete this custom runtime profile: active agents are still bound to its runtimes.",
+			"code":  "runtime_profile_has_active_agents",
+		}
+	}
+	summary := agents[0]
+	total := summary.TotalCount
+
+	classes := map[blockingAgentClass]bool{
+		blockingAgentUser:        summary.UserCount > 0,
+		blockingAgentMika:        summary.MikaCount > 0,
+		blockingAgentOtherSystem: summary.OtherSystemCount > 0,
+	}
+
+	named := make([]string, 0, maxNamedBlockingAgents)
+	for _, a := range agents {
+		class := blockingAgentClassFromKey(a.BlockerClass)
+		if len(named) >= maxNamedBlockingAgents {
+			continue
+		}
+		runtimeName := a.RuntimeName
+		if a.RuntimeCustomName.Valid && strings.TrimSpace(a.RuntimeCustomName.String) != "" {
+			runtimeName = a.RuntimeCustomName.String
+		}
+		named = append(named, blockingAgentLabel(a.Name, runtimeName, a.RuntimeStatus, class))
+	}
+	listed := strings.Join(named, ", ")
+	if remaining := total - int64(len(named)); remaining > 0 {
+		listed = fmt.Sprintf("%s, and %d more", listed, remaining)
+	}
+
+	subject := "this custom runtime profile"
+	if strings.TrimSpace(profileName) != "" {
+		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
+	}
+
+	remedies := blockingAgentRemedies(classes, blockingAgentScopeProfile)
+	if len(remedies) == 0 {
+		remedies = []string{"None of them can be released from here."}
+	}
+
+	resp := make([]map[string]any, len(agents))
+	for i, a := range agents {
+		resp[i] = map[string]any{
+			"id":           uuidToString(a.ID),
+			"name":         a.Name,
+			"kind":         a.Kind,
+			"system_key":   textToPtr(a.SystemKey),
+			"runtime_id":   uuidToString(a.RuntimeID),
+			"runtime_name": a.RuntimeName,
+			// Deliberately separate from runtime_name: a client that renders
+			// its own copy shows custom_name ?? name, same as everywhere else.
+			"runtime_custom_name": textToPtr(a.RuntimeCustomName),
+			"runtime_status":      a.RuntimeStatus,
+		}
+	}
+
+	sentences := append([]string{fmt.Sprintf(
+		"cannot delete %s: %d active agent(s) are still bound to its runtimes — %s.",
+		subject, total, listed,
+	)}, remedies...)
+	sentences = append(sentences,
+		"Deleting this profile removes its runtime on every machine that registered it, so agents on a machine you did not intend to touch will be affected too.")
+
+	return map[string]any{
+		"error":         strings.Join(sentences, " "),
+		"code":          "runtime_profile_has_active_agents",
+		"active_agents": resp,
+		// The sample above is capped; this is the real number.
+		"active_agent_count":      total,
+		"active_agents_truncated": total > int64(len(resp)),
+	}
+}
+
 // DeleteRuntimeProfile removes a profile and, in the same transaction, the
 // agent_runtime instance rows registered against it. Migration 120 dropped the
 // DB ON DELETE CASCADE, so this app-layer cleanup is what prevents orphaned
-// runtime rows. Refuses (409) while active agents are still bound to the
-// profile's runtimes. Admin-gated by the router.
+// runtime rows. Refuses (409) while active user agents are still bound to the
+// profile's runtimes. Hidden Agent Builder carriers do not block: the teardown
+// deletes them with their sessions, as the single-runtime delete already does
+// (GH #9762). Admin-gated by the router.
 func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	wsID := strings.TrimSpace(chi.URLParam(r, "id"))
 	member, ok := h.requireWorkspaceMember(w, r, wsID, "workspace not found")
@@ -359,10 +554,29 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Confirm the profile exists in this workspace. If the profile row is
-	// already gone but runtime rows still carry this workspace/profile pair,
-	// treat them as orphaned instances and clean them up below.
-	_, profileErr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+	// The profile-delete cascade must run the SAME teardown the runtime-delete
+	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
+	// agent still pointing at one of these rows would turn a bare delete into a
+	// 500. Active user agents are refused (409); archived user agents are
+	// unbound rather than destroyed, and system agents (Builder carriers) are
+	// deleted, exactly as in service.TeardownRuntime.
+	// Guard: refuse while any active (non-archived) user agent is bound to one
+	// of the profile's runtimes. Keep this a 409 — the profile is the thing that
+	// defines those runtimes, so the user should retire the agents or move them
+	// deliberately instead of having them silently unbound in bulk.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Lock the profile before planning the cascade. Daemon registration takes
+	// a conflicting KEY SHARE lock in its own transaction, so it cannot insert
+	// a runtime after the plan and have that row escape deletion. If the profile
+	// row is already gone, still clean up any orphaned profile_id rows.
+	profile, profileErr := qtx.LockRuntimeProfileForDelete(r.Context(), db.LockRuntimeProfileForDeleteParams{
 		ID:          profileUUID,
 		WorkspaceID: wsUUID,
 	})
@@ -372,11 +586,10 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enumerate the runtime instance rows registered against this profile in
-	// this workspace. The workspace predicate is important because profile_id has
-	// no FK and should never let a malformed row in another workspace be cleaned
-	// up from this workspace's profile endpoint.
-	runtimeIDs, err := h.Queries.ListAgentRuntimeIDsByProfile(r.Context(), db.ListAgentRuntimeIDsByProfileParams{
+	// Lock runtime rows in deterministic ID order. Their agent/task foreign-key
+	// inserts take KEY SHARE locks, preventing dependencies from appearing after
+	// the active-agent check.
+	runtimeIDs, err := qtx.ListAgentRuntimeIDsByProfile(r.Context(), db.ListAgentRuntimeIDsByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
 	})
@@ -388,111 +601,74 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "runtime profile not found")
 		return
 	}
+	for _, runtimeID := range runtimeIDs {
+		if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), runtimeID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to lock profile dependencies")
+			return
+		}
+	}
 
-	// The profile-delete cascade must run the SAME teardown the runtime-delete
-	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
-	// archived agent still pointing at one of these rows would turn a bare
-	// delete into a 500. We refuse active agents (409) and clean archived
-	// agents / their archived squad+autopilot references before deleting.
-	// Guard 1: refuse while any active (non-archived) agent is bound to one of
-	// the profile's runtimes. Keep this a 409 — deleting would orphan live
-	// agents.
-	agentCount, err := h.Queries.CountAgentsByProfile(r.Context(), db.CountAgentsByProfileParams{
+	// Bounded read: the guard only needs "is there at least one", and the
+	// refusal needs a few names plus the exact total, which rides on each row.
+	blockingAgents, err := qtx.ListActiveAgentsByProfile(r.Context(), db.ListActiveAgentsByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
+		MaxRows:     maxReportedBlockingAgents,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check profile usage")
 		return
 	}
-	if agentCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime profile: active agents are still bound to its runtimes")
+	if len(blockingAgents) > 0 {
+		profileName := profile.DisplayName
+		if profileMissing {
+			profileName = ""
+		}
+		writeJSON(w, http.StatusConflict, profileDeleteBlockedByAgents(profileName, blockingAgents))
 		return
 	}
 
-	// Guard 2: refuse (before any teardown) if any runtime still has an active
-	// squad whose leader is already archived on it — same rule the
-	// runtime-delete path enforces. Checked per runtime up front so we never
-	// half-tear-down and then 409.
+	// App-layer cascade, per runtime, mirroring DeleteAgentRuntime: unbind the
+	// remaining (archived) agents and their task history, cancel anything still
+	// in flight, and hard-delete only the system agents, so removing the runtime
+	// rows below cannot destroy an agent, a conversation or a task record.
+	var teardowns []service.RuntimeTeardownResult
 	for _, rid := range runtimeIDs {
-		activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rid)
+		teardown, err := service.TeardownRuntime(r.Context(), qtx, rid, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
-			return
-		}
-		if activeSquadCount > 0 {
-			writeError(w, http.StatusConflict, "cannot delete runtime profile: a runtime has active squads led by archived agents. Archive those squads or assign them a new leader first.")
-			return
-		}
-	}
-
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-
-	// App-layer cascade, per runtime, mirroring DeleteAgentRuntime: pause
-	// autopilots pointing at the archived agents, drop archived squads led by
-	// them, then hard-delete the archived agents so the RESTRICT FK on
-	// agent.runtime_id no longer blocks removing the runtime row.
-	for _, rid := range runtimeIDs {
-		archivedAgentIDs, err := qtx.ListArchivedAgentIDsByRuntime(r.Context(), rid)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
-			return
-		}
-		if len(archivedAgentIDs) > 0 {
-			if err := qtx.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to pause autopilots")
+			if errors.Is(err, service.ErrRuntimeNotDrained) {
+				slog.Error("runtime profile delete aborted: tasks not drained",
+					"runtime_id", uuidToString(rid), "profile_id", uuidToString(profileUUID), "error", err)
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "a runtime of this profile still has tasks in flight; retry in a moment.",
+					"code":  "runtime_delete_not_drained",
+				})
 				return
 			}
-		}
-		if err := qtx.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rid); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
+			if errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
+				slog.Error("runtime profile delete aborted: agent workspace mismatch",
+					"runtime_id", uuidToString(rid), "profile_id", uuidToString(profileUUID), "error", err)
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "a runtime of this profile has an invalid cross-workspace agent binding.",
+					"code":  "runtime_delete_workspace_mismatch",
+				})
+				return
+			}
+			slog.Error("runtime profile delete teardown failed",
+				"runtime_id", uuidToString(rid), "profile_id", uuidToString(profileUUID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to unbind agents")
 			return
 		}
-		if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
-			return
-		}
-		// Same app-layer cleanup for channel installations: channel_* has no
-		// workspace/agent FK (MUL-3515 §4), so an archived agent's bot
-		// installations would otherwise survive the hard-delete as orphans and
-		// keep occupying their (channel_type, app_id) routing slots, making those
-		// bots un-rebindable (#4810).
-		if err := qtx.DeleteChannelInstallationsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
-			return
-		}
-		// agent_to_label has no agent_id FK; clear the runtime's agents' label
-		// links before the archived agents are hard-deleted so they don't leak
-		// as orphan rows once resource labels are enabled.
-		if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rid); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
-			return
-		}
-		// chat_session cascades from agent, and chat_draft_restore has no FK to
-		// follow it (#5219). This path deletes only archived agents, so the prune
-		// is scoped to them too — system agents keep their sessions here.
-		if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rid, false); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
-			return
-		}
-		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
-			return
-		}
+		teardowns = append(teardowns, teardown)
 	}
 
 	// Now the runtime rows have no agent references; remove them, then the
 	// profile itself.
-	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
+	deletedRuntimes, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("DeleteAgentRuntimesByProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
 		writeError(w, http.StatusInternalServerError, "failed to clean up runtime instances")
 		return
@@ -511,11 +687,20 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
+	for _, runtime := range deletedRuntimes {
+		h.NotifyRuntimeGone(uuidToString(runtime.ID))
+	}
 
-	// Tell connected clients to refetch the runtime list (instances vanished).
+	// Tell connected clients to refetch the runtime list (instances vanished),
+	// and fan out the per-runtime teardown so unbound agents and cancelled
+	// tasks reach subscribers the same way the runtime-delete path emits them.
 	profileID := uuidToString(profileUUID)
+	userID := uuidToString(member.UserID)
+	for _, teardown := range teardowns {
+		h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
+	}
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
-	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
 		"deleted_runtime_profile_id": profileID,
 	})
 
@@ -536,7 +721,42 @@ func (h *Handler) DaemonListRuntimeProfiles(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	profiles, err := h.Queries.ListEnabledRuntimeProfilesForWorkspace(r.Context(), wsUUID)
+	daemonID := strings.TrimSpace(r.URL.Query().Get("daemon_id"))
+	if tokenDaemonID := middleware.DaemonIDFromContext(r.Context()); tokenDaemonID != "" {
+		if daemonID != "" && daemonID != tokenDaemonID {
+			writeError(w, http.StatusForbidden, "daemon identity mismatch")
+			return
+		}
+		daemonID = tokenDaemonID
+	}
+
+	if daemonID != "" {
+		owners, err := h.Queries.ListRuntimeOwnersByDaemon(r.Context(), db.ListRuntimeOwnersByDaemonParams{
+			WorkspaceID: wsUUID,
+			DaemonID:    strToText(daemonID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime profile machine")
+			return
+		}
+		for _, owner := range owners {
+			if !daemonRuntimeBindingAllowed(r, strToText(daemonID), owner.OwnerID) {
+				writeError(w, http.StatusNotFound, "machine not found")
+				return
+			}
+		}
+	}
+	var profiles []db.RuntimeProfile
+	var err error
+	if daemonID == "" && requestUserID(r) != "" {
+		userID, ok := parseUUIDOrBadRequest(w, requestUserID(r), "user id")
+		if !ok {
+			return
+		}
+		profiles, err = h.Queries.ListEnabledRuntimeProfilesForOwner(r.Context(), db.ListEnabledRuntimeProfilesForOwnerParams{WorkspaceID: wsUUID, OwnerID: userID})
+	} else {
+		profiles, err = h.Queries.ListEnabledRuntimeProfilesForDaemon(r.Context(), db.ListEnabledRuntimeProfilesForDaemonParams{WorkspaceID: wsUUID, DaemonID: strToText(daemonID)})
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list runtime profiles")
 		return

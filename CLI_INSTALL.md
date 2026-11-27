@@ -59,40 +59,19 @@ brew upgrade multica-ai/tap/multica
 
 ### Option B: Download from GitHub Releases (macOS/Linux, no Homebrew)
 
-If Homebrew is not available, download the binary directly.
-
-Detect OS and architecture, then download the correct archive:
+Without Homebrew, the installer detects the OS and CPU architecture and downloads the matching CLI archive from GitHub Releases.
 
 ```bash
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # "darwin" or "linux"
-ARCH=$(uname -m)                                # "x86_64" or "arm64"
-
-# Normalize architecture name
-if [ "$ARCH" = "x86_64" ]; then
-  ARCH="amd64"
-fi
-
-# Get the latest release tag from GitHub
-LATEST=$(curl -sI https://github.com/multica-ai/multica/releases/latest | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
-
-# Download and extract
-VERSION="${LATEST#v}"
-curl -sL "https://github.com/multica-ai/multica/releases/download/${LATEST}/multica-cli-${VERSION}-${OS}-${ARCH}.tar.gz" -o /tmp/multica.tar.gz
-tar -xzf /tmp/multica.tar.gz -C /tmp multica
-sudo mv /tmp/multica /usr/local/bin/multica
-rm /tmp/multica.tar.gz
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-Verify:
+Verify the installation in your shell:
 
 ```bash
 multica version
 ```
 
-**If this fails:**
-- Check that `/usr/local/bin` is in `$PATH`.
-- On Linux, you may need `chmod +x /usr/local/bin/multica`.
-- If `sudo` is not available, install to a user-writable directory: `mv /tmp/multica ~/.local/bin/multica` and ensure `~/.local/bin` is in `$PATH`.
+If the command is missing, check that the installation directory printed by the script is on your `PATH`. If it installed to `~/.local/bin`, you may need to restart your shell.
 
 ### Option C: Windows (PowerShell)
 
@@ -112,7 +91,6 @@ multica version
 
 **If this fails:**
 - Restart your terminal so the updated PATH takes effect.
-- If you use Scoop, the installer will use it automatically: `scoop bucket add multica https://github.com/multica-ai/scoop-bucket.git && scoop install multica`
 - If your execution policy blocks the script: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` then re-run.
 
 ---

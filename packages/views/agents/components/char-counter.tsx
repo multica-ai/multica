@@ -16,7 +16,7 @@ export function CharCounter({ length, max }: { length: number; max: number }) {
       ? "text-warning"
       : "text-muted-foreground";
   return (
-    <div className={`text-right text-xs tabular-nums ${tone}`}>
+    <div className={`text-right text-caption tabular-nums ${tone}`}>
       {length} / {max}
       {over && t(($) => $.char_counter.over_limit, { count: length - max })}
     </div>

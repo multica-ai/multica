@@ -4,6 +4,15 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
+import enEditor from "../../locales/en/editor.json";
+
+// Uploads flow through the module-level coordinator, which calls
+// `api.uploadFile(file, ctx, signal)` (MUL-5181 L2).
+const mockApiUploadFile = vi.hoisted(() => vi.fn());
+
+vi.mock("@multica/core/api", () => ({
+  api: { uploadFile: mockApiUploadFile },
+}));
 
 /**
  * Draft isolation across a composer switch, driven through the REAL
@@ -58,7 +67,12 @@ vi.mock("../../editor/extensions", () => ({
 // starts), and on completion the real implementation dispatches into the SAME
 // editor instance — which is what fires onUpdate. Tests drive that dispatch
 // explicitly via `finishUpload()`.
-vi.mock("../../editor/extensions/file-upload", () => ({
+vi.mock("../../editor/extensions/file-upload", async () => ({
+  // Only the insert flow is stubbed; the paste-as-file tagging helpers are
+  // plain module state the upload hook reads on every settle.
+  ...(await vi.importActual<typeof import("../../editor/extensions/file-upload")>(
+    "../../editor/extensions/file-upload",
+  )),
   uploadAndInsertFile: async (
     _editor: unknown,
     file: File,
@@ -78,6 +92,10 @@ vi.mock("../../editor/bubble-menu", () => ({
 }));
 vi.mock("../../editor/attachment-download-context", () => ({
   AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("../../editor/use-open-attachment-link", () => ({
+  useOpenAttachmentLink: () => ({ resolve: () => undefined, open: () => false, modal: null }),
 }));
 
 vi.mock("@tiptap/react", () => ({
@@ -150,6 +168,14 @@ vi.mock("@multica/core/chat", () => {
     }),
     setInputDraftAttachments: vi.fn(),
     addInputDraftAttachment: vi.fn(),
+    appendToInputDraft: vi.fn(),
+    addInputDraftUpload: vi.fn((key: string, upload: { clientUploadId: string }) => {
+      const existing = state.inputDraftAttachments[key] ?? [];
+      state.inputDraftAttachments[key] = [...existing, upload];
+    }),
+    settleInputDraftUpload: vi.fn(),
+    failInputDraftUpload: vi.fn(),
+    removeInputDraftUpload: vi.fn(),
     clearInputDraft: vi.fn(),
   };
   return {
@@ -164,7 +190,7 @@ vi.mock("@multica/core/chat", () => {
 import { ChatInput } from "./chat-input";
 import { useChatStore } from "@multica/core/chat";
 
-const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
+const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor } };
 
 function makeUpload(id: string, filename: string): UploadResult {
   const link = `/api/attachments/${id}/download`;
@@ -266,6 +292,40 @@ describe("ChatInput draft isolation across a composer switch (real debounce)", (
     vi.useRealTimers();
   });
 
+  it("preserves unflushed typing when a starter is clicked inside the debounce window", async () => {
+    const onSend = vi.fn().mockResolvedValue(false);
+    const { rerender } = render(element({ onSend }));
+    type("unfinished local text");
+    const prompt = "Review the release pull request.";
+
+    rerender(element({ onSend, conversationStarterRequest: { id: 1, content: prompt } }));
+    await act(async () => {});
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorState.markdown).toBe("unfinished local text");
+
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(store().inputDrafts["__new__"]).toBe("unfinished local text");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("allows a starter after the user clears the draft before its debounce fires", async () => {
+    mockSetContent.mockImplementationOnce((markdown: string) => {
+      editorState.markdown = markdown;
+    });
+    const onSend = vi.fn().mockResolvedValue(false);
+    const { rerender } = render(element({ onSend }));
+    type("unfinished local text");
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(store().inputDrafts["__new__"]).toBe("unfinished local text");
+    type("");
+    const prompt = "Review the release pull request.";
+
+    rerender(element({ onSend, conversationStarterRequest: { id: 1, content: prompt } }));
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledWith(prompt, undefined, expect.any(Function), []);
+    expect(store().inputDrafts["__new__"]).toBe(prompt);
+  });
+
   it("files unflushed keystrokes under the session they were typed in, never the one switched to", () => {
     store().activeSessionId = "session-a";
     const { rerender } = render(element());
@@ -361,14 +421,14 @@ describe("ChatInput draft isolation across a composer switch (real debounce)", (
 
     it("binds an attachment dropped while the editor is still pinned to the source draft", async () => {
       store().activeSessionId = "session-a";
-      const onUploadFile = vi.fn(async (_file: File) => makeUpload("att-2", "second.png"));
-      const { rerender } = render(element({ onUploadFile }));
+      mockApiUploadFile.mockImplementation(async () => makeUpload("att-2", "second.png"));
+      const { rerender } = render(element({ uploadEnabled: true }));
 
       // An upload is already in flight, so Guard 0 pins the editor to A's
       // document.
       beginUpload("first ![](blob:one)");
       store().activeSessionId = "session-b";
-      rerender(element({ onUploadFile }));
+      rerender(element({ uploadEnabled: true }));
 
       // The composer still shows A's document, so a file dropped now lands in
       // A's body — its attachment row has to bind to A, or the body and the
@@ -380,16 +440,18 @@ describe("ChatInput draft isolation across a composer switch (real debounce)", (
         await Promise.resolve();
       });
 
-      const addAttachment = (
+      // The engine snapshots the LOADED draft as the upload target at pick
+      // time — the placeholder (and its settle) file under A, never B.
+      const addUpload = (
         useChatStore.getState() as unknown as {
-          addInputDraftAttachment: ReturnType<typeof vi.fn>;
+          addInputDraftUpload: ReturnType<typeof vi.fn>;
         }
-      ).addInputDraftAttachment;
-      expect(addAttachment).toHaveBeenCalledWith(
+      ).addInputDraftUpload;
+      expect(addUpload).toHaveBeenCalledWith(
         "session-a",
-        expect.objectContaining({ id: "att-2" }),
+        expect.objectContaining({ status: "uploading", filename: "second.png" }),
       );
-      expect(addAttachment).not.toHaveBeenCalledWith("session-b", expect.anything());
+      expect(addUpload).not.toHaveBeenCalledWith("session-b", expect.anything());
     });
 
     it("refuses to send while the composer still holds the source draft's document", () => {

@@ -72,9 +72,14 @@ describe("chat store — legacy per-agent new-chat draft migration", () => {
 
     const store = createChatStore({ storage });
 
-    expect(store.getState().inputDraftAttachments[DRAFT_NEW_SESSION]?.map((a) => a.id)).toEqual([
-      "att-mine",
-    ]);
+    // Legacy bare Attachment rows load as `uploaded` entries (MUL-5181 L2).
+    expect(
+      store
+        .getState()
+        .inputDraftAttachments[DRAFT_NEW_SESSION]?.map((u) =>
+          u.status === "uploaded" ? u.attachment.id : u.clientUploadId,
+        ),
+    ).toEqual(["att-mine"]);
     expect(store.getState().inputDraftAttachments["__new__:agent-2"]).toBeUndefined();
   });
 
@@ -255,6 +260,101 @@ describe("chat store — floating window preference", () => {
   });
 });
 
+describe("chat store — bottom bar chips", () => {
+  const BAR_KEY = "multica:chat:bar";
+
+  it("keeps opened chats newest first, once each, and across a reload", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    store.getState().keepChatInBar("a");
+    store.getState().keepChatInBar("b");
+    store.getState().keepChatInBar("a");
+
+    expect(store.getState().chatBarKept).toEqual(["b", "a"]);
+    expect(createChatStore({ storage }).getState().chatBarKept).toEqual(["b", "a"]);
+  });
+
+  it("closes a chip with the chat's activity, and forgets that when it is opened again", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    store.getState().keepChatInBar("a");
+
+    store.getState().dismissChatFromBar("a", "2026-11-11T08:00:00Z");
+    expect(store.getState().chatBarKept).toEqual([]);
+    expect(store.getState().chatBarDismissed).toEqual({ a: "2026-11-11T08:00:00Z" });
+    expect(createChatStore({ storage }).getState().chatBarDismissed).toEqual({
+      a: "2026-11-11T08:00:00Z",
+    });
+
+    store.getState().keepChatInBar("a");
+    expect(store.getState().chatBarKept).toEqual(["a"]);
+    expect(store.getState().chatBarDismissed).toEqual({});
+  });
+
+  it("drops the oldest chips over the cap", () => {
+    const store = createChatStore({ storage: memStorage() });
+    for (let i = 0; i < 14; i++) store.getState().keepChatInBar(`s${i}`);
+
+    const kept = store.getState().chatBarKept;
+    expect(kept).toHaveLength(12);
+    expect(kept[0]).toBe("s13");
+    expect(kept).not.toContain("s0");
+  });
+
+  it("reads a malformed blob as empty", () => {
+    const storage = memStorage();
+    storage.setItem(BAR_KEY, JSON.stringify({ kept: "nope", dismissed: [1] }));
+    const state = createChatStore({ storage }).getState();
+
+    expect(state.chatBarKept).toEqual([]);
+    expect(state.chatBarDismissed).toEqual({});
+  });
+});
+
+describe("chat store — Ask Multica agent", () => {
+  it("has no preference by default, and persists one until it is cleared", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    expect(store.getState().quickChatAgentId).toBeNull();
+
+    store.getState().setQuickChatAgentId("agent-1");
+    expect(createChatStore({ storage }).getState().quickChatAgentId).toBe("agent-1");
+
+    store.getState().setQuickChatAgentId(null);
+    expect(createChatStore({ storage }).getState().quickChatAgentId).toBeNull();
+  });
+
+  it("starts a new chat with that agent and no project, and asks for composer focus", () => {
+    const store = createChatStore({ storage: memStorage() });
+    const s = () => store.getState();
+    s().setSelectedAgentId("agent-1");
+    s().setSelectedProjectId("project-1");
+    s().setActiveSession("session-1");
+    s().setQuickChatAgentId("agent-9");
+
+    s().startNewChat();
+
+    expect(s().isOpen).toBe(true);
+    expect(s().activeSessionId).toBeNull();
+    expect(s().selectedProjectId).toBeNull();
+    expect(s().selectedAgentId).toBe("agent-9");
+    expect(s().newChatRequest).toBe(1);
+
+    s().startNewChat();
+    expect(s().newChatRequest).toBe(2);
+  });
+
+  it("starts the new chat with the current agent when none is set", () => {
+    const store = createChatStore({ storage: memStorage() });
+    store.getState().setSelectedAgentId("agent-1");
+
+    store.getState().startNewChat();
+
+    expect(store.getState().selectedAgentId).toBe("agent-1");
+  });
+});
+
 // The ledger is what makes a durable draft restore (#5219) apply at most once.
 // A consume request can be lost — retries exhausted, app closed mid-flight — and
 // the row then comes back on the next fetch. Without a record that survives the
@@ -300,5 +400,101 @@ describe("chat store — applied draft-restore ledger", () => {
     store.getState().forgetDraftRestoreApplied("r-0");
     expect(store.getState().appliedDraftRestoreIds).toHaveLength(59);
     expect(store.getState().appliedDraftRestoreIds[0]).toBe("r-1");
+  });
+});
+
+// Coordinator-owned upload lifecycle in the draft slots (MUL-5181 L2).
+describe("chat store — draft upload ops", () => {
+  const ATTACHMENTS_KEY = "multica:chat:draft-attachments";
+
+  function freshStore() {
+    const storage = memStorage();
+    return { storage, store: createChatStore({ storage }) };
+  }
+
+  it("add → settle keeps the clientUploadId and strips the signed download_url", () => {
+    const { storage, store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "shot.png",
+      size: 9,
+    });
+    expect(store.getState().inputDraftAttachments["session-1"]?.[0]?.status).toBe("uploading");
+
+    s.settleInputDraftUpload("session-1", "c1", {
+      ...makeAttachment("att-1"),
+      download_url: "/uploads/att-1.png?Signature=short-lived",
+    });
+
+    const settled = store.getState().inputDraftAttachments["session-1"]?.[0];
+    expect(settled).toMatchObject({ clientUploadId: "c1", status: "uploaded" });
+    expect(settled?.status === "uploaded" && settled.attachment.id).toBe("att-1");
+    // Drafts survive restarts; a response-scoped signed URL must not.
+    expect(settled?.status === "uploaded" && settled.attachment.download_url).toBe("");
+    // And the persisted blob agrees with memory.
+    expect(storage.getItem(ATTACHMENTS_KEY)).toContain('"c1"');
+    expect(storage.getItem(ATTACHMENTS_KEY)).not.toContain("Signature=");
+  });
+
+  it("addInputDraftUpload dedupes by clientUploadId", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    const placeholder = {
+      clientUploadId: "c1",
+      status: "uploading" as const,
+      filename: "a.png",
+      size: 1,
+    };
+    s.addInputDraftUpload("session-1", placeholder);
+    s.addInputDraftUpload("session-1", placeholder);
+    expect(store.getState().inputDraftAttachments["session-1"]).toHaveLength(1);
+  });
+
+  it("failInputDraftUpload marks the placeholder failed with its reason", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "a.png",
+      size: 1,
+    });
+    s.failInputDraftUpload("session-1", "c1", "network down");
+    expect(store.getState().inputDraftAttachments["session-1"]?.[0]).toMatchObject({
+      status: "failed",
+      error: "network down",
+      filename: "a.png",
+    });
+  });
+
+  it("removeInputDraftUpload drops the entry and prunes an empty slot", () => {
+    const { storage, store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "a.png",
+      size: 1,
+    });
+    s.removeInputDraftUpload("session-1", "c1");
+    expect(store.getState().inputDraftAttachments["session-1"]).toBeUndefined();
+    expect(storage.getItem(ATTACHMENTS_KEY)).toBeNull();
+  });
+
+  it("appendToInputDraft lands after trimmed text, or bare on an empty slot", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    s.setInputDraft("session-1", "wip text  \n");
+    s.appendToInputDraft("session-1", "![shot.png](/api/attachments/att-1/download)");
+    expect(store.getState().inputDrafts["session-1"]).toBe(
+      "wip text\n\n![shot.png](/api/attachments/att-1/download)",
+    );
+
+    s.appendToInputDraft("session-2", "[doc.pdf](/api/attachments/att-2/download)");
+    expect(store.getState().inputDrafts["session-2"]).toBe(
+      "[doc.pdf](/api/attachments/att-2/download)",
+    );
   });
 });

@@ -1,8 +1,11 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
+import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,17 +15,18 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDndContext,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import {
   getCoreRowModel,
   useReactTable,
@@ -47,15 +51,18 @@ import {
   Plus,
   Search,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -65,10 +72,13 @@ import {
   TableCell,
   TableRow,
 } from "@multica/ui/components/ui/table";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { isImeComposing } from "@multica/core/utils";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import {
   issueKeys,
   issueTableGroupsOptions,
@@ -83,7 +93,8 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
   agentListOptions,
@@ -94,7 +105,6 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
-  IssueStatus,
   IssueTableGroupDescriptor,
   IssueTableGroupSpec,
   IssueTableQuerySpec,
@@ -103,19 +113,39 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import {
+  actorRefsFromValue,
+  formatActorRef,
+  isActorPropertyType,
+} from "@multica/core/types";
+import {
   useInfiniteQuery,
   useQueries,
   useQuery,
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { LabelChip } from "../../labels/label-chip";
-import { useNavigation } from "../../navigation";
+import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { CURSOR_ROW_CLASS, useIssueCursorId } from "../surface/issue-cursor";
+import {
+  PEEK_TARGET_ATTR,
+  useIssuePeekClick,
+  useIssuePeekActions,
+  useIssuePeekId,
+} from "../surface/peek-context";
+
+// A peeked table row: the same tint and leading bar as a peeked list row, on
+// the cells, because pinned cells paint an opaque background over the row.
+const PEEKED_TABLE_ROW_CLASS =
+  "[&>td]:bg-[color-mix(in_oklab,var(--brand)_6%,var(--background))] [&>td:first-child]:shadow-[inset_2px_0_0_var(--brand)]";
 import type { IssueCreateDefaults } from "../surface/types";
 import { ProgressRing } from "./progress-ring";
 import {
@@ -135,8 +165,16 @@ import {
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
-import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueBlockedMarker } from "./issue-blockers";
+import { IssueDuplicateOfMarker } from "./issue-duplicates";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
+import { issuePullRequestSummariesOptions } from "@multica/core/github";
+
+// Enough placeholder rows to cover a typical viewport; the virtualizer only
+// mounts what fits, so overshooting costs nothing.
+const SKELETON_ROW_COUNT = 12;
 
 const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
@@ -147,7 +185,9 @@ type TableViewProps = {
   search: string;
   onSearchChange: (query: string) => void;
   onLoadedIssuesChange: (issues: Issue[]) => void;
-  onCreateIssue: (defaults: IssueCreateDefaults) => void;
+  /** Omitted when the viewer cannot create issues: the row's add-sub-issue
+   *  button goes with it. */
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
     projects: boolean;
@@ -247,6 +287,7 @@ function rebaseServerBranchState(
 function tableGroupSpec(grouping: string): IssueTableGroupSpec {
   if (grouping === "status") return { kind: "status" };
   if (grouping === "assignee") return { kind: "assignee" };
+  if (grouping === "project") return { kind: "project" };
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) return { kind: "property", property_id: propertyId };
   return { kind: "none" };
@@ -265,6 +306,7 @@ type ColumnLabelKey =
   | "created_at"
   | "updated_at"
   | "child_progress"
+  | "pull_requests"
   | "creator";
 
 const SORTABLE_COLUMNS: Partial<Record<TableSystemColumnKey, SortField>> = {
@@ -331,6 +373,7 @@ function IssueCheckbox({
         event.stopPropagation();
         onToggle(event.shiftKey);
       }}
+      onAuxClick={stopRowNavigation}
       onChange={() => undefined}
       className="size-3.5 cursor-pointer accent-primary"
     />
@@ -366,31 +409,78 @@ function SortableColumnHeader({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: columnKey, disabled: !sortable });
   const active = sortField === sortBy;
+  // Any column in flight, not only this one: the neighbours shift to open a
+  // gap, and each is clipped by its own cell just the same.
+  const isReordering = useDndContext().active != null;
+  const nodeRef = useRef<HTMLDivElement | null>(null);
+
+  // The cell clips its own content, which is what made a dragged column look
+  // like it vanished rather than travelled. The clip only earns its keep at
+  // rest, capping a label wider than its column, so it is lifted for the length
+  // of a reorder and the column in hand is raised over its neighbours.
+  //
+  // Only overflow and stacking are touched. Transforming the <th> itself would
+  // carry the header's full height along, but `transform` on a table cell is a
+  // corner of the spec browsers take liberties with — Chromium lifts the cell
+  // out of the table's box model and its geometry stops matching the row. The
+  // wrapper below is padded out to the cell's size instead.
+  useLayoutEffect(() => {
+    const cell = nodeRef.current?.closest("th");
+    if (!cell || !isReordering) return;
+    cell.style.overflow = "visible";
+    if (isDragging) cell.style.zIndex = "20";
+    return () => {
+      cell.style.removeProperty("overflow");
+      cell.style.removeProperty("z-index");
+    };
+  }, [isDragging, isReordering]);
 
   return (
     <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      ref={(node) => {
+        nodeRef.current = node;
+        setNodeRef(node);
+      }}
+      // Horizontal travel only. dnd-kit's layout animation also hands back
+      // scaleX/scaleY — old rect over new rect — to tween an item into the
+      // shape of the slot it landed in. Between two tabs of equal width that
+      // ratio is 1 and never shows; between two columns it is not, so a 174px
+      // column swapping with a 96px one gets stretched to 1.8x on the way.
+      // Reordering columns changes no column's width, so there is nothing for
+      // a shape tween to say here. The move and the settle stay animated
+      // through `transition`.
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transition,
+      }}
+      // The wrapper spans the cell's own box — the negative margins undo the
+      // <th>'s padding and put it back inside — so it renders exactly as at
+      // rest while being what travels: a header-sized block rather than the
+      // line of text in it. Height is derived rather than fixed at h-8: the
+      // strip is taller than the cell's nominal height once row borders are in.
       className={cn(
-        "group/header flex min-w-0 items-center",
-        isDragging && "opacity-40",
+        "group/header -mx-4 -my-2 flex h-[calc(100%+1rem)] min-w-0 items-center px-4",
+        isDragging && "opacity-60",
       )}
     >
       {sortable && (
-        <button
-          type="button"
-          aria-label={reorderLabel}
-          className="-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground/50 opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-3" />
-        </button>
+        <TooltipHint label={reorderLabel}>
+          <button
+            type="button"
+            aria-label={reorderLabel}
+            className={cn(
+              "-ml-2 mr-0.5 rounded-xs p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
+              isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
+            )}
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-3" />
+          </button>
+        </TooltipHint>
       )}
       <DropdownMenu>
-        <DropdownMenuTrigger
-          className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 hover:bg-accent"
-        >
+        <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-xs px-1.5 py-1 hover:bg-accent">
           <span className="truncate">{label}</span>
           {active &&
             (sortDirection === "asc" ? (
@@ -428,9 +518,12 @@ function SortableColumnHeader({
 export function TableColumnPicker({
   properties,
   trigger,
+  tooltip,
 }: {
   properties: IssueProperty[];
   trigger: React.ReactElement;
+  /** Names an icon-only `trigger`. */
+  tooltip?: string;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
@@ -450,9 +543,11 @@ export function TableColumnPicker({
     property.name.toLocaleLowerCase().includes(query),
   );
 
+  const menuTrigger = <DropdownMenuTrigger render={trigger} />;
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={trigger} />
+      {tooltip ? <TooltipHint label={tooltip}>{menuTrigger}</TooltipHint> : menuTrigger}
       <DropdownMenuContent align="end" className="w-64 p-0">
         <div className="border-b p-2">
           <Input
@@ -472,22 +567,14 @@ export function TableColumnPicker({
                 {t(($) => $.table.columns.system_section)}
               </DropdownMenuLabel>
               {systemColumns.map((key) => (
-                <DropdownMenuItem
+                <DropdownMenuCheckboxItem
                   key={key}
                   disabled={key === "title"}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    toggleTableColumn(key);
-                  }}
+                  checked={selected.has(key)}
+                  onCheckedChange={() => toggleTableColumn(key)}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(key)}
-                    readOnly
-                    className="size-3.5 accent-primary"
-                  />
                   {t(($) => $.table.columns[key as ColumnLabelKey])}
-                </DropdownMenuItem>
+                </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuGroup>
           )}
@@ -501,28 +588,20 @@ export function TableColumnPicker({
                 {visibleProperties.map((property) => {
                   const key = `property:${property.id}` as const;
                   return (
-                    <DropdownMenuItem
+                    <DropdownMenuCheckboxItem
                       key={property.id}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        toggleTableColumn(key);
-                      }}
+                      checked={selected.has(key)}
+                      onCheckedChange={() => toggleTableColumn(key)}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(key)}
-                        readOnly
-                        className="size-3.5 accent-primary"
-                      />
                       <span className="truncate">{property.name}</span>
-                    </DropdownMenuItem>
+                    </DropdownMenuCheckboxItem>
                   );
                 })}
               </DropdownMenuGroup>
             </>
           )}
           {systemColumns.length === 0 && visibleProperties.length === 0 && (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-2 py-6 text-center text-caption text-muted-foreground">
               {t(($) => $.table.columns.no_results)}
             </p>
           )}
@@ -557,19 +636,20 @@ export function TableIssueSearch({
         onChange={(event) => onChange(event.target.value)}
         aria-label={placeholder}
         placeholder={placeholder}
-        className="h-7 pl-7 pr-7 text-xs"
+        className="h-7 pl-7 pr-7 text-caption"
       />
       {value && (
-        <Button
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={clearLabel}
+          label={clearLabel}
+          tooltipSide="bottom"
           onClick={() => onChange("")}
           className="absolute right-0.5 top-0.5 text-muted-foreground"
         >
           <X className="size-3" />
-        </Button>
+        </IconButton>
       )}
     </div>
   );
@@ -594,8 +674,9 @@ export function InlineTitle({
   onEditingChange: (editing: boolean) => void;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   /** Navigate to the issue — clicking the title is the primary way IN. */
-  onOpen: () => void;
-  onCreateSubIssue: () => void;
+  onOpen: (event: React.MouseEvent) => void;
+  /** Omitted when the viewer cannot create issues. */
+  onCreateSubIssue?: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
   renameLabel: string;
@@ -628,7 +709,7 @@ export function InlineTitle({
 
   return (
     <div
-      className="flex min-w-0 items-center gap-1.5"
+      className="group/title relative flex min-w-0 items-center gap-1.5"
       style={{ paddingLeft: row.depth * 18 }}
       // Record whether the gesture began while editing (mousedown fires before
       // the blur that commits), then swallow that click in the capture phase —
@@ -644,27 +725,37 @@ export function InlineTitle({
         }
         gestureStartedWhileEditingRef.current = false;
       }}
+      onAuxClickCapture={(event) => {
+        if (editing) event.stopPropagation();
+      }}
     >
       {row.hasChildren ? (
-        <button
-          type="button"
-          aria-label={toggleLabel}
-          className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleParent();
-          }}
-        >
-          {row.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
-        </button>
+        <DeferredTooltip
+          content={toggleLabel}
+          trigger={
+            <button
+              type="button"
+              aria-label={toggleLabel}
+              className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleParent();
+              }}
+              onAuxClick={stopRowNavigation}
+            >
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                  !row.collapsed && "rotate-90",
+                )}
+              />
+            </button>
+          }
+        />
       ) : (
         <span className="w-4 shrink-0" />
       )}
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">
+      <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
         {row.issue.identifier}
       </span>
       <IssueAgentActivityIndicator issueId={row.issue.id} />
@@ -675,6 +766,7 @@ export function InlineTitle({
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}
           onKeyDown={(event) => {
+            if (isImeComposing(event)) return;
             if (event.key === "Enter") commit();
             if (event.key === "Escape") {
               setDraft(row.issue.title);
@@ -690,34 +782,69 @@ export function InlineTitle({
             className="min-w-0 flex-1 truncate text-left hover:underline"
             onClick={(event) => {
               event.stopPropagation();
-              onOpen();
+              onOpen(event);
             }}
           >
             {row.issue.title}
           </button>
-          <button
-            type="button"
-            aria-label={createSubIssueLabel}
-            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={(event) => {
-              event.stopPropagation();
-              onCreateSubIssue();
-            }}
-          >
-            <Plus className="size-3" />
-          </button>
-          <button
-            type="button"
-            aria-label={renameLabel}
-            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={(event) => {
-              event.stopPropagation();
-              setDraft(row.issue.title);
-              onEditingChange(true);
-            }}
-          >
-            <Pencil className="size-3" />
-          </button>
+          <IssueBlockedMarker issue={row.issue} />
+          <IssueDuplicateOfMarker issue={row.issue} />
+          {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
+            * out inline these two reserved ~40px of the title column for
+            * buttons that are invisible until hovered — and title is the
+            * column with the least room to spare. The gradient fades the text
+            * running underneath rather than letting the icons sit on top of
+            * it; the sidebar has no need for one because its labels are short,
+            * but a title runs to the cell's edge. focus-within keeps them
+            * reachable by keyboard, where hover never fires. */}
+          {/* The fade has to be whatever the cell is painted with at the
+            * moment the actions show, and a hovered row is not the resting
+            * background — pinned cells switch to the muted mix on hover, so
+            * the gradient follows. */}
+          {/* Keyed to the title cell, not the row: these act on the title,
+            * and offering them from anywhere along a row puts them under the
+            * pointer while it is somewhere else entirely. The fade still
+            * follows the row's hover colour, since that is what the cell is
+            * painted with when they appear. */}
+          <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+            {onCreateSubIssue && (
+              <DeferredTooltip
+                content={createSubIssueLabel}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={createSubIssueLabel}
+                    className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCreateSubIssue();
+                    }}
+                    onAuxClick={stopRowNavigation}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                }
+              />
+            )}
+            <DeferredTooltip
+              content={renameLabel}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={renameLabel}
+                  className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDraft(row.issue.title);
+                    onEditingChange(true);
+                  }}
+                  onAuxClick={stopRowNavigation}
+                >
+                  <Pencil className="size-3" />
+                </button>
+              }
+            />
+          </span>
         </>
       )}
     </div>
@@ -737,7 +864,7 @@ function LazyLabelCell({
   const labels = issue.labels ?? [];
   if (open) {
     return (
-      <div onClick={stopRowNavigation}>
+      <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
         <LabelPicker
           issueId={issue.id}
           open
@@ -752,11 +879,12 @@ function LazyLabelCell({
   return (
     <button
       type="button"
-      className="flex max-w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5 hover:bg-accent"
+      className="flex max-w-full items-center gap-1 overflow-hidden rounded-xs px-1 py-0.5 hover:bg-accent"
       onClick={(event) => {
         event.stopPropagation();
         onOpenChange(true);
       }}
+      onAuxClick={stopRowNavigation}
     >
       {labels.length > 0 ? (
         <>
@@ -764,7 +892,7 @@ function LazyLabelCell({
             <LabelChip key={label.id} label={label} />
           ))}
           {labels.length > 2 && (
-            <span className="text-xs text-muted-foreground">+{labels.length - 2}</span>
+            <span className="text-caption text-muted-foreground">+{labels.length - 2}</span>
           )}
         </>
       ) : (
@@ -774,7 +902,11 @@ function LazyLabelCell({
   );
 }
 
-type IssueTableGroupRowProps = {
+// Extends the <tr> props so the virtualizer's measuring ref and data-index,
+// which DataTable clones onto whatever renderRow returns, reach the element
+// instead of being absorbed here. A group header is shorter than a data row,
+// so it is exactly the kind of row the measurement exists for.
+type IssueTableGroupRowProps = React.ComponentProps<"tr"> & {
   group: Extract<IssueTableDisplayRow, { kind: "group" }>;
   colSpan: number;
   onToggle: () => void;
@@ -784,22 +916,25 @@ export function IssueTableGroupRow({
   group,
   colSpan,
   onToggle,
+  ...rowProps
 }: IssueTableGroupRowProps) {
   return (
     <TableRow
+      {...rowProps}
       className="bg-muted/40 hover:bg-muted/60"
       onClick={onToggle}
     >
       <TableCell colSpan={colSpan} className="h-9 px-4 py-1.5">
         <button
           type="button"
-          className="sticky left-4 flex w-fit items-center gap-2 text-xs font-medium"
+          className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              !group.collapsed && "rotate-90",
+            )}
+          />
           {group.label}
           <span className="font-normal tabular-nums text-muted-foreground">
             {group.count}
@@ -813,6 +948,9 @@ export function IssueTableGroupRow({
 function propertyDisplayValue(
   property: IssueProperty,
   value: IssuePropertyValue | undefined,
+  // Actor values are "<kind>:<uuid>" references; without a resolver they would
+  // export as raw ids, so callers that can export an actor column must pass one.
+  getActorName?: (type: string, id: string) => string,
 ) {
   if (value === undefined) return "";
   const options = property.config.options ?? [];
@@ -824,6 +962,14 @@ function propertyDisplayValue(
     return options
       .filter((option) => ids.includes(option.id))
       .map((option) => option.name)
+      .join(", ");
+  }
+  if (property.type === "multi_text" || property.type === "multi_url") {
+    return Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  if (isActorPropertyType(property.type)) {
+    return actorRefsFromValue(value)
+      .map((ref) => (getActorName ? getActorName(ref.kind, ref.id) : formatActorRef(ref.kind, ref.id)))
       .join(", ");
   }
   return String(value);
@@ -851,9 +997,11 @@ type TableViewMeta = {
    *  remounts and freezes the table structure while it is up. */
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
-  updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
-  openIssue: (issue: Issue) => void;
-  createSubIssue: (issue: Issue) => void;
+  /** Takes the ISSUE, not its id: the run-confirm gate reads its status
+   *  category and owner to decide whether the write needs confirming first. */
+  updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
+  openIssue: (issue: Issue, event?: React.MouseEvent) => void;
+  createSubIssue: ((issue: Issue) => void) | undefined;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
   getActorName: (actorType: string, actorId: string) => string;
@@ -946,11 +1094,12 @@ function IssueTableAddColumnHeader({
   return (
     <TableColumnPicker
       properties={meta.properties}
+      tooltip={t(($) => $.table.columns.add)}
       trigger={
         <button
           type="button"
           aria-label={t(($) => $.table.columns.add)}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Plus className="size-3.5" />
         </button>
@@ -973,7 +1122,8 @@ function IssueTableHeaderCell({
   const propertyId = propertyIdFromViewKey(key);
   const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
   const staticSort = propertyId
-    ? property && !["multi_select", "checkbox"].includes(property.type)
+    ? property &&
+      !["multi_select", "checkbox", "actor", "multi_actor", "multi_text", "multi_url"].includes(property.type)
       ? (`property:${propertyId}` as SortField)
       : undefined
     : SORTABLE_COLUMNS[key as TableSystemColumnKey];
@@ -1011,6 +1161,12 @@ function IssueTableBodyCell({
     meta.editingCellKey,
     meta.setEditingCellKey,
   );
+  // Placeholder rows go through the ordinary cell renderer so they inherit the
+  // real column widths, pinning and borders — the grid is already correct
+  // before any data arrives, so the rows swap in without shifting anything.
+  if (row.original.kind === "skeleton") {
+    return <Skeleton className="h-3.5 w-full" />;
+  }
   if (row.original.kind !== "issue") return null;
   const issueRow = row.original;
   const issue = issueRow.issue;
@@ -1019,14 +1175,14 @@ function IssueTableBodyCell({
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);
   const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-    meta.updateIssue(issue.id, updates);
+    meta.updateIssue(issue, updates);
 
   const propertyId = propertyIdFromViewKey(key);
   if (propertyId) {
     const property = meta.propertyById.get(propertyId);
     if (!property) return null;
     return (
-      <div onClick={stopRowNavigation}>
+      <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
         <CustomPropertyValueEditor
           issue={issue}
           property={property}
@@ -1044,8 +1200,8 @@ function IssueTableBodyCell({
           editing={editorOpen}
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
-          onOpen={() => meta.openIssue(issue)}
-          onCreateSubIssue={() => meta.createSubIssue(issue)}
+          onOpen={(event) => meta.openIssue(issue, event)}
+          onCreateSubIssue={meta.createSubIssue && (() => meta.createSubIssue?.(issue))}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
@@ -1054,14 +1210,16 @@ function IssueTableBodyCell({
       );
     case "identifier":
       return (
-        <span className="text-xs text-muted-foreground">{issue.identifier}</span>
+        <span className="text-caption text-muted-foreground">{issue.identifier}</span>
       );
     case "status":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <StatusPicker
             status={issue.status}
             onUpdate={onUpdate}
+            projectId={issue.project_id}
+            issue={issue}
             align="start"
             open={editorOpen}
             onOpenChange={setEditorOpen}
@@ -1070,7 +1228,7 @@ function IssueTableBodyCell({
       );
     case "priority":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <PriorityPicker
             priority={issue.priority}
             onUpdate={onUpdate}
@@ -1082,7 +1240,7 @@ function IssueTableBodyCell({
       );
     case "assignee":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <AssigneePicker
             assigneeType={issue.assignee_type}
             assigneeId={issue.assignee_id}
@@ -1103,7 +1261,7 @@ function IssueTableBodyCell({
       );
     case "project":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <ProjectPicker
             projectId={issue.project_id}
             onUpdate={onUpdate}
@@ -1112,7 +1270,7 @@ function IssueTableBodyCell({
             triggerRender={
               <button
                 type="button"
-                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent"
+                className="flex max-w-full items-center gap-1.5 rounded-xs px-1 py-0.5 hover:bg-accent"
               />
             }
           />
@@ -1120,7 +1278,7 @@ function IssueTableBodyCell({
       );
     case "start_date":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <StartDatePicker
             startDate={issue.start_date}
             onUpdate={onUpdate}
@@ -1131,7 +1289,7 @@ function IssueTableBodyCell({
       );
     case "due_date":
       return (
-        <div onClick={stopRowNavigation}>
+        <div onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <DueDatePicker
             dueDate={issue.due_date}
             onUpdate={onUpdate}
@@ -1143,7 +1301,7 @@ function IssueTableBodyCell({
     case "created_at":
     case "updated_at":
       return (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-caption text-muted-foreground">
           {new Intl.DateTimeFormat(i18n.language, {
             month: "short",
             day: "numeric",
@@ -1154,7 +1312,7 @@ function IssueTableBodyCell({
     case "child_progress": {
       const progress = meta.childProgressMap.get(issue.id);
       return progress ? (
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
           <ProgressRing done={progress.done} total={progress.total} size={15} />
           {progress.done}/{progress.total}
         </span>
@@ -1162,6 +1320,8 @@ function IssueTableBodyCell({
         <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
       );
     }
+    case "pull_requests":
+      return <PullRequestsCell issueId={issue.id} />;
     case "creator":
       return (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -1179,6 +1339,19 @@ function IssueTableBodyCell({
   return null;
 }
 
+function PullRequestsCell({ issueId }: { issueId: string }) {
+  const { t } = useT("issues");
+  const pullRequests = useIssuePullRequestSummaries(issueId, true);
+  return pullRequests.length > 0 ? (
+    <IssuePullRequestChips pullRequests={pullRequests} max={3} />
+  ) : (
+    <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
+  );
+}
+
+const TABLE_SCROLL_KEY = "table";
+const TABLE_SCROLL_ROOT = { "data-tab-scroll-root": TABLE_SCROLL_KEY };
+
 export function TableView({
   serverQuery,
   childProgressMap,
@@ -1191,8 +1364,11 @@ export function TableView({
 }: TableViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const resolveStatusLabel = useStatusLabel(wsId);
+  const { entryOf } = useIssueStatuses(wsId);
+  const openModal = useModalStore((s) => s.open);
   const queryClient = useQueryClient();
-  const navigation = useNavigation();
+  const intentNavigate = useIntentNavigate();
   const paths = useWorkspacePaths();
   const actions = useIssueSurfaceActionsOptional();
   const selection = useIssueSurfaceSelection();
@@ -1242,6 +1418,10 @@ export function TableView({
   // The one cell whose editor (picker popup / rename input) is open — see
   // TableViewMeta.editingCellKey.
   const [editingCellKey, setEditingCellKey] = useState<string | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the table's two-axis scroller
+  // gets its saved offsets back when it attaches.
+  const restoredScrollTop = useRestoredScrollOffset(TABLE_SCROLL_KEY);
+  const restoreScrollRef = useRestoredScrollRef(TABLE_SCROLL_KEY);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -1273,6 +1453,23 @@ export function TableView({
     [effectiveTableGrouping],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
+  // Project group rows carry only a project id; the title comes from the
+  // shared projects query the surface already primes for this grouping.
+  //
+  // Read `data` rather than defaulting it in the destructure: an un-settled
+  // query has no data, so `= []` would hand this memo a fresh array on every
+  // render and churn every consumer of the map below (MUL-5477).
+  const groupProjectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: serverGroupSpec.kind === "project",
+  });
+  const groupProjectMap = useMemo(
+    () =>
+      new Map(
+        (groupProjectsQuery.data ?? []).map((project) => [project.id, project]),
+      ),
+    [groupProjectsQuery.data],
+  );
   const serverGroupsRequestGroup =
     serverGroupSpec.kind === "none"
       ? ({ kind: "status" } as const)
@@ -1399,7 +1596,16 @@ export function TableView({
           // keepPreviousData alone cannot bridge a changed table query inside
           // useQueries. Retain the last settled head per structural branch to
           // keep the previous table painted while the new query is pending.
-          ...(placeholder ? { placeholderData: () => placeholder } : {}),
+          //
+          // Passed as a VALUE, not a closure. QueryObserver reuses the previous
+          // placeholder result only while `options.placeholderData` compares
+          // equal BY REFERENCE to the previous render's, so `() => placeholder`
+          // — a fresh arrow on every rebuild of this array — forced the
+          // placeholder to be recomputed and the result re-derived on every
+          // render. The value comes from a ref Map and is already stable, and
+          // the closure ignored both of the arguments the function form
+          // receives, so the two forms are equivalent (MUL-5477).
+          ...(placeholder ? { placeholderData: placeholder } : {}),
           enabled:
             (branch.groupKey === null ||
               !collapsedGroupSet.has(branch.groupKey)) &&
@@ -1653,13 +1859,12 @@ export function TableView({
     (descriptor: IssueTableGroupDescriptor) => {
       const value = descriptor.value;
       if (value.kind === "status") {
-        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
-          return t(($) => $.status[value.status as IssueStatus]);
-        }
-        // Installed clients can receive a status introduced by a newer
-        // backend. Keep the group usable instead of collapsing the response
-        // to the schema fallback or rendering an empty label.
-        return value.status;
+        // A group is one status KEY, so it shows that status's own name — a
+        // custom status must not read as its category. `resolveStatusLabel`
+        // falls back to the raw key, which is also what keeps a status
+        // introduced by a NEWER backend usable on an installed client instead
+        // of collapsing to the schema fallback or an empty label. (MUL-6243)
+        return resolveStatusLabel(value.status);
       }
       if (value.kind === "assignee") {
         return value.actor
@@ -1667,9 +1872,13 @@ export function TableView({
           : t(($) => $.table.unassigned);
       }
       if (value.kind === "project") {
-        return value.project_id
-          ? value.project_id
-          : t(($) => $.swimlane.no_project);
+        if (!value.project_id) return t(($) => $.swimlane.no_project);
+        // A project the query cannot resolve (deleted, or not visible to this
+        // member) reads as unavailable — never as its raw id.
+        return (
+          groupProjectMap.get(value.project_id)?.title ??
+          t(($) => $.table.value_unavailable)
+        );
       }
       if (value.kind === "parent") {
         if (value.value_state === "unset") {
@@ -1692,7 +1901,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
@@ -1711,9 +1920,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `${registered ? "loading" : "activate"}:${key}`,
-          label: t(($) => $.table.loading_branch),
-          loading: registered,
-          autoLoad: !registered,
+          state: registered ? "loading" : "has_more",
+          total: 0,
           onLoad: registered
             ? undefined
             : () => activateServerBranch(groupKey, parentId, ancestorIds),
@@ -1724,8 +1932,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `loading:${key}`,
-          label: t(($) => $.table.loading_branch),
-          loading: true,
+          state: "loading",
+          total: 0,
         });
       }
       for (const row of data.rows) {
@@ -1754,8 +1962,8 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `retry:${key}`,
-          label: t(($) => $.table.load_more_failed_retry),
-          loading: false,
+          state: "error",
+          total: data.total,
           onLoad: () => retryServerBranch(key),
         });
       } else if (data.nextCursor) {
@@ -1763,10 +1971,19 @@ export function TableView({
         result.push({
           kind: "load_more",
           key: `more:${key}:${nextCursor}`,
-          label: t(($) => $.table.load_more),
-          loading: data.loading,
-          autoLoad: true,
+          state: data.loading ? "loading" : "has_more",
+          total: data.total,
           onLoad: () => loadNextServerBranchPage(key, nextCursor),
+        });
+      } else if (data.rows.length > 0) {
+        // Reaching the end is only worth marking on a branch that paginated;
+        // the footer applies that rule, so the row is pushed unconditionally
+        // and carries the total for it to judge by.
+        result.push({
+          kind: "load_more",
+          key: `end:${key}`,
+          state: "end",
+          total: data.total,
         });
       }
     };
@@ -1794,27 +2011,40 @@ export function TableView({
       result.push({
         kind: "load_more",
         key: "loading:groups",
-        label: t(($) => $.table.loading_branch),
-        loading: true,
+        state: "loading",
+        total: 0,
       });
     } else if (usesServerGrouping && serverGroupsError) {
       result.push({
         kind: "load_more",
         key: "retry:groups",
-        label: t(($) => $.table.load_failed_retry),
-        loading: false,
+        state: "error",
+        total: 0,
         onLoad: () => void refetchServerGroups(),
       });
     } else if (usesServerGrouping && hasNextServerGroupPage) {
       result.push({
         kind: "load_more",
         key: "more:groups",
-        label: t(($) => $.table.load_more),
-        loading: fetchingNextServerGroupPage,
-        autoLoad: true,
+        state: fetchingNextServerGroupPage ? "loading" : "has_more",
+        total: 0,
         onLoad: () => void fetchNextServerGroupPage(),
       });
     }
+
+    // Nothing has landed yet and something is still in flight: show the grid
+    // filled with placeholders instead of one "Loading…" line, which reads as
+    // an empty table more than a loading one.
+    const isColdLoad =
+      !result.some((row) => row.kind === "issue") &&
+      result.some((row) => row.kind === "load_more" && row.state === "loading");
+    if (isColdLoad) {
+      return Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => ({
+        kind: "skeleton" as const,
+        key: `skeleton:${index}`,
+      }));
+    }
+
     return result;
   }, [
     collapsedGroupSet,
@@ -1832,7 +2062,6 @@ export function TableView({
     fetchingNextServerGroupPage,
     refetchServerGroups,
     fetchNextServerGroupPage,
-    t,
     tableHierarchy,
     usesServerGrouping,
   ]);
@@ -1935,6 +2164,15 @@ export function TableView({
   useEffect(() => {
     onLoadedIssuesChange(loadedIssues);
   }, [loadedIssues, onLoadedIssuesChange]);
+  // Side peek steps through the loaded rows top to bottom.
+  const peek = useIssuePeekActions();
+  const peekedId = useIssuePeekId();
+  const cursorId = useIssueCursorId();
+  const handlePeekClick = useIssuePeekClick();
+  useEffect(() => {
+    peek?.publishColumns([visibleIssueIds]);
+  }, [peek, visibleIssueIds]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
   const selectedIssues = useMemo(
     () => loadedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
     [loadedIssues, selection.selectedIds],
@@ -1974,36 +2212,46 @@ export function TableView({
     [propertyById, t],
   );
 
+  // Inline row edits are single-issue writes like the picker in the issue
+  // detail or the right-click menu, so they route on the same gate: a status
+  // change that promotes an agent-owned issue out of the backlog category
+  // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
-    (issueId: string, updates: Partial<UpdateIssueRequest>) =>
-      actions?.updateIssue(issueId, updates),
-    [actions],
+    (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
+      actions?.updateIssue(issue.id, updates);
+    },
+    [actions, entryOf, openModal],
   );
 
   const openIssue = useCallback(
-    (issue: Issue) => {
-      const path = paths.issueDetail(issue.id);
-      if (navigation.openInNewTab) {
-        navigation.openInNewTab(path, issue.identifier, { activate: true });
+    (issue: Issue, event?: React.MouseEvent) => {
+      // Match card links, including the preferred default and modifier keys.
+      if (handlePeekClick(issue, event)) {
+        if (event?.shiftKey) window.getSelection()?.removeAllRanges();
         return;
       }
-
-      window.open(
-        navigation.getShareableUrl(path),
-        "_blank",
-        "noopener,noreferrer",
+      // Standard link semantics: plain click navigates in place; modifier /
+      // middle clicks open tabs. Callbacks without an event (keyboard
+      // affordances) count as plain clicks.
+      intentNavigate(
+        paths.issueDetail(issueRouteRef(issue)),
+        event ? resolveClickIntent(event) : "push",
+        issue.identifier,
       );
     },
-    [navigation, paths],
+    [intentNavigate, paths, handlePeekClick],
   );
 
-  const createSubIssue = useCallback(
-    (issue: Issue) =>
-      onCreateIssue({
-        parent_issue_id: issue.id,
-        parent_issue_identifier: issue.identifier,
-        ...(issue.project_id ? { project_id: issue.project_id } : {}),
-      }),
+  const createSubIssue = useMemo(
+    () =>
+      onCreateIssue
+        ? (issue: Issue) => onCreateIssue(subIssueCreateDefaults(issue))
+        : undefined,
     [onCreateIssue],
   );
 
@@ -2059,6 +2307,9 @@ export function TableView({
           cell: IssueTableBodyCell,
         };
         if (config.width !== undefined) definition.size = config.width;
+        // Room for three "#123" chips before the overflow count; the 150px
+        // default clips the second repo-prefixed chip mid-number.
+        else if (config.key === "pull_requests") definition.size = 200;
         return definition;
       }),
       {
@@ -2145,10 +2396,13 @@ export function TableView({
         const propertyId = propertyIdFromViewKey(column.key);
         return !propertyId || exportPropertyById.has(propertyId);
       });
-      const needsActors = csvColumns.some(
-        (column) => column.key === "assignee" || column.key === "creator",
-      );
-      const [rows, exportLookups, exportActorName] = await Promise.all([
+      const needsActors = csvColumns.some((column) => {
+        if (column.key === "assignee" || column.key === "creator") return true;
+        const propertyId = propertyIdFromViewKey(column.key);
+        const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
+        return property ? isActorPropertyType(property.type) : false;
+      });
+      const [rows, exportLookups, exportActorName, exportPullRequests] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
           projects: csvColumns.some((column) => column.key === "project"),
@@ -2165,6 +2419,9 @@ export function TableView({
               buildActorNameResolver({ members, agents, squads }),
             )
           : Promise.resolve(getActorName),
+        csvColumns.some((column) => column.key === "pull_requests")
+          ? queryClient.fetchQuery(issuePullRequestSummariesOptions(wsId))
+          : Promise.resolve(null),
       ]);
       const headers = csvColumns.map((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
@@ -2177,7 +2434,11 @@ export function TableView({
           if (propertyId) {
             const property = exportPropertyById.get(propertyId);
             return property
-              ? propertyDisplayValue(property, issue.properties[propertyId])
+              ? propertyDisplayValue(
+                  property,
+                  issue.properties[propertyId],
+                  exportActorName,
+                )
               : "";
           }
           switch (column.key) {
@@ -2186,7 +2447,7 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return t(($) => $.status[issue.status]);
+              return resolveStatusLabel(issue.status);
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":
@@ -2209,6 +2470,10 @@ export function TableView({
               const progress = exportLookups.childProgressMap.get(issue.id);
               return progress ? `${progress.done}/${progress.total}` : "";
             }
+            case "pull_requests":
+              return (exportPullRequests?.[issue.id] ?? [])
+                .map((pr) => pr.html_url)
+                .join(", ");
             case "creator":
               return exportActorName(issue.creator_type, issue.creator_id);
           }
@@ -2287,6 +2552,18 @@ export function TableView({
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        // Columns only ever swap sideways, so the header should not follow the
+        // pointer up out of its own strip — same constraint the desktop tab bar
+        // puts on tab reordering.
+        modifiers={[restrictToHorizontalAxis]}
+        // Modifiers constrain the drag's movement but not its auto-scrolling,
+        // which reads raw pointer coordinates: drifting a few pixels vertically
+        // while dragging a header sent the rows scrolling underneath it. Zero
+        // on y removes an axis the gesture cannot act on. On x it stays, since
+        // a table wider than its viewport needs it to reach a distant slot, but
+        // the default 0.2 arms it a fifth of the way in from either edge, which
+        // is most of a wide header.
+        autoScroll={{ threshold: { x: 0.05, y: 0 } }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -2296,12 +2573,28 @@ export function TableView({
           <DataTable
             table={table}
             virtualizeRows
+            scrollContainerRef={restoreScrollRef}
+            initialScrollTop={restoredScrollTop}
+            scrollContainerAttributes={TABLE_SCROLL_ROOT}
             emptyMessage={t(($) => $.table.empty)}
-            onRowClick={(row) => {
+            onRowClick={(row, event) => {
               if (row.original.kind === "issue") {
-                openIssue(row.original.issue);
+                openIssue(row.original.issue, event);
               }
             }}
+            getRowProps={(row) =>
+              row.original.kind === "issue"
+                ? {
+                    [PEEK_TARGET_ATTR]: row.original.issue.id,
+                    "data-cursor": row.original.issue.id === cursorId ? "" : undefined,
+                    className: cn(
+                      row.original.issue.id === peekedId && PEEKED_TABLE_ROW_CLASS,
+                      CURSOR_ROW_CLASS,
+                      "data-[cursor]:[&>td]:bg-issue-row-hover",
+                    ),
+                  }
+                : undefined
+            }
             renderRow={(row) => {
               if (row.original.kind === "group") {
                 return (
@@ -2318,32 +2611,27 @@ export function TableView({
                   <TableRow className="hover:bg-transparent">
                     <TableCell
                       colSpan={table.getVisibleLeafColumns().length}
-                      className="relative h-9 px-4 py-1"
+                      className="p-0"
                     >
-                      {loadMoreRow.autoLoad &&
-                        loadMoreRow.onLoad &&
-                        !loadMoreRow.loading && (
-                        <InfiniteScrollSentinel
-                          onVisible={loadMoreRow.onLoad}
-                          loading={false}
-                          rootMargin="240px"
-                          className="absolute inset-y-0 left-0 w-px"
+                      {/* The same footer Board / List / Swimlane end their
+                        * columns with. Hand-rolling it here had left the table
+                        * as the one surface where a failed page read as muted
+                        * body text rather than an error, and where reaching the
+                        * end of a paginated branch said nothing at all. The row
+                        * only supplies the cell it lives in. */}
+                      <div className="sticky left-0 w-full">
+                        <ListLoadMoreFooter
+                          hasMore={
+                            loadMoreRow.state === "loading" ||
+                            loadMoreRow.state === "has_more"
+                          }
+                          isLoading={loadMoreRow.state === "loading"}
+                          total={loadMoreRow.total}
+                          onLoadMore={() => loadMoreRow.onLoad?.()}
+                          isError={loadMoreRow.state === "error"}
+                          onRetry={loadMoreRow.onLoad}
                         />
-                      )}
-                      <button
-                        type="button"
-                        disabled={loadMoreRow.loading || !loadMoreRow.onLoad}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          loadMoreRow.onLoad?.();
-                        }}
-                        className="sticky left-4 flex items-center gap-2 text-xs text-muted-foreground enabled:hover:text-foreground disabled:cursor-default"
-                      >
-                        {loadMoreRow.loading && (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        )}
-                        {loadMoreRow.label}
-                      </button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

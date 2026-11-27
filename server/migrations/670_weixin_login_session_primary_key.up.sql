@@ -1,0 +1,1 @@
+ALTER TABLE weixin_login_session ADD CONSTRAINT weixin_login_session_pkey PRIMARY KEY USING INDEX weixin_login_session_pkey;

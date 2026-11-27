@@ -17,10 +17,12 @@ function Harness({
   restoreKey,
   ready = true,
   disabled = false,
+  overrideTop,
 }: {
   restoreKey: string;
   ready?: boolean;
   disabled?: boolean;
+  overrideTop?: number;
 }) {
   const [scrollContainerEl, setScrollContainerEl] =
     useState<HTMLDivElement | null>(null);
@@ -30,6 +32,7 @@ function Harness({
     scrollContainerEl,
     ready,
     disabled,
+    overrideTop,
   });
 
   return (
@@ -283,6 +286,28 @@ describe("useIssueDetailScrollRestore", () => {
     rerender(<Harness restoreKey={issueA} />);
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(500);
+  });
+
+  it("restores the memento override over its own map when both exist", () => {
+    // The module map only hears scroll events, so it can hold an older
+    // visit's offset; the platform memento is captured from the live DOM at
+    // leave time and must win.
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+    flushNextAnimationFrame();
+
+    setScroll(scroller, 500);
+
+    rerender(<Harness restoreKey={issueB} />);
+    flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(0);
+
+    rerender(<Harness restoreKey={issueA} overrideTop={340} />);
+    flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(340);
   });
 
   it("does not yank scroll to top when a same-issue comment highlight clears", () => {

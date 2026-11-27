@@ -1,0 +1,430 @@
+---
+title: 完整教程
+description: 从空工作区开始，用一个个人网站项目走完 Multica 的全部核心流程：空间导航、连接运行时、创建智能体、用任务与本地环境交付、PR 审查、组建小队、沉淀 Skill 与配置自动化。
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica 是人和 AI 智能体一起工作的平台。这篇教程从零开始，带你完整走一遍端到端的工作流：
+
+- 搭建自己的工作区，熟悉 **工作**、**团队**、**聊天** 与 **自动化** 四个空间
+- 连接本机运行时，手动和通过对话创建智能体
+- 用任务交付代码、查看实时执行日志，并用 **环境（Environments）** 一键预览本地页面
+- 把审查反馈写进指令，让 **Engineer** 与只读 **Reviewer** 在同一条时间线上协作
+- 把协调工作交给 **小队（Squad）**，把通用方法沉淀为 **Skills**，把周期检查交给 **自动化（Autopilot）**
+
+教程以一个摄影师个人作品集网站为示例项目，把 Multica 的核心能力串成一条真实的交付链路。
+
+**开始前准备：**
+
+- 一个 Multica 账号（在 [multica.ai](https://multica.ai) 注册）
+- 一台安装并登录了至少一款 AI 编程工具的电脑，例如 Claude Code 或 Codex；全部支持的工具见[安装 AI 编程工具](/install-agent-runtime)
+
+## 创建工作区
+
+工作区是团队工作的地方：任务、项目、智能体和运行记录都属于某个工作区。注册后的引导会带你创建第一个工作区；如果你是被邀请加入团队，登录后会直接进入团队的工作区。
+
+这篇教程新建一个空白工作区来演示。
+
+<Steps>
+<Step>
+
+点击最左侧应用导航栏顶部的工作区图标，选择 **创建工作区**：
+
+![在左侧应用导航栏打开工作区菜单并选择创建工作区](/images/docs/tutorial-create-workspace-menu.webp)
+
+</Step>
+<Step>
+
+填写三项信息：
+
+- **工作区名称**：展示给成员，之后可以随时修改。
+- **URL**：工作区地址中的 slug，例如 `multica.ai/personal-site` 中的 `personal-site`，创建后不可修改。
+- **任务编号前缀**：默认根据 URL 自动生成，创建前可直接修改；设为 `SITE` 后，任务编号会依次为 `SITE-1`、`SITE-2`（之后也可以在设置中修改）。
+
+![创建工作区页面，填写名称、URL 和任务编号前缀](/images/docs/tutorial-create-workspace-form.webp)
+
+</Step>
+<Step>
+
+创建完成后即进入新工作区。先认识一下界面结构：
+
+- **最左侧应用导航栏**：顶部是工作区切换、**新建任务**（`C`）和 **搜索**（`⌘K`）；中间是四个核心空间——**工作**、**团队**、**聊天**、**自动化**；底部是帮助、**设置**和个人账号。
+- **工作面板**（紧邻导航栏）：顶部就是 **收件箱**，往下依次是内置与自定义 **视图** 以及 **项目**。
+- **底部状态栏**：左侧显示正在工作的智能体数量，右侧是 **Ask Multica** 快捷聊天入口（快捷键 `⌘J`）。
+
+中间的任务列表目前还是空的，接下来几步我们会让智能体把它填起来。
+
+![刚创建好的空工作区](/images/docs/tutorial-empty-workspace.webp)
+
+</Step>
+</Steps>
+
+## 连接你的电脑
+
+智能体在你连接的电脑上执行工作，调用的正是这台电脑上安装的 AI 编程工具。
+
+教程使用 [Multica Desktop](https://multica.ai/download) 演示：下载并登录后，桌面端会自动启动守护进程、把这台电脑注册为运行时，并检测已安装的 AI 编程工具。在应用导航栏切到 **团队**，打开 **资源** 下的 **运行时**，确认电脑已显示为 **在线**：
+
+![团队空间下的运行时列表，本机显示在线](/images/docs/tutorial-runtimes-list.webp)
+
+点进这台电脑，可以看到检测出的每一款 AI 编程工具及其状态：
+
+![机器详情页，显示 Claude Code 和 Codex 在线](/images/docs/tutorial-runtime-detail.webp)
+
+不使用桌面端也可以：在 **运行时** 页面点击右上角 **+**，选择 **其他机器或服务器**，按提示在终端执行安装命令即可；守护进程会在后台常驻运行，详见[守护进程与运行时](/daemon-runtimes)。
+
+## 创建第一个智能体
+
+智能体是工作区的正式协作者：可以被分配任务、在评论线程中回复，也可以与你一对一对话。我们先创建一个负责日常事务的 helper，后续教程里的不少配置工作都可以直接交给它。
+
+在 **团队** 空间点击面板顶部的 **+**（或进入 **全部智能体** 后点击 **新建智能体**）：
+
+<Steps>
+<Step>
+
+**选择运行时**：挑选上一步连接的电脑上处于在线状态的 AI 编程工具，教程使用 **Claude Code**。
+
+</Step>
+<Step>
+
+**配置智能体**：填写核心字段（也可以点击右上角的 **让 AI 来写**，通过 Agent Builder 对话直接生成配置）：
+
+- **名称**：`Multica helper`
+- **描述**：`Handles workspace chores, agent setup, and status updates.`
+- **指令**：每次运行时都会提供给智能体，写清它的职责与边界：
+
+```text
+You are the helper of this workspace.
+
+You handle what members ask for in issues and chat: create or update
+issues, adjust statuses, configure agents, squads, skills, and autopilots,
+and answer questions about what is going on in the workspace.
+
+Keep replies short. After finishing something, reply with a one-line
+summary of what you did. Do not touch code or repositories. If a
+request is ambiguous, ask before acting.
+```
+
+选择模型（教程选用 Claude Sonnet），**访问权限** 保持默认的 **仅自己可用**。
+
+![创建智能体配置页，已填写 Multica helper 的名称、描述和指令](/images/docs/tutorial-create-agent-form.webp)
+
+</Step>
+<Step>
+
+点击 **创建智能体**。进入详情页后，**Multica helper** 已显示为 **在线 · 空闲**，随时可以接活：
+
+![智能体详情页，Multica helper 在线待命](/images/docs/tutorial-agent-detail.webp)
+
+</Step>
+</Steps>
+
+## 第二个智能体：通过对话创建
+
+建网站需要一名能写代码的工程师。这次不用再填表单：工作区里已经有了一名智能体，创建新智能体的操作可以直接在聊天里交给它通过 CLI 完成。
+
+在应用导航栏切换到 **聊天**，选择 **Multica helper**，让它在同一个 Claude Code 运行时上创建一名叫 **Engineer** 的智能体，模型使用 **Claude Opus 5**，负责建设和维护摄影师个人作品集网站。Multica helper 会在这台电脑上执行创建并回复结果：
+
+![在聊天中让 Multica helper 创建 Engineer 智能体](/images/docs/tutorial-chat-create-engineer.webp)
+
+打开 **团队 → 全部智能体 → Engineer** 确认结果：模型为 `claude-opus-5`，权限为仅所有者可用，指令由 Multica helper 自动生成，后续随时可以调整：
+
+![Engineer 详情页与生成的指令](/images/docs/tutorial-engineer-instructions.webp)
+
+## 准备网站仓库
+
+网站代码托管在 GitHub 仓库里。只要这台电脑安装并登录了 [GitHub CLI](https://cli.github.com)（`gh`），创建和注册仓库同样可以交给智能体。
+
+在 **聊天** 中选择 **Engineer**，让它用 `gh` 在你的 GitHub 账号下创建一个名为 `personal-website` 的空仓库，再通过 `multica repo add` 注册到当前工作区。Engineer 执行完成后会回复仓库地址：
+
+![Engineer 回复已创建并注册 personal-website 仓库](/images/docs/tutorial-chat-create-repo.webp)
+
+点击应用导航栏底部的 **设置** 图标，打开 **连接与扩展** 下的 **代码**。确认 `personal-website` 已出现在 **代码仓库** 列表中，并点击 **连接 GitHub** 完成授权。连接之后：
+
+- 分支名或标题中带有任务编号（如 `SITE-1`）的 Pull Request 会自动关联到对应任务；
+- PR 的改动行数与 CI 检查状态会直接显示在任务右侧栏；
+- 关联 PR 全部合并后，系统可自动把任务移至 **已完成**。
+
+![设置 -> 代码页面，GitHub 已连接且 personal-website 已注册](/images/docs/tutorial-repo-settings.webp)
+
+如果没有安装 GitHub CLI，也可以自己在 GitHub 建好仓库后，在同一页面点 **+ 添加仓库** 手动绑定。
+
+## 第一条任务：建站
+
+前期准备全部就绪。接下来进入 Multica 的日常协作节奏：把需求写成 **任务**，交给智能体执行，所有讨论、运行记录和 PR 都沉淀在同一条时间线上。
+
+网站从 shadcn 的 Next.js 官方模板起步，让 Engineer 在干净的技术栈上专注内容与设计。
+
+<Steps>
+<Step>
+
+点击应用导航栏顶部的 **新建任务**（快捷键 `C`）。默认的 **通过智能体创建** 模式不需要手写标题：在 **创建者** 里选择 **Engineer**，直接把需求写进输入框（底部随时可以 **切换为手动创建**）：
+
+```text
+Work in the personal-website repository registered in this workspace.
+
+Start from a template instead of scaffolding from scratch:
+
+pnpm dlx shadcn@latest init --preset b5rR41Mtnc --template next --pointer
+
+Run the command, commit the template as-is, then build on top of it.
+
+The site is for a photographer. It needs:
+
+- Introduction — who I am and what I shoot
+- My work — a selection of photos
+- Contact — an email link that is easy to find
+- Pricing — decide where a pricing table fits and how to present it
+- Use placeholder images wherever a photo belongs, and list where I
+  should replace them with my own work
+
+Design:
+
+- Pick a style that fits a photography portfolio. It should feel
+  refined and understated; express that through layout, typography,
+  and spacing, and never use words like "premium" or "high-end"
+  in the copy.
+- Choose the fonts.
+
+Open a pull request when it is ready.
+```
+
+这条需求包含三类关键信息：明确约束（基于指定模板起步）、具体内容清单、以及有意识的留白（版式与字体交给 Engineer 决策）。写清意图与边界，把实现交给智能体。
+
+![新建任务对话框的智能体模式，创建者已选 Engineer](/images/docs/tutorial-new-issue-agent-mode.webp)
+
+</Step>
+<Step>
+
+提交后，Multica 自动生成标题并创建 `SITE-1`，把负责人设为 **Engineer** 并立刻开始执行，任务状态变为 **进行中**。任务右侧栏集中展示了 **属性**、**唤醒**、**Pull requests**、**环境** 和 **执行日志**。
+
+执行期间，可以通过顶部标题旁的 **Engineer is working** 徽章或右侧的 **执行日志** 随时查看进展。如果中途发现智能体跑偏了，也不必中断重来——直接在评论框发送纠正并选择 **加入当前运行**，即可在下一步安全边界[给运行中的智能体插话纠偏](/mentioning-agents#给正在运行的智能体插话)。
+
+![SITE-1 执行中，显示工作状态徽章和右侧执行日志](/images/docs/tutorial-issue-engineer-working.webp)
+
+</Step>
+<Step>
+
+将鼠标悬停在 **执行日志** 中的当前运行上，点击 **查看完整记录**，即可看到智能体的每一步操作：文字说明、**Bash** 命令、**Read / Edit** 文件改动以及耗时。点击右上角的 **ⓘ**，可以查看本次运行使用的机器、AI 编程工具、已下发的 Skills 与工作目录：
+
+![执行日志详情，完整呈现 Engineer 的每一步命令与编辑](/images/docs/tutorial-execution-log.webp)
+
+</Step>
+</Steps>
+
+## 验收与预览：快捷聊天与本地环境
+
+运行结束后，Engineer 自动将 `SITE-1` 改为 **审核中**，在任务下发表结构化的完成总结（列出每个占位图的替换路径），同时你的 **工作** 面板顶部 **收件箱** 收到新通知：
+
+![SITE-1 审核中，展示 Engineer 的完成评论与左侧收件箱通知](/images/docs/tutorial-issue-review-comment.webp)
+
+验收时有两件事要确认：在浏览器里打开实时页面看看效果，以及右侧栏的 **Pull requests** 为什么还是空的。不用在任务评论区刷屏，直接用底部状态栏的 **快捷聊天**：
+
+<Steps>
+<Step>
+
+点击底部状态栏最右侧的 **Ask Multica**（或按 `⌘J` / `⇧⌘J`），选择 **Engineer**，输入 `@SITE-1` 带入当前任务上下文，把两件事一并问它。
+
+Engineer 直接在浮窗里回复：它已经通过 `multica env start web` 启动了本地预览服务；至于 PR #1，因为分支名和标题里漏掉了 `SITE-1` 没能触发自动关联，它已经把编号补进了 PR 标题。
+
+![在 SITE-1 页面打开底部状态栏的快捷聊天浮窗与 Engineer 对话](/images/docs/tutorial-chat-ask-in-issue.webp)
+
+</Step>
+<Step>
+
+收起浮窗，看 `SITE-1` 的右侧栏，两张新卡片都已经就位：
+
+- **Pull requests**：`#1 Build photographer portfolio website`，显示 `+648 -14` 改动量以及合并后自动流转提示（`Moves to Done when #1 merges`）。
+- **环境（Environments）**：`Maya's MacBook Pro` 下的 `Web app · Running · localhost:41000`。点击即可在浏览器一键打开，也可以在菜单里重启、停止或查看实时日志——详见[环境文档](/environments)。
+
+![SITE-1 右侧栏同时展示关联 PR 卡片与运行中的本地环境](/images/docs/tutorial-issue-pr-and-env.webp)
+
+</Step>
+<Step>
+
+点击 **环境** 里的 **Web app** 打开 `http://localhost:41000`，在浏览器里验收做好的作品集网站：
+
+![本地运行在 localhost:41000 的摄影师作品集首页](/images/docs/tutorial-site-localhost.webp)
+
+</Step>
+</Steps>
+
+## 把反馈写进指令
+
+这轮验收暴露出两个会反复出现的习惯：提交 PR 时漏带任务编号导致无法自动关联；完成后反复截屏自查拉长了执行时间，而我们更习惯直接通过 **环境** 在浏览器里看效果。
+
+这两条规则对以后每条任务都适用，最省事的做法是直接固化进 Engineer 的指令。智能体支持用 `multica agent update` 更新自己的配置，在刚才的对话里直接让它写进去即可：
+
+![在聊天中让 Engineer 用 multica agent update 把两条规则写入自身指令](/images/docs/tutorial-chat-update-instructions.webp)
+
+Engineer 完成更新，并坦诚提示了代价：取消截图自查后，页面视觉细节需要靠你的浏览器验收把关。打开 **团队 → 全部智能体 → Engineer**，可以看到新增的 **Working rules** 小节已经生效：
+
+![Engineer 更新后的指令，已包含新增的工作规则](/images/docs/tutorial-engineer-updated-instructions.webp)
+
+调优智能体的核心方法就是如此：只要某个问题会跨任务重复出现，就把它沉淀成一条指令规则。
+
+## 第三个智能体：Reviewer
+
+Engineer 交付了第一版，但作者自己往往很难发现全部盲区。引入一名独立上下文、使用不同工具和模型的 **Reviewer** 智能体来做代码审查。
+
+<Steps>
+<Step>
+
+在聊天里让 **Multica helper** 创建 **Reviewer**，运行时选 **Codex**、模型选 `gpt-5.6-sol`，指令限定为只读审查：对照任务需求与代码规范检查 PR diff、按类别输出带文件路径和行号的发现、运行只读检查命令，绝不修改代码。打开 **团队 → 全部智能体 → Reviewer** 确认配置：
+
+![Reviewer 详情页，运行在 Codex 与 gpt-5.6-sol 上的只读审查智能体](/images/docs/tutorial-reviewer-detail.webp)
+
+</Step>
+<Step>
+
+审查不需要新建任务，也不用变更负责人。回到 `SITE-1` 的评论框，输入 `@Reviewer` 请它审查 PR #1。发送前，输入框下方会出现触发预览（`Reviewer · Will start when sent`），清楚提示发送后将启动哪名智能体：
+
+![在 SITE-1 评论框中 @Reviewer，底部显示实时触发预览](/images/docs/tutorial-comment-mention-reviewer.webp)
+
+</Step>
+<Step>
+
+Reviewer 返回 **合并前需要修改**，列出两组共五条具体发现——既包含两条 Engineer 自己没注意到的需求偏差（定价表缺少占位标注、页脚塞了未核实的 Instagram 链接），也包含三条代码规范建议，全部附带文件与行号。
+
+在同一条讨论线程里 `@Engineer` 让它逐条修复；Engineer 推送新提交到 PR #1 后，在时间线里逐项汇报修复结果：
+
+![Reviewer 的结构化审查结论与 @Engineer 接手修复](/images/docs/tutorial-reviewer-findings.webp)
+
+</Step>
+<Step>
+
+再次 `@Reviewer` 复查一轮：五条问题全部验证修复、本地检查全绿，Reviewer 给出 **Ready to merge** 结论并附带两条非阻塞后续建议：
+
+![Reviewer 复查通过，确认可以合并](/images/docs/tutorial-reviewer-recheck.webp)
+
+</Step>
+</Steps>
+
+一条任务上现在有两名专业分工的智能体——Engineer 负责实现与修复，Reviewer 负责把关——在同一条讨论线程里高效往复。
+
+## 合并收尾
+
+在评论里 `@Engineer` 合并 PR #1 并收尾。Engineer 合并至 `main`、清理分支、在主分支重跑构建并汇报结果。右侧 PR 卡片变为 **Merged**，本地预览环境自动停止，`SITE-1` 状态更新为 **已完成**：
+
+![SITE-1 状态转为已完成，PR #1 已合并](/images/docs/tutorial-issue-done.webp)
+
+从需求描述、运行日志、实时预览、代码审查、修复复查到最终合并，全过程完整沉淀在一条时间线里。
+
+## 组建小队
+
+`SITE-1` 的开发审查闭环跑通了，但每次衔接都得由你手动发起：建完 `@Reviewer`、审完 `@Engineer`、修完再 `@Reviewer`。这层协调工作同样可以交给 **小队（Squad）**：由一名队长智能体统筹多名智能体与人类成员。
+
+任务分配给小队后，队长负责接管：阅读需求、用 `@` 提及把活派给合适成员、在成员回复后自动唤醒并推进下一步，直到全部完成再向你汇报验收。
+
+把现有分工加一名队长，组成 **Website Team**：
+
+- **Lead**（新建，Claude Sonnet）：队长，负责拆解约束、派活给 Engineer 与 Reviewer、推进状态并汇总交付简报，自己不改代码。
+- **Engineer**（已有）：开发实现、修复审查意见、获批后合并 PR。
+- **Reviewer**（已有）：审查每个 PR（只读）。
+- **Maya Lin（你）**：最终产品验收与合入拍板。
+
+在聊天里把这套结构连同两个 Skill（`tdd` 挂给 Engineer、`delivery-brief` 挂给 Lead，下一节展开）和小队工作流一次性说给 **Multica helper**，它通过 CLI 一步配置完毕：
+
+![Multica helper 一次完成 Website Team 小队、Lead 与 Skill 绑定](/images/docs/tutorial-helper-create-squad.webp)
+
+打开 **团队 → 小队 → Website Team** 检查成员名单、角色描述与交付工作流（也可以直接在这个页面用表单新建或编辑小队，详见[小队文档](/squads)）：
+
+![Website Team 小队详情页，展示队长、成员、角色与工作流指令](/images/docs/tutorial-squad-detail.webp)
+
+## Skill：可复用的方法
+
+前面把反馈写进指令，解决的是单个智能体的专属规则。如果一套方法需要让多个智能体共享，或者直接复用社区现成经验，就沉淀为 **Skill**。
+
+Skill 遵循开放的 Agent Skills 规范：以一份 `SKILL.md` 为核心，可附带参考文档、模板或脚本。挂载给智能体后，Multica 会在每次执行时自动同步到运行时。打开 **团队 → 资源 → Skills**，刚才配置的两个 Skill 及挂载对象一目了然：
+
+![团队 -> Skills 列表，显示 delivery-brief 与 tdd 及各自挂载的智能体](/images/docs/tutorial-skills-list.webp)
+
+点进 `tdd`，可以查看 `SKILL.md` 正文、附带文件（`examples/test-first.md`、`references/checklist.md`）、版本记录与使用它的智能体：
+
+![tdd Skill 详情页，展示 SKILL.md、附带文件与已挂载的 Engineer](/images/docs/tutorial-skill-detail.webp)
+
+这两个 Skill 分别规范了“怎么做”和“怎么汇报”：
+
+- **tdd**（挂给 Engineer）：先写失败测试，再用最小改动让测试通过，最后整理重构。
+- **delivery-brief**（挂给 Lead）：每次验收汇报第一行直接给结论与下一步动作，紧跟 PR 摘要与需要你拍板的点，未获批准绝不合并。
+
+点击 **Skills** 页面右上角的 **+**，可以看到添加 Skill 的四种入口——**手动创建**、**从本地导入**、**从 URL 导入**（GitHub、ClawHub、Skills.sh）以及 **从运行时复制**（详见 [Skills 文档](/skills)）：
+
+![Skills 页面右上角 + 菜单中的四种创建与导入方式](/images/docs/tutorial-skill-new-modal.webp)
+
+导入第三方 Skill 前请先审阅其中的文件：Multica 不对 Skill 做沙盒隔离，内容会原样交给 AI 编程工具执行。
+
+## 第二条任务：交给小队
+
+现在把一件完整需求交给 **Website Team**：把个人作品集改造成可复用模板——将个人姓名替换为占位身份 `Alex Rivera`，邮箱替换为 `hello@example.com`，保持原有排版、字体与画廊结构不变。
+
+按 `C` 打开 **新建任务**，保持 **通过智能体创建** 模式，在 **创建者** 中选择 **Website Team**，输入需求提交。小队和个人、单个智能体一样，可以出现在任何负责人位置。
+
+Multica 创建 `SITE-2` 并分配给 **Website Team**。接下来整条链路完全由 **Lead** 自动串联：
+
+1. **Lead** 主动补齐约束（全站 `<title>`、Open Graph 元数据和 `README.md` 统一替换，并按 `tdd` 补单元测试），然后 `@Engineer` 派活。
+2. **Engineer** 先写测试再实现，提交 PR #2（`SITE-2: Convert portfolio into reusable template`）并回报。
+3. **Lead** 自动唤醒，将 PR #2 转给 `@Reviewer` 审查。
+4. **Reviewer** 校验 diff 与测试全部通过，零发现返回 **Ready to merge**。
+
+![SITE-2 时间线：Lead 派活给 Engineer、Engineer 回报 PR #2、Lead 转交 Reviewer 并审查通过](/images/docs/tutorial-squad-dispatch.webp)
+
+审查通过后，**Lead** 自动把 `SITE-2` 推进至 **审核中**，按 `delivery-brief` Skill 的格式向你发出简洁验收简报：首行给出结论并 `@` 提及你，列出 PR 摘要与两个待确认点，并明确表示未经同意不会合并：
+
+![Lead 在 SITE-2 发出的简洁交付简报，@ 提及 Maya 验收](/images/docs/tutorial-squad-delivery.webp)
+
+从补齐约束、测试驱动开发、PR 审查到验收简报，全程无需你手动穿针引线。
+
+## 自动化：Autopilot
+
+前面的每次运行都由你主动触发：分配任务、评论提及或发起聊天。**自动化（Autopilot）** 补上了定时与 Webhook 触发能力，让周期性维护工作自动运转。
+
+<Steps>
+<Step>
+
+在聊天里让 **Multica helper** 创建一条每周一早上 9:00 运行的自动化规则，指派给 **Reviewer**，采用 **创建任务** 模式：检出 `personal-website` 仓库，只读巡检死代码、未使用的导出、过时依赖和类型隐患，并将结果写进任务评论。
+
+在应用导航栏切换到 **自动化**，点开规则即可看到完整配置——**运行手册（Runbook）**、定时规则（`0 9 * * 1`、时区与下次运行时间）、执行模式（**创建任务** 或 **仅运行**）；面板左侧还提供 **任务唤醒（Issue wakeups）** 视图，用来管理单条已有任务的定时或事件回调。
+
+不用等到周一，点击右上角 **立即运行** 马上试跑一次：
+
+![自动化详情页，展示运行手册、每周一 9:00 定时触发器与立即运行按钮](/images/docs/tutorial-autopilot-detail.webp)
+
+</Step>
+<Step>
+
+Multica 立刻创建出 `SITE-3` 并唤醒 **Reviewer** 开始只读巡检。此后每周一早上九点，同样的检查都会自动建单执行：
+
+![自动化创建的 SITE-3 任务，Reviewer 正在执行检查](/images/docs/tutorial-autopilot-issue.webp)
+
+</Step>
+</Steps>
+
+除了定时触发，自动化同样支持 GitHub、GitLab 与通用 **Webhook**，执行者也可以直接指向 **小队**；详见[自动化文档](/autopilots)和[任务唤醒](/issue-wakeups)。
+
+## 多人协作
+
+到目前为止，工作区里的人类成员只有你一个。点击 **团队** 面板顶部的 **邀请成员** 图标，或打开 **设置 → 成员**，即可通过邮箱邀请协作者。支持选择 **成员**、**管理员**，或仅限特定共享项目的免费 **访客（Guest）** 角色：
+
+![设置 -> 成员中的邀请成员弹窗，支持成员、管理员与访客角色](/images/docs/tutorial-invite-member.webp)
+
+加入后的同事和你一样可以创建任务、`@` 提及共享智能体、打开预览环境并加入小队，实现多人与多智能体的协同交付。
+
+## 结语
+
+当任务和项目逐渐增多时，Multica 已经为你准备好了顺滑扩展这套工作流的结构：
+
+- **四个空间**让日常关注点清晰分离：**工作**（收件箱、视图、项目）、**团队**（智能体、小队、Skills、运行时、统计）、**聊天** 与 **自动化**。
+- **项目（Projects）** 把关联任务聚合在一起，提供共享背景说明、代码仓库与目录资源、文件夹归类、进度预测，以及可按阶段自动交接的自定义[工作流（Workflows）](/workflows)。
+
+回头看走过的完整路径：从空白工作区起步，连上本机电脑，建起四名分工明确的智能体，用本地环境完成首次 PR 预览与交付，把经验固化成指令和可复用 Skill，再把协调交给小队、把周期巡检交给自动化。到最后，你需要投入精力的，只剩定方向和做验收。
+
+## 接下来
+
+- [核心概念](/concepts) — 三分钟理清 Multica 全部核心对象之间的关系。
+- [环境（Environments）](/environments) — 用 `.multica/environments.toml` 配置一键预览与实时日志。
+- [项目](/projects) — 用共享资源、文件夹与进度预测组织多任务项目。
+- [小队](/squads) — 深入了解队长路由规则、自动唤醒机制与协作协议。
+- [Skills](/skills) — 编写、导入、更新与共享可复用的智能体方法。
+- [自动化](/autopilots) — 定时规则、Webhook 事件过滤与运行记录完整说明。

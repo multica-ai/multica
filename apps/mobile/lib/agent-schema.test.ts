@@ -38,4 +38,33 @@ describe("AgentSchema invocation permissions", () => {
       { target_type: "team", target_id: null },
     ]);
   });
+
+  it("preserves the additive runtime binding signal", () => {
+    const parsed = AgentSchema.parse({
+      id: "agent-1",
+      runtime_id: "",
+      runtime_bound: false,
+    });
+
+    expect(parsed.runtime_id).toBe("");
+    expect(parsed.runtime_bound).toBe(false);
+  });
+
+  it("parses conversation starters and degrades malformed additive data", () => {
+    expect(
+      AgentSchema.parse({
+        id: "agent-1",
+        conversation_starters: [
+          { label: "Review a PR", prompt: "Review the open pull request." },
+        ],
+      }).conversation_starters,
+    ).toEqual([
+      { label: "Review a PR", prompt: "Review the open pull request." },
+    ]);
+
+    expect(
+      AgentSchema.parse({ id: "agent-1", conversation_starters: "invalid" })
+        .conversation_starters,
+    ).toEqual([]);
+  });
 });

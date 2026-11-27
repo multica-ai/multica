@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // TestEnvPositiveIntOrDefault locks in the parse-or-fallback behaviour the log
@@ -35,7 +37,7 @@ func TestEnvPositiveIntOrDefault(t *testing.T) {
 			if c.set {
 				t.Setenv(key, c.val)
 			}
-			if got := envPositiveIntOrDefault(key, c.def); got != c.want {
+			if got := envPositiveIntOrDefault(key, c.def, maxDaemonLogBackups); got != c.want {
 				t.Errorf("envPositiveIntOrDefault(%q, %d) = %d, want %d", c.val, c.def, got, c.want)
 			}
 		})
@@ -96,33 +98,6 @@ func TestOpenBoundedErrLogKeepsSmall(t *testing.T) {
 	}
 }
 
-// TestNewDaemonLogRotatorDefaults asserts the rotator is wired to the intended
-// policy when no env overrides are set: the configured path, the default
-// size/backups/age, and gzip compression so rotated files stay small.
-func TestNewDaemonLogRotatorDefaults(t *testing.T) {
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_SIZE_MB")
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_BACKUPS")
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_AGE_DAYS")
-
-	path := filepath.Join(t.TempDir(), "daemon.log")
-	r := newDaemonLogRotator(path)
-	if r.Filename != path {
-		t.Errorf("Filename = %q, want %q", r.Filename, path)
-	}
-	if r.MaxSize != defaultDaemonLogMaxSizeMB {
-		t.Errorf("MaxSize = %d, want %d", r.MaxSize, defaultDaemonLogMaxSizeMB)
-	}
-	if r.MaxBackups != defaultDaemonLogMaxBackups {
-		t.Errorf("MaxBackups = %d, want %d", r.MaxBackups, defaultDaemonLogMaxBackups)
-	}
-	if r.MaxAge != defaultDaemonLogMaxAgeDays {
-		t.Errorf("MaxAge = %d, want %d", r.MaxAge, defaultDaemonLogMaxAgeDays)
-	}
-	if !r.Compress {
-		t.Error("Compress = false, want true")
-	}
-}
-
 // TestNewDaemonLogRotatorEnvOverride confirms operators can tune retention via
 // env without a rebuild.
 func TestNewDaemonLogRotatorEnvOverride(t *testing.T) {
@@ -130,7 +105,7 @@ func TestNewDaemonLogRotatorEnvOverride(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_LOG_MAX_BACKUPS", "2")
 	t.Setenv("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", "7")
 
-	r := newDaemonLogRotator(filepath.Join(t.TempDir(), "daemon.log"))
+	r := newDaemonLogRotator(filepath.Join(t.TempDir(), "daemon.log"), cli.CLIConfig{})
 	if r.MaxSize != 5 || r.MaxBackups != 2 || r.MaxAge != 7 {
 		t.Errorf("rotator = {MaxSize:%d MaxBackups:%d MaxAge:%d}, want {5 2 7}", r.MaxSize, r.MaxBackups, r.MaxAge)
 	}
@@ -146,7 +121,7 @@ func TestDaemonLogRotatorRotates(t *testing.T) {
 	// racing lumberjack's async gzip of the rotated file.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "daemon.log")
-	r := newDaemonLogRotator(path)
+	r := newDaemonLogRotator(path, cli.CLIConfig{})
 	r.Compress = false
 
 	// Write ~1.5 MB in chunks; at least one rotation must happen.

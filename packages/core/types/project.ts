@@ -1,30 +1,179 @@
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
+
+export type ProjectVisibility = "workspace" | "private";
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+export interface ListProjectMembersResponse {
+  members: ProjectMember[];
+  total: number;
+  /**
+   * The member who manages a private project's access besides the workspace
+   * owners and admins on its list: its lead when that is a person, otherwise
+   * its creator, otherwise its longest-standing member. Null for a
+   * workspace-visible project.
+   */
+  manager_id: string | null;
+}
+
+/**
+ * A private project as a workspace owner sees it from settings: who is in it,
+ * never what is in it. `is_member` says whether the owner is one of them.
+ */
+export interface PrivateProjectOverview {
+  id: string;
+  title: string;
+  icon: string | null;
+  lead_type: "member" | "agent" | null;
+  lead_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+  is_member: boolean;
+  members: Omit<ProjectMember, "project_id">[];
+}
+
+export interface ListPrivateProjectsResponse {
+  projects: PrivateProjectOverview[];
+  total: number;
+}
+
+/**
+ * Issue-count progress of a project. Scope leaves out cancelled issues (the
+ * closed category); started issues are counted but add nothing to percent.
+ */
+export interface ProjectProgress {
+  unit: "issues";
+  scope: number;
+  completed: number;
+  started: number;
+  unstarted: number;
+  cancelled: number;
+  /** completed / scope, rounded down; 0 when scope is 0. */
+  percent: number;
+}
+
+export interface ProjectProgressAssignee {
+  assignee_type: "member" | "agent" | "squad" | null;
+  assignee_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
+/** Issues carrying one label; an issue with several labels counts under each. */
+export interface ProjectProgressLabel {
+  /** Null for the issues with no label. */
+  label_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
+/** One weekly sample; `date` is a calendar day ("YYYY-MM-DD"), the last one is today. */
+export interface ProjectProgressPoint {
+  date: string;
+  scope: number;
+  started: number;
+  completed: number;
+}
+
+export interface ProjectProgressForecast {
+  completion_date: string;
+  weekly_velocity: number;
+}
+
+export interface ProjectProgressDetail {
+  progress: ProjectProgress;
+  by_assignee: ProjectProgressAssignee[];
+  by_label: ProjectProgressLabel[];
+  history: ProjectProgressPoint[];
+  forecast: ProjectProgressForecast | null;
+}
+
+/** One activity on an issue in the project, with the issue it happened on. */
+export interface ProjectActivityEntry {
+  id: string;
+  issue_id: string;
+  issue_identifier: string;
+  issue_title: string;
+  issue_status: string;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ProjectActivityPage {
+  entries: ProjectActivityEntry[];
+  /** Reads the next older page; null on the last one. */
+  next_cursor: string | null;
+}
 
 export interface Project {
   id: string;
   workspace_id: string;
   title: string;
+  visibility?: ProjectVisibility;
   description: string | null;
   icon: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  // Older backends omit these; null means the creator is unknown.
+  creator_type?: "member" | "agent" | null;
+  creator_id?: string | null;
   // Calendar days ("YYYY-MM-DD"), no time-of-day or timezone — same contract as
   // issue.start_date / issue.due_date.
   start_date: string | null;
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * The later of the project's own last edit and the latest activity on its
+   * issues. Older servers omit it; read it through projectLastActivityAt.
+   */
+  last_activity_at?: string;
   issue_count: number;
+  /** Done and cancelled issues together; prefer `progress` for completion. */
   done_count: number;
+  /** Optional because older servers do not send it. */
+  progress?: ProjectProgress;
   resource_count: number;
+  /**
+   * The workflow this project uses; null for the workspace Default workflow.
+   * Optional because older servers do not send it. (MUL-7420)
+   */
+  workflow_id?: string | null;
+  /**
+   * Set while the project is archived: hidden from default lists and pickers
+   * and closed to new issues, otherwise intact. Orthogonal to `status`.
+   * Optional because older servers do not send it. (MUL-8861)
+   */
+  archived_at?: string | null;
+  archived_by_type?: "member" | "agent" | null;
+  archived_by_id?: string | null;
+}
+
+export interface ArchiveProjectResponse extends Project {
+  /** Autopilots the archive paused because they file into this project. */
+  paused_autopilot_ids: string[];
 }
 
 export interface CreateProjectRequest {
   title: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string;
   icon?: string;
   status?: ProjectStatus;
@@ -33,6 +182,8 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  /** Workflow to use from the start; omitted uses the Default workflow. */
+  workflow_id?: string | null;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -40,6 +191,8 @@ export interface CreateProjectRequest {
 
 export interface UpdateProjectRequest {
   title?: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string | null;
   icon?: string | null;
   status?: ProjectStatus;
@@ -62,8 +215,8 @@ export interface ListProjectsResponse {
 //
 // Known types (UI must default-case unknown server-side additions):
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
-//   - local_directory: in-place agent execution on a specific daemon,
-//     ref = { local_path, daemon_id, label? }
+//   - local_directory: agent execution on a specific daemon,
+//     ref = { local_path, daemon_id, label?, execution_mode? }
 //   - project_space: server-managed project files, ref = { version: 1 }
 export type ProjectResourceType = "github_repo" | "local_directory" | "project_space";
 
@@ -73,10 +226,31 @@ export interface GithubRepoResourceRef {
   default_branch_hint?: string;
 }
 
+/**
+ * How tasks sharing one local directory are executed.
+ *
+ * - `in_place`: the agent works directly in the user's directory and tasks run
+ *   one at a time — a second task waits in `waiting_local_directory`. Edits
+ *   land in the user's working copy.
+ * - `worktree`: each task gets its own git worktree of that repo inside the
+ *   runtime's workspace, so tasks run concurrently and deliver their work as a
+ *   branch instead of touching the working copy. Every task of one conversation
+ *   shares that branch — `agent/<agent>/<issue>` — so a follow-up continues the
+ *   previous turn's work; a task with no conversation behind it gets
+ *   `agent/<agent>/<task>`. Continuation is decided by an ownership record in
+ *   the repo, not by the branch name, so a same-named branch the user made is
+ *   never adopted.
+ *
+ * Absent means `in_place`: resources created before the mode existed keep their
+ * original behavior, so this is optional rather than defaulted on the server.
+ */
+export type LocalDirectoryExecutionMode = "in_place" | "worktree";
+
 export interface LocalDirectoryResourceRef {
   local_path: string;
   daemon_id: string;
   label?: string;
+  execution_mode?: LocalDirectoryExecutionMode;
 }
 
 export interface ProjectSpaceResourceRef {
@@ -138,9 +312,11 @@ export interface ListProjectSpaceFilesResponse {
 export type ProjectSpaceImportStatus =
   | "queued"
   | "uploading"
+  | "finalizing"
   | "completed"
   | "partial"
-  | "failed";
+  | "failed"
+  | "unknown";
 
 export interface ProjectSpaceImportFile {
   id: string;
@@ -149,7 +325,7 @@ export interface ProjectSpaceImportFile {
   content_type: string;
   size_bytes: number;
   sha256?: string;
-  status: "queued" | "uploading" | "completed" | "skipped" | "failed";
+  status: "queued" | "uploading" | "completed" | "skipped" | "failed" | "unknown";
   error_code?: string;
 }
 

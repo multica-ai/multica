@@ -1,25 +1,53 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useEditorUpload } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
+import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
+import { ReplyAnnotations } from "./reply-annotations";
+import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo, type Ref } from "react";
+import { toast } from "sonner";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { Attachment } from "@multica/core/types";
-import { contentReferencesAttachment } from "@multica/core/types";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useT } from "../../i18n";
+import {
+  useComposerVoice,
+  VoiceErrorRow,
+  VoiceHud,
+  VoiceSetupDialog,
+} from "../../voice";
 import { CommentTriggerChips } from "./comment-trigger-chips";
-import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import {
+  ComposerIdleTools,
+  ComposerToolbar,
+  ComposerTools,
+  QUIET_SEND_CLASS,
+  useComposerExpanded,
+  useComposerFocus,
+} from "./composer-frame";
+import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useRecipientActions } from "../hooks/use-recipient-actions";
+import { SteerAttachmentNotice } from "./steer-attachment-notice";
+import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
+import { useCommentUploads } from "./use-comment-uploads";
+import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
+
+/** Lets the thread around the box move the caret into it, e.g. from a menu. */
+interface ReplyInputHandle {
+  focus: () => void;
+}
 
 interface ReplyInputProps {
+  handleRef?: Ref<ReplyInputHandle>;
   issueId: string;
   parentId: string;
   placeholder?: string;
@@ -27,33 +55,48 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  /** Called after the server accepts the reply and the composer is cleared. */
+  onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
   /** When set, hydrates/persists the in-progress reply via the draft store.
    *  Required for replies inside virtualized timeline threads, where the
    *  enclosing CommentCard may unmount on scroll-out. */
   draftKey?: CommentDraftKey;
+  targetMissing?: boolean;
+  onEditAnnotation?: (id: string) => boolean;
+  annotationComposer?: AnnotationComposerSlot;
+  /** Whether a running turn takes this reply by default: true for the turn
+   *  that belongs to this thread. Other recipients' turns can still be chosen. */
+  steerByDefault?: (task: AgentTask) => boolean;
 }
 
-// ---------------------------------------------------------------------------
+const NEVER_STEER_BY_DEFAULT = () => false;
+
 // ReplyInput
-// ---------------------------------------------------------------------------
 
 function ReplyInput({
+  handleRef,
   issueId,
   parentId,
   placeholder,
   avatarType,
   avatarId,
   onSubmit,
+  onAccepted,
   size = "default",
   draftKey,
+  onEditAnnotation,
+  annotationComposer,
+  targetMissing = false,
+  steerByDefault = NEVER_STEER_BY_DEFAULT,
 }: ReplyInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
@@ -63,15 +106,39 @@ function ReplyInput({
   );
   const [content, setContent] = useState(initialDraft ?? "");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
-  const clearDraft = useCommentDraftStore((s) => s.clearDraft);
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
-  const [submitting, setSubmitting] = useState(false);
-  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
-  // Attachments uploaded in this composer session — see CommentInput for the
-  // rationale (drives both submit-time attachment_ids and editor previews).
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useEditorUpload();
+  const annotations = useCommentDraftStore((s) => draftKey ? s.getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS);
+  const previewAnnotations = useMemo(() => annotationsWithPending(annotations, annotationComposer?.pending), [annotations, annotationComposer?.pending]);
+  const composedContent = useMemo(() => composeAnnotatedReply(content, previewAnnotations), [content, previewAnnotations]);
+  const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
+  // Saving the first pending annotation will fix the target before submission.
+  const previewParentId = annotations.length === 0 ? annotationComposer?.pending.sourceCommentId ?? parentId : parentId;
+  const previewContent = !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "";
+  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: previewContent });
+  // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
+  // a draftKey they persist in the draft store so scroll-out/close no longer
+  // drops an in-flight upload; without one (no persistence context) they fall
+  // back to session-local state inside the hook.
+  // `gate` widens the editor gate with coordinator-owned placeholders — see
+  // CommentInput.
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
+    useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
+  const hasAttachments = useMemo(
+    () => pendingAttachments.some((a) => contentReferencesAttachment(content, a)) || gate.uploading,
+    [pendingAttachments, content, gate.uploading],
+  );
+  const { recipients, attachmentsBlockSteer, routing, setAction, reset: resetRecipients } = useRecipientActions({
+    issueId,
+    agents: triggerPreview.agents,
+    allowSteer: true,
+    hasAttachments,
+    steerByDefault,
+    resetKey: `${issueId}:${previewParentId}`,
+  });
+  const stopRunsBeforeSend = useStopRunsBeforeSend(issueId);
+  // A pending annotation note previews recipients while the reply itself is
+  // still empty, so the chip row can render under the one-line placeholder.
+  const showsTriggerChips = recipients.length > 0 || triggerPreview.blocked.length > 0 || triggerPreview.hasAllMembersMention;
 
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
@@ -79,9 +146,19 @@ function ReplyInput({
   // into a live editor when the card remounts, an untouched box folds back
   // to the shell.
   const lazy = useLazyEditor({
-    initialActive: !!initialDraft?.trim(),
+    initialActive:
+      !!initialDraft?.trim() ||
+      (draftKey ? useCommentDraftStore.getState().getUploads(draftKey).length > 0 : false),
     editorRef,
   });
+  const quickActionMenu = useQuickActionMenu(issueId, {
+    enabled: lazy.active,
+    parentId: previewParentId,
+    targetMissing,
+    triggerPreview,
+    previewContent,
+  });
+  useImperativeHandle(handleRef, () => ({ focus: () => lazy.activate() }), [lazy]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
   });
@@ -102,74 +179,119 @@ function ReplyInput({
     };
   }, [draftKey, setDraft]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) {
-      setPendingAttachments((prev) => [...prev, result]);
-    }
-    return result;
-  }, [uploadWithToast, issueId]);
-
+  // Await-then-render send (see CommentInput): the shared hook keeps the text,
+  // locks + spins, and clears only once the server accepts it.
+  // Stale-submit guard — see CommentInput.
+  const mountedRef = useRef(true);
   useEffect(() => {
-    setSuppressedAgentIds(new Set());
-  }, [issueId, parentId]);
-
-  useEffect(() => {
-    const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
-    setSuppressedAgentIds((prev) => {
-      const next = new Set([...prev].filter((id) => visible.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [triggerPreview.agents]);
-
-  const toggleSuppressedAgent = useCallback((agentId: string) => {
-    setSuppressedAgentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(agentId)) next.delete(agentId);
-      else next.add(agentId);
-      return next;
-    });
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
+  const submittedEntryRef = useRef<unknown>(null);
+  // See CommentInput: bound to the branch that actually wiped the editor, so a
+  // draft the stale-submit guard kept is never disturbed.
+  const editorScrubbedRef = useRef(false);
+  const acceptedCommentIdRef = useRef<string | null>(null);
 
-  const handleSubmit = async () => {
-    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || submitting) return;
-    // Submit-time re-read — the shortcut path never sees the disabled button.
-    if (uploadGate.isBlocked()) return;
-    // Track every attachment whose stable download URL OR legacy
-    // storage URL is referenced in the markdown body. Both shapes
-    // can appear in the same comment during the MUL-3130 rollout.
-    const activeIds = pendingAttachments
-      .filter((a) => contentReferencesAttachment(content, a))
-      .map((a) => a.id);
-    const suppressAgentIds = triggerPreview.agents
-      .filter((agent) => suppressedAgentIds.has(agent.id))
-      .map((agent) => agent.id);
-    // Pessimistic submit (see CommentInput): keep the text, lock + spin, clear
-    // only once the server accepts it.
-    setSubmitting(true);
-    try {
-      const ok = await onSubmit(
+  const { submitting, submit } = useComposerSubmit({
+    editorRef,
+    uploadGate: gate,
+    normalize: (raw) => {
+      const current = draftKey ? useCommentDraftStore.getState().getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS;
+      return !targetMissing && hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
+    },
+    // Drop the caret once the reply is posted, same as a top-level comment: a
+    // focused editor swallows the page's keyboard shortcuts, so keeping it here
+    // would trap the user until they click away. Bound to `editorScrubbedRef`
+    // so a draft the stale-submit guard kept stays focused.
+    afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
+    onSubmit: async (content) => {
+      editorScrubbedRef.current = false;
+      const currentParentId = (draftKey ? useCommentDraftStore.getState().drafts[draftKey]?.replyTarget?.commentId : undefined) ?? parentId;
+      if (currentParentId !== previewParentId) {
+        toast.error(t(($) => $.reply.recipients_changed));
+        return false;
+      }
+      const { suppressAgentIds, steerTaskIds } = routing;
+      // A preview still catching up with an edited @mention can name a
+      // recipient this comment no longer addresses: never stop a run on it.
+      const previewMatches = triggerPreview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composedContent);
+      const restartTaskIds = previewMatches ? routing.restartTaskIds : [];
+      if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
+      if (draftKey) {
+        // Flush pending debounce before snapshotting — see CommentInput.
+        const pending = editorRef.current?.flushPendingUpdate?.();
+        if (pending != null) setDraft(draftKey, pending);
+        submittedEntryRef.current = useCommentDraftStore.getState().drafts[draftKey];
+      }
+      // Bind only uploads the body still references (see CommentInput):
+      // deleting an inline image really unbinds it; close-surviving uploads
+      // are written back into the body by the settle handler.
+      const activeIds = pendingAttachments
+        .filter((a) => contentReferencesAttachment(content, a))
+        .map((a) => a.id);
+      return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-      );
-      if (ok) {
-        editorRef.current?.clearContent();
-        setContent("");
-        setIsEmpty(true);
-        setSuppressedAgentIds(new Set());
-        setPendingAttachments([]);
-        if (draftKey) clearDraft(draftKey);
+        steerTaskIds.length > 0 ? steerTaskIds : undefined,
+      ).then((commentId) => {
+        acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
+        return !!commentId;
+      });
+    },
+    onAccepted: () => {
+      // Success may only consume the entry it submitted — see CommentInput.
+      if (draftKey) {
+        const lateMd = editorRef.current?.flushPendingUpdate?.();
+        if (lateMd != null) setDraft(draftKey, lateMd);
+        const store = useCommentDraftStore.getState();
+        const live = store.drafts[draftKey];
+        const untouched = live === undefined || live === submittedEntryRef.current;
+        if (untouched) store.clearDraft(draftKey);
+        if (!mountedRef.current || !untouched) return;
+      } else {
+        if (!mountedRef.current) return;
+        uploads.forEach((u) => removeUpload(u.clientUploadId));
       }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+      editorRef.current?.clearContent();
+      setContent("");
+      setIsEmpty(true);
+      resetRecipients();
+      editorScrubbedRef.current = true;
+      if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
+    },
+  });
 
   const avatarSize: AvatarSize = size === "sm" ? "sm" : "md";
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    // A send that would restart a run stays an explicit click — see CommentInput.
+    submit: routing.restartTaskIds.length === 0 ? () => void submit() : undefined,
+    activate: () => lazy.activate(),
+    scope: `${issueId}:${parentId}`,
+  });
+  const { focused, focusProps } = useComposerFocus();
+  // One line at rest, like the comment box — see CommentInput.
+  const expanded = useComposerExpanded(
+    focused || !isEmpty || annotations.length > 0 || showsTriggerChips || voice.showStrip || submitting || gate.uploading,
+    voice,
+  );
+  const voiceRootRef = voice.rootRef;
+  const bindComposer = useCallback((element: HTMLDivElement | null) => {
+    composerRef.current = element;
+    voiceRootRef(element);
+  }, [voiceRootRef]);
 
-  return (
+  return (<>
+    {annotationComposer?.render({
+      submit, submitting, uploading: gate.uploading, targetMissing, restart: routing.restartTaskIds.length > 0,
+      draftContent: content, annotations,
+      recipients: <CommentTriggerChips recipients={recipients} blocked={triggerPreview.blocked}
+        hasAllMembersMention={triggerPreview.hasAllMembersMention} draftContent={composedContent} onActionChange={setAction} />,
+    })}
     <div className="group/editor flex items-start gap-2.5">
       <ActorAvatar
         actorType={avatarType}
@@ -179,16 +301,23 @@ function ReplyInput({
       />
       <div
         {...dropZoneProps}
-        className={cn(
-          "relative min-w-0 flex-1 flex flex-col",
-          !isEmpty && "pb-9",
-        )}
+        {...focusProps}
+        ref={bindComposer}
+        className="relative flex min-w-0 flex-1 flex-col"
+        onFocusCapture={voice.onFocusCapture}
       >
+        {attachmentsBlockSteer && <SteerAttachmentNotice />}
+        {draftKey && annotations.length > 0 && <>
+          {targetMissing && <p role="alert" className="mb-2 text-caption text-destructive">{t(($) => $.reply.annotations.target_deleted)}</p>}
+          <ReplyAnnotations draftKey={draftKey} annotations={annotations}
+            disabled={submitting} onEditAnnotation={onEditAnnotation} />
+        </>}
+        <div className="flex min-h-0 flex-1 items-center">
         {/* Lock the editor while the reply is in flight — see CommentInput. */}
         {lazy.active && (
         <div
           className={cn(
-            "flex-1 min-h-0 overflow-y-auto",
+            "min-w-0 flex-1 min-h-0 overflow-y-auto",
             submitting && "pointer-events-none opacity-60",
             !lazy.ready && "hidden",
           )}
@@ -202,12 +331,11 @@ function ReplyInput({
             onUpdate={(md) => {
               setContent(md);
               setIsEmpty(!md.trim());
-              if (draftKey) {
-                if (md.trim().length > 0) setDraft(draftKey, md);
-                else clearDraft(draftKey);
-              }
+              // setDraft keeps any pending attachments and drops the entry only
+              // when text AND attachments are both empty.
+              if (draftKey) setDraft(draftKey, md);
             }}
-            onSubmit={handleSubmit}
+            onSubmit={submit}
             onUploadFile={handleUpload}
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
@@ -215,6 +343,7 @@ function ReplyInput({
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"
+            quickActionMenu={quickActionMenu}
           />
         </div>
         )}
@@ -226,7 +355,7 @@ function ReplyInput({
             role="button"
             tabIndex={0}
             aria-label={placeholderText}
-            className="flex-1 min-h-0 cursor-text rich-text-editor text-sm"
+            className="min-w-0 flex-1 cursor-text rich-text-editor text-body"
             onClick={() => lazy.activate()}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
@@ -240,40 +369,65 @@ function ReplyInput({
             <p className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
-        <div className="absolute bottom-0 left-0 right-24 min-w-0">
-          <CommentTriggerChips
-            agents={triggerPreview.agents}
-            blocked={triggerPreview.blocked}
-            draftContent={content}
-            suppressedAgentIds={suppressedAgentIds}
-            onToggle={toggleSuppressedAgent}
-          />
+        {!expanded && <ComposerIdleTools className="-my-1" voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
-          <FileUploadButton
-            size="sm"
-            multiple
-            onSelect={(file) => lazy.uploadOrQueue([file])}
-          />
-          <SubmitButton
-            onClick={handleSubmit}
-            disabled={isEmpty}
+        <VoiceHud voice={voice} />
+        <VoiceSetupDialog voice={voice} />
+        <VoiceErrorRow voice={voice} className="mt-1" />
+        {storageRefusal && (
+          <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mt-1" />
+        )}
+        {expanded && <ComposerToolbar
+          className="mt-1 animate-in fade-in slide-in-from-top-1 duration-150"
+          voice={voice}
+          hasRecipients={showsTriggerChips}
+          recipients={<CommentTriggerChips
+            recipients={recipients}
+            blocked={triggerPreview.blocked}
+            hasAllMembersMention={triggerPreview.hasAllMembersMention}
+            draftContent={composedContent}
+            onActionChange={setAction}
+          />}
+          tools={<ComposerTools voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+          send={routing.restartTaskIds.length > 0 ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
+              className="rounded-full px-3"
+              onClick={submit}
+              disabled={!canSend || submitting || gate.uploading}
+            >
+              {t(($) => $.comment.restart_send)}
+            </Button>
+          ) : <SubmitButton
+            className={QUIET_SEND_CLASS}
+            onClick={submit}
+            disabled={!canSend}
             loading={submitting}
-            busy={uploadGate.uploading}
-            tooltip={uploadGate.uploading
+            busy={gate.uploading}
+            disabledReason={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : sendShortcut
-                ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                : t(($) => $.comment.send_tooltip)}
-            ariaLabel={uploadGate.uploading
+              : !canSend && annotations.length > 0 && !targetMissing
+                ? t(($) => $.reply.annotations.intent_hint)
+                : undefined}
+            tooltip={sendShortcut
+              ? (
+                <>
+                  {t(($) => $.comment.send_tooltip)}
+                  <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                </>
+              )
+              : t(($) => $.comment.send_tooltip)}
+            ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.comment.send_tooltip)}
-          />
-        </div>
+          />}
+        />}
         {isDragOver && <FileDropOverlay />}
       </div>
     </div>
-  );
+  </>);
 }
 
-export { ReplyInput, type ReplyInputProps };
+export { ReplyInput, type ReplyInputHandle, type ReplyInputProps };

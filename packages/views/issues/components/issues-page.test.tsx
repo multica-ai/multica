@@ -45,13 +45,20 @@ vi.mock("@multica/core/paths", async () => {
 
 // Mock @multica/views/navigation (AppLink + useNavigation)
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({ push: vi.fn(), pathname: "/issues", searchParams: new URLSearchParams() }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock("../../chat/use-start-chat-with-draft", () => ({
+  useStartChatWithDraft: () => null,
 }));
 
 // Mock workspace avatar
@@ -115,25 +122,40 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    const status = request.group_key?.replace(/^status:/, "");
-    const response = await mockListIssues({
-      status,
-      limit: 50,
-      offset: 0,
-      ...(request.query.scope.assignee_types
-        ? { assignee_types: request.query.scope.assignee_types }
-        : {}),
-    });
+    // Support exact status branches and the legacy category contract.
+    const value = request.group_key?.replace(/^status(_category)?:/, "");
+    const statusesByCategory: Record<string, string[]> = {
+      unstarted: ["backlog", "todo"],
+      started: ["in_progress", "in_review", "blocked"],
+      done: ["done"],
+      closed: ["cancelled"],
+    };
+    const statuses = request.group.kind === "status_category"
+      ? statusesByCategory[value] ?? []
+      : [value];
+    const responses = await Promise.all(
+      statuses.map((status) =>
+        mockListIssues({
+          status,
+          limit: 50,
+          offset: 0,
+          ...(request.query.scope.assignee_types
+            ? { assignee_types: request.query.scope.assignee_types }
+            : {}),
+        }),
+      ),
+    );
+    const issues = responses.flatMap((response) => response.issues);
     return {
       query_fingerprint: "test",
       group_key: request.group_key,
       parent_id: null,
       total: 0,
-      rows: response.issues.map((issue: Issue) => ({
+      rows: issues.map((issue: Issue) => ({
         issue,
         direct_child_count: 0,
       })),
-      branch_total: response.issues.length,
+      branch_total: issues.length,
       next_cursor: null,
     };
   }),
@@ -149,19 +171,27 @@ const mockListIssueTableFacets = vi.hoisted(() =>
       "blocked",
       "cancelled",
     ];
-    const groups = await Promise.all(
-      statuses.map(async (status) => ({
-        status,
-        response: await mockListIssues({
-          status,
-          limit: 50,
-          offset: 0,
-          ...(request.query.scope.assignee_types
-            ? { assignee_types: request.query.scope.assignee_types }
-            : {}),
-        }),
-      })),
+    // Only sweep the legacy endpoint for a status facet. Every surface also
+    // requests an always-on `working_agents` facet to label its activity chip,
+    // and that must not look like the legacy status sweep these tests forbid.
+    const wantsStatus = request.facets.some(
+      (facet: any) => facet.kind === "status",
     );
+    const groups = wantsStatus
+      ? await Promise.all(
+          statuses.map(async (status) => ({
+            status,
+            response: await mockListIssues({
+              status,
+              limit: 50,
+              offset: 0,
+              ...(request.query.scope.assignee_types
+                ? { assignee_types: request.query.scope.assignee_types }
+                : {}),
+            }),
+          })),
+        )
+      : [];
     return {
       query_fingerprint: "test",
       total: groups.reduce((sum, group) => sum + group.response.issues.length, 0),
@@ -235,10 +265,10 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
-    listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
+    listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -246,10 +276,10 @@ vi.mock("@multica/core/api", () => ({
   },
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
-    listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
     listIssueTableRows: (request: any) => mockListIssueTableRows(request),
     listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
+    listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -259,27 +289,7 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 // Mock issue config
-vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_CONFIG: {
-    backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-    in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
-    done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
-    blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
-    cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
-  },
-  PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
-  PRIORITY_CONFIG: {
-    urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning" },
-    medium: { label: "Medium", bars: 2, color: "text-warning" },
-    low: { label: "Low", bars: 1, color: "text-info" },
-    none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
-  },
-}));
+// Use the real status configuration so category fixtures cannot drift.
 
 // Mock view store
 const mockViewState = {
@@ -292,7 +302,12 @@ const mockViewState = {
   creatorFilters: [] as { type: string; id: string }[],
   projectFilters: [] as string[],
   includeNoProject: false,
+  projectStatusFilters: [] as string[],
   labelFilters: [] as string[],
+  relationFilters: [] as string[],
+  dueDateFilters: [] as string[],
+  advancedFilter: null,
+  negatedFilters: [] as string[],
   propertyFilters: {} as Record<string, string[]>,
   cardPropertyIds: [] as string[],
   sortBy: "position" as const,
@@ -307,6 +322,7 @@ const mockViewState = {
     { key: "labels", width: 220 },
   ],
   listCollapsedStatuses: [] as string[],
+  hiddenStatuses: [] as string[],
   setViewMode: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
@@ -335,6 +351,8 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     key.startsWith("property:") ? key.slice("property:".length) : null,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
+  effectiveNegatedFilters: () => [],
+  ISSUE_RELATION_FILTERS: ["assigned", "created", "my_agents"],
   viewStoreSlice: vi.fn(),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
@@ -365,6 +383,22 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { key: "labels", label: "Labels" },
     { key: "childProgress", label: "Sub-issue progress" },
   ],
+  cardPropertyOptionsForView: () => [
+    { key: "priority", label: "Priority" },
+    { key: "description", label: "Description" },
+    { key: "assignee", label: "Assignee" },
+    { key: "dueDate", label: "Due date" },
+    { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
+    { key: "childProgress", label: "Sub-issue progress" },
+  ],
+  sortOptionsForView: () => [
+    { value: "position", label: "Manual" },
+    { value: "priority", label: "Priority" },
+    { value: "due_date", label: "Due date" },
+    { value: "created_at", label: "Created date" },
+    { value: "title", label: "Title" },
+  ],
 }));
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
@@ -378,11 +412,12 @@ let mockScope = "all";
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scope: mockScope, setScope: vi.fn() };
+      const state = { scopes: { issues: mockScope }, setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
+    { getState: () => ({ scopes: { issues: mockScope }, setScope: vi.fn() }) },
   ),
+  useIssuesScope: () => mockScope,
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -446,6 +481,7 @@ vi.mock("@dnd-kit/core", () => {
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
   verticalListSortingStrategy: {},
+  horizontalListSortingStrategy: {},
   arrayMove: vi.fn(),
   useSortable: () => ({
     attributes: {},
@@ -458,7 +494,10 @@ vi.mock("@dnd-kit/sortable", () => ({
 }));
 
 vi.mock("@dnd-kit/utilities", () => ({
-  CSS: { Transform: { toString: () => undefined } },
+  CSS: {
+    Transform: { toString: () => undefined },
+    Translate: { toString: () => undefined },
+  },
 }));
 
 // Mock @base-ui/react/accordion (used by ListView)
@@ -706,7 +745,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Backlog");
+    await screen.findByText("Todo");
     expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
   });
@@ -748,7 +787,7 @@ describe("IssuesPage (shared)", () => {
     expect(mockListIssues).not.toHaveBeenCalled();
   });
 
-  it("shows the 'Issues' section header without a workspace prefix", async () => {
+  it("titles the page with the built-in view, without a workspace prefix", async () => {
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
         issues: mockIssues.filter((i) => i.status === params?.status),
@@ -758,9 +797,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Issues");
-    // The list header is now `icon + title`, matching the other list pages.
-    // The workspace/org name is no longer rendered as a breadcrumb prefix.
+    await screen.findByRole("heading", { name: "All issues" });
     expect(screen.queryByText("Test WS")).not.toBeInTheDocument();
   });
 
@@ -770,15 +807,18 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("No issues yet");
-    expect(screen.getByText("Create an issue to get started.")).toBeInTheDocument();
   });
 
-  it("shows scope tab buttons", async () => {
-    renderWithQuery(<IssuesPage />);
+  it("counts the assignee type as a filter only once it narrows the list", async () => {
+    const { unmount } = renderWithQuery(<IssuesPage />);
+    await screen.findByRole("heading", { name: "All issues" });
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
+    unmount();
 
-    expect(await screen.findAllByText("All")).not.toHaveLength(0);
-    expect(screen.getByText("Members")).toBeInTheDocument();
-    expect(screen.getByText("Agents")).toBeInTheDocument();
+    mockScope = "agents";
+    renderWithQuery(<IssuesPage />);
+    await screen.findByRole("heading", { name: "All issues" });
+    expect(screen.getByRole("button", { name: "1 filter" })).toBeInTheDocument();
   });
 
   // The Members/Agents tabs filter server-side via assignee_types (the same

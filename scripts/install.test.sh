@@ -236,8 +236,613 @@ STUB
   fi
 }
 
+# ---------------------------------------------------------------------------
+# --with-server: the probed port and the printed port must both be the port
+# Docker Compose reported (#6145)
+#
+# The installer used to derive the port from .env with its own copy of the alias
+# chain. Compose gives the *calling environment* precedence over .env, so any
+# ambient PORT / BACKEND_PORT / API_PORT / SERVER_PORT / FRONTEND_PORT moved the
+# published port while the installer kept probing and printing the file value.
+#
+# Here the docker stub plays Compose: it answers `port` from the same resolution
+# Compose performs, environment first, then .env. The installer must take that
+# answer as given for both the health check and the summary — which is exactly
+# what a .env-only derivation cannot do, because the two disagree in every case
+# below. That real Compose resolves this way is proven separately, against real
+# `docker compose config`, in scripts/selfhost-config.test.sh; that test needs a
+# Docker CLI, which this job deliberately does not require.
+# ---------------------------------------------------------------------------
+_setup_server_sandbox() {
+  local tmp="$1"
+  local stub_bin="$tmp/stub-bin"
+  local server_dir="$tmp/server"
+  mkdir -p "$stub_bin" "$server_dir/.git"
+
+  # Minimal self-host assets: only the port mapping matters here.
+  cat >"$server_dir/.env.example" <<'ENVFILE'
+PORT=8080
+# BACKEND_PORT=8080
+# API_PORT=8080
+# SERVER_PORT=8080
+FRONTEND_PORT=3000
+JWT_SECRET=change-me-in-production
+POSTGRES_PASSWORD=multica
+DATABASE_URL=postgres://multica:multica@localhost:5432/multica?sslmode=disable
+ENVFILE
+  touch "$server_dir/docker-compose.selfhost.yml"
+
+  # Compose stand-in. Resolves the published host port the way Compose does:
+  # the process environment wins over .env, then the alias chain decides.
+  cat >"$stub_bin/docker" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+
+_env_file_value() {
+  local key="$1" line
+  line="$(grep -E "^${key}=" .env 2>/dev/null | tail -n 1 || true)"
+  [ -n "$line" ] || return 1
+  printf '%s' "${line#*=}"
+}
+
+# Environment first (Compose interpolation), then the env file.
+_resolve() {
+  local key="$1" from_env
+  eval "from_env=\${$key-__unset__}"
+  if [ "$from_env" != "__unset__" ]; then
+    printf '%s' "$from_env"
+    return 0
+  fi
+  _env_file_value "$key"
+}
+
+_published_backend_port() {
+  local value
+  for key in BACKEND_PORT API_PORT SERVER_PORT PORT; do
+    if value="$(_resolve "$key")" && [ -n "$value" ]; then
+      printf '%s' "$value"
+      return
+    fi
+  done
+  printf '8080'
+}
+
+_published_frontend_port() {
+  local value
+  if value="$(_resolve FRONTEND_PORT)" && [ -n "$value" ]; then
+    printf '%s' "$value"
+    return
+  fi
+  printf '3000'
+}
+
+case "${1:-}" in
+  info) exit 0 ;;
+  compose)
+    shift
+    if [ -n "${MULTICA_TEST_NO_COMPOSE:-}" ]; then
+      echo "docker: 'compose' is not a docker command." >&2
+      exit 1
+    fi
+    subcommand=""
+    for arg in "$@"; do
+      case "$arg" in
+        pull | up | port | config | version | ps | logs | down) subcommand="$arg"; break ;;
+      esac
+    done
+    case "$subcommand" in
+      up) : >.stub-stack-up ;;
+      config)
+        # `config --quiet` is the installer's validation step. An old Compose
+        # rejects the file's top-level `name:` here (#1401).
+        for arg in "$@"; do
+          if [ "$arg" = "--quiet" ]; then
+            if [ -n "${MULTICA_TEST_COMPOSE_REJECTS_NAME:-}" ]; then
+              echo "(root) Additional property name is not allowed" >&2
+              exit 1
+            fi
+            exit 0
+          fi
+        done
+        # Opt-in, so the port matrix above never probes real host ports.
+        [ -n "${MULTICA_TEST_COMPOSE_CONFIG:-}" ] || exit 1
+        cat <<JSON
+{
+  "services": {
+    "backend": {
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 8080,
+          "published": "$(_published_backend_port)",
+          "protocol": "tcp"
+        }
+      ]
+    },
+    "frontend": {
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 3000,
+          "published": "$(_published_frontend_port)",
+          "protocol": "tcp"
+        }
+      ]
+    }
+  }
+}
+JSON
+        ;;
+      port)
+        # Nothing is published until `up`, unless the test models this
+        # installation's own stack already running (an upgrade re-run).
+        if [ ! -f .stub-stack-up ] && [ -z "${MULTICA_TEST_STACK_RUNNING:-}" ]; then
+          exit 1
+        fi
+        service=""
+        for arg in "$@"; do
+          case "$arg" in
+            backend | frontend) service="$arg"; break ;;
+          esac
+        done
+        case "$service" in
+          backend) printf '127.0.0.1:%s\n' "$(_published_backend_port)" ;;
+          frontend) printf '127.0.0.1:%s\n' "$(_published_frontend_port)" ;;
+          *) exit 1 ;;
+        esac
+        ;;
+      version)
+        if [ -n "${MULTICA_TEST_COMPOSE_REJECTS_NAME:-}" ]; then
+          echo "Docker Compose version v2.2.3"
+        else
+          echo "2.30.0"
+        fi
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$stub_bin/docker"
+
+  # git: the installer takes the "existing installation" path, so only the
+  # fetch/checkout calls run and they tolerate a failing remote. The installer
+  # still verifies that the checkout landed on the requested ref, so rev-parse
+  # has to answer consistently: HEAD and origin/main are the same commit here.
+  cat >"$stub_bin/git" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  rev-parse) printf '1111111111111111111111111111111111111111\n' ;;
+esac
+exit 0
+STUB
+  chmod +x "$stub_bin/git"
+
+  # brew: pretend the CLI installs cleanly so the run reaches the summary.
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$stub_bin/brew"
+  chmod +x "$stub_bin/brew"
+
+  printf '#!/usr/bin/env bash\necho "multica v0.3.2 (commit: test)"\n' >"$stub_bin/multica"
+  chmod +x "$stub_bin/multica"
+
+  # curl records every probed URL so the health-check port can be asserted.
+  cat >"$stub_bin/curl" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+for arg in "$@"; do
+  case "$arg" in
+    http*) printf '%s\n' "$arg" >>"$MULTICA_TEST_CURL_LOG" ;;
+  esac
+done
+exit 0
+STUB
+  chmod +x "$stub_bin/curl"
+
+  printf '#!/usr/bin/env bash\nhead -c 32 /dev/zero | od -An -tx1 | tr -d " \\n"\n' >"$stub_bin/openssl"
+  chmod +x "$stub_bin/openssl"
+}
+
+# Runs `install.sh --with-server` with the sandbox stubs. Remaining arguments are
+# ambient environment assignments, so each case controls the environment
+# explicitly instead of inheriting a CI runner's PORT.
+_run_with_server() {
+  local tmp="$1"
+  shift
+
+  : >"$tmp/curl.log"
+  if ! env -i \
+    PATH="$tmp/stub-bin:/usr/bin:/bin" \
+    HOME="$tmp" \
+    MULTICA_INSTALL_DIR="$tmp/server" \
+    MULTICA_SELFHOST_REF="main" \
+    MULTICA_TEST_CURL_LOG="$tmp/curl.log" \
+    "$@" \
+    bash "$ROOT_DIR/scripts/install.sh" --with-server \
+    >"$tmp/install.out" 2>"$tmp/install.err"; then
+    echo "install.sh --with-server exited non-zero" >&2
+    cat "$tmp/install.out" >&2 || true
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+}
+
+# Asserts the probed port and the printed ports all match the stub's answer.
+_require_server_ports() {
+  local tmp="$1" label="$2" expected_backend="$3" expected_frontend="$4"
+  local probed printed_backend printed_frontend
+
+  probed="$(sed -n '1s#.*localhost:\([0-9]*\)/health#\1#p' "$tmp/curl.log")"
+  printed_backend="$(sed -n 's#.*Backend:[^0-9]*http://localhost:\([0-9]*\).*#\1#p' "$tmp/install.out" | head -n 1)"
+  printed_frontend="$(sed -n 's#.*Frontend:[^0-9]*http://localhost:\([0-9]*\).*#\1#p' "$tmp/install.out" | head -n 1)"
+
+  if [ "$probed" != "$expected_backend" ] ||
+    [ "$printed_backend" != "$expected_backend" ] ||
+    [ "$printed_frontend" != "$expected_frontend" ]; then
+    echo "[$label] installer ports disagree with the port Compose published" >&2
+    echo "  compose published:  backend=$expected_backend frontend=$expected_frontend" >&2
+    echo "  health check probed: ${probed:-<none>}" >&2
+    echo "  printed:            backend=${printed_backend:-<none>} frontend=${printed_frontend:-<none>}" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_with_server_uses_compose_published_ports() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  # label | .env mutation (sed) | ambient env | expected backend | expected frontend
+  local cases='defaults|||8080|3000
+env-file PORT|s/^PORT=8080/PORT=9100/||9100|3000
+env-file BACKEND_PORT|s/^# BACKEND_PORT=8080/BACKEND_PORT=9200/||9200|3000
+env-file API_PORT|s/^# API_PORT=8080/API_PORT=9300/||9300|3000
+env-file SERVER_PORT|s/^# SERVER_PORT=8080/SERVER_PORT=9400/||9400|3000
+env-file FRONTEND_PORT|s/^FRONTEND_PORT=3000/FRONTEND_PORT=3100/||8080|3100
+ambient PORT beats .env|s/^PORT=8080/PORT=9100/|PORT=9500|9500|3000
+ambient BACKEND_PORT beats .env|s/^PORT=8080/PORT=9100/|BACKEND_PORT=9600|9600|3000
+ambient API_PORT beats .env|s/^PORT=8080/PORT=9100/|API_PORT=9700|9700|3000
+ambient SERVER_PORT beats .env|s/^PORT=8080/PORT=9100/|SERVER_PORT=9800|9800|3000
+ambient FRONTEND_PORT beats .env|s/^FRONTEND_PORT=3000/FRONTEND_PORT=3100/|FRONTEND_PORT=3200|8080|3200
+empty ambient BACKEND_PORT falls through|s/^PORT=8080/PORT=9100/|BACKEND_PORT=|9100|3000
+empty env-file BACKEND_PORT falls through|s/^PORT=8080/PORT=9100/;s/^# BACKEND_PORT=8080/BACKEND_PORT=/||9100|3000'
+
+  local label mutation ambient expect_backend expect_frontend
+  while IFS='|' read -r label mutation ambient expect_backend expect_frontend; do
+    [ -n "$label" ] || continue
+
+    rm -rf "$tmp/server" "$tmp/stub-bin"
+    _setup_server_sandbox "$tmp"
+    cp "$tmp/server/.env.example" "$tmp/server/.env"
+    if [ -n "$mutation" ]; then
+      sed "$mutation" "$tmp/server/.env" >"$tmp/server/.env.new"
+      mv "$tmp/server/.env.new" "$tmp/server/.env"
+    fi
+
+    if [ -n "$ambient" ]; then
+      _run_with_server "$tmp" "$ambient" || return 1
+    else
+      _run_with_server "$tmp" || return 1
+    fi
+    _require_server_ports "$tmp" "$label" "$expect_backend" "$expect_frontend" || return 1
+  done <<<"$cases"
+}
+
+test_with_server_fails_when_compose_port_is_unavailable() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+
+  # Compose cannot report a port, e.g. the container never came up.
+  cat >"$tmp/stub-bin/docker" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+case "${1:-}" in
+  info) exit 0 ;;
+  compose)
+    for arg in "$@"; do
+      case "$arg" in
+        port) exit 1 ;;
+        version) echo "2.30.0"; exit 0 ;;
+      esac
+    done
+    exit 0
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$tmp/stub-bin/docker"
+
+  if _run_with_server "$tmp" >/dev/null 2>&1; then
+    echo "installer must not report success when Compose cannot report the port" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "could not read the backend host port" "$tmp/install.err"; then
+    echo "expected an explicit failure about the backend host port" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if grep -q "server is running and CLI is ready" "$tmp/install.out"; then
+    echo "installer claimed success despite an unresolved port" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_cli_lookup_failure_does_not_claim_up_to_date() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+
+  # The curl stub answers nothing, so the latest release cannot be determined.
+  # The installed CLI still works: the installer must say so instead of the old
+  # "Multica CLI is up to date (<old version>)".
+  _run_with_server "$tmp" || return 1
+
+  if grep -q "is up to date" "$tmp/install.out"; then
+    echo "installer claimed the CLI was up to date without knowing the latest release" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Could not determine the latest Multica CLI release" "$tmp/install.out" "$tmp/install.err"; then
+    echo "expected an explicit note that the latest CLI release could not be determined" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Multica server is running and CLI is ready" "$tmp/install.out"; then
+    echo "installer should still finish successfully with the installed CLI" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_with_server_fails_when_checkout_does_not_land() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+
+  # Every git call "succeeds", but HEAD never becomes the requested main. The
+  # installer used to print "Repository ready" and continue against whatever
+  # commit happened to be checked out.
+  cat >"$tmp/stub-bin/git" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  rev-parse)
+    case "$*" in
+      *origin/main*) printf '2222222222222222222222222222222222222222\n' ;;
+      *) printf '3333333333333333333333333333333333333333\n' ;;
+    esac
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$tmp/stub-bin/git"
+
+  if _run_with_server "$tmp" >/dev/null 2>&1; then
+    echo "installer must not report success when the checkout did not land on the requested ref" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Could not check out" "$tmp/install.err"; then
+    echo "expected an explicit failure about the checkout" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if grep -q "Repository ready" "$tmp/install.out"; then
+    echo "installer claimed the repository was ready despite a failed checkout" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# --with-server: a host port that is already taken must stop the installer
+# before anything is pulled or started, with a fix the user can act on (#883).
+# The port comes from Compose's own resolution, so an ambient override is
+# checked rather than the .env value.
+# ---------------------------------------------------------------------------
+_HELD_PORT=""
+_HELD_PORT_PID=""
+
+# Starts a real listener on 127.0.0.1 and sets _HELD_PORT / _HELD_PORT_PID.
+_hold_port() {
+  local port_file="$1/held-port"
+  rm -f "$port_file"
+  python3 -c '
+import os, socket, sys, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(16)
+s.settimeout(0.5)
+with open(sys.argv[1] + ".tmp", "w") as f:
+    f.write(str(s.getsockname()[1]))
+os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+deadline = time.time() + 120
+while time.time() < deadline:
+    try:
+        conn, _ = s.accept()
+        conn.close()
+    except socket.timeout:
+        pass
+' "$port_file" >/dev/null 2>&1 &
+  _HELD_PORT_PID=$!
+  for _ in $(seq 1 50); do
+    [ -s "$port_file" ] && break
+    sleep 0.1
+  done
+  _HELD_PORT="$(cat "$port_file")"
+}
+
+_release_port() {
+  if [ -n "$_HELD_PORT_PID" ]; then
+    kill "$_HELD_PORT_PID" 2>/dev/null || true
+    wait "$_HELD_PORT_PID" 2>/dev/null || true
+    _HELD_PORT_PID=""
+    _HELD_PORT=""
+  fi
+}
+
+# A port nothing listens on: bind an ephemeral one, then let it go.
+_free_port() {
+  python3 -c '
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+'
+}
+
+test_with_server_refuses_ports_already_in_use() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "skipping occupied-port tests: python3 not available" >&2
+    return 0
+  fi
+
+  local tmp held
+  tmp="$(mktemp -d)"
+  trap '_release_port; rm -rf "$tmp"' RETURN
+  _hold_port "$tmp"
+  held="$_HELD_PORT"
+
+  # label | .env mutation (sed) | ambient env | expected setting in the message
+  local cases="env-file PORT|s/^PORT=8080/PORT=$held/||PORT=<free port>
+ambient PORT beats .env||PORT=$held|PORT=<free port>
+env-file BACKEND_PORT|s/^# BACKEND_PORT=8080/BACKEND_PORT=$held/||PORT=<free port>
+env-file FRONTEND_PORT|s/^FRONTEND_PORT=3000/FRONTEND_PORT=$held/||FRONTEND_PORT=<free port>"
+
+  local label mutation ambient setting
+  while IFS='|' read -r label mutation ambient setting; do
+    [ -n "$label" ] || continue
+
+    rm -rf "$tmp/server" "$tmp/stub-bin"
+    _setup_server_sandbox "$tmp"
+    cp "$tmp/server/.env.example" "$tmp/server/.env"
+    if [ -n "$mutation" ]; then
+      sed "$mutation" "$tmp/server/.env" >"$tmp/server/.env.new"
+      mv "$tmp/server/.env.new" "$tmp/server/.env"
+    fi
+
+    local -a extra=(MULTICA_TEST_COMPOSE_CONFIG=1)
+    [ -z "$ambient" ] || extra+=("$ambient")
+    if _run_with_server "$tmp" "${extra[@]}" >/dev/null 2>&1; then
+      echo "[$label] installer must not continue when port $held is already in use" >&2
+      cat "$tmp/install.out" >&2 || true
+      return 1
+    fi
+    if ! grep -q "Port $held is already in use" "$tmp/install.err" ||
+      ! grep -qF "$setting" "$tmp/install.err"; then
+      echo "[$label] expected an actionable occupied-port error naming $held and $setting" >&2
+      cat "$tmp/install.err" >&2 || true
+      return 1
+    fi
+    if [ -f "$tmp/server/.stub-stack-up" ]; then
+      echo "[$label] installer started the stack despite the occupied port" >&2
+      return 1
+    fi
+  done <<<"$cases"
+}
+
+test_with_server_port_preflight_allows_free_and_own_ports() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "skipping occupied-port tests: python3 not available" >&2
+    return 0
+  fi
+
+  local tmp held free
+  tmp="$(mktemp -d)"
+  trap '_release_port; rm -rf "$tmp"' RETURN
+
+  # A free port goes straight through.
+  free="$(_free_port)"
+  _setup_server_sandbox "$tmp"
+  sed "s/^PORT=8080/PORT=$free/" "$tmp/server/.env.example" >"$tmp/server/.env"
+  _run_with_server "$tmp" MULTICA_TEST_COMPOSE_CONFIG=1 || return 1
+  _require_server_ports "$tmp" "free port" "$free" "3000" || return 1
+
+  # Re-running over this installation's own running stack: the port is busy
+  # only because Compose already publishes it for us, which is not a conflict.
+  _hold_port "$tmp"
+  held="$_HELD_PORT"
+  rm -rf "$tmp/server" "$tmp/stub-bin"
+  _setup_server_sandbox "$tmp"
+  sed "s/^PORT=8080/PORT=$held/" "$tmp/server/.env.example" >"$tmp/server/.env"
+  _run_with_server "$tmp" MULTICA_TEST_COMPOSE_CONFIG=1 MULTICA_TEST_STACK_RUNNING=1 || return 1
+  _require_server_ports "$tmp" "own running stack" "$held" "3000" || return 1
+}
+
+# A Compose release too old for the file's top-level `name:` (or no Compose v2
+# plugin at all) must stop the installer before anything is pulled or started,
+# with an error that says what to upgrade, instead of Compose's bare
+# "(root) Additional property name is not allowed" from `up` (#1401).
+_require_compose_preflight_failure() {
+  local tmp="$1" label="$2" expected="$3"
+
+  if grep -q "Pulling official Multica images" "$tmp/install.out" || [ -f "$tmp/server/.stub-stack-up" ]; then
+    echo "[$label] installer pulled or started the stack despite an unusable Docker Compose" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -qF "$expected" "$tmp/install.err"; then
+    echo "[$label] expected the error to contain: $expected" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+}
+
+test_with_server_stops_on_compose_too_old_for_name() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+  if _run_with_server "$tmp" MULTICA_TEST_COMPOSE_REJECTS_NAME=1 >/dev/null 2>&1; then
+    echo "installer must fail when Docker Compose rejects the self-host compose file" >&2
+    return 1
+  fi
+  _require_compose_preflight_failure "$tmp" "old compose" "Your Docker Compose is too old" || return 1
+  _require_compose_preflight_failure "$tmp" "old compose" "Found: Docker Compose version v2.2.3" || return 1
+  _require_compose_preflight_failure "$tmp" "old compose" "Additional property name is not allowed" || return 1
+}
+
+test_with_server_stops_without_compose_v2() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+  if _run_with_server "$tmp" MULTICA_TEST_NO_COMPOSE=1 >/dev/null 2>&1; then
+    echo "installer must fail when 'docker compose' is not available" >&2
+    return 1
+  fi
+  _require_compose_preflight_failure "$tmp" "no compose v2" "Docker Compose v2 is required" || return 1
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
 test_local_install_does_not_print_token_login_hint
+test_with_server_uses_compose_published_ports
+test_with_server_fails_when_compose_port_is_unavailable
+test_with_server_refuses_ports_already_in_use
+test_with_server_port_preflight_allows_free_and_own_ports
+test_with_server_stops_on_compose_too_old_for_name
+test_with_server_stops_without_compose_v2
+test_with_server_fails_when_checkout_does_not_land
+test_cli_lookup_failure_does_not_claim_up_to_date
 echo "install.sh tests passed"

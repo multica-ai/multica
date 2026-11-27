@@ -1,762 +1,427 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Check,
-  Clock,
-  Copy,
-  FileText,
-  Link2,
-  Loader2,
-  MessageSquare,
-  Plus,
-  SearchIcon,
-  ListChevronsDownUp,
-  ListChevronsUpDown,
-  Monitor,
-  Moon,
-  Sun,
-  type LucideIcon,
-} from "lucide-react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { ChevronRight, SearchIcon } from "@multica/ui/icons";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
+import { cn } from "@multica/ui/lib/utils";
 import { Command as CommandPrimitive } from "cmdk";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import type {
-  MemberWithUser,
-  SearchIssueResult,
-  SearchProjectResult,
-} from "@multica/core/types";
-import { api } from "@multica/core/api";
 import {
-  openCreateIssueWithPreference,
-  selectRecentIssues,
-  useCommentCollapseStore,
-  useRecentIssuesStore,
-  useResolvedExpandStore,
-} from "@multica/core/issues/stores";
-import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
-import { useWorkspaceId } from "@multica/core";
-import { useWorkspacePaths } from "@multica/core/paths";
-import type { WorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
+  selectCommandBarContexts,
+  useCommandBarContextStore,
+  useSearchStore,
+} from "@multica/core/command-bar";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { memberListOptions } from "@multica/core/workspace/queries";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { StatusIcon } from "../issues/components";
-import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
-import { ProjectIcon } from "../projects/components/project-icon";
-import { routeIconForPath } from "../layout/route-icon-components";
-import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
-import type { ProjectStatus } from "@multica/core/types";
-import { ActorAvatar } from "../common/actor-avatar";
-import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@multica/ui/components/ui/dialog";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
-import { copyText } from "@multica/ui/lib/clipboard";
-import { useNavigation } from "../navigation";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { resolveClickIntent, useIntentNavigate, type LinkClickIntent } from "../navigation";
 import { useT } from "../i18n";
-import { matchesPinyin } from "../editor/extensions/pinyin-match";
-import { HighlightText } from "./highlight-text";
-import { useSearchStore } from "./search-store";
+import { PaletteContext, type PaletteApi } from "./palette-context";
+import { PaletteFooter } from "./footer";
+import { PaletteHostDialogs } from "./host-dialogs";
+import { IssueShortcuts } from "./issue-shortcuts";
+import { clearPendingPalettePage, usePendingPalettePage } from "./palette-launch";
+import { PageView } from "./pages/page-view";
+import { RootView } from "./root-view";
+import { useRootModel } from "./use-root-model";
+import type { PaletteHostDialog, PaletteStackEntry } from "./types";
 
-// Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see SearchCommand body).
-// Only parameterless paths are valid nav destinations.
-type NavKey =
-  | "inbox"
-  | "myIssues"
-  | "issues"
-  | "projects"
-  | "agents"
-  | "runtimes"
-  | "skills"
-  | "settings";
+const ESCAPE = createShortcutChord("Escape");
 
-// No `icon` field: like the sidebar nav, a page's icon is derived from its
-// destination path via routeIconForPath, so all navigation surfaces show the
-// same icon for the same route.
-interface NavPage {
-  key: NavKey;
-  label: string;
-  keywords: string[];
-}
-
-type ThemeValue = "light" | "dark" | "system";
-
-function memberInitials(name: string) {
-  return name
-    .split(" ")
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-function matchesMember(member: MemberWithUser, query: string) {
-  return (
-    member.name.toLowerCase().includes(query) ||
-    member.email.toLowerCase().includes(query) ||
-    (query.length >= 3 && member.role.startsWith(query)) ||
-    matchesPinyin(member.name, query)
-  );
-}
-
-function IssueAssigneeAvatar({
-  assigneeType,
-  assigneeId,
-}: {
-  assigneeType?: string | null;
-  assigneeId?: string | null;
-}) {
-  if (!assigneeType || !assigneeId) return null;
-  return (
-    <ActorAvatar
-      actorType={assigneeType}
-      actorId={assigneeId}
-      size="sm"
-      profileLink={false}
-      className="shrink-0"
-    />
-  );
-}
-
-interface CommandItem {
-  key: string;
-  label: string;
-  icon: LucideIcon;
-  keywords: string[];
-  trailing?: React.ReactNode;
-  onSelect: () => void;
-}
-
-interface SearchResults {
-  issues: SearchIssueResult[];
-  projects: SearchProjectResult[];
-}
-
+/**
+ * ⌘K. The shell owns the dialog, the input, the page stack and the footer;
+ * what the palette offers comes from the pages on screen (registered contexts)
+ * and the search over workspace objects.
+ */
 export function SearchCommand() {
   const { t } = useT("search");
-  const navPages: NavPage[] = [
-    { key: "inbox", label: t(($) => $.pages.inbox), keywords: ["inbox", "notifications", "收件箱"] },
-    { key: "myIssues", label: t(($) => $.pages.my_issues), keywords: ["my", "issues", "assigned", "我的"] },
-    { key: "issues", label: t(($) => $.pages.issues), keywords: ["issues", "tasks", "bugs"] },
-    { key: "projects", label: t(($) => $.pages.projects), keywords: ["projects", "kanban", "项目"] },
-    { key: "agents", label: t(($) => $.pages.agents), keywords: ["agents", "bots", "ai"] },
-    { key: "runtimes", label: t(($) => $.pages.runtimes), keywords: ["runtimes", "environments"] },
-    { key: "skills", label: t(($) => $.pages.skills), keywords: ["skills", "library"] },
-    { key: "settings", label: t(($) => $.pages.settings), keywords: ["settings", "config", "preferences", "设置"] },
-  ];
-  const { push, pathname, getShareableUrl } = useNavigation();
+  const workspaceSlug = useWorkspaceSlug();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
-  const wsId = useWorkspaceId();
-  const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
-  const p: WorkspacePaths = useWorkspacePaths();
-  const { theme, setTheme } = useTheme();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-
-  // Resolve each recent issue via its cached detail entry. Recent items are
-  // typically already in the detail cache because the user has opened them;
-  // if not, this triggers a lookup per id so Recent never depends on whether
-  // the issue falls inside the paginated list cache.
-  const recentDetailQueries = useQueries({
-    queries: recentItems.map((item) => issueDetailOptions(wsId, item.id)),
-  });
-  const recentIssues = useMemo(
-    () =>
-      recentDetailQueries.flatMap((q) => (q.data ? [q.data] : [])),
-    [recentDetailQueries],
+  const launchPage = usePendingPalettePage();
+  const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  const openHostDialog = useCallback(
+    (dialog: PaletteHostDialog) => {
+      setOpen(false);
+      setHostDialog(dialog);
+    },
+    [setOpen],
   );
 
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
-  const [isLoading, setIsLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  return (
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          finalFocus={false}
+          className="top-[20%] translate-y-0 overflow-hidden rounded-xl! p-0 sm:max-w-[640px]!"
+          showCloseButton={false}
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t(($) => $.title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.description)}</DialogDescription>
+          </DialogHeader>
+          {/* The desktop shell survives workspace navigation. Reset its query,
+              selection and pending searches together with their workspace.
+              Base UI's Portal keeps the body mounted through the exit animation
+              and unmounts it once closed, so no `{open && ...}` gate is needed. */}
+          <PaletteBody
+            key={workspaceSlug}
+            active={open}
+            launchPage={launchPage}
+            close={close}
+            openHostDialog={openHostDialog}
+          />
+        </DialogContent>
+      </Dialog>
+      <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
+      <IssueShortcuts />
+    </>
+  );
+}
 
-  const filteredPages = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return navPages.filter(
-      (page) =>
-        page.label.toLowerCase().includes(q) ||
-        page.keywords.some((kw) => kw.includes(q)),
-    );
-  }, [query]);
+function PaletteBody({
+  active,
+  launchPage,
+  close,
+  openHostDialog,
+}: {
+  active: boolean;
+  /** The page an issue shortcut opened the palette on (`openPalettePage`). */
+  launchPage: PaletteStackEntry | null;
+  close: () => void;
+  openHostDialog: (dialog: PaletteHostDialog) => void;
+}) {
+  const intentNavigate = useIntentNavigate();
+  const [pageQuery, setPageQuery] = useState("");
+  const [stack, setStack] = useState<PaletteStackEntry[]>(() => (launchPage ? [launchPage] : []));
 
-  // Detect if current route is an issue detail page — /{slug}/issues/{id}.
-  // Falls back to null on any other route; used to gate issue-specific commands.
-  const currentIssueId = useMemo(() => {
-    const match = pathname.match(/\/issues\/([^/]+)$/);
-    const raw = match?.[1];
-    return raw ? decodeURIComponent(raw) : null;
-  }, [pathname]);
-  const { data: currentIssue = null } = useQuery({
-    ...issueDetailOptions(wsId, currentIssueId ?? ""),
-    enabled: !!currentIssueId,
-  });
-  const queryClient = useQueryClient();
+  // The body mounts as the palette opens, so the launch page is its first
+  // page; one that arrives while it is still mounted (reopened mid-exit)
+  // replaces the stack.
+  useEffect(() => {
+    if (!launchPage) return;
+    clearPendingPalettePage();
+    setStack((prev) => (prev.length === 1 && prev[0] === launchPage ? prev : [launchPage]));
+    setPageQuery("");
+  }, [launchPage]);
 
-  const commands = useMemo<CommandItem[]>(() => {
-    const activeThemeCheck = (value: ThemeValue) =>
-      theme === value ? (
-        <Check
-          aria-label={t(($) => $.commands.current_theme_aria)}
-          className="ml-auto size-4 shrink-0 text-muted-foreground"
-        />
-      ) : undefined;
+  // cmdk's onSelect carries no event, so the activating gesture's modifiers
+  // are recorded on the capture phase (click on a result, Enter in the input)
+  // and consumed by the select handlers below: cmd+click / cmd+Enter opens a
+  // result in a new tab instead of navigating in place.
+  const pendingIntentRef = useRef<LinkClickIntent>("push");
+  const recordIntent = useCallback(
+    (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => {
+      pendingIntentRef.current = resolveClickIntent(e);
+    },
+    [],
+  );
+  const consumeIntent = useCallback(() => {
+    const intent = pendingIntentRef.current;
+    pendingIntentRef.current = "push";
+    return intent;
+  }, []);
 
-    const items: CommandItem[] = [
-      {
-        key: "new-issue",
-        label: t(($) => $.commands.new_issue),
-        icon: Plus,
-        keywords: ["new", "issue", "create", "add"],
-        onSelect: () => {
-          openCreateIssueWithPreference();
-          setOpen(false);
-        },
+  const push = useCallback((entry: PaletteStackEntry) => {
+    setStack((prev) => [...prev, entry]);
+    setPageQuery("");
+  }, []);
+
+  const api = useMemo<PaletteApi>(
+    () => ({
+      close,
+      push,
+      navigate: (href, onNavigateInPlace) => {
+        close();
+        const intent = consumeIntent();
+        if (intent === "push") onNavigateInPlace?.();
+        intentNavigate(href, intent);
       },
-      {
-        key: "new-project",
-        label: t(($) => $.commands.new_project),
-        icon: Plus,
-        keywords: ["new", "project", "create", "add"],
-        onSelect: () => {
-          useModalStore.getState().open("create-project");
-          setOpen(false);
-        },
-      },
-    ];
-
-    if (currentIssueId && currentIssue) {
-      const identifier = currentIssue.identifier;
-      items.push(
-        {
-          key: "copy-issue-link",
-          label: t(($) => $.commands.copy_issue_link),
-          icon: Link2,
-          keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
-          onSelect: () => {
-            void copyText(getShareableUrl(pathname)).then((ok) => {
-              if (ok) toast.success(t(($) => $.toast.link_copied));
-            });
-            setOpen(false);
-          },
-        },
-        {
-          key: "copy-issue-identifier",
-          label: t(($) => $.commands.copy_identifier, { identifier }),
-          icon: Copy,
-          keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
-          onSelect: () => {
-            void copyText(identifier).then((ok) => {
-              if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
-            });
-            setOpen(false);
-          },
-        },
-        {
-          key: "fold-all-comments",
-          label: t(($) => $.commands.fold_all_comments),
-          icon: ListChevronsDownUp,
-          keywords: ["fold", "collapse", "comments", "收起", "折叠", "评论"],
-          onSelect: () => {
-            // The timeline is already cached whenever the issue page has
-            // rendered; ensureQueryData only fetches on a cold cache. If it
-            // still can't load, no comments are on screen — dropping the
-            // action matches the visible state.
-            void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
-              .then((entries) => {
-                useCommentCollapseStore
-                  .getState()
-                  .collapseAll(currentIssueId, rootCommentIds(entries));
-                useResolvedExpandStore.getState().collapseAll(currentIssueId);
-              })
-              .catch(() => {});
-            setOpen(false);
-          },
-        },
-        {
-          key: "unfold-all-comments",
-          label: t(($) => $.commands.unfold_all_comments),
-          icon: ListChevronsUpDown,
-          keywords: ["unfold", "expand", "comments", "展开", "评论"],
-          onSelect: () => {
-            void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
-              .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(currentIssueId);
-                useResolvedExpandStore
-                  .getState()
-                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
-              })
-              .catch(() => {});
-            setOpen(false);
-          },
-        },
-      );
-    }
-
-    items.push(
-      {
-        key: "theme-light",
-        label: t(($) => $.commands.switch_to_light),
-        icon: Sun,
-        keywords: ["light", "theme", "appearance", "mode", "bright"],
-        trailing: activeThemeCheck("light"),
-        onSelect: () => {
-          setTheme("light");
-          setOpen(false);
-        },
-      },
-      {
-        key: "theme-dark",
-        label: t(($) => $.commands.switch_to_dark),
-        icon: Moon,
-        keywords: ["dark", "theme", "appearance", "mode", "night"],
-        trailing: activeThemeCheck("dark"),
-        onSelect: () => {
-          setTheme("dark");
-          setOpen(false);
-        },
-      },
-      {
-        key: "theme-system",
-        label: t(($) => $.commands.use_system_theme),
-        icon: Monitor,
-        keywords: ["system", "theme", "appearance", "mode", "auto"],
-        trailing: activeThemeCheck("system"),
-        onSelect: () => {
-          setTheme("system");
-          setOpen(false);
-        },
-      },
-    );
-
-    return items;
-  }, [currentIssue, currentIssueId, getShareableUrl, pathname, queryClient, setOpen, setTheme, theme, t]);
-
-  const filteredCommands = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    // No query: only surface the primary creation action. Other commands
-    // (theme switches, copy actions, New Project) are revealed as the user
-    // types, leaving the empty-state space to Recent.
-    if (!q) return commands.filter((c) => c.key === "new-issue");
-    return commands.filter(
-      (c) =>
-        c.label.toLowerCase().includes(q) ||
-        c.keywords.some((kw) => kw.includes(q)),
-    );
-  }, [commands, query]);
-
-  const filteredMembers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const wantsAllMembers =
-      q.length >= 3 &&
-      ("members".startsWith(q) ||
-        "people".startsWith(q) ||
-        "users".startsWith(q) ||
-        "team".startsWith(q));
-    return members
-      .filter((member) => wantsAllMembers || matchesMember(member, q))
-      .slice(0, 10);
-  }, [members, query]);
-
-  const hasResults =
-    results.issues.length > 0 ||
-    results.projects.length > 0 ||
-    filteredMembers.length > 0;
+      openHostDialog,
+    }),
+    [close, consumeIntent, intentNavigate, openHostDialog, push],
+  );
 
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
-    if (!open) return;
+    if (!active) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        close();
       }
     };
     document.addEventListener("keydown", handleEsc, true);
     return () => document.removeEventListener("keydown", handleEsc, true);
-  }, [open, setOpen]);
-
-  // Cleanup debounce/abort on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
-
-  // Reset state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults({ issues: [], projects: [] });
-      setIsLoading(false);
-    }
-  }, [open]);
-
-  const search = useCallback((q: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (abortRef.current) abortRef.current.abort();
-
-    if (!q.trim()) {
-      setResults({ issues: [], projects: [] });
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    debounceRef.current = setTimeout(async () => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const [issueRes, projectRes] = await Promise.all([
-          api.searchIssues({
-            q: q.trim(),
-            limit: 20,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-          api.searchProjects({
-            q: q.trim(),
-            limit: 10,
-            include_closed: true,
-            signal: controller.signal,
-          }),
-        ]);
-        if (!controller.signal.aborted) {
-          setResults({
-            issues: issueRes.issues,
-            projects: projectRes.projects,
-          });
-          setIsLoading(false);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
-    }, 300);
-  }, []);
-
-  const handleValueChange = useCallback(
-    (value: string) => {
-      setQuery(value);
-      search(value);
-    },
-    [search],
-  );
-
-  const handleSelect = useCallback(
-    (value: string) => {
-      setOpen(false);
-      if (value.startsWith("project:")) {
-        // value is "project:<id>" — slice off the 8-char prefix to extract the id.
-        push(p.projectDetail(value.slice(8)));
-      } else {
-        push(p.issueDetail(value));
-      }
-    },
-    [push, setOpen, p],
-  );
-
-  const handlePageSelect = useCallback(
-    (key: NavKey) => {
-      setOpen(false);
-      push(p[key]());
-    },
-    [push, setOpen, p],
-  );
-
-  const handleMemberSelect = useCallback(
-    (userId: string) => {
-      push(p.memberDetail(userId));
-      setOpen(false);
-    },
-    [push, setOpen, p],
-  );
+  }, [active, close]);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent
-        finalFocus={false}
-        className="top-[20%] translate-y-0 overflow-hidden rounded-xl! p-0 sm:max-w-xl!"
-        showCloseButton={false}
+    <PaletteContext.Provider value={api}>
+      <PaletteFrame
+        active={active}
+        stack={stack}
+        setStack={setStack}
+        pageQuery={pageQuery}
+        setPageQuery={setPageQuery}
+        recordIntent={recordIntent}
+      />
+    </PaletteContext.Provider>
+  );
+}
+
+const PALETTE_NAV_DURATION = 0.14;
+const ENABLED_ITEM = '[cmdk-item=""]:not([aria-disabled="true"])';
+
+/** Keys cmdk moves the selection on: arrows, and ⌃N/⌃J/⌃P/⌃K. */
+function isSelectionKey(e: Pick<KeyboardEvent, "key" | "ctrlKey">) {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") return true;
+  return e.ctrlKey && (e.key === "n" || e.key === "j" || e.key === "p" || e.key === "k");
+}
+
+/** Everything that reads the palette API lives under its provider. */
+function PaletteFrame({
+  active,
+  stack,
+  setStack,
+  pageQuery,
+  setPageQuery,
+  recordIntent,
+}: {
+  active: boolean;
+  stack: PaletteStackEntry[];
+  setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
+  pageQuery: string;
+  setPageQuery: (value: string) => void;
+  recordIntent: (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => void;
+}) {
+  const { t } = useT("search");
+  const reduceMotion = useReducedMotion();
+  const entries = useCommandBarContextStore(selectCommandBarContexts);
+  const contexts = useMemo(() => entries.map((entry) => entry.context), [entries]);
+  const [rawQuery, setRawQuery] = useState("");
+  const current = stack[stack.length - 1] ?? null;
+  const inputValue = current ? pageQuery : rawQuery;
+
+  // The selected row's value. cmdk picks the first row only when it is empty.
+  const [selected, setSelected] = useState("");
+  // cmdk picks the first enabled row when the input changes, while the new
+  // query's server rows are still loading and disabled, and keeps that pick
+  // when they land above it. Until the user moves the selection, the effect
+  // below keeps it on the top row.
+  const selectionMovedRef = useRef(false);
+  const selectionScopeRef = useRef("");
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const prevDepthRef = useRef(stack.length);
+  const navDirectionRef = useRef<-1 | 0 | 1>(0);
+  if (stack.length !== prevDepthRef.current) {
+    navDirectionRef.current = stack.length > prevDepthRef.current ? 1 : -1;
+    prevDepthRef.current = stack.length;
+    // It names a row of the page left behind. Cleared before the new rows mount.
+    setSelected("");
+  }
+  const navDirection = navDirectionRef.current;
+  const pageKey = current ? `${stack.length}:${current.page.type}` : "root";
+  const selectionScope = `${pageKey}\n${inputValue}`;
+  if (selectionScope !== selectionScopeRef.current) {
+    selectionScopeRef.current = selectionScope;
+    selectionMovedRef.current = false;
+  }
+
+  const [listHeight, setListHeight] = useState<number | undefined>(undefined);
+  const [animateHeight, setAnimateHeight] = useState(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  // Keep list height smooth as filtering or subpage navigation changes the
+  // rendered rows, without animating from 0 on initial open or collapsing
+  // while the dialog exits.
+  useLayoutEffect(() => {
+    if (reduceMotion) {
+      setListHeight(undefined);
+      setAnimateHeight(false);
+      return;
+    }
+    const content = contentRef.current;
+    const list = listRef.current;
+    if (!content || !list || typeof ResizeObserver === "undefined") return;
+
+    let initialized = false;
+    let rafId = 0;
+    const syncHeight = () => {
+      if (!activeRef.current) return;
+      // offsetHeight ignores the dialog's zoom-in transform; a scaled
+      // getBoundingClientRect() read would pin the list at ~95% height.
+      const contentHeight = content.offsetHeight;
+      if (contentHeight <= 0) return;
+      const styles = getComputedStyle(list);
+      const padY =
+        (Number.parseFloat(styles.paddingTop) || 0) +
+        (Number.parseFloat(styles.paddingBottom) || 0);
+      const maxH = Number.parseFloat(styles.maxHeight);
+      const rawNext = contentHeight + padY;
+      const clamped = Number.isFinite(maxH) && maxH > 0 ? Math.min(rawNext, maxH) : rawNext;
+      setListHeight(clamped);
+      if (!initialized) {
+        initialized = true;
+        rafId = requestAnimationFrame(() => setAnimateHeight(true));
+      }
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(content);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [reduceMotion]);
+
+  // Reset scroll to the top and keep the caret at the end of any carried query
+  // when drilling into or returning from a subpage.
+  useLayoutEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+    if (navDirection === 0) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  }, [pageKey, navDirection]);
+
+  // Base UI's DialogPortal only mounts PaletteBody while open or exiting, so
+  // keeping `active: true` does not fetch while closed and prevents recent
+  // items and search results from clearing on frame 1 of the exit animation.
+  const model = useRootModel(rawQuery, contexts, { active: true });
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!active || !list || selectionMovedRef.current) return;
+    const first = list.querySelector(ENABLED_ITEM);
+    const value = first?.getAttribute("data-value");
+    if (!first || !value || value === selected) return;
+    setSelected(value);
+    // cmdk scrolls only selections it makes itself, and this one lands first.
+    list.scrollTop = 0;
+    first.scrollIntoView({ block: "nearest" });
+  }, [active, selected, model, current, pageQuery]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // cmdk's root handler intercepts Home/End for list navigation; stop
+    // propagation so the browser moves the text caret instead.
+    if (e.key === "Home" || e.key === "End") {
+      e.stopPropagation();
+      return;
+    }
+    if (e.key === "Backspace" && current && pageQuery === "") {
+      e.preventDefault();
+      setStack((prev) => prev.slice(0, -1));
+    }
+  };
+
+  return (
+    <>
+      <CommandPrimitive
+        data-mc="command-palette"
+        label={t(($) => $.title)}
+        shouldFilter={false}
+        value={selected}
+        onValueChange={setSelected}
+        onPointerDownCapture={recordIntent}
+        onClickCapture={recordIntent}
+        onKeyDownCapture={(e) => {
+          if (e.key === "Enter") {
+            recordIntent({ button: 0, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
+          }
+          if (isSelectionKey(e)) selectionMovedRef.current = true;
+        }}
+        className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
       >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{t(($) => $.title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.description)}
-          </DialogDescription>
-        </DialogHeader>
-        <CommandPrimitive
-          shouldFilter={false}
-          className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
-        >
-          {/* Search input */}
-          <div className="flex items-center gap-3 border-b px-4 py-3">
-            <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
-            <CommandPrimitive.Input
-              placeholder={t(($) => $.placeholder)}
-              value={query}
-              onValueChange={handleValueChange}
-              onKeyDown={(e) => {
-                // cmdk's root handler intercepts Home/End for list navigation;
-                // stop propagation so the browser moves the text caret instead.
-                if (e.key === "Home" || e.key === "End") {
-                  e.stopPropagation();
-                }
+        <div className="flex items-center gap-2 border-b px-4 py-3">
+          <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {current && (
+            <motion.nav
+              key={pageKey}
+              aria-label={t(($) => $.breadcrumb_aria)}
+              initial={reduceMotion ? false : { opacity: 0, x: -6 }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                transition: { duration: reduceMotion ? 0 : PALETTE_NAV_DURATION, ease: UI_EASE_OUT },
               }}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            <ShortcutKeycaps
-              shortcut={createShortcutChord("Escape")}
-              className="hidden shrink-0 sm:inline-flex"
-            />
-          </div>
+              className="flex min-w-0 shrink items-center gap-1"
+            >
+              {current.crumbs.map((crumb, index) => (
+                <Fragment key={`${index}:${crumb}`}>
+                  {index > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
+                  <span className="max-w-40 truncate rounded-md bg-muted px-1.5 py-0.5 text-caption font-medium">
+                    {crumb}
+                  </span>
+                </Fragment>
+              ))}
+            </motion.nav>
+          )}
+          <CommandPrimitive.Input
+            ref={inputRef}
+            autoFocus
+            placeholder={current ? t(($) => $.page_placeholder) : t(($) => $.placeholder)}
+            value={inputValue}
+            onValueChange={(value) => (current ? setPageQuery(value) : setRawQuery(value))}
+            onKeyDown={handleKeyDown}
+            onFocus={(e) => {
+              const end = e.currentTarget.value.length;
+              e.currentTarget.setSelectionRange(end, end);
+            }}
+            className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
+          />
+          <ShortcutKeycaps shortcut={ESCAPE} className="hidden shrink-0 sm:inline-flex" />
+        </div>
 
-          {/* Results list */}
-          <CommandPrimitive.List className="max-h-[min(400px,50vh)] overflow-y-auto overflow-x-hidden">
-            {/* Pages section — only shown when query matches */}
-            {filteredPages.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.pages)}
-                </div>
-                {filteredPages.map((page) => {
-                  const PageIcon = routeIconForPath(p[page.key]());
-                  return (
-                  <CommandPrimitive.Item
-                    key={page.key}
-                    value={`page:${page.key}`}
-                    onSelect={() => handlePageSelect(page.key)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <PageIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      <HighlightText text={page.label} query={query} />
-                    </span>
-                  </CommandPrimitive.Item>
-                  );
-                })}
-              </CommandPrimitive.Group>
-            )}
-
-            {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
-            {filteredCommands.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.commands)}
-                </div>
-                {filteredCommands.map((cmd) => (
-                  <CommandPrimitive.Item
-                    key={cmd.key}
-                    value={`command:${cmd.key}`}
-                    onSelect={cmd.onSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <cmd.icon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      <HighlightText text={cmd.label} query={query} />
-                    </span>
-                    {cmd.trailing}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {filteredMembers.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.members)}
-                </div>
-                {filteredMembers.map((member) => (
-                  <CommandPrimitive.Item
-                    key={member.user_id}
-                    value={`member:${member.user_id}`}
-                    onSelect={() => handleMemberSelect(member.user_id)}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <ActorAvatarBase
-                      name={member.name}
-                      initials={memberInitials(member.name)}
-                      avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-                      size="md"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate">
-                        <HighlightText text={member.name} query={query} />
-                      </div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        <HighlightText text={member.email} query={query} />
-                      </div>
-                    </div>
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {isLoading && (
-              <div className="flex items-center justify-center py-10">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
-            {!isLoading &&
-              query.trim() &&
-              !hasResults &&
-              filteredPages.length === 0 &&
-              filteredCommands.length === 0 && (
-                <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
-                  {t(($) => $.empty.no_results)}
-                </CommandPrimitive.Empty>
+        <CommandPrimitive.List
+          ref={listRef}
+          // cmdk selects the enabled row under a moving pointer, and nothing else.
+          onPointerMove={(e) => {
+            if ((e.target as Element).closest(ENABLED_ITEM)) selectionMovedRef.current = true;
+          }}
+          style={listHeight !== undefined ? { height: listHeight } : undefined}
+          className={cn(
+            "max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1",
+            animateHeight && "transition-[height] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+          )}
+        >
+          <div ref={contentRef}>
+            <motion.div
+              key={pageKey}
+              initial={reduceMotion || navDirection === 0 ? false : { opacity: 0, x: navDirection * 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{
+                duration: reduceMotion || navDirection === 0 ? 0 : PALETTE_NAV_DURATION,
+                ease: UI_EASE_OUT,
+              }}
+            >
+              {current ? (
+                <PageView page={current.page} query={pageQuery} />
+              ) : (
+                <RootView model={model} rawQuery={rawQuery} />
               )}
+            </motion.div>
+          </div>
+        </CommandPrimitive.List>
 
-            {!isLoading && results.projects.length > 0 && (
-              <CommandPrimitive.Group
-                heading={t(($) => $.groups.projects)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-              >
-                {results.projects.map((project) => (
-                  <CommandPrimitive.Item
-                    key={`project:${project.id}`}
-                    value={`project:${project.id}`}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <ProjectIcon project={project} size="md" />
-                      <span className="truncate">
-                        <HighlightText text={project.title} query={query} />
-                      </span>
-                      <span
-                        className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
-                      >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
-                      </span>
-                    </div>
-                    {project.match_source === "description" &&
-                      project.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={project.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && results.issues.length > 0 && (
-              <CommandPrimitive.Group
-                heading={t(($) => $.groups.issues)}
-                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-              >
-                {results.issues.map((issue) => (
-                  <CommandPrimitive.Item
-                    key={issue.id}
-                    value={issue.id}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <StatusIcon
-                        status={issue.status}
-                        className="size-4 shrink-0"
-                      />
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {issue.identifier}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">
-                        <HighlightText text={issue.title} query={query} />
-                      </span>
-                      <IssueAssigneeAvatar
-                        assigneeType={issue.assignee_type}
-                        assigneeId={issue.assignee_id}
-                      />
-                    </div>
-                    {issue.matched_description_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_description_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    {issue.matched_comment_snippet && (
-                      <div className="flex items-start gap-2 pl-[26px]">
-                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="text-xs text-muted-foreground truncate">
-                          <HighlightText
-                            text={issue.matched_comment_snippet}
-                            query={query}
-                          />
-                        </span>
-                      </div>
-                    )}
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && !query.trim() && recentIssues.length > 0 && (
-              <CommandPrimitive.Group className="p-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  <Clock className="size-3" />
-                  <span>{t(($) => $.groups.recent)}</span>
-                </div>
-                {recentIssues.map((item) => (
-                  <CommandPrimitive.Item
-                    key={item.id}
-                    value={item.id}
-                    onSelect={handleSelect}
-                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
-                  >
-                    <StatusIcon
-                      status={item.status}
-                      className="size-4 shrink-0"
-                    />
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {item.identifier}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                    <IssueAssigneeAvatar
-                      assigneeType={item.assignee_type}
-                      assigneeId={item.assignee_id}
-                    />
-                  </CommandPrimitive.Item>
-                ))}
-              </CommandPrimitive.Group>
-            )}
-
-            {!isLoading && !query.trim() && recentIssues.length === 0 && (
-              <div className="px-5 py-4 text-center text-xs text-muted-foreground">
-                {t(($) => $.empty.type_to_search)}
-              </div>
-            )}
-          </CommandPrimitive.List>
-        </CommandPrimitive>
-      </DialogContent>
-    </Dialog>
+        <PaletteFooter mode={current ? "page" : "root"} />
+      </CommandPrimitive>
+    </>
   );
 }

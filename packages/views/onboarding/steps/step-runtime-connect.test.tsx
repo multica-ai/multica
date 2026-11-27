@@ -1,3 +1,4 @@
+import { api } from "@multica/core/api";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,7 +7,13 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
+import enAgents from "../../locales/en/agents.json";
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
+  api: { initiateListModels: vi.fn() },
+}));
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding, agents: enAgents } };
 
 // Drive the runtime picker via a hoisted mock so the step renders without a
 // live daemon. (The onboarding_runtime_detected PostHog event this file used
@@ -37,9 +44,8 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   } as AgentRuntime;
 }
 
-function renderStep(props: { runtimesPending?: boolean } = {}) {
+function renderStep(props: { runtimesPending?: boolean; wsSlug?: string } = {}) {
   const onNext = vi.fn();
-  const onBack = vi.fn();
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -48,17 +54,33 @@ function renderStep(props: { runtimesPending?: boolean } = {}) {
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <StepRuntimeConnect
           wsId="ws_test"
+          wsSlug={props.wsSlug}
           onNext={onNext}
-          onBack={onBack}
           runtimesPending={props.runtimesPending}
         />
       </I18nProvider>
     </QueryClientProvider>,
   );
-  return { onNext, onBack };
+  return { onNext };
 }
 
 describe("StepRuntimeConnect", () => {
+  it("passes the onboarding workspace through the model chooser", async () => {
+    const initiate = vi.spyOn(api, "initiateListModels").mockResolvedValue({
+      id: "request-1", runtime_id: "rt_1", status: "completed", models: [],
+      supported: true, created_at: "2026-10-30T00:00:00Z", updated_at: "2026-10-30T00:00:00Z",
+    });
+    const rt = makeRuntime();
+    mocks.pickerState.runtimes = [rt];
+    mocks.pickerState.selected = rt;
+    mocks.pickerState.selectedId = rt.id;
+    mocks.pickerState.hasRuntimes = true;
+    renderStep({ wsSlug: "new-workspace" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(initiate).toHaveBeenCalledWith(rt.id, undefined, "new-workspace");
+    initiate.mockRestore();
+  });
+
   beforeEach(() => {
     mocks.pickerState.runtimes = [];
     mocks.pickerState.selected = null;
@@ -71,17 +93,10 @@ describe("StepRuntimeConnect", () => {
     vi.useRealTimers();
   });
 
-  it("mounts and shows the scanning UI without touching framework-level globals", () => {
+  it("does not render a permanently-disabled Mika action while scanning", () => {
     renderStep();
     expect(
-      screen.getByText(/connecting this computer/i),
-    ).toBeInTheDocument();
-  });
-
-  it("does not render a permanently-disabled Start exploring while scanning", () => {
-    renderStep();
-    expect(
-      screen.queryByRole("button", { name: /start exploring/i }),
+      screen.queryByRole("button", { name: /start with mika/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -123,15 +138,16 @@ describe("StepRuntimeConnect", () => {
     renderStep();
     act(() => vi.advanceTimersByTime(25000));
 
-    expect(
-      screen.getByText(/this computer is connected/i),
-    ).toBeInTheDocument();
+    // Assert on the runtime count row rather than headline copy: the phase is
+    // what this test is about, and keying on the headline made a copy edit
+    // look like a behaviour regression.
+    expect(screen.getByText(/1 agent runtime/i)).toBeInTheDocument();
     expect(
       screen.queryByText(/no agent runtime found/i),
     ).not.toBeInTheDocument();
-    // Continue is actionable in the found phase.
+    // Starting with Mika is actionable in the found phase.
     expect(
-      screen.getByRole("button", { name: /start exploring/i }),
+      screen.getByRole("button", { name: /start with mika/i }),
     ).toBeInTheDocument();
   });
 

@@ -129,9 +129,9 @@ export function Markdown({
   );
 
   const segments = useMemo(() => {
-    const processed = preprocessMobileMarkdown(content);
+    const processed = preprocessMobileMarkdown(content, attachments);
     return splitMarkdown(processed);
-  }, [content]);
+  }, [content, attachments]);
 
   const onLinkPress = useCallback(
     ({ url }: { url: string }) => {
@@ -142,6 +142,8 @@ export function Markdown({
       // return without falling through to Linking.
       //
       //   mention://issue/<uuid>   → navigate to that issue detail
+      //   mention://project/<uuid> → navigate to that project detail
+      //   mention://doc/<uuid>     → open the doc on web (no docs screen in the app)
       //   mention://member/<uuid>  → no-op (no member profile screen yet)
       //   mention://agent/<uuid>   → no-op (no agent profile screen yet)
       //   mention://squad/<uuid>   → no-op (no squad profile screen yet)
@@ -153,8 +155,18 @@ export function Markdown({
         if (slash < 0) return;
         const type = rest.slice(0, slash);
         const id = rest.slice(slash + 1);
-        if (type === "issue" && id && wsSlug) {
-          router.push(`/${wsSlug}/issue/${id}`);
+        if (id && wsSlug) {
+          // Route segments are singular on mobile (`/issue/`, `/project/`)
+          // while the mention type and web's route are the same word — keep
+          // the mapping explicit so a new type can't silently no-op.
+          if (type === "issue") router.push(`/${wsSlug}/issue/${id}`);
+          else if (type === "project") router.push(`/${wsSlug}/project/${id}`);
+          else if (type === "doc") {
+            const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
+            if (webUrl) {
+              Linking.openURL(`${webUrl}/${wsSlug}/docs/${id}`).catch(() => {});
+            }
+          }
         }
         return;
       }

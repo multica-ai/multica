@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -22,6 +24,36 @@ func TestSkillBundleCacheLoadStore(t *testing.T) {
 	}
 }
 
+func TestSkillBundleCacheStoreRetriesRenameWhenDestinationExists(t *testing.T) {
+	cache := NewSkillBundleCache(t.TempDir())
+	bundle := testSkillBundle()
+	ref := skillRefFromBundle(bundle)
+	renameCalls := 0
+	cache.rename = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 1 {
+			if err := os.MkdirAll(newPath, 0o755); err != nil {
+				return err
+			}
+			return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: fs.ErrExist}
+		}
+		return os.Rename(oldPath, newPath)
+	}
+
+	if err := cache.Store("ws-1", bundle); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if renameCalls != 2 {
+		t.Fatalf("rename calls = %d, want 2", renameCalls)
+	}
+	if _, ok := cache.Load("ws-1", ref); !ok {
+		t.Fatal("expected cache hit after EEXIST recovery")
+	}
+	if _, err := os.Stat(filepath.Dir(cache.bundlePath("ws-1", ref))); err != nil {
+		t.Fatalf("stat stored bundle directory: %v", err)
+	}
+}
+
 func TestSkillBundleCacheRejectsCorruptBundle(t *testing.T) {
 	cache := NewSkillBundleCache(t.TempDir())
 	bundle := testSkillBundle()
@@ -39,6 +71,17 @@ func TestSkillBundleCacheRejectsCorruptBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected corrupt cache file to be removed, stat err=%v", err)
+	}
+}
+
+// The complete path matrix lives beside skill.IsSafeFilePath. This test only
+// verifies that the daemon wrapper uses the shared contract.
+func TestSafeSkillFilePathUsesSharedContract(t *testing.T) {
+	if !safeSkillFilePath("references/example.md") {
+		t.Fatal("expected canonical nested path to be accepted")
+	}
+	if safeSkillFilePath("C:/outside.txt") {
+		t.Fatal("expected Windows drive path to be rejected")
 	}
 }
 

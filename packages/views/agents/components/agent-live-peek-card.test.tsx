@@ -17,6 +17,7 @@ vi.mock("@multica/core/hooks", () => ({
 // Paths only needs issueDetail for the "Now on" link. A simple stub keeps the
 // test free of WorkspaceSlugProvider wiring.
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/test/issues/${id}`,
   }),
@@ -197,7 +198,7 @@ describe("AgentLivePeekCard", () => {
     expect(screen.getByText("Working")).toBeInTheDocument();
     // identifier + title both render under the same link.
     const link = screen.getByRole("link", { name: /MUL-42/ });
-    expect(link).toHaveAttribute("href", "/test/issues/issue-42");
+    expect(link).toHaveAttribute("href", "/test/issues/MUL-42");
     expect(link.textContent).toContain("Wire up live peek");
   });
 
@@ -250,6 +251,36 @@ describe("AgentLivePeekCard", () => {
     renderCard();
 
     expect(screen.getByText("Idle")).toBeInTheDocument();
+    expect(screen.getByText(enAgents.live_peek.failed_indicator)).toBeInTheDocument();
+  });
+
+  it("ignores cancelled tasks when picking last activity", () => {
+    mockPresence.current = {
+      availability: "online",
+      workload: "idle",
+      runningCount: 0,
+      queuedCount: 0,
+      capacity: 1,
+    };
+    // The snapshot endpoint never returns cancelled rows, but the card must
+    // not treat one as an outcome if it ever does: cancel is a procedural
+    // signal, so a newer cancellation must not mask the older real failure.
+    mockSnapshot.current = [
+      makeTask({
+        id: "task-failed",
+        status: "failed",
+        completed_at: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      }),
+      makeTask({
+        id: "task-cancelled",
+        status: "cancelled",
+        completed_at: new Date(Date.now() - 1 * 60 * 1000).toISOString(),
+      }),
+    ];
+
+    renderCard();
+
+    expect(screen.getByText(/10m ago/)).toBeInTheDocument();
     expect(screen.getByText(enAgents.live_peek.failed_indicator)).toBeInTheDocument();
   });
 });

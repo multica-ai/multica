@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import type { Agent, ChatSession, Project } from "@multica/core/types";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { Agent, ChatPendingTask, ChatSession, Project } from "@multica/core/types";
 
 interface QueuedRestore {
   id: string;
@@ -53,8 +53,15 @@ const h = vi.hoisted(() => {
       store.pendingSendRestores = next;
     }),
   };
+  const queryClient = {
+    getQueryData: vi.fn(),
+    setQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(),
+  };
   return {
     store,
+    queryClient,
     archivedMutate: vi.fn(),
     markReadMutate: vi.fn(),
     // Stable across renders so tests can assert on it; lazy-creates the session
@@ -69,6 +76,8 @@ const h = vi.hoisted(() => {
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
     projects: [] as Project[],
+    pendingTask: null as ChatPendingTask | null,
+    messagesQueryEnabled: undefined as boolean | undefined,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -76,6 +85,9 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/platform", () => ({
+  getCurrentWsId: () => "ws-1",
+}));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
     sel({ user: { id: "user-1" } }),
@@ -87,14 +99,36 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/projects/queries", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
-vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
+// Steerable per test: the invoke rule is what decides whether an OPEN session's
+// agent is still runnable. Default true so every existing case is unaffected.
+const invokableAgentIds = vi.hoisted(() => ({ current: null as string[] | null }));
+vi.mock("../../issues/components/pickers/assignee-picker", () => ({
+  canAssignAgent: (agent: { id: string }) =>
+    invokableAgentIds.current === null ||
+    invokableAgentIds.current.includes(agent.id),
+}));
 vi.mock("@multica/core/api", () => ({
-  api: { sendChatMessage: vi.fn(), cancelTaskById: vi.fn() },
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+    }
+  },
+  api: {
+    sendChatMessage: vi.fn(),
+    cancelTaskById: vi.fn(),
+    clearQueuedChatTasks: vi.fn(),
+    prioritizeQueuedChatTask: vi.fn(),
+  },
   // Names the 403 that a revoked invoke permission raises (MUL-4525); plain
   // failures have no reason code.
   dispatchReasonCode: () => undefined,
 }));
 vi.mock("@multica/core/agents", () => ({
+  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
+    agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
   useWorkspaceAgentAvailability: () => "available",
 }));
@@ -139,28 +173,30 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("members")) {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
+      if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
+      if (key.includes("pending-task")) return { data: h.pendingTask };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
-    useInfiniteQuery: () => ({
-      data: undefined,
-      isLoading: false,
-      fetchNextPage: vi.fn(),
-      hasNextPage: false,
-      isFetchingNextPage: false,
-    }),
-    useQueryClient: () => ({
-      getQueryData: vi.fn(),
-      setQueryData: vi.fn(),
-      invalidateQueries: vi.fn(),
-    }),
+    useInfiniteQuery: (options: { enabled?: boolean }) => {
+      h.messagesQueryEnabled = options.enabled;
+      return {
+        data: undefined,
+        isLoading: false,
+        fetchNextPage: vi.fn(),
+        hasNextPage: false,
+        isFetchingNextPage: false,
+      };
+    },
+    useQueryClient: () => h.queryClient,
   };
 });
 
 import { useChatController } from "./use-chat-controller";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -181,21 +217,37 @@ function makeSession(
   };
 }
 
-const agentA = { id: "agent-a", name: "Alpha" } as unknown as Agent;
-const agentB = { id: "agent-b", name: "Beta" } as unknown as Agent;
+const agentA = {
+  id: "agent-a",
+  name: "Alpha",
+  runtime_id: "runtime-a",
+  runtime_bound: true,
+} as unknown as Agent;
+const agentB = {
+  id: "agent-b",
+  name: "Beta",
+  runtime_id: "runtime-b",
+  runtime_bound: true,
+} as unknown as Agent;
 
 // Descending updated_at → sortChatSessions renders them sA, sB, sC.
 const sA = makeSession({ id: "sA", agent_id: "agent-a", updated_at: "2026-07-08T03:00:00Z" });
 const sB = makeSession({ id: "sB", agent_id: "agent-b", updated_at: "2026-07-08T02:00:00Z" });
 const sC = makeSession({ id: "sC", agent_id: "agent-a", updated_at: "2026-07-08T01:00:00Z" });
 
-function setup(activeSessionId: string | null, sessions: ChatSession[], agents: Agent[]) {
+function setup(
+  activeSessionId: string | null,
+  sessions: ChatSession[],
+  agents: Agent[],
+  pendingTask: ChatPendingTask | null = null,
+) {
   h.store.activeSessionId = activeSessionId;
   h.store.selectedAgentId = null;
   h.store.selectedProjectId = null;
   h.sessions = sessions;
   h.agents = agents;
   h.projects = [];
+  h.pendingTask = pendingTask;
   const { result } = renderHook(() => useChatController());
   // Ignore any render-time store writes (self-heal etc.); we assert only the
   // effect of the call under test.
@@ -351,6 +403,39 @@ describe("useChatController project context", () => {
     );
   });
 
+  it("creates the session untitled and refetches the list once the first send lands", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA];
+    h.queryClient.invalidateQueries.mockClear();
+    h.queryClient.cancelQueries.mockClear();
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const { result } = renderHook(() => useChatController());
+    await act(async () => {
+      await result.current.handleSend("# Release checklist\nmore", undefined, vi.fn());
+    });
+
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ title: expect.anything() }),
+    );
+    const sessionsKey = { queryKey: chatKeys.sessions("ws-1") };
+    expect(h.queryClient.cancelQueries).toHaveBeenCalledWith(sessionsKey);
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(sessionsKey);
+    const cancelOrder = h.queryClient.cancelQueries.mock.invocationCallOrder[0]!;
+    const refetchOrder = h.queryClient.invalidateQueries.mock.calls.findIndex(
+      ([arg]) => JSON.stringify(arg) === JSON.stringify(sessionsKey),
+    );
+    expect(cancelOrder).toBeLessThan(
+      h.queryClient.invalidateQueries.mock.invocationCallOrder[refetchOrder]!,
+    );
+  });
+
   it("does not inherit the current session project when starting a new chat", () => {
     const projectSession = makeSession({
       id: "project-session",
@@ -416,6 +501,77 @@ describe("useChatController project context", () => {
     expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).toHaveBeenCalledWith(projectSession.id);
   });
+
+  it("ignores picking the agent that is already active", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedAgentId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentA));
+
+    expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft project when switching agent before the first send", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.store.selectedProjectId = project.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(project.id);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
+  it("drops the open session's project when switching agent away from it", () => {
+    const projectSession = makeSession({
+      id: "project-session",
+      agent_id: "agent-a",
+      project_id: project.id,
+    });
+    h.store.activeSessionId = projectSession.id;
+    h.sessions = [projectSession];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("useChatController message loading", () => {
+  it("does not load the open session's messages while its surface is hidden", () => {
+    h.store.activeSessionId = "session-1";
+    h.sessions = [makeSession({ id: "session-1", agent_id: "agent-a" })];
+
+    const { rerender } = renderHook(
+      ({ isActive }) => useChatController({ isActive }),
+      { initialProps: { isActive: false } },
+    );
+    expect(h.messagesQueryEnabled).toBe(false);
+
+    rerender({ isActive: true });
+    expect(h.messagesQueryEnabled).toBe(true);
+  });
 });
 
 describe("useChatController.advanceSelectionAfterArchive", () => {
@@ -427,8 +583,12 @@ describe("useChatController.advanceSelectionAfterArchive", () => {
 
   it("advances to the next chat and syncs the selected agent across agents", () => {
     const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sA));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sA);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "sB", direction: "next" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("sB");
     // The next chat belongs to a different agent — selectedAgentId must follow
     // so a subsequent "new chat" defaults to the right agent (the review bug).
@@ -441,32 +601,48 @@ describe("useChatController.advanceSelectionAfterArchive", () => {
     const a1 = makeSession({ id: "a1", agent_id: "agent-a", updated_at: "2026-07-08T03:00:00Z" });
     const a2 = makeSession({ id: "a2", agent_id: "agent-a", updated_at: "2026-07-08T02:00:00Z" });
     const result = setup("a1", [a1, a2], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(a1));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(a1);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "a2", direction: "next" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("a2");
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
 
   it("falls back to the previous chat when archiving the last open one", () => {
     const result = setup("sC", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sC));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sC);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: "sB", direction: "prev" });
     expect(h.store.setActiveSession).toHaveBeenCalledWith("sB");
   });
 
   it("clears the selection when archiving the only chat", () => {
     const only = makeSession({ id: "only", agent_id: "agent-a" });
     const result = setup("only", [only], [agentA]);
-    act(() => result.current.advanceSelectionAfterArchive(only));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(only);
+    });
 
+    expect(outcome).toEqual({ moved: true, targetSessionId: null, direction: null });
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
 
   it("is a no-op when the archived chat is not the open one", () => {
     const result = setup("sB", [sA, sB, sC], [agentA, agentB]);
-    act(() => result.current.advanceSelectionAfterArchive(sA));
+    let outcome;
+    act(() => {
+      outcome = result.current.advanceSelectionAfterArchive(sA);
+    });
 
+    expect(outcome).toEqual({ moved: false });
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
     expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
   });
@@ -478,6 +654,315 @@ describe("useChatController.archiveSession", () => {
     act(() => result.current.archiveSession("sA"));
 
     expect(h.archivedMutate).toHaveBeenCalledWith({ sessionId: "sA", archived: true });
+  });
+});
+
+describe("useChatController queued task actions", () => {
+  beforeEach(() => {
+    vi.mocked(api.cancelTaskById).mockReset();
+    vi.mocked(api.clearQueuedChatTasks).mockReset();
+    vi.mocked(api.prioritizeQueuedChatTask).mockReset();
+    h.removeFromCaches.mockClear();
+    h.store.enqueuePendingSendRestore.mockClear();
+    h.store.pendingSendRestores = {};
+    h.queryClient.getQueryData.mockReset();
+    h.queryClient.setQueryData.mockReset();
+    h.queryClient.invalidateQueries.mockReset();
+    h.queryClient.cancelQueries.mockReset();
+  });
+
+  it("recovers an edited queued prompt through durable draft restore", async () => {
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-queued",
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Revise this follow-up",
+        restore_to_input: true,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleEditQueuedTask("task-queued");
+    });
+
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-queued", {
+      queuedAction: "edit",
+      sessionId: "sA",
+    });
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-queued",
+    );
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["draft-restores"]) }),
+    );
+  });
+
+  it("uses durable edit cancellation when Stop targets a queued head", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      supports_queue: true,
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: taskId,
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, {
+        queuedAction: "edit",
+        sessionId: "sA",
+      });
+    });
+  });
+
+  it("keeps the legacy synchronous restore path when queue capability is absent", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: taskId,
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Keep this prompt",
+        restore_to_input: true,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, undefined);
+      expect(h.store.enqueuePendingSendRestore).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "Keep this prompt" }),
+      );
+    });
+  });
+
+  it("falls back to active cancellation when a derived queued Stop loses the claim race", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      supports_queue: true,
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById)
+      .mockRejectedValueOnce(new ApiError("task is no longer queued", 409, "Conflict"))
+      .mockResolvedValueOnce({
+        id: taskId,
+        cancelled_chat_message: {
+          chat_session_id: "sA",
+          message_id: "message-queued",
+          content: "Stop and restore this",
+          restore_to_input: true,
+          attachments: [],
+        },
+      } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenNthCalledWith(1, taskId, {
+        queuedAction: "edit",
+        sessionId: "sA",
+      });
+      expect(api.cancelTaskById).toHaveBeenNthCalledWith(2, taskId);
+      expect(h.store.enqueuePendingSendRestore).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "Stop and restore this" }),
+      );
+    });
+  });
+
+  it("removes a queued prompt without restoring it", async () => {
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-queued",
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Discard this follow-up",
+        restore_to_input: false,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleRemoveQueuedTask("task-queued");
+    });
+
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-queued", {
+      queuedAction: "remove",
+      sessionId: "sA",
+    });
+    expect(h.removeFromCaches).toHaveBeenCalled();
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+  });
+
+  it("restores the pending snapshot when queued-only cancellation loses a race", async () => {
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-queued", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new Error("task is no longer queued"));
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleRemoveQueuedTask("task-queued");
+    });
+
+    expect(h.queryClient.setQueryData).toHaveBeenLastCalledWith(
+      expect.anything(),
+      pending,
+    );
+  });
+
+  it("refetches the durable restore when a queued edit response is lost", async () => {
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new Error("response lost"));
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleEditQueuedTask("task-queued");
+    });
+
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["draft-restores"]) }),
+    );
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+  });
+
+  it("clears the queue with one session-scoped request", async () => {
+    vi.mocked(api.clearQueuedChatTasks).mockResolvedValue();
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        {
+          task_id: "task-1",
+          status: "queued",
+          created_at: "2026-07-01T00:00:01Z",
+          message_id: "message-1",
+        },
+        {
+          task_id: "task-2",
+          status: "queued",
+          created_at: "2026-07-01T00:00:02Z",
+          message_id: "message-2",
+        },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleClearQueuedTasks();
+    });
+
+    expect(api.clearQueuedChatTasks).toHaveBeenCalledTimes(1);
+    expect(api.clearQueuedChatTasks).toHaveBeenCalledWith("sA");
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-1",
+    );
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-2",
+    );
+  });
+
+  it("refetches messages when the clear response is lost", async () => {
+    vi.mocked(api.clearQueuedChatTasks).mockRejectedValue(new Error("response lost"));
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleClearQueuedTasks();
+    });
+
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["messages"]) }),
+    );
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["messages-page"]) }),
+    );
+  });
+
+  it("prioritizes send-now before stopping the active task", async () => {
+    vi.mocked(api.prioritizeQueuedChatTask).mockResolvedValue({
+      task_id: "task-queued",
+      active_task_id: "task-active",
+    });
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-active",
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-queued", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.handleSendQueuedTaskNow("task-queued");
+    });
+
+    expect(api.prioritizeQueuedChatTask).toHaveBeenCalledWith("sA", "task-queued");
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-active", undefined);
+    expect(
+      vi.mocked(api.prioritizeQueuedChatTask).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(api.cancelTaskById).mock.invocationCallOrder[0]!);
+  });
+
+  it("restores the pending snapshot when send-now loses a queued race", async () => {
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-first", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+        { task_id: "task-stale", status: "queued", created_at: "2026-07-01T00:00:02Z" },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.prioritizeQueuedChatTask).mockRejectedValue(
+      new Error("task is no longer queued"),
+    );
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleSendQueuedTaskNow("task-stale");
+    });
+
+    expect(h.queryClient.setQueryData).toHaveBeenLastCalledWith(
+      expect.anything(),
+      pending,
+    );
   });
 });
 
@@ -713,6 +1198,7 @@ describe("useChatController.handleSend — compose target tracking", () => {
     h.store.setActiveSession.mockClear();
     h.createSessionMutate.mockClear();
     h.createSessionMutate.mockResolvedValue({ id: "new-session" });
+    vi.mocked(api.sendChatMessage).mockClear();
     vi.mocked(api.sendChatMessage).mockResolvedValue({
       message_id: "msg-1",
       task_id: "task-1",
@@ -741,6 +1227,32 @@ describe("useChatController.handleSend — compose target tracking", () => {
     };
   }
 
+  it("keeps the active retry and stores guidance under its root input owner", async () => {
+    h.pendingTask = { task_id: "running-task", status: "running", supports_queue: true };
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "guidance", task_id: "running-task", message_task_id: "root-task", steered: true,
+      created_at: "2026-01-01T00:00:00Z", message_created_at: "2026-01-01T00:01:00Z",
+    });
+    h.queryClient.setQueryData.mockClear();
+    const { send, commitInput } = sendFrom("sA");
+    await send();
+    expect(h.queryClient.setQueryData.mock.calls.filter(([key]) =>
+      JSON.stringify(key) === JSON.stringify(chatKeys.pendingTask("sA"))))
+      .toHaveLength(0);
+    const cacheWrite = h.queryClient.setQueryData.mock.calls.find(([key]) =>
+      JSON.stringify(key) === JSON.stringify(chatKeys.messages("sA")));
+    expect(cacheWrite).toBeDefined();
+    expect(cacheWrite![1](undefined)).toEqual([
+      expect.objectContaining({
+        id: "guidance",
+        task_id: "root-task",
+        created_at: "2026-01-01T00:01:00Z",
+      }),
+    ]);
+    expect(commitInput).toHaveBeenCalled();
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+  });
+
   it("scrubs the composer after a new chat's first send", async () => {
     const { commitInput, send } = sendFrom(null);
     await send();
@@ -749,6 +1261,25 @@ describe("useChatController.handleSend — compose target tracking", () => {
       expect.objectContaining({ clearEditor: true, extraDraftKeys: ["new-session"] }),
     );
     expect(h.store.setActiveSession).toHaveBeenCalledWith("new-session");
+  });
+
+  it("does not create or send a chat for an unbound agent", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = "agent-a";
+    h.sessions = [];
+    h.agents = [{ ...agentA, runtime_id: "", runtime_bound: false }];
+    const { result } = renderHook(() => useChatController());
+    const commitInput = vi.fn();
+
+    let sent = true;
+    await act(async () => {
+      sent = await result.current.handleSend("hello", undefined, commitInput);
+    });
+
+    expect(sent).toBe(false);
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(commitInput).not.toHaveBeenCalled();
   });
 
   it("scrubs the composer even if the agent picker moved mid-send", async () => {
@@ -802,5 +1333,56 @@ describe("useChatController.handleSend — compose target tracking", () => {
     expect(commitInput).toHaveBeenCalledWith(
       expect.objectContaining({ clearEditor: true, extraDraftKeys: ["sA"] }),
     );
+  });
+});
+
+// MUL-6380: a chat session outlives the permission that created it. The agent can
+// be flipped to personal, change owner, or drop this member from its allow-list;
+// the server keeps serving the transcript (view gate) but refuses every send
+// (invoke gate, MUL-4525). The controller must reach that verdict up front so the
+// composer is read-only, instead of the user learning it from a 403 after typing.
+describe("useChatController revoked invoke permission", () => {
+  const revokedSession = makeSession({ id: "revoked", agent_id: "agent-a" });
+
+  beforeEach(() => {
+    h.createSessionMutate.mockClear();
+    vi.mocked(api.sendChatMessage).mockClear();
+  });
+
+  afterEach(() => {
+    invokableAgentIds.current = null;
+  });
+
+  it("flags the open session's agent as revoked while still resolving it", () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    // Still bound — the transcript stays readable and the header keeps naming
+    // the real agent; only running is refused.
+    expect(result.current.activeAgent?.id).toBe("agent-a");
+    expect(result.current.isAgentAccessRevoked).toBe(true);
+    // Not conflated with the retired-agent state, which has different copy.
+    expect(result.current.isAgentArchived).toBe(false);
+  });
+
+  it("does not flag an agent the user may still invoke", () => {
+    invokableAgentIds.current = ["agent-a"];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    expect(result.current.isAgentAccessRevoked).toBe(false);
+  });
+
+  it("refuses the send instead of letting the server reject it", async () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    let sent: boolean | undefined;
+    await act(async () => {
+      sent = await result.current.handleSend("are you there?");
+    });
+
+    expect(sent).toBe(false);
+    expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
   });
 });

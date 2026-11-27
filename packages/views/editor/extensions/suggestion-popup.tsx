@@ -5,32 +5,9 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
-
-/**
- * Keys that accept the currently highlighted suggestion row.
- *
- * `Enter` is the canonical accept (WAI-ARIA combobox guidance). Plain `Tab` is
- * an additive convenience that matches terminal / CLI / editor completion
- * muscle memory (MUL-3685). `Shift+Tab` and any `Ctrl/Cmd/Alt + Tab` are
- * deliberately NOT accept keys: they stay reverse focus navigation / OS window
- * switching, so standard keyboard accessibility is preserved.
- *
- * Centralizing the rule here keeps every picker built on
- * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
- * future suggestion list) consistent instead of each list re-deciding what
- * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
- * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.
- */
-export function isPickerAcceptKey(event: KeyboardEvent): boolean {
-  if (event.key === "Enter") return true;
-  return (
-    event.key === "Tab" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey
-  );
-}
+import { prefersReducedMotion } from "@multica/core/appearance";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
+import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -41,10 +18,14 @@ interface SuggestionPopupRenderOptions<
   pluginKey: PluginKey;
   component: ComponentType<TComponentProps>;
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
+  /** Refresh an active popup when its externally supplied catalog changes. */
+  subscribe?: (refresh: () => void) => () => void;
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
   ) => boolean;
+  /** Preferred side; `flip` still moves it when that side lacks room. */
+  placement?: "top-start" | "bottom-start";
 }
 
 export function createSuggestionPopupRender<
@@ -56,23 +37,53 @@ export function createSuggestionPopupRender<
   pluginKey,
   component,
   getProps,
+  subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let unsubscribe: (() => void) | undefined;
+    let currentProps: SuggestionProps<TItem, TSelected> | null = null;
+    let entered = false;
 
     const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      currentProps = null;
+      entered = false;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
       removeAutoUpdate = null;
-      renderer?.destroy();
-      renderer = null;
-      popup?.remove();
+      const exitingPopup = popup;
+      const exitingRenderer = renderer;
       popup = null;
+      renderer = null;
+      if (exitingPopup && typeof exitingPopup.animate === "function" && !prefersReducedMotion()) {
+        const side = exitingPopup.dataset.side === "bottom" ? "bottom" : "top";
+        const dy = side === "top" ? 4 : -4;
+        exitingPopup.style.pointerEvents = "none";
+        const anim = exitingPopup.animate(
+          [
+            { opacity: 1, transform: "translateY(0) scale(1)" },
+            { opacity: 0, transform: `translateY(${dy}px) scale(0.97)` },
+          ],
+          { duration: UI_MOTION_DURATION.micro * 1000, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" },
+        );
+        const finish = () => {
+          exitingRenderer?.destroy();
+          exitingPopup.remove();
+        };
+        anim.onfinish = finish;
+        anim.oncancel = finish;
+      } else {
+        exitingRenderer?.destroy();
+        exitingPopup?.remove();
+      }
     };
 
     const requestExit = (props: SuggestionProps<TItem, TSelected>) => {
@@ -80,9 +91,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };
@@ -136,7 +148,8 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The Docs block menu opts into `bottom-start`: it reads down the page.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),
@@ -166,7 +179,23 @@ export function createSuggestionPopupRender<
         if (popup !== el) return;
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
-        el.dataset.side = placement.startsWith("top") ? "top" : "bottom";
+        const side = placement.startsWith("top") ? "top" : "bottom";
+        el.dataset.side = side;
+        if (!entered) {
+          entered = true;
+          el.style.opacity = "";
+          el.style.transformOrigin = side === "top" ? "bottom left" : "top left";
+          if (typeof el.animate === "function" && !prefersReducedMotion()) {
+            const dy = side === "top" ? 4 : -4;
+            el.animate(
+              [
+                { opacity: 0, transform: `translateY(${dy}px) scale(0.97)` },
+                { opacity: 1, transform: "translateY(0) scale(1)" },
+              ],
+              { duration: UI_MOTION_DURATION.fast * 1000, easing: UI_EASE_OUT_CSS },
+            );
+          }
+        }
       });
     };
 
@@ -190,6 +219,7 @@ export function createSuggestionPopupRender<
 
     return {
       onStart: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer = new ReactRenderer(component, {
           props: getProps(props),
           editor: props.editor,
@@ -199,15 +229,26 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        if (typeof popup.animate === "function" && !prefersReducedMotion()) {
+          popup.style.opacity = "0";
+        }
+        const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
+        if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
 
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
+        unsubscribe = subscribe?.(() => {
+          if (!currentProps || !renderer) return;
+          renderer.updateProps(getProps(currentProps));
+          if (popup) updatePosition(popup, currentProps.clientRect);
+        });
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer?.updateProps(getProps(props));
         if (popup) {
           trackPosition(popup, props.clientRect);
@@ -216,7 +257,19 @@ export function createSuggestionPopupRender<
       },
 
       onKeyDown: (props: SuggestionKeyDownProps) => {
-        if (props.event.key === "Escape") {
+        // `Esc` is the legacy alias the suggestion plugin also matches on.
+        if (props.event.key === "Escape" || props.event.key === "Esc") {
+          // Escape while a picker is open must close ONLY the picker. Returning
+          // true makes ProseMirror call preventDefault(), but ProseMirror never
+          // stops propagation, and Base UI's dismiss layer listens for Escape on
+          // `document` in the bubble phase without consulting defaultPrevented.
+          // Without stopPropagation the same keypress that closes this popup
+          // also closes the host Dialog and discards the draft (MUL-5429).
+          // This handler is the only layer that knows a picker is open, so
+          // stopping here fixes every host at once (create-issue dialog, chat
+          // input, comment composer).
+          props.event.preventDefault();
+          props.event.stopPropagation();
           cleanup();
           return true;
         }

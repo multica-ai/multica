@@ -7,9 +7,14 @@
     "highlight": "高亮",
     "link": "链接",
     "list": "列表",
-    "task_list": "任务列表",
+    "task_list": "待办列表",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "应用链接",
+      "remove": "移除链接",
+      "close": "关闭链接编辑器"
+    },
     "heading_dropdown": {
       "text": "正文",
       "normal_text": "正文",
@@ -20,12 +25,12 @@
     "list_dropdown": {
       "bullet_list": "无序列表",
       "ordered_list": "有序列表",
-      "task_list": "任务列表"
+      "task_list": "待办列表"
     },
     "sub_issue": {
-      "tooltip": "用选中内容创建子 issue",
+      "tooltip": "用选中内容创建子任务",
       "created": "已创建 {{identifier}}",
-      "create_failed": "创建子 issue 失败"
+      "create_failed": "创建子任务失败"
     }
   },
   "image": {
@@ -34,18 +39,59 @@
     "copy_link": "复制链接",
     "delete": "删除",
     "link_copied": "已复制链接",
-    "copy_link_failed": "复制链接失败"
+    "copy_link_failed": "复制链接失败",
+    "copy_image": "复制图片",
+    "image_copied": "已复制图片",
+    "copy_image_failed": "无法复制图片",
+    "canvas_label": "图片画布，拖动可平移，滚动可缩放，双击可切换实际大小。",
+    "unavailable": "这张图片已失效，已跳过。"
+  },
+  "canvas": {
+    "zoom_in": "放大",
+    "zoom_out": "缩小",
+    "zoom_fit": "适应窗口",
+    "zoom_actual": "实际大小"
   },
   "attachment": {
     "download_failed": "下载链接获取失败，请稍后重试。",
+    "copy_contents": "复制全文",
+    "contents_copied": "已复制全文",
+    "copy_failed": "无法复制全文",
+    "more_actions": "更多操作",
     "preview": "预览",
-    "preview_loading": "加载预览中…",
+    "preview_loading": "加载预览中...",
     "preview_failed": "预览加载失败",
     "preview_too_large": "文件太大，无法在线预览，请下载查看。",
     "preview_unsupported": "该文件类型暂不支持预览。",
     "close": "关闭",
     "open_in_new_tab": "在新标签页打开",
-    "remove": "移除附件"
+    "remove": "移除附件",
+    "previous": "上一个",
+    "next": "下一个",
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "全部产物",
+    "info": "信息",
+    "wrap_lines": "自动换行",
+    "viewport": "视口宽度",
+    "viewport_fill": "自适应",
+    "viewport_desktop": "桌面",
+    "viewport_tablet": "平板",
+    "viewport_phone": "手机",
+    "viewport_scale": "缩放 {{percent}}%",
+    "view_source": "查看源码",
+    "view_mode": "视图",
+    "view_tree": "树形",
+    "view_raw": "原文",
+    "structured_parse_failed": "无法解析这个文件，已按原文显示。",
+    "tree_show_more": "显示更多（还有 {{count}} 项）",
+    "tree_items_other": "{{count}} 项",
+    "tree_keys_other": "{{count}} 个键",
+    "table_empty": "没有数据行",
+    "table_rows_other": "{{count}} 行",
+    "table_columns_other": "{{count}} 列",
+    "address": "地址",
+    "address_hint": "?参数",
+    "reload": "刷新"
   },
   "link_hover": {
     "copy_link": "复制链接",
@@ -54,56 +100,164 @@
     "copy_failed": "复制失败"
   },
   "mention": {
-    "group_users": "用户",
-    "group_issues": "Issues",
+    "group_users": "成员",
+    "group_issues": "任务",
+    "group_projects": "项目",
+    "group_docs": "文档",
     "all_members": "所有成员",
+    "agent_badge": "智能体",
+    "squad_badge": "小队",
     "searching": "搜索中...",
     "no_results": "无结果",
     "group_current": "当前页面",
     "group_recent": "最近浏览",
-    "group_search": "搜索结果"
+    "group_search": "搜索结果",
+    "group_cancelled": "已取消"
   },
   "slash_command": {
-    "no_skills_configured": "暂无配置的技能",
-    "no_results": "没有匹配的技能",
+    "no_skills_configured": "暂无配置的 skill",
+    "no_results": "没有匹配的 skill",
     "commands": {
-      "note": "添加备注 — 不触发任何 Agent"
+      "note": "添加备注——不触发任何智能体"
     }
   },
   "code_block": {
+    "html_preview": "HTML 预览",
+    "close_preview": "关闭",
     "copy_code": "复制代码",
-    "show_preview": "显示预览",
-    "show_source": "显示源码",
-    "fullscreen": "放大"
+    "fullscreen": "全屏"
+  },
+  "dynamic_block": {
+    "preview": "预览",
+    "source": "源码",
+    "view": "视图",
+    "copy_source": "复制源码",
+    "show_all": "展开全部",
+    "rendering": "正在渲染...",
+    "error_html": "预览中的脚本出错",
+    "error_mermaid": "无法绘制这张图",
+    "error_at_line": "{{message}}（第 {{line}} 行）",
+    "view_source": "查看源码",
+    "copy_error": "复制错误",
+    "title": "标题",
+    "rename": "重命名",
+    "add_title": "添加标题"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },
   "upload": {
     "failed": "{{filename}} 上传失败：{{reason}}",
-    "in_progress": "上传中…"
+    "in_progress": "上传中...",
+    "interrupted": "上传已中断——文件未保存。请重新添加。",
+    "remove": "移除",
+    "uploading_label": "正在上传 {{filename}}...",
+    "failed_label": "{{filename}} 上传失败"
   },
   "title_editor": {
     "title_aria_label": "标题"
   },
   "mermaid": {
+    "diagram_label": "Mermaid 图表",
     "render_error": "无法渲染 Mermaid 图。",
-    "rendering": "渲染中…",
+    "rendering": "渲染中...",
     "viewer_title": "图表",
-    "canvas_label": "图表画布,拖动可平移,滚动可缩放。",
+    "canvas_label": "图表画布，拖动可平移，滚动可缩放。",
     "open_viewer": "打开图表查看器",
     "close_viewer": "关闭",
     "copy_source": "复制图表源码",
     "show_source": "显示源码",
     "show_diagram": "显示图表",
-    "zoom_in": "放大",
-    "zoom_out": "缩小",
-    "zoom_fit": "适应窗口",
-    "zoom_actual": "实际大小",
-    "reset_view": "重置视图",
     "export": "导出",
     "export_png": "下载 PNG",
     "export_svg": "下载 SVG",
     "export_source": "下载 .mmd"
+  },
+  "table": {
+    "reset_widths": "重置列宽",
+    "expand": "展开表格",
+    "copy_markdown": "复制为 Markdown",
+    "copy_csv": "复制为 CSV",
+    "copied": "已复制",
+    "resize_column": "调整\"{{name}}\"列宽",
+    "expanded_title": "表格",
+    "filter_placeholder": "筛选行",
+    "clear_filter": "清除筛选",
+    "no_matches": "没有匹配的行",
+    "close": "关闭"
+  },
+  "voice": {
+    "dictate": "语音输入",
+    "hold_to_talk": "按住说话",
+    "tap_or_hold": "语音输入（点按，或按住说话）",
+    "cancel": "取消",
+    "insert": "插入",
+    "send": "发送",
+    "retry": "重试",
+    "dismiss": "关闭",
+    "requesting": "正在等待麦克风...",
+    "transcribing": "正在转写...",
+    "release_to_insert": "松开插入",
+    "recording": "录音中",
+    "errors": {
+      "permission_denied": "麦克风权限被阻止。请在浏览器或系统设置中允许后重试。",
+      "no_microphone": "未找到麦克风。连接后重试。",
+      "microphone_failed": "无法启动麦克风。",
+      "no_speech": "没有听到说话声。靠近麦克风再试一次。",
+      "unavailable": "这台电脑无法在本地转写语音。",
+      "transcription_failed": "转写失败。录音已保留，可以重试。"
+    },
+    "models": {
+      "more_languages": "其他 {{more}} 种语言",
+      "in_use": "使用中",
+      "recommended": "推荐",
+      "most_accurate": "最准确",
+      "fastest": "最快",
+      "by": "来自 {{author}}",
+      "license": "许可协议",
+      "downloading": "正在下载，{{percent}}%",
+      "failed": "下载失败。重试会从中断处继续。",
+      "download": "下载",
+      "retry": "重试",
+      "cancel": "取消",
+      "use": "使用",
+      "delete": "删除 {{name}}"
+    },
+    "setup": {
+      "title": "设置语音输入",
+      "description": "语音在这台电脑上转写，录音不会离开本机。先下载一个语音模型即可开始。",
+      "later": "以后再说",
+      "start": "开始语音输入"
+    }
+  },
+  "block_menu": {
+    "label": "插入内容",
+    "blocks": {
+      "paragraph": "正文",
+      "heading1": "标题 1",
+      "heading2": "标题 2",
+      "heading3": "标题 3",
+      "bulletList": "无序列表",
+      "orderedList": "有序列表",
+      "taskList": "待办列表",
+      "blockquote": "引用",
+      "codeBlock": "代码块",
+      "mermaid": "Mermaid 图表",
+      "table": "表格",
+      "divider": "分割线",
+      "image": "图片",
+      "file": "文件"
+    }
+  },
+  "block_handle": {
+    "add": "在下方添加",
+    "options": "拖动以移动，点击打开菜单",
+    "turn_into": "转换为",
+    "duplicate": "创建副本",
+    "delete": "删除"
+  },
+  "plain_text": {
+    "notice": "内容过长，以纯文本显示。",
+    "download": "下载为 .txt"
   }
 }

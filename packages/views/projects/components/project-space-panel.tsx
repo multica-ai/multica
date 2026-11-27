@@ -6,19 +6,21 @@ import {
   ChevronLeft,
   File,
   Folder,
-  FolderUp,
-  RefreshCw,
+  FolderInput,
+  RotateCw,
   Sparkles,
   Upload,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { projectDetailOptions } from "@multica/core/projects";
 import type {
   ProjectSpaceImport,
   ProjectSpaceImportFile,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useT } from "../../i18n";
 
 const MAX_FILES = 5_000;
@@ -97,21 +99,18 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
   const [localProgress, setLocalProgress] = useState(0);
 
   const filesQueryKey = useMemo(
-    () => ["project-space", projectId, "files", path],
-    [projectId, path],
+    () => ["project-space", workspaceId, projectId, "files", path],
+    [workspaceId, projectId, path],
   );
   const importsQueryKey = useMemo(
-    () => ["project-space", projectId, "imports"],
-    [projectId],
+    () => ["project-space", workspaceId, projectId, "imports"],
+    [workspaceId, projectId],
   );
   const files = useQuery({
     queryKey: filesQueryKey,
     queryFn: () => api.listProjectSpaceFiles(projectId, path),
   });
-  const project = useQuery({
-    queryKey: ["project", projectId],
-    queryFn: () => api.getProject(projectId),
-  });
+  const project = useQuery(projectDetailOptions(workspaceId, projectId));
   const agents = useQuery({
     queryKey: ["agents", workspaceId, "project-space-organize"],
     queryFn: () => api.listAgents({ workspace_id: workspaceId }),
@@ -121,7 +120,7 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
     queryFn: () => api.listProjectSpaceImports(projectId),
     refetchInterval: (query) =>
       query.state.data?.imports.some((item) =>
-        item.status === "queued" || item.status === "uploading",
+        item.status === "queued" || item.status === "uploading" || item.status === "finalizing",
       )
         ? 2_000
         : false,
@@ -185,13 +184,13 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
         }
       });
       const completed = await api.completeProjectSpaceImport(projectId, created.id);
-      if (failures.length > 0 || completed.status === "partial" || completed.status === "failed") {
+      if (failures.length > 0 || completed.status !== "completed") {
         toast.warning(t(($) => $.resources.upload_partial));
       } else {
         toast.success(t(($) => $.resources.upload_complete));
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["project-space", projectId, "files"] }),
+        queryClient.invalidateQueries({ queryKey: ["project-space", workspaceId, projectId, "files"] }),
         queryClient.invalidateQueries({ queryKey: importsQueryKey }),
       ]);
     } catch (error) {
@@ -212,7 +211,7 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
     ? path.slice(0, path.lastIndexOf("/"))
     : "";
   const activeImport = imports.data?.imports.find(
-    (item) => item.status === "queued" || item.status === "uploading",
+    (item) => item.status === "queued" || item.status === "uploading" || item.status === "finalizing",
   );
   const progress = uploading
     ? localProgress
@@ -284,19 +283,17 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
           disabled={uploading}
           onClick={() => folderInput.current?.click()}
         >
-          <FolderUp className="size-3" />
+          <FolderInput className="size-3" />
           {t(($) => $.resources.upload_folder)}
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
+        <IconButton
+          label={t(($) => $.resources.refresh_space)}
           size="icon-sm"
           disabled={files.isFetching}
           onClick={() => void files.refetch()}
-          title={t(($) => $.resources.refresh_space)}
         >
-          <RefreshCw className="size-3" />
-        </Button>
+          <RotateCw className="size-3" />
+        </IconButton>
         <Button
           type="button"
           variant="ghost"
@@ -337,7 +334,7 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
           </div>
           <div className="h-1 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full bg-primary transition-[width]"
+              className="h-full bg-primary transition-[width] motion-reduce:transition-none"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -345,14 +342,13 @@ export function ProjectSpacePanel({ projectId }: { projectId: string }) {
       )}
       <div className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
         {path && (
-          <button
-            type="button"
-            className="rounded p-0.5 hover:bg-accent"
+          <IconButton
+            label={t(($) => $.resources.space_parent)}
+            size="icon-xs"
             onClick={() => setPath(parentPath)}
-            title={t(($) => $.resources.space_parent)}
           >
             <ChevronLeft className="size-3" />
-          </button>
+          </IconButton>
         )}
         <span className="truncate">/{path}</span>
       </div>

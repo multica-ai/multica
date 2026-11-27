@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { VirtuosoMockContext } from "react-virtuoso";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent, ChatSession } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
@@ -45,18 +47,21 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionArchived: () => ({ mutate: archiveMutate, isPending: false }),
+  useUpdateChatSession: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
     ...actual,
-    useQuery: () => ({ data: { tasks: [] } }),
+    useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+      queryKey.includes("my-wakeups") ? { data: [] } : { data: { tasks: [] } },
     useQueryClient: () => ({ setQueryData: vi.fn(), invalidateQueries: vi.fn() }),
   };
 });
 
 import { ChatThreadList } from "./chat-thread-list";
+import { SESSION_LIST_VIRTUALIZE_AFTER } from "./session-history-list";
 
 const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
 
@@ -87,22 +92,65 @@ const sessions: ChatSession[] = [
   makeSession({ id: "s3", updated_at: "2026-07-08T01:00:00Z" }),
 ];
 
-function renderList(activeSessionId: string | null, onArchive = vi.fn()) {
-  render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatThreadList
-        sessions={sessions}
-        agents={[agent]}
-        activeSessionId={activeSessionId}
-        onSelectSession={vi.fn()}
-        onArchive={onArchive}
-      />
-    </I18nProvider>,
+function renderList(
+  activeSessionId: string | null,
+  {
+    onArchive = vi.fn(),
+    onSelectSession = vi.fn(),
+    onPrefetchSession = vi.fn(),
+    renderedSessions = sessions,
+    renderedAgents = [agent],
+  } = {},
+) {
+  const makeUi = (list: ChatSession[], activeId: string | null) => (
+    <VirtuosoMockContext.Provider value={{ viewportHeight: 560, itemHeight: 56 }}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatThreadList
+          sessions={list}
+          agents={renderedAgents}
+          activeSessionId={activeId}
+          onSelectSession={onSelectSession}
+          onArchive={onArchive}
+          onPrefetchSession={onPrefetchSession}
+        />
+      </I18nProvider>
+    </VirtuosoMockContext.Provider>
   );
-  return onArchive;
+  const view = render(makeUi(renderedSessions, activeSessionId));
+  return {
+    onArchive,
+    onSelectSession,
+    onPrefetchSession,
+    rerenderList: (list: ChatSession[], activeId: string | null = activeSessionId) =>
+      view.rerender(makeUi(list, activeId)),
+  };
 }
 
 const ARCHIVE_LABEL = enChat.list.archive;
+
+describe("ChatThreadList windowing", () => {
+  it("mounts only a window of a long history without an archive footer", () => {
+    renderList(null, {
+      renderedSessions: Array.from({ length: 200 }, (_, i) => makeSession({ id: `history-${i}` })),
+    });
+    expect(screen.getByText("Chat history-0")).toBeInTheDocument();
+    expect(screen.getAllByTestId("avatar-agent-1").length).toBeLessThan(30);
+    expect(screen.queryByText("Chat history-199")).not.toBeInTheDocument();
+  });
+
+  it("keeps the archive entry reachable and windows archived sessions", () => {
+    renderList(null, {
+      renderedSessions: [
+        ...sessions,
+        ...Array.from({ length: 200 }, (_, i) => makeSession({ id: `archived-${i}`, status: "archived" })),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Archived.*200/ }));
+    expect(screen.getByText("Chat archived-0")).toBeInTheDocument();
+    expect(screen.getAllByTestId("avatar-agent-1").length).toBeLessThan(30);
+    expect(screen.queryByText("Chat archived-199")).not.toBeInTheDocument();
+  });
+});
 
 describe("ChatThreadList archive delegation", () => {
   beforeEach(() => {
@@ -111,7 +159,7 @@ describe("ChatThreadList archive delegation", () => {
   });
 
   it("delegates the history-row Archive action to onArchive with that session", () => {
-    const onArchive = renderList("s2");
+    const { onArchive } = renderList("s2");
     // Rows render in order s1, s2, s3 → the second archive button is s2's.
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
     fireEvent.click(archiveButtons[1]!);
@@ -121,7 +169,7 @@ describe("ChatThreadList archive delegation", () => {
   });
 
   it("passes the archived row's session even when it isn't the open one", () => {
-    const onArchive = renderList("s1");
+    const { onArchive } = renderList("s1");
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
     // Archive s3 while s1 is the open one — the parent decides what to do.
     fireEvent.click(archiveButtons[2]!);
@@ -152,21 +200,272 @@ describe("ChatThreadList no_response preview (MUL-4351)", () => {
         message_kind: "no_response",
       },
     });
-    render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatThreadList
-          sessions={[session]}
-          agents={[agent]}
-          activeSessionId={null}
-          onSelectSession={vi.fn()}
-          onArchive={vi.fn()}
-        />
-      </I18nProvider>,
-    );
+    renderList(null, { renderedSessions: [session] });
     expect(screen.getByText(enChat.list.no_response_preview)).toBeInTheDocument();
     // The stored English fallback body must not leak into the preview.
     expect(
       screen.queryByText("The agent finished this turn without a text reply."),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatThreadList agent identity", () => {
+  it("shows and bounds the resolved agent name without replacing the preview", () => {
+    const longName = "A very long agent name that must not take over the conversation row";
+    const longNameAgent = { id: "agent-1", name: longName } as unknown as Agent;
+    const session = makeSession({
+      id: "agent-name",
+      last_message: {
+        content: "Latest project update",
+        role: "assistant",
+        created_at: "2026-07-08T03:00:00Z",
+      },
+    });
+
+    renderList(null, {
+      renderedSessions: [session],
+      renderedAgents: [longNameAgent],
+    });
+
+    const name = screen.getByText(longName);
+    expect(name.className).toContain("max-w-[40%]");
+    expect(name.className).toContain("truncate");
+    expect(screen.getByText("Latest project update")).toBeInTheDocument();
+  });
+
+  it("keeps the existing preview when the session agent is unavailable", () => {
+    const session = makeSession({
+      id: "missing-agent",
+      agent_id: "missing-agent-id",
+      last_message: {
+        content: "Still identifiable by its preview",
+        role: "assistant",
+        created_at: "2026-07-08T03:00:00Z",
+      },
+    });
+
+    renderList(null, { renderedSessions: [session] });
+
+    expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+    expect(screen.getByText("Still identifiable by its preview")).toBeInTheDocument();
+  });
+});
+
+// Touch has no hover, so the hover strip's actions also live in a per-row menu.
+describe("ChatThreadList compact row menu", () => {
+  beforeEach(() => {
+    setActiveSession.mockClear();
+    archiveMutate.mockClear();
+  });
+
+  const openRowMenu = (index: number) =>
+    fireEvent.click(
+      screen.getAllByRole("button", { name: enChat.list.row_actions_aria })[index]!,
+    );
+
+  it("archives the row it belongs to", async () => {
+    const { onArchive } = renderList("s1");
+
+    openRowMenu(1);
+    fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_LABEL }));
+
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
+  });
+
+  it("offers the same pin toggle the hover strip does", async () => {
+    renderList(null);
+
+    openRowMenu(0);
+
+    expect(await screen.findByRole("menuitem", { name: enChat.list.pin })).toBeInTheDocument();
+  });
+
+  it("does not select the row when the menu opens", () => {
+    const { onSelectSession } = renderList(null);
+
+    openRowMenu(0);
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("stays reachable on a wide viewport that cannot hover", () => {
+    // The menu and the hover strip must both switch on hover capability. Gating
+    // either on width strands a landscape phone: past `md` the menu would be
+    // hidden and the strip would wait for a hover that never arrives.
+    renderList(null);
+
+    const trigger = screen.getAllByRole("button", {
+      name: enChat.list.row_actions_aria,
+    })[0]!;
+    const strip = trigger.parentElement!.querySelector(
+      "[class*='group-hover/row']",
+    )!;
+
+    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
+    expect(strip.className).toContain("[@media(hover:hover)]:group-hover/row:flex");
+    expect(strip.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
+  });
+});
+
+describe("ChatThreadList row keyboard semantics", () => {
+  it("selects the row on Enter", () => {
+    const { onSelectSession } = renderList(null);
+
+    const row = screen.getByText("Chat s1").closest("[tabindex]")!;
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Enter pressed inside a row control to that control", () => {
+    // Opening the action menu with the keyboard must not also select the row.
+    const { onSelectSession } = renderList(null);
+
+    fireEvent.keyDown(
+      screen.getAllByRole("button", { name: enChat.list.row_actions_aria })[0]!,
+      { key: "Enter" },
+    );
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatThreadList right-click menu", () => {
+  beforeEach(() => {
+    archiveMutate.mockClear();
+  });
+
+  it("keeps the row's actions available after pointer departure and acts on that row", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
+    ).toEqual([enChat.list.pin, ARCHIVE_LABEL, enChat.header.rename]);
+
+    fireEvent.mouseLeave(menu.parentElement!, { relatedTarget: document.body });
+    expect(screen.getByRole("menu")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: ARCHIVE_LABEL }));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("dismisses with Escape and reopens actions for a different chat", async () => {
+    const { onArchive } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("Chat s3"), { clientX: 40, clientY: 140 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_LABEL }));
+    expect(onArchive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "s3" }));
+  });
+
+  it("dismisses on an outside press without running a row action", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    await screen.findByRole("menu");
+    await userEvent.click(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the modal dismissal layer after pointer departure", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    // The real Base UI backdrop prevents an outside press reaching the row below.
+    const backdrop = document.querySelector<HTMLElement>(
+      'div[role="presentation"][data-base-ui-inert]',
+    )!;
+    expect(backdrop).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu.parentElement!, { relatedTarget: document.body });
+    expect(backdrop).toBeInTheDocument();
+    await userEvent.click(backdrop);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatThreadList prefetch and smooth exit", () => {
+  it("triggers onPrefetchSession when hovering or focusing a row", () => {
+    const { onPrefetchSession } = renderList("s1");
+    const row = screen.getByText("Chat s2").closest("[data-chat-thread-row]")!;
+
+    fireEvent.pointerEnter(row);
+    fireEvent.focus(row);
+
+    expect(onPrefetchSession).toHaveBeenCalledTimes(2);
+    expect(onPrefetchSession).toHaveBeenNthCalledWith(1, "s2");
+    expect(onPrefetchSession).toHaveBeenNthCalledWith(2, "s2");
+  });
+
+  it("marks a removed history row as exiting while animating out in a short list", () => {
+    const { rerenderList } = renderList("s1");
+    expect(screen.getByText("Chat s1")).toBeInTheDocument();
+
+    // Optimistic archive flips s1 to status="archived", dropping it from history.
+    const nextSessions = sessions.map((s) =>
+      s.id === "s1" ? { ...s, status: "archived" as const } : s,
+    );
+    rerenderList(nextSessions, "s2");
+
+    const exiting = document.querySelector("[data-chat-row-exiting]");
+    expect(exiting).toBeInTheDocument();
+    expect(exiting).toHaveAttribute("aria-hidden", "true");
+    expect(exiting?.className).toContain("pointer-events-none");
+    expect(screen.getByText("Chat s2").closest("[aria-current]")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("marks a removed archived row as exiting when unarchived in the archived view", () => {
+    const archived = [
+      makeSession({ id: "a1", status: "archived", updated_at: "2026-07-08T03:00:00Z" }),
+      makeSession({ id: "a2", status: "archived", updated_at: "2026-07-08T02:00:00Z" }),
+    ];
+    const { rerenderList } = renderList(null, {
+      renderedSessions: [...sessions, ...archived],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Archived.*2/ }));
+    expect(screen.getByText("Chat a1")).toBeInTheDocument();
+
+    rerenderList(
+      [...sessions, { ...archived[0]!, status: "active" }, archived[1]!],
+      null,
+    );
+
+    const exiting = document.querySelector("[data-chat-row-exiting]");
+    expect(exiting).toBeInTheDocument();
+    expect(exiting).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("keeps the same scroll container element when crossing the virtualization threshold", () => {
+    const overThreshold = Array.from(
+      { length: SESSION_LIST_VIRTUALIZE_AFTER + 1 },
+      (_, i) => makeSession({ id: `s-${i}` }),
+    );
+    const { rerenderList } = renderList("s-0", {
+      renderedSessions: overThreshold,
+    });
+
+    const scrollerBefore = document.querySelector("[data-chat-session-scroller]");
+    expect(scrollerBefore).toBeInTheDocument();
+
+    // Archiving one row drops the active count from 61 to 60 (virtualized -> animated list).
+    rerenderList(overThreshold.slice(1), "s-1");
+
+    const scrollerAfter = document.querySelector("[data-chat-session-scroller]");
+    expect(scrollerAfter).toBe(scrollerBefore);
   });
 });

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,15 +31,37 @@ const (
 	KindNetworkRefused                  // connection refused
 	KindNetworkTLS                      // x509 / tls handshake failures
 	KindNetworkOffline                  // catch-all: host unreachable, reset, etc.
+	// KindNetworkStalled is a transfer that stopped producing bytes (see
+	// StallError). Distinct from KindNetworkTimeout because the remedy is
+	// different: a timeout says "this took too long", a stall says "this went
+	// quiet", and only the latter is unaffected by raising a time limit.
+	KindNetworkStalled
+	// KindNetworkTLSHandshakeTimeout is a TLS handshake that never completed
+	// after the TCP connection opened. Distinct from KindNetworkTimeout
+	// because the remedy is different: the request budget
+	// (MULTICA_HTTP_TIMEOUT) does not govern the handshake, and the usual
+	// cause is a network path that drops a ClientHello spanning two TCP
+	// packets — which every Go client sends by default since Go 1.24 (the
+	// post-quantum key share makes it ~1.5 KB) while curl on the same machine
+	// gets through (GH #8654).
+	KindNetworkTLSHandshakeTimeout
+	// The HTTP response started but its body ended before decoding completed.
+	KindNetworkIncompleteResponse
 
 	// HTTP status layer.
 	KindAuthRequired // 401
-	KindForbidden    // 403
-	KindNotFound     // 404
-	KindConflict     // 409
-	KindValidation   // 400 / 422
-	KindRateLimited  // 429
-	KindServerError  // 5xx
+	// KindTaskTokenRejected is a 401 on a task-scoped token. HTTPError.Kind()
+	// never returns it — the status code alone cannot tell the two apart — so
+	// it is selected in userMessage, where the credential the request actually
+	// sent is known. Exit classification is unchanged: still an auth failure.
+	KindTaskTokenRejected
+	KindForbidden   // 403
+	KindNotFound    // 404
+	KindConflict    // 409
+	KindValidation  // 400 / 422
+	KindTooLarge    // 413
+	KindRateLimited // 429
+	KindServerError // 5xx
 
 	// Anything we could not classify.
 	KindUnknown
@@ -56,7 +79,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout, KindNetworkIncompleteResponse:
 		return true
 	default:
 		return false
@@ -78,8 +101,16 @@ func (k ErrorKind) String() string {
 		return "network_tls"
 	case KindNetworkOffline:
 		return "network_offline"
+	case KindNetworkStalled:
+		return "network_stalled"
+	case KindNetworkTLSHandshakeTimeout:
+		return "network_tls_handshake_timeout"
+	case KindNetworkIncompleteResponse:
+		return "network_incomplete_response"
 	case KindAuthRequired:
 		return "auth_required"
+	case KindTaskTokenRejected:
+		return "task_token_rejected"
 	case KindForbidden:
 		return "forbidden"
 	case KindNotFound:
@@ -88,6 +119,8 @@ func (k ErrorKind) String() string {
 		return "conflict"
 	case KindValidation:
 		return "validation"
+	case KindTooLarge:
+		return "too_large"
 	case KindRateLimited:
 		return "rate_limited"
 	case KindServerError:
@@ -151,6 +184,28 @@ func WithUserMessage(msg string, err error) error {
 	return &UserMessageError{Msg: msg, Err: err}
 }
 
+// WithUserMessageUnlessNetwork is WithUserMessage for a command whose custom
+// copy explains an HTTP-level refusal — a rejected token, a server that would
+// not issue one — and would be wrong for a transport failure. When err is a
+// *NetworkError it is returned unchanged, so FormatError renders the
+// kind-based copy, which is the only place that names the actual remedy
+// (DNS, proxy, TLS handshake).
+//
+// `multica login` needs this: with WithUserMessage, a TLS handshake that
+// never completed was reported as "the server could not issue an access
+// token" and "make sure the token is valid and not expired", and nothing in
+// the default output pointed at the network (GH #8654).
+func WithUserMessageUnlessNetwork(msg string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var netErr *NetworkError
+	if errors.As(err, &netErr) {
+		return err
+	}
+	return &UserMessageError{Msg: msg, Err: err}
+}
+
 // Kind maps an HTTPError's status code onto an ErrorKind.
 func (e *HTTPError) Kind() ErrorKind {
 	switch e.StatusCode {
@@ -164,6 +219,8 @@ func (e *HTTPError) Kind() ErrorKind {
 		return KindConflict
 	case 400, 422:
 		return KindValidation
+	case 413:
+		return KindTooLarge
 	case 429:
 		return KindRateLimited
 	default:
@@ -183,12 +240,30 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindUnknown
 	}
 
+	// A stalled transfer is checked first: the guard implements it by
+	// canceling the request context, so the underlying error would otherwise
+	// read as a generic cancellation and lose the reason.
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return KindNetworkStalled
+	}
+
 	// Timeouts (context deadline or socket i/o timeout).
 	if errors.Is(err, context.DeadlineExceeded) {
 		return KindNetworkTimeout
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
+		// net/http reports a TLS handshake that never completed with an
+		// unexported type that also satisfies Timeout(), so only its message
+		// tells it apart from a socket timeout. The remedy differs (see
+		// KindNetworkTLSHandshakeTimeout), so it must not be folded into the
+		// generic timeout. Error() is only consulted here, on a timeout: the
+		// typed x509 checks below must keep running before any message is
+		// rendered, because a hostname error renders its certificate.
+		if isTLSHandshakeTimeout(err) {
+			return KindNetworkTLSHandshakeTimeout
+		}
 		return KindNetworkTimeout
 	}
 
@@ -224,6 +299,8 @@ func classifyNetworkError(err error) ErrorKind {
 	// String fallbacks for anything not surfaced as a typed error.
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "tls handshake timeout"):
+		return KindNetworkTLSHandshakeTimeout
 	case strings.Contains(msg, "context deadline exceeded"), strings.Contains(msg, "timeout"), strings.Contains(msg, "timed out"):
 		return KindNetworkTimeout
 	case strings.Contains(msg, "no such host"), strings.Contains(msg, "server misbehaving"), strings.Contains(msg, "name resolution"):
@@ -234,6 +311,12 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindNetworkTLS
 	}
 	return KindNetworkOffline
+}
+
+// isTLSHandshakeTimeout reports whether err is net/http's TLS handshake
+// timeout, which is only identifiable by its message.
+func isTLSHandshakeTimeout(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "tls handshake timeout")
 }
 
 // wrapTransport converts a raw transport error returned by http.Client.Do
@@ -247,11 +330,52 @@ func wrapTransport(req *http.Request, err error) error {
 	if err == nil {
 		return nil
 	}
+	return networkError(req, err, classifyNetworkError(err))
+}
+
+func networkError(req *http.Request, err error, kind ErrorKind) *NetworkError {
 	op := ""
 	if req != nil && req.URL != nil {
 		op = req.Method + " " + req.URL.Path
 	}
-	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
+	return &NetworkError{Kind: kind, Op: op, Err: err}
+}
+
+// wrapBodyRead classifies an error raised while reading or decoding a
+// response body.
+//
+// wrapTransport only sees errors from http.Client.Do, which returns as soon as
+// the response headers arrive. Everything that goes wrong afterwards — the
+// case #7498 actually reports, a body that never finishes arriving — surfaces
+// out of the JSON decoder instead, and used to reach the user as a raw
+// "context deadline exceeded ... while reading body". A transport failure is
+// still a transport failure when the decoder is the one that notices it; a
+// genuine malformed-JSON error is returned unchanged.
+//
+// io.ErrUnexpectedEOF is deliberately on the network side of that line. It is
+// what the decoder reports for a body that simply stops — a dropped
+// connection, a proxy cutting the response — which is vastly the more common
+// cause than a server that emits syntactically truncated JSON. Well-formed
+// nonsense (the ordinary server bug) raises *json.SyntaxError and is left
+// alone.
+func wrapBodyRead(req *http.Request, err error) error {
+	if err == nil {
+		return nil
+	}
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return wrapTransport(req, err)
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return networkError(req, err, KindNetworkIncompleteResponse)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return wrapTransport(req, err)
+	}
+	return err
 }
 
 // Language is the language FormatError renders messages in.
@@ -287,6 +411,14 @@ var kindMessages = map[ErrorKind][2]string{
 		"Request timed out: the server did not respond in time. Check your network connection or try again later. You can raise the limit with MULTICA_HTTP_TIMEOUT.",
 		"请求超时：服务器未在规定时间内响应。请检查网络连接或稍后重试。可通过 MULTICA_HTTP_TIMEOUT 调高超时时间。",
 	},
+	KindNetworkTLSHandshakeTimeout: {
+		"TLS handshake timed out: the connection to the Multica server opened, but the secure handshake never completed. Something on this network path (security software, a VPN, a router, or a firewall) is probably dropping large TLS handshakes; curl or a browser on the same machine may still work. Retry with the environment variable GODEBUG=tlsmlkem=0 set, and keep it set for the CLI and the daemon if that fixes it. MULTICA_HTTP_TIMEOUT does not affect the handshake.",
+		"TLS 握手超时：已连上 Multica 服务器，但安全握手一直没有完成。通常是网络路径上的安全软件、VPN、路由器或防火墙丢弃了较大的 TLS 握手包，同一台机器上的 curl 或浏览器可能仍然正常。请设置环境变量 GODEBUG=tlsmlkem=0 后重试；若因此恢复，请为 CLI 和守护进程长期保留该设置。MULTICA_HTTP_TIMEOUT 对握手无效。",
+	},
+	KindNetworkStalled: {
+		"Transfer stalled: the connection stopped sending data before the response was complete. Check your network connection or try again. You can raise the no-progress budget with MULTICA_HTTP_STALL_TIMEOUT.",
+		"传输中断：响应尚未接收完毕，连接就停止发送数据。请检查网络连接或重试。可通过 MULTICA_HTTP_STALL_TIMEOUT 调高无进展等待时间。",
+	},
 	KindNetworkDNS: {
 		"Could not resolve the Multica server address. Check your network connection or the --server-url setting.",
 		"无法解析 Multica 服务器地址。请检查网络连接或 --server-url 配置。",
@@ -299,6 +431,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"Could not establish a secure connection to the Multica server (TLS/certificate error). Check your system clock and CA certificates.",
 		"无法与 Multica 服务器建立安全连接（TLS/证书错误）。请检查系统时间和 CA 证书。",
 	},
+	KindNetworkIncompleteResponse: {
+		"The response ended before it was complete. If this keeps happening, check the Multica server or proxy logs.",
+		"响应在完整接收前已结束。如果问题持续发生，请检查 Multica 服务器或代理日志。",
+	},
 	KindNetworkOffline: {
 		"Could not reach the Multica server. Check your network connection.",
 		"无法访问 Multica 服务器。请检查网络连接。",
@@ -306,6 +442,10 @@ var kindMessages = map[ErrorKind][2]string{
 	KindAuthRequired: {
 		"Your session has expired or you are not signed in. Run `multica login` to sign in again. On a self-hosted or non-OAuth setup, ask your administrator for valid credentials.",
 		"登录已过期或尚未登录。请运行 `multica login` 重新登录。自托管或非 OAuth 场景请联系管理员获取有效凭证。",
+	},
+	KindTaskTokenRejected: {
+		"This task token was rejected and is no longer usable. Stop here: do not retry, and do not fall back to a profile or member credential, because anything done with one would run as that person rather than as this task. Only the runtime that started this task can supply a valid task token.",
+		"这个 task token 已被拒绝，不再可用。请到此为止：不要重试，也不要改用 profile 或成员凭证 —— 用它们执行的任何操作都会以那个成员的身份运行，而不是以这次 task 的身份运行。只有启动这次 task 的运行时才能提供有效的 task token。",
 	},
 	KindForbidden: {
 		"You do not have permission to access this resource. Check that you are in the right workspace, or ask an administrator to grant access.",
@@ -323,6 +463,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"The request was invalid. Check the values you provided; run the command with --help to see the expected format.",
 		"请求无效。请检查所填写的参数；可用 --help 查看期望的格式。",
 	},
+	KindTooLarge: {
+		"The request is larger than the server accepts. Reduce its size and try again. Re-run with --debug to see the raw server response.",
+		"请求超出服务器允许的大小。请缩小后重试。可加 --debug 查看服务器原始响应。",
+	},
 	KindRateLimited: {
 		"Too many requests. Please wait a moment and try again; if this keeps happening, reduce how frequently you call the API.",
 		"请求过于频繁。请稍候重试；若持续出现，请降低 API 调用频率。",
@@ -335,6 +479,36 @@ var kindMessages = map[ErrorKind][2]string{
 		"An unexpected error occurred.",
 		"发生未知错误。",
 	},
+}
+
+// serverMessagePrefixes lists the kinds whose response body carries a
+// hand-written, actionable message worth showing instead of the generic
+// template, with the {English, Chinese} lead-in used to introduce it.
+//
+// 409 belongs here because the generic conflict copy is not merely vague, it
+// points the wrong way: it reads as a transient race ("re-fetch the latest
+// state and try again") while every conflict this API returns is a
+// deterministic refusal that names its own fix ("a skill with this name
+// already exists", "set parent_id (--parent) to <id>"). Agents took the retry
+// hint literally and burned hours re-sending an unchanged request (GH #6264,
+// GH #5948), and the server-side wording added in MUL-4417 never reached them.
+//
+// 413 belongs here because the server names the limit that was hit and the
+// size that hit it. Before 413 had a kind, a skill import over the file-count
+// cap printed "An unexpected error occurred." for a URL import while the same
+// bundle as a ZIP (rejected with 400) printed the limit (GH #9812).
+var serverMessagePrefixes = map[ErrorKind][2]string{
+	KindValidation: {"Invalid request: ", "请求无效："},
+	KindConflict:   {"Request conflict: ", "请求冲突："},
+	KindTooLarge:   {"Request too large: ", "请求过大："},
+}
+
+// TaskTokenRejectedMessage returns the localized stop guidance for a rejected
+// task token. It is for callers that talk to an endpoint outside the API
+// client (the local daemon's environment routes) and want to append the same
+// guidance to the endpoint's own explanation, so there is one copy of it.
+func TaskTokenRejectedMessage() string {
+	return messageFor(KindTaskTokenRejected, DetectLanguage())
 }
 
 // messageFor returns the localized message for a kind.
@@ -391,14 +565,31 @@ func userMessage(err error, lang Language) string {
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {
 		kind := httpErr.Kind()
-		// Validation errors usually carry a useful server-provided message;
-		// surface it instead of the generic line.
-		if kind == KindValidation {
+		// A 401 on a task token is not a login problem, and the generic copy
+		// below is the wrong instruction for whoever reads it: it says to sign
+		// in again or ask an administrator for valid credentials. An
+		// autonomous agent can act on that, and one did — after its task token
+		// stopped working mid-run it read the daemon owner's profile PAT and
+		// kept going under the member's identity (GH #7522).
+		//
+		// What the copy must not do is guess *why*. The usual cause is the
+		// task reaching a terminal state, but the same 401 covers a malformed
+		// token, one sent to the wrong server, and one dropped by an unrelated
+		// cleanup. "Stop" is true in every one of those cases; "the task
+		// finished" is not.
+		if kind == KindAuthRequired && httpErr.TaskScoped {
+			return messageFor(KindTaskTokenRejected, lang)
+		}
+		// Validation and conflict errors carry a useful server-provided
+		// message; surface it instead of the generic line. A body we cannot
+		// recognize still falls back to the template, so this never dumps a
+		// raw response at the user.
+		if prefix, ok := serverMessagePrefixes[kind]; ok {
 			if serverMsg := extractServerMessage(httpErr.Body); serverMsg != "" {
 				if lang == LangZH {
-					return "请求无效：" + serverMsg
+					return prefix[1] + serverMsg
 				}
-				return "Invalid request: " + serverMsg
+				return prefix[0] + serverMsg
 			}
 		}
 		return messageFor(kind, lang)
@@ -413,6 +604,11 @@ func userMessage(err error, lang Language) string {
 // extractServerMessage tries to pull a human-readable message out of a JSON
 // error body like {"error":"..."} or {"message":"..."}. Returns "" if the
 // body is not JSON or has no recognizable message field.
+//
+// A few endpoints put a stable machine code in "error" and the prose in
+// "message" (the issue-table cursor responses do this). Prose always wins;
+// a bare code is kept only as a last resort so the user still gets something
+// greppable when no sentence is on offer.
 func extractServerMessage(body string) string {
 	body = strings.TrimSpace(body)
 	if body == "" || body[0] != '{' {
@@ -422,14 +618,92 @@ func extractServerMessage(body string) string {
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		return ""
 	}
+	var code string
 	for _, key := range []string{"error", "message", "detail", "title"} {
-		if v, ok := parsed[key]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				return strings.TrimSpace(s)
+		v, ok := parsed[key]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		if looksLikeMachineCode(s) {
+			if code == "" {
+				code = s
 			}
+			continue
+		}
+		return s
+	}
+	return code
+}
+
+// ServerMessage returns the human-readable message a server error body
+// carries, or "" when err is not an HTTP failure or the body has none (an HTML
+// proxy page, an empty body).
+//
+// It exists for a command whose endpoint writes actionable prose on a status
+// whose generic copy is deliberately vague. A 5xx from most routes means "the
+// Multica service failed"; a 5xx from skill import means "the upstream source
+// failed", and the server names which one and why.
+func ServerMessage(err error) string {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	return extractServerMessage(httpErr.Body)
+}
+
+// ServerErrorCode returns the stable `code` a server error body carries, or ""
+// when err is not an HTTP failure or the body has no code.
+//
+// It exists so a command can recognize ONE specific refusal and print guidance
+// for it without matching on the English sentence, which changes with copy edits
+// and disappears under translation. Statuses whose generic copy is deliberately
+// vague — 403 above all, where naming the cause could confirm a resource exists —
+// keep that copy for every code a command has not explicitly opted into.
+func ServerErrorCode(err error) string {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return ""
+	}
+	body := strings.TrimSpace(httpErr.Body)
+	if body == "" || body[0] != '{' {
+		return ""
+	}
+	var parsed struct {
+		Code string `json:"code"`
+	}
+	if jsonErr := json.Unmarshal([]byte(body), &parsed); jsonErr != nil {
+		return ""
+	}
+	if !looksLikeMachineCode(parsed.Code) {
+		return ""
+	}
+	return parsed.Code
+}
+
+// looksLikeMachineCode reports whether s is a bare identifier such as
+// "cursor_query_mismatch" rather than a sentence meant for a person. The test
+// is deliberately narrow — lowercase word characters only — so that ordinary
+// prose in any language, including Chinese without ASCII spaces, is never
+// mistaken for a code.
+func looksLikeMachineCode(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+		default:
+			return false
 		}
 	}
-	return ""
+	return true
 }
 
 // debugDetail renders the full original error chain plus any structured

@@ -24,6 +24,13 @@ describe("resolveTabPresentation — pages", () => {
       title: { kind: "nav", navKey: "projects" },
     });
   });
+
+  it("titles My agents' work as its own page rather than My issues", () => {
+    expect(present("/acme/my-issues?scope=agents")).toEqual({
+      visual: { kind: "icon", icon: "Bot" },
+      title: { kind: "tab", tabKey: "my_agents" },
+    });
+  });
 });
 
 describe("resolveTabPresentation — direct resources", () => {
@@ -37,7 +44,9 @@ describe("resolveTabPresentation — direct resources", () => {
         issue: { identifier: "MUL-1", title: "Fix", status: "in_progress" },
       }),
     ).toEqual({
-      visual: { kind: "issue-status", status: "in_progress" },
+      // `category` travels with the visual so the tab strip never has to guess
+      // the glyph for a custom status key. (MUL-6243)
+      visual: { kind: "issue-status", status: "in_progress", category: "started" },
       title: { kind: "text", text: "MUL-1: Fix" },
     });
   });
@@ -70,7 +79,7 @@ describe("resolveTabPresentation — direct resources", () => {
     });
   });
 
-  it("autopilot / skill / machine / runtime use a type icon + name", () => {
+  it("autopilot / skill / app / machine / runtime use a type icon + name", () => {
     expect(present("/acme/autopilots/a1", { autopilot: { title: "Nightly" } })).toEqual({
       visual: { kind: "icon", icon: "Zap" },
       title: { kind: "text", text: "Nightly" },
@@ -79,6 +88,11 @@ describe("resolveTabPresentation — direct resources", () => {
       visual: { kind: "icon", icon: "BookOpenText" },
       title: { kind: "text", text: "Deploy" },
     });
+    expect(present("/acme/apps/gmail", { app: { name: "Gmail" } })).toEqual({
+      visual: { kind: "icon", icon: "Plug" },
+      title: { kind: "text", text: "Gmail" },
+    });
+    expect(present("/acme/apps/gmail").title).toEqual({ kind: "tab", tabKey: "app" });
     expect(present("/acme/runtimes/m1", { machine: { name: "Mac Studio" } })).toEqual({
       visual: { kind: "icon", icon: "Monitor" },
       title: { kind: "text", text: "Mac Studio" },

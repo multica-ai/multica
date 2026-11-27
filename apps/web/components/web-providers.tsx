@@ -1,17 +1,30 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { CoreProvider } from "@multica/core/platform";
+import { installUserTimingCap } from "@multica/core/diagnostics";
+import { registerEE } from "@multica/ee";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
-import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
-import { useWelcomeStore } from "@multica/core/onboarding";
+import type { SupportedLocale } from "@multica/core/i18n";
 import packageJson from "../package.json";
+import { LocaleBundle } from "@/components/i18n/locale-bundle";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
 import { detectWebOS } from "@/platform/client-os";
+import { useUserLocaleSyncEnabled } from "@/platform/user-locale-sync";
+import { MotionProvider } from "@multica/views/common/motion-provider";
+
+// Client-only: every reading is a live client measurement the server cannot
+// render, so server HTML would only ever mismatch on hydration.
+const WebDevToolbar = dynamic(
+  () => import("./web-dev-toolbar").then((m) => m.WebDevToolbar),
+  { ssr: false },
+);
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -43,20 +56,24 @@ function deriveWsUrl(): string | undefined {
 const WEB_VERSION =
   process.env.NEXT_PUBLIC_APP_VERSION || packageJson.version || "dev";
 
+registerEE();
+
 export function WebProviders({
   children,
   locale,
-  resources,
   apiBaseUrl,
   wsUrl,
+  devToolbarApiUrl,
 }: {
   children: React.ReactNode;
   locale: SupportedLocale;
-  resources: Record<string, LocaleResources>;
   apiBaseUrl?: string;
   wsUrl?: string;
+  /** Set only when the dev toolbar is enabled; the backend it reports. */
+  devToolbarApiUrl?: string;
 }) {
   const cookieAuth = !hasLegacyToken();
+  const syncUserLocale = useUserLocaleSyncEnabled();
   // Stable identity reference so downstream effects keyed on it don't see a
   // new object on every parent render.
   const identity = useMemo(
@@ -64,28 +81,36 @@ export function WebProviders({
     [],
   );
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
+  // React's development build never clears its render measures; see
+  // installUserTimingCap.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") installUserTimingCap();
+  }, []);
   return (
-    <CoreProvider
-      apiBaseUrl={apiBaseUrl}
-      wsUrl={wsUrl || deriveWsUrl()}
-      cookieAuth={cookieAuth}
-      onLogin={setLoggedInCookie}
-      onLogout={() => {
-        // welcome-store holds the transient post-onboarding signal. Must
-        // clear on logout so user B logging into the same browser doesn't
-        // inherit user A's signal and have <WelcomeAfterOnboarding /> fire
-        // listAgents / createIssue against a workspace user B doesn't even
-        // belong to. The store's own docstring promises this reset; this
-        // is where it gets wired.
-        useWelcomeStore.getState().reset();
-        clearLoggedInCookie();
-      }}
-      identity={identity}
-      locale={locale}
-      resources={resources}
-      localeAdapter={localeAdapter}
-    >
-      <WebNavigationProvider>{children}</WebNavigationProvider>
-    </CoreProvider>
+    <MotionProvider>
+      <LocaleBundle locale={locale}>
+        {(resources) => (
+          <CoreProvider
+            apiBaseUrl={apiBaseUrl}
+            wsUrl={wsUrl || deriveWsUrl()}
+            cookieAuth={cookieAuth}
+            onLogin={setLoggedInCookie}
+            onLogout={clearLoggedInCookie}
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+            syncUserLocale={syncUserLocale}
+          >
+            <WebNavigationProvider>
+              <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+              {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
+                <WebDevToolbar apiUrl={devToolbarApiUrl} />
+              )}
+            </WebNavigationProvider>
+          </CoreProvider>
+        )}
+      </LocaleBundle>
+    </MotionProvider>
   );
 }

@@ -8,6 +8,7 @@ import {
   useBatchUpdateIssues,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import {
   type IssueSurfaceActions,
@@ -22,6 +23,7 @@ export type MoveIssueUpdates = Pick<
   | "assignee_type"
   | "assignee_id"
   | "position"
+  | "stop_previous_assignee_runs"
   | "parent_issue_id"
   | "project_id"
 > & {
@@ -45,6 +47,7 @@ export function useIssueSurfaceActions({
   createDefaults: IssueCreateDefaults;
 }): IssueSurfaceActionController {
   const { t } = useT("projects");
+  const { t: tIssues } = useT("issues");
   const updateIssueMutation = useUpdateIssue();
   const batchUpdateMutation = useBatchUpdateIssues();
   const batchDeleteMutation = useBatchDeleteIssues();
@@ -55,24 +58,28 @@ export function useIssueSurfaceActions({
       updates: Partial<UpdateIssueRequest>,
       options?: IssueSurfaceMutationOptions,
     ) => {
-      updateIssueMutation.mutate(
-        { id: issueId, ...updates },
-        {
-          onSuccess: () => options?.onSuccess?.(),
-          onError: (err) => {
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : (options?.errorMessage ??
-                    t(($) => $.detail.toast_move_issue_failed)),
-            );
-            options?.onError?.(err);
+      // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+      void updateIssueMutation
+        .mutateAsync(
+          { id: issueId, ...updates },
+          {
+            onSuccess: (issue) => options?.onSuccess?.(issue),
+            onError: (err) => options?.onError?.(err),
+            onSettled: () => options?.onSettled?.(),
           },
-          onSettled: () => options?.onSettled?.(),
-        },
-      );
+        )
+        .catch((err: unknown) => {
+          toast.error(
+            errorCode(err) === "revision_conflict"
+              ? tIssues(($) => $.revision.conflict)
+              : err instanceof Error && err.message
+              ? err.message
+              : (options?.errorMessage ??
+                  t(($) => $.detail.toast_move_issue_failed)),
+          );
+        });
     },
-    [t, updateIssueMutation],
+    [t, tIssues, updateIssueMutation],
   );
 
   const moveIssue = useCallback(
@@ -91,7 +98,9 @@ export function useIssueSurfaceActions({
         {
           onError: (err) => {
             toast.error(
-              err instanceof Error && err.message
+              errorCode(err) === "revision_conflict"
+                ? tIssues(($) => $.revision.conflict)
+                : err instanceof Error && err.message
                 ? err.message
                 : t(($) => $.detail.toast_move_issue_failed),
             );
@@ -100,7 +109,7 @@ export function useIssueSurfaceActions({
         },
       );
     },
-    [t, updateIssueMutation],
+    [t, tIssues, updateIssueMutation],
   );
 
   const openCreateIssue = useCallback(
@@ -125,9 +134,8 @@ export function useIssueSurfaceActions({
           errorMessage: t(($) => $.detail.toast_move_issue_failed),
           ...options,
         }),
-      batchUpdate: async (issueIds, updates) => {
-        await batchUpdateMutation.mutateAsync({ ids: issueIds, updates });
-      },
+      batchUpdate: (issueIds, updates, ops) =>
+        batchUpdateMutation.mutateAsync({ ids: issueIds, updates, ...ops }),
       batchDelete: async (issueIds) => {
         await batchDeleteMutation.mutateAsync(issueIds);
       },

@@ -26,7 +26,8 @@
  * enough by themselves, because those should still paste as Markdown source.
  */
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import {
   Fragment,
   Slice,
@@ -407,6 +408,26 @@ function repairFragmentedOrderedLists(slice: Slice): Slice {
   return new Slice(content, slice.openStart, slice.openEnd);
 }
 
+/**
+ * Marks a transaction as the commit of a paste, the way ProseMirror marks its
+ * own.
+ *
+ * `doPaste` stamps `paste` / `uiEvent` on the transaction it dispatches, but it
+ * returns early once a `handlePaste` prop claims the event — and this extension
+ * is a catch-all that claims nearly every paste. Anything downstream that asks
+ * "did this text arrive by paste?" therefore sees an unmarked transaction and
+ * treats a paste as typing. `issueIdentifierAutolink` reads exactly that, and
+ * without the mark it only ever inspects the token before the caret, so pasting
+ * `See MUL-2 now` autolinks nothing (MUL-5429).
+ *
+ * ProseMirror's author describes these metas as the contract third-party code
+ * relies on to tell user events apart, so any custom `handlePaste` that
+ * dispatches its own transaction owes them.
+ */
+function dispatchPaste(view: EditorView, tr: Transaction): void {
+  view.dispatch(tr.setMeta("paste", true).setMeta("uiEvent", "paste"));
+}
+
 export function createMarkdownPasteExtension() {
   return Extension.create({
     name: "markdownPaste",
@@ -438,12 +459,10 @@ export function createMarkdownPasteExtension() {
                 if (html && !html.includes("data-pm-slice")) {
                   const repaired = repairFragmentedOrderedLists(slice);
                   if (repaired !== slice) {
-                    const tr = view.state.tr
-                      .replaceSelection(repaired)
-                      .scrollIntoView()
-                      .setMeta("paste", true)
-                      .setMeta("uiEvent", "paste");
-                    view.dispatch(tr);
+                    dispatchPaste(
+                      view,
+                      view.state.tr.replaceSelection(repaired).scrollIntoView(),
+                    );
                     return true;
                   }
                 }
@@ -451,7 +470,7 @@ export function createMarkdownPasteExtension() {
               }
 
               if (mode === "literal") {
-                view.dispatch(view.state.tr.insertText(text));
+                dispatchPaste(view, view.state.tr.insertText(text));
                 return true;
               }
 
@@ -470,13 +489,12 @@ export function createMarkdownPasteExtension() {
                   first?.type.name === "paragraph" &&
                   first.content.size === 0);
               if (text.trim() && parsedEmpty) {
-                view.dispatch(view.state.tr.insertText(text));
+                dispatchPaste(view, view.state.tr.insertText(text));
                 return true;
               }
 
               const parsedSlice = Slice.maxOpen(node.content);
-              const tr = view.state.tr.replaceSelection(parsedSlice);
-              view.dispatch(tr);
+              dispatchPaste(view, view.state.tr.replaceSelection(parsedSlice));
               return true;
             },
           },

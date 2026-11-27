@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
@@ -8,46 +9,119 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@multica/ui/components/ui/hover-card";
-import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type {
-  WorkspaceWorkingAgent,
-  WorkspaceWorkingAgentMineRelation,
-} from "@multica/core/types";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type { AgentTask, WorkingAgentSummary } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
+import {
+  collapseWorkingAgentsWithSnapshot,
+  type WorkingExecutionUnit,
+} from "../surface/execution-actors";
 import { useT } from "../../i18n";
+
+const EMPTY_SNAPSHOT: AgentTask[] = [];
+
+export function useWorkingExecutionUnits(
+  agents: readonly WorkingAgentSummary[] | undefined,
+): WorkingExecutionUnit[] | undefined {
+  const wsId = useWorkspaceId();
+  const { hasActor } = useActorName();
+  const { data: snapshot = EMPTY_SNAPSHOT } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: Boolean(wsId) && (agents?.length ?? 0) > 0,
+  });
+  const isKnownSquad = useMemo(
+    () => (hasActor ? (id: string) => hasActor("squad", id) !== false : null),
+    [hasActor],
+  );
+  return useMemo(() => {
+    if (agents === undefined) return undefined;
+    return collapseWorkingAgentsWithSnapshot(agents, snapshot, isKnownSquad);
+  }, [agents, snapshot, isKnownSquad]);
+}
 
 interface WorkspaceAgentWorkingChipProps {
   value: boolean;
   onToggle: () => void;
-  mineRelation?: WorkspaceWorkingAgentMineRelation;
+  /** Agents working inside the surface this header belongs to, already narrowed
+   *  by its scope and every active filter. `undefined` = not resolved yet. */
+  agents: readonly WorkingAgentSummary[] | undefined;
+  /** Avatars and the number only, for a header that has run out of room. */
+  compact?: boolean;
+}
+
+/** What the projection says about activity in this surface. `unknown` is a
+ *  first-class case, not a synonym for `none`. */
+export type ChipActivity = "unknown" | "none" | "some";
+
+export function chipActivity(
+  agents: readonly WorkingAgentSummary[] | undefined,
+): ChipActivity {
+  if (agents === undefined) return "unknown";
+  return agents.length > 0 ? "some" : "none";
 }
 
 /**
  * Which colour tier the chip wears, and the only classes allowed alongside
  * it. Activity uses a tint, the active filter uses the filled brand tier,
- * and an idle workspace stays neutral.
+ * and an idle surface stays neutral.
+ *
+ * The muted text on the neutral tier is what reads as "nothing is happening
+ * here", so an unresolved projection gets the neutral tier WITHOUT it: we do
+ * not yet know whether the surface is idle, and dimming it would claim so.
  */
 export function chipAppearance(
   value: boolean,
-  hasAgents: boolean,
+  activity: ChipActivity,
 ): { variant: "brand" | "brandSubtle" | "outline"; className: string } {
   const layout = "h-8 px-2 md:h-7 md:px-2.5";
   if (value) return { variant: "brand", className: layout };
-  if (hasAgents) return { variant: "brandSubtle", className: layout };
+  if (activity === "some") return { variant: "brandSubtle", className: layout };
+  if (activity === "unknown") return { variant: "outline", className: layout };
   return { variant: "outline", className: `${layout} text-muted-foreground` };
 }
 
-function WorkingAgentsHoverContent({
+/**
+ * Hover body for every surface that reads a working-agents projection — the
+ * surface filter chip here and the sub-issues header chip on issue detail.
+ * Shared so a narrowed read and an unnarrowed one describe activity the same
+ * way; the only difference between the two is the projection's scope.
+ *
+ * Identity comes from the workspace agent directory rather than the payload:
+ * the surface projection is a facet of ids and counts, and resolving names
+ * here keeps one definition of an agent's name/avatar across both callers.
+ *
+ * Three distinct states, and the first two must never collapse into each other:
+ * `undefined` = the projection has not resolved, `[]` = it resolved and this
+ * surface really has nobody working, a non-empty list = the roster. Rendering
+ * the empty sentence for an unresolved projection would assert "no agents
+ * working right now" on no evidence — the same class of unearned claim the chip
+ * count itself had (MUL-5525).
+ */
+export function WorkingAgentsHoverContent({
   agents,
+  units: unitsProp,
 }: {
-  agents: readonly WorkspaceWorkingAgent[];
+  agents: readonly WorkingAgentSummary[] | undefined;
+  units?: readonly WorkingExecutionUnit[] | undefined;
 }) {
   const { t } = useT("issues");
+  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const derivedUnits = useWorkingExecutionUnits(unitsProp === undefined ? agents : undefined);
+  const units = unitsProp ?? derivedUnits;
 
-  if (agents.length === 0) {
+  if (units === undefined) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.agent_activity.unknown_hover)}
+      </p>
+    );
+  }
+
+  if (units.length === 0) {
+    return (
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.empty_hover)}
       </p>
     );
@@ -55,61 +129,81 @@ function WorkingAgentsHoverContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-muted-foreground">
-        {t(($) => $.agent_activity.hover_header, { count: agents.length })}
+      <div className="text-caption font-medium text-muted-foreground">
+        {t(($) => $.agent_activity.hover_header, { count: units.length })}
       </div>
       <div className="flex flex-col gap-1.5">
-        {agents.map((agent) => (
-          <div key={agent.id} className="flex items-center gap-2 text-xs">
-            <ActorAvatar
-              name={agent.name}
-              initials={agent.name.trim().slice(0, 2).toUpperCase()}
-              avatarUrl={agent.avatar_url ?? undefined}
-              isAgent
-              size="sm"
-            />
-            <span className="min-w-0 flex-1 truncate font-medium">
-              {agent.name}
-            </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {t(($) => $.agent_activity.tasks_count, {
-                count: agent.running_task_count,
-              })}
-            </span>
-          </div>
-        ))}
+        {units.map((unit) => {
+          const memberNames =
+            unit.type === "squad" && unit.memberAgentIds.length > 0
+              ? unit.memberAgentIds
+                  .map((id) => getActorName("agent", id))
+                  .join("、")
+              : null;
+          return (
+            <div key={`${unit.type}:${unit.id}`} className="flex items-center gap-2 text-caption">
+              <ActorAvatar
+                name={getActorName(unit.type, unit.id)}
+                initials={getActorInitials(unit.type, unit.id)}
+                avatarUrl={getActorAvatarUrl(unit.type, unit.id) ?? undefined}
+                isAgent={unit.type === "agent"}
+                isSquad={unit.type === "squad"}
+                size="sm"
+              />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{getActorName(unit.type, unit.id)}</span>
+                {memberNames ? (
+                  <span className="ml-1 text-muted-foreground">({memberNames})</span>
+                ) : null}
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {t(($) => $.agent_activity.tasks_count, {
+                  count: unit.runningTaskCount,
+                })}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 /**
- * Workspace-wide agents-working filter chip.
+ * Agents-working filter chip for an issue surface header.
  *
- * Its data comes from the independent GET /api/working-agents projection, so
- * Table pagination and locally loaded rows can never turn a known count into
- * an indeterminate "—". Issues uses the workspace issue projection; My Issues
- * passes its authenticated relation so the server scopes the count. Clicking
- * the control only toggles view state; the Table controller translates these
- * same returned ids into assignee filters.
+ * The number IS the post-click row count's authority: it counts the agents
+ * working on rows this surface's scope AND active filters would show, resolved
+ * by the surface controller from the server-side `working_agents` facet — the
+ * same compiled query the rows come from. Before MUL-5525 it ran its own
+ * workspace-wide `/api/working-agents` read, so on a project page it could
+ * advertise agents working nowhere near that project and open an empty list.
+ *
+ * `agents === undefined` means the projection has not resolved. Every surface of
+ * the chip then stays indeterminate — label, compact number, colour tier and
+ * hover body alike — because "0" and "not known yet" are different claims and
+ * the reader cannot tell them apart once one of them is rendered as the other.
+ *
+ * Clicking only toggles view state; the controller turns the running-issue set
+ * into the query's `working_issue_ids` filter.
  */
 export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
-  mineRelation,
+  agents,
+  compact = false,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
-  const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(
-    workspaceWorkingAgentsOptions(wsId, "issue", mineRelation),
-  );
-  const agentIds = agents.map((agent) => agent.id);
-  const agentCount = agents.length;
-  const hasAgents = agentCount > 0;
-  const label = t(($) => $.agent_activity.chip_agents_working, {
-    count: agentCount,
-  });
-  const appearance = chipAppearance(value, hasAgents);
+  const units = useWorkingExecutionUnits(agents);
+  const activity = chipActivity(agents);
+  const agentIds = agents?.map((agent) => agent.id) ?? [];
+  const actors = units?.map(({ type, id }) => ({ type, id })) ?? [];
+  const count = units?.length ?? 0;
+  const label =
+    activity === "unknown"
+      ? t(($) => $.agent_activity.chip_agents_working_unknown)
+      : t(($) => $.agent_activity.chip_agents_working, { count });
+  const appearance = chipAppearance(value, activity);
 
   const trigger = (
     <Button
@@ -120,9 +214,15 @@ export function WorkspaceAgentWorkingChip({
       aria-pressed={value}
       aria-label={label}
     >
-      {hasAgents && <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />}
-      <span className="tabular-nums md:hidden">{agentCount}</span>
-      <span className="hidden tabular-nums md:inline">{label}</span>
+      {activity === "some" && (
+        <AgentAvatarStack agentIds={agentIds} actors={actors} size="sm" max={3} />
+      )}
+      <span className={compact ? "tabular-nums" : "tabular-nums md:hidden @max-3xl/issue-header:inline"}>
+        {activity === "unknown" ? "—" : count}
+      </span>
+      {!compact && (
+        <span className="hidden tabular-nums md:inline @max-3xl/issue-header:hidden">{label}</span>
+      )}
     </Button>
   );
 
@@ -130,7 +230,7 @@ export function WorkspaceAgentWorkingChip({
     <HoverCard>
       <HoverCardTrigger render={trigger} />
       <HoverCardContent align="end" className="w-72">
-        <WorkingAgentsHoverContent agents={agents} />
+        <WorkingAgentsHoverContent agents={agents} units={units} />
       </HoverCardContent>
     </HoverCard>
   );

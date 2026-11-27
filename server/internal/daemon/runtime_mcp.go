@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // runtimeLocalMcpServerSummary is the intentionally non-secret inventory
@@ -32,13 +35,13 @@ type runtimeLocalMcpServerSummary struct {
 // A present config (including an empty mcpServers map) opts into the merged,
 // task-local config so adding one managed server no longer disables unrelated
 // runtime servers.
-func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage) (json.RawMessage, error) {
+func mergeRuntimeAndAgentMcpConfig(provider, cliVersion string, agentConfig json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(agentConfig)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return agentConfig, nil
 	}
 
-	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider)
+	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider, cliVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +56,7 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 	agentServers := map[string]any{}
 	if servers, ok := nestedRuntimeMcpMap(agentDocument, "mcpServers"); ok {
 		agentServers = servers
-	} else if provider == "opencode" {
+	} else if provider == "opencode" || provider == "codearts" {
 		// Older OpenCode agents may store the provider-native top-level `mcp`
 		// map. Its individual entries can still flow through the existing
 		// OpenCode adapter when placed under the canonical mcpServers envelope.
@@ -77,11 +80,188 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 	return raw, nil
 }
 
+// codeArtsUserConfigPath returns the first CodeArts user config file present,
+// following the official launcher's codearts_cli.json/codearts_cli.jsonc order.
+func codeArtsUserConfigPath(home string) string {
+	configDir := filepath.Join(home, ".codeartsdoer")
+	candidates := []string{
+		filepath.Join(configDir, "codearts_cli.json"),
+		filepath.Join(configDir, "codearts_cli.jsonc"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+// codebuddyUserMcpConfigPath returns the user-scope MCP config file CodeBuddy
+// actually reads.
+//
+// CodeBuddy is a Claude Code fork but resolves its own config, so `~/.claude.json`
+// is never consulted. Its config directory is `$CODEBUDDY_CONFIG_DIR`, defaulting
+// to `~/.codebuddy`, and the user-scope MCP file is the FIRST of these that
+// exists — the list is a fallback chain, not a merge:
+//
+//	<configDir>/.mcp.json   (what `codebuddy mcp add --scope user` writes)
+//	<configDir>/mcp.json
+//	~/.codebuddy.json
+//
+// When none exist the first candidate is returned so the caller's read fails
+// with os.ErrNotExist and is treated as "no runtime servers", matching the
+// other providers. Verified against CodeBuddy 2.x by writing each file in turn
+// and reading back `codebuddy mcp list`.
+func codebuddyUserMcpConfigPath(home string) string {
+	configDir := strings.TrimSpace(os.Getenv("CODEBUDDY_CONFIG_DIR"))
+	if configDir == "" {
+		configDir = filepath.Join(home, ".codebuddy")
+	}
+	candidates := []string{
+		filepath.Join(configDir, ".mcp.json"),
+		filepath.Join(configDir, "mcp.json"),
+		filepath.Join(home, ".codebuddy.json"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+// unmarshalRuntimeMcpConfig decodes one runtime's config file. "jsonc" is JSON
+// with comments and trailing commas, which CodeBuddy accepts in its MCP files —
+// parsing those as strict JSON would drop every server behind a single `//`.
+func unmarshalRuntimeMcpConfig(raw []byte, format string) (map[string]any, error) {
+	var cfg map[string]any
+	switch format {
+	case "toml":
+		if err := toml.Unmarshal(raw, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	case "jsonc":
+		stripped, err := stripJSONC(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+		if err := json.Unmarshal(stripped, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	default:
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return nil, fmt.Errorf("parse runtime MCP config: %w", err)
+		}
+	}
+	return cfg, nil
+}
+
+// stripJSONC rewrites JSONC into strict JSON: `//` and `/* */` comments become
+// spaces and a single trailing comma before `}` / `]` is dropped. String
+// literals are copied verbatim, so a `//` or a comma inside a command argument
+// survives.
+//
+// Output is always the same length as the input — comments and the dropped
+// comma are blanked, never deleted — so a parse-error offset still points at
+// the byte the user actually wrote.
+//
+// Only the LAST comma before a closer is blanked, so genuinely malformed input
+// stays malformed: `[1,,,]` does not silently become `[1]`. This is a
+// pragmatic subset of JSONC covering what CodeBuddy's MCP files use in
+// practice; anything it cannot repair is reported as a parse error rather than
+// guessed at.
+//
+// An unterminated `/*` is an error rather than a blank-to-EOF, so the Agent >
+// MCP tab cannot list servers out of a file CodeBuddy itself rejects. Verified:
+// the CLI reports "No MCP servers configured" for both an unterminated comment
+// and the `/*/` near-miss, where the opener's `*` must not double as the
+// closer's.
+func stripJSONC(raw []byte) ([]byte, error) {
+	out := make([]byte, 0, len(raw))
+	// Offset into out of the one comma still eligible for removal, or -1.
+	// Reset by any value token, so only a genuinely trailing comma is dropped.
+	lastComma := -1
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if inString {
+			out = append(out, c)
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch {
+		case c == '"':
+			inString = true
+			lastComma = -1
+			out = append(out, c)
+		case c == '/' && i+1 < len(raw) && raw[i+1] == '/':
+			// Blank through end of line, preserving the newline itself.
+			for i < len(raw) && raw[i] != '\n' {
+				out = append(out, ' ')
+				i++
+			}
+			if i < len(raw) {
+				out = append(out, raw[i])
+			}
+		case c == '/' && i+1 < len(raw) && raw[i+1] == '*':
+			// Consume the opener first so `/*/` cannot reuse its own `*` as the
+			// closer's, then blank the body, newlines included, so line numbers
+			// and the total byte count both survive.
+			out = append(out, ' ', ' ')
+			i += 2
+			closed := false
+			for i < len(raw) {
+				if raw[i] == '*' && i+1 < len(raw) && raw[i+1] == '/' {
+					out = append(out, ' ', ' ')
+					i++ // consume '*'; the loop's i++ consumes '/'
+					closed = true
+					break
+				}
+				if raw[i] == '\n' {
+					out = append(out, '\n')
+				} else {
+					out = append(out, ' ')
+				}
+				i++
+			}
+			if !closed {
+				return nil, errors.New("unterminated block comment")
+			}
+		case c == ',':
+			lastComma = len(out)
+			out = append(out, c)
+		case c == '}' || c == ']':
+			if lastComma >= 0 {
+				out[lastComma] = ' '
+			}
+			lastComma = -1
+			out = append(out, c)
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			out = append(out, c)
+		default:
+			lastComma = -1
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // loadRuntimeMcpServerConfigs returns full, secret-bearing runtime MCP entries
 // for task-local merging. Callers must never send the result to the server or
 // logs; the public capabilities endpoint continues to use the redacted summary
 // type above.
-func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) {
+func loadRuntimeMcpServerConfigs(provider, cliVersion string) (map[string]any, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -89,8 +269,16 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 
 	var path, key, format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
+	case "codearts":
+		path, key, format = codeArtsUserConfigPath(home), "mcp", "jsonc"
+	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
+	// and local scopes on every launch (codebuddy.go never passes
+	// --strict-mcp-config), and a managed entry already wins a same-name
+	// collision, so the daemon pre-merging them would only duplicate what the
+	// CLI does natively — while losing the scope precedence and the approval
+	// gate that protects project-scope servers.
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -116,30 +304,27 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		}
 		key, format = "mcp.servers", "json"
 	default:
+		// pi is intentionally absent. The CLI reads ~/.pi/agent/mcp.json on its
+		// own, and a project .pi/mcp.json replaces entries with the same name.
+		// Copying the user file into the task file would start those servers twice.
 		return map[string]any{}, false, nil
 	}
 
-	servers := map[string]any{}
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		var cfg map[string]any
-		if format == "toml" {
-			if err := toml.Unmarshal(raw, &cfg); err != nil {
-				return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
-			}
-		} else if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
+	configured, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
+	if err != nil {
+		return nil, true, err
+	}
+	servers := make(map[string]any, len(configured))
+	for name, entry := range configured {
+		// OpenCode 2.x uses disabled, but the task adapters only read
+		// enabled. Keep disabled entries in inventory, not in task config.
+		if server, ok := entry.(map[string]any); provider == "opencode" && ok && server["disabled"] == true {
+			continue
 		}
-		if configured, ok := nestedRuntimeMcpMap(cfg, key); ok {
-			for name, entry := range configured {
-				servers[name] = normalizeRuntimeMcpEntry(provider, entry)
-			}
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+		servers[name] = normalizeRuntimeMcpEntry(provider, entry)
 	}
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		// User configuration has the same precedence Claude uses: plugin
 		// servers only fill names not already defined by the user.
 		for name, entry := range loadClaudePluginMcpServerConfigs(home) {
@@ -174,7 +359,7 @@ func normalizeRuntimeMcpEntry(provider string, value any) any {
 
 func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	out := map[string]any{}
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(filepath.Join(home, ".claude")) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,
@@ -204,7 +389,7 @@ func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	return out
 }
 
-func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary, bool, error) {
+func listRuntimeLocalMcpServers(provider, cliVersion string) ([]runtimeLocalMcpServerSummary, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -213,8 +398,22 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	var path, key, source string
 	var format string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
+	case "codearts":
+		path, key, source, format = codeArtsUserConfigPath(home), "mcp", "User config", "jsonc"
+	case "codebuddy":
+		path, key, source, format = codebuddyUserMcpConfigPath(home), "mcpServers", "User config", "jsonc"
+	case "kimi":
+		// Inventory only — kimi is deliberately absent from
+		// loadRuntimeMcpServerConfigs. `kimi acp` merges this file with the
+		// ephemeral `mcpServers` we send in session/new, so merging it in
+		// again would spawn every user server twice.
+		kimiHome := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+		if kimiHome == "" {
+			kimiHome = filepath.Join(home, ".kimi-code")
+		}
+		path, key, source, format = filepath.Join(kimiHome, "mcp.json"), "mcpServers", "User config", "json"
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -239,29 +438,32 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			path = filepath.Join(stateDir, "openclaw.json")
 		}
 		key, source, format = "mcp.servers", "User config", "json"
+	case "pi":
+		// Inventory only, same as omp. Pi already loads this file at startup,
+		// so loadRuntimeMcpServerConfigs must not merge it into the task.
+		path, key, source, format = filepath.Join(home, ".pi", "agent", "mcp.json"), "mcpServers", "User config", "json"
+	case "omp":
+		// Inventory scope: omp discovers servers from a multi-level precedence
+		// chain (.omp/mcp.json, .omp/.mcp.json, profile/user-level configs, and
+		// third-party tool configs such as .claude.json, .cursor/mcp.json,
+		// .vscode/mcp.json, and project-root mcp.json/.mcp.json). This inventory
+		// reads only ~/.omp/agent/mcp.json — the user-scope entry point — so a
+		// user who clears every server in the UI may still inherit servers from
+		// lower-precedence sources. This matches the simplification other
+		// providers already make and avoids sending full tool-chain state over
+		// the wire.
+		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
 	default:
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
 
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		var cfg map[string]any
-		if format == "toml" {
-			if err := toml.Unmarshal(raw, &cfg); err != nil {
-				return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
-			}
-		} else if err := json.Unmarshal(raw, &cfg); err != nil {
-			return nil, true, fmt.Errorf("parse runtime MCP config: %w", err)
-		}
-		if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
-			out = append(out, runtimeMcpSummaries(servers, source)...)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
+	servers, err := readRuntimeMcpServers(provider, cliVersion, path, key, format)
+	if err != nil {
+		return nil, true, err
 	}
+	out := runtimeMcpSummaries(servers, source)
 
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
 	}
 
@@ -309,7 +511,7 @@ func runtimeMcpSummaries(servers map[string]any, source string) []runtimeLocalMc
 
 func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 	out := make([]runtimeLocalMcpServerSummary, 0)
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(filepath.Join(home, ".claude")) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,
@@ -333,6 +535,130 @@ func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
 		}
 	}
 	return out
+}
+
+func readRuntimeMcpDocument(path, format string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read runtime MCP config: %w", err)
+	}
+	cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return cfg, nil
+}
+
+func readRuntimeMcpServers(provider, cliVersion, path, key, format string) (map[string]any, error) {
+	cfg, err := readRuntimeMcpDocument(path, format)
+	if err != nil {
+		return nil, err
+	}
+	if provider != "opencode" {
+		servers, _ := nestedRuntimeMcpMap(cfg, key)
+		return servers, nil
+	}
+
+	overlay, err := readRuntimeMcpDocument(filepath.Join(filepath.Dir(path), "opencode.jsonc"), "jsonc")
+	if err != nil {
+		return nil, err
+	}
+	usesV2 := agent.OpenCodeVersionIsV2OrLater(cliVersion)
+	baseServers := opencodeMcpServers(cfg, key, usesV2)
+	overlayServers := opencodeMcpServers(overlay, key, usesV2)
+	if baseServers == nil {
+		return overlayServers, nil
+	}
+	// OpenCode 2.x replaces servers by name, even when both files use the
+	// legacy flat layout. Unknown versions follow the 1.x deep-merge rule.
+	if !usesV2 {
+		mergeOpenCodeMcpObjects(baseServers, overlayServers)
+	} else {
+		for name, entry := range overlayServers {
+			baseServers[name] = entry
+		}
+	}
+	return baseServers, nil
+}
+
+func mergeOpenCodeMcpObjects(base, overlay map[string]any) {
+	for name, entry := range overlay {
+		oldObject, oldOK := base[name].(map[string]any)
+		newObject, newOK := entry.(map[string]any)
+		if oldOK && newOK {
+			mergeOpenCodeMcpObjects(oldObject, newObject)
+			continue
+		}
+		base[name] = entry
+	}
+}
+
+func opencodeMcpServers(cfg map[string]any, key string, usesV2 bool) map[string]any {
+	mcp, ok := cfg[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if usesV2 {
+		return normalizeOpenCodeV2McpServers(mcp)
+	}
+	// Keep recognizing nested inventories when CLI version detection is
+	// unavailable, including a document containing only timeout defaults.
+	if servers, ok := mcp["servers"].(map[string]any); ok && !isFlatOpenCodeMcpServer(servers) {
+		return servers
+	}
+	if !isFlatOpenCodeMcpServer(mcp["timeout"]) {
+		delete(mcp, "timeout")
+	}
+	return mcp
+}
+
+func normalizeOpenCodeV2McpServers(mcp map[string]any) map[string]any {
+	servers := make(map[string]any, len(mcp))
+	for name, value := range mcp {
+		server, ok := value.(map[string]any)
+		if !ok || !isTypedOpenCodeMcpServer(server) {
+			continue
+		}
+		// OpenCode 2.x ignores enabled-only overrides and migrates the
+		// enabled flag on complete legacy entries to disabled.
+		if server["enabled"] == false {
+			server["disabled"] = true
+		}
+		servers[name] = server
+	}
+	if native, ok := mcp["servers"].(map[string]any); ok && !isTypedOpenCodeMcpServer(native) {
+		// A legacy override named "servers" is not a nested server map.
+		if _, enabledOnly := native["enabled"].(bool); enabledOnly {
+			return servers
+		}
+		for name, value := range native {
+			if server, ok := value.(map[string]any); ok && isTypedOpenCodeMcpServer(server) {
+				servers[name] = server
+			}
+		}
+	}
+	return servers
+}
+
+func isTypedOpenCodeMcpServer(server map[string]any) bool {
+	return server["type"] == "local" || server["type"] == "remote"
+}
+
+func isFlatOpenCodeMcpServer(value any) bool {
+	server, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, field := range []string{"type", "url", "command", "enabled", "disabled"} {
+		switch server[field].(type) {
+		case string, bool, []any:
+			return true
+		}
+	}
+	return false
 }
 
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {

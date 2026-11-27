@@ -1,3 +1,4 @@
+import { issueStatusCategory, normalizeStatusPatch } from "./status-category";
 import {
   hashKey,
   type InfiniteData,
@@ -10,16 +11,18 @@ import {
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
-import { inboxKeys } from "../inbox/queries";
-import { patchInboxIssueStatus } from "../inbox/ws-updaters";
+import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
+import { patchInboxIssueProjection } from "../inbox/ws-updaters";
 import { projectKeys } from "../projects/queries";
 import {
   decrementBucketTotal,
   findIssueLocation,
   moveBucketTotal,
   patchIssueInBuckets,
+  patchNeedsInvalidation,
   removeIssueFromBuckets,
 } from "./cache-helpers";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
 import {
   issueMatchesListFilter,
   listFilterDependsOn,
@@ -37,46 +40,15 @@ export type IssueFlatCache = InfiniteData<ListIssuesResponse, number>;
 export type IssueTableRowCache = IssueTableRowsResponse;
 
 /**
- * IssueCacheCoordinator — the one rules table for how a single issue change
- * propagates through the query cache.
+ * IssueCacheCoordinator applies shared mutation and WebSocket cache rules.
+ * Patch determinate loaded rows, remove rows that leave a filter, and mark keys
+ * stale when membership or an unloaded row's server-sorted position is uncertain.
+ * Update bucket totals for known transitions without inserting speculative rows.
  *
- * Every write path converges here: `useUpdateIssue` (onMutate optimistic +
- * onSuccess server reconcile), `useBatchUpdateIssues`, and the WS
- * `issue:updated` handler all call {@link applyIssueChange}, so "I changed
- * it" and "someone else changed it" follow the same rules by construction.
- *
- * The rules, per loaded bucketed list (workspace board + every myList
- * scope — My Issues, Project, actor panels, workspace members/agents tabs):
- *
- *   card present, filter untouched by the change → surgical patch (rebucket
- *     on status, position-slot insert; never a refetch — refetching the
- *     visible list is what made drags flicker)
- *   card present, no longer matches the list's filter → surgical REMOVE
- *     (bucket total decremented) — the "issue left this surface" case that a
- *     filter-blind patch used to leave behind (MUL-3669)
- *   card present, membership undecidable client-side (involves / my:all) →
- *     patch + mark the key stale
- *   card absent, change can't affect this list → skip
- *   card absent, stayed a member + status changed → move one unit of the
- *     server total between the two buckets immediately, then mark the key
- *     stale: the row's slot in the destination bucket's loaded window is
- *     server knowledge, and under staleTime: Infinity an explicit
- *     invalidation is the only channel that ever fills it in
- *   card absent, left the list (reassigned / re-projected) → old status
- *     bucket total -1
- *   card absent, may have ENTERED, or anything undecidable (no base entity,
- *     unknown membership) → mark the key stale (never hard-insert: the
- *     right page/slot under the list's sort+filter is server knowledge)
- *
- * Stale keys are NOT invalidated here — timing is the caller's contract:
- * mutations defer them to onSettled (invalidating mid-flight would refetch
- * uncommitted state and stomp the optimistic patch), the WS path invalidates
- * immediately (the server already committed).
- *
- * The detail cache and the Inbox `issue_status` projection are patched in the
- * same pass. Aggregate projections that cannot be recomputed from one entity
- * (assignee-grouped boards, Gantt, project metrics) go through
- * {@link invalidateIssueDerivatives}.
+ * This helper returns stale keys without invalidating them: mutations wait until
+ * onSettled so refetches cannot overwrite optimistic work, while committed WS
+ * changes invalidate immediately. Detail and inbox projections are patched here;
+ * aggregate projections use invalidateIssueDerivatives.
  */
 
 export interface IssueCacheChangeResult {
@@ -85,8 +57,10 @@ export interface IssueCacheChangeResult {
   prevLists: [QueryKey, ListIssuesCache][];
   prevFlatLists: [QueryKey, IssueFlatCache][];
   prevTableRows: [QueryKey, IssueTableRowCache][];
+  prevSidebarLists: [QueryKey, ListIssuesResponse][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
+  prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
    *  unknown, possible enter/leave beyond the loaded window, bucket-count
    *  drift). Invalidate on settle (mutation) or immediately (WS). */
@@ -120,7 +94,20 @@ function listContractFromKey(key: QueryKey): {
   };
 }
 
-function bucketedListEntries(
+/**
+ * SHAPE-FILTERED CACHE SCANS.
+ *
+ * `getQueriesData` matches a key PREFIX, and every issue-surface prefix also
+ * covers sibling queries that hold a different shape: `myAll` covers the
+ * assignee-grouped caches, `tableAll` covers the grouped (infinite) and facet
+ * caches next to the row pages, `flatAll` covers the export window. Reading
+ * `data.rows` / `data.pages` / `data.byStatus` off those siblings throws
+ * ("Cannot read properties of undefined"), and inside a mutation's onSuccess
+ * that throw surfaces as a failed write the server already accepted
+ * (MUL-6394). Every scan goes through these helpers so the shape check can't
+ * be forgotten at a new call site.
+ */
+export function bucketedListEntries(
   qc: QueryClient,
   wsId: string,
 ): [QueryKey, ListIssuesCache][] {
@@ -132,7 +119,7 @@ function bucketedListEntries(
   );
 }
 
-function flatListEntries(
+export function flatListEntries(
   qc: QueryClient,
   wsId: string,
 ): [QueryKey, IssueFlatCache][] {
@@ -144,7 +131,7 @@ function flatListEntries(
     );
 }
 
-function tableRowEntries(
+export function tableRowEntries(
   qc: QueryClient,
   wsId: string,
 ): [QueryKey, IssueTableRowCache][] {
@@ -156,6 +143,31 @@ function tableRowEntries(
         typeof entry[1] === "object" &&
         Array.isArray((entry[1] as IssueTableRowCache).rows),
     );
+}
+
+export function sidebarListEntries(
+  qc: QueryClient,
+  wsId: string,
+): [QueryKey, ListIssuesResponse][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.sidebarAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, ListIssuesResponse] =>
+        !!entry[1] &&
+        typeof entry[1] === "object" &&
+        Array.isArray((entry[1] as ListIssuesResponse).issues),
+    );
+}
+
+/** Caches under `prefix` that hold a plain `Issue[]` — per-parent children and
+ *  the project Gantt list. */
+export function issueArrayEntries(
+  qc: QueryClient,
+  prefix: readonly unknown[],
+): [QueryKey, Issue[]][] {
+  return qc
+    .getQueriesData<Issue[]>({ queryKey: prefix })
+    .filter((entry): entry is [QueryKey, Issue[]] => Array.isArray(entry[1]));
 }
 
 function flatContractFromKey(key: QueryKey): {
@@ -189,6 +201,37 @@ function patchChangesAnyIssueField(
 ): boolean {
   return Object.keys(patch).some((field) =>
     patchFieldChanged(patch, base, field as keyof Issue),
+  );
+}
+
+// Fields whose direct mutation is part of the issue's semantic activity
+// contract. Position-only moves deliberately stay out: they are layout edits,
+// not user-visible activity. Full server snapshots carry last_activity_at, so
+// prefer that authoritative clock when present; the field list is the
+// mixed-version/optimistic fallback for patches that do not carry it yet.
+const issueActivityFields = [
+  "title",
+  "description",
+  "status",
+  "priority",
+  "assignee_type",
+  "assignee_id",
+  "start_date",
+  "due_date",
+  "parent_issue_id",
+  "project_id",
+  "stage",
+] as const satisfies readonly (keyof Issue)[];
+
+function patchChangesIssueActivity(
+  patch: Partial<Issue>,
+  base: Issue | undefined,
+): boolean {
+  if (Object.prototype.hasOwnProperty.call(patch, "last_activity_at")) {
+    return patchFieldChanged(patch, base, "last_activity_at");
+  }
+  return issueActivityFields.some((field) =>
+    patchFieldChanged(patch, base, field),
   );
 }
 
@@ -246,6 +289,8 @@ function flatWindowNeedsReconcile(
       // Every persisted issue edit advances updated_at even though the
       // optimistic request payload does not carry the server timestamp.
       return anyIssueFieldChanged;
+    case "last_activity":
+      return patchChangesIssueActivity(patch, base);
     case "start_date":
       return patchFieldChanged(patch, base, "start_date");
     case "due_date":
@@ -263,7 +308,7 @@ export function applyIssueChange(
   qc: QueryClient,
   wsId: string,
   id: string,
-  patch: Partial<Issue>,
+  rawPatch: Partial<Issue>,
   opts: {
     /** Which membership dimensions this change actually moved — compute via
      *  `issueChangedDims` (mutations) or the server's WS flags. */
@@ -272,18 +317,28 @@ export function applyIssueChange(
      *  where the card is not loaded. Omitting it degrades those judgments to
      *  "unknown" → a deferred refetch, never a wrong patch. */
     baseIssue?: Issue;
+    /** Optional per-cache admission guard. Realtime uses this to reject a
+     *  non-increasing revision in a fresh cache while still healing another
+     *  loaded projection that holds an older revision of the same issue. */
+    acceptCurrent?: (current: Issue) => boolean;
   },
 ): IssueCacheChangeResult {
-  const { changed, baseIssue } = opts;
+  const { changed, baseIssue, acceptCurrent = () => true } = opts;
+  // Normalize ONCE, at the door. Every write below is a `{...entity, ...patch}`
+  // spread, and an optimistic `{status}` patch would otherwise leave the stale
+  // status_category on the entity while the card moves buckets. (MUL-6243)
+  const patch = normalizeStatusPatch(rawPatch);
   const prevLists: [QueryKey, ListIssuesCache][] = [];
   const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
   const prevTableRows: [QueryKey, IssueTableRowCache][] = [];
+  const prevSidebarLists: [QueryKey, ListIssuesResponse][] = [];
   const staleKeys: QueryKey[] = [];
   let prevIssue: Issue | undefined = baseIssue;
 
   for (const [key, data] of bucketedListEntries(qc, wsId)) {
     const { scope, filter, sort } = listContractFromKey(key);
     const loc = findIssueLocation(data, id);
+    if (loc && !acceptCurrent(loc.issue)) continue;
     const filterTouched = listFilterDependsOn(scope, filter, changed);
 
     // "Updated date" sort: every persisted edit advances updated_at, but the
@@ -298,9 +353,20 @@ export function applyIssueChange(
     ) {
       staleKeys.push(key);
     }
+    if (
+      sort.sort_by === "last_activity" &&
+      patchChangesIssueActivity(patch, loc?.issue ?? baseIssue)
+    ) {
+      staleKeys.push(key);
+    }
 
     if (loc) {
       if (!prevIssue) prevIssue = loc.issue;
+      // A status this client cannot resolve to a category makes
+      // patchIssueInBuckets a no-op. The row DID move on the server, so
+      // treating that as "nothing to do" would leave the card in its old
+      // column forever — force a refetch instead. (MUL-6243)
+      if (patchNeedsInvalidation(patch)) staleKeys.push(key);
       let next: ListIssuesCache;
       if (filterTouched) {
         const membership = issueMatchesListFilter(
@@ -350,7 +416,22 @@ export function applyIssueChange(
         // buckets; anything else (e.g. member→member reassignment) leaves
         // this list's pages and counts untouched.
         if (!changed.status || patch.status === undefined) continue;
-        const next = moveBucketTotal(data, baseIssue.status, patch.status);
+        // Bucket totals are per category (MUL-6243).
+        // patch.status_category is authoritative when the server sent it; the
+        // key-only fallback covers built-ins.
+        const fromCategory = issueStatusCategory(baseIssue);
+        const toCategory = issueStatusCategory({
+          status: patch.status,
+          status_category: patch.status_category,
+        });
+        if (!fromCategory || !toCategory) {
+          // An unresolvable custom status must NOT be a silent no-op: the row
+          // moved on the server, so leaving this cache untouched drifts the
+          // off-window totals permanently. Force a refetch instead.
+          staleKeys.push(key);
+          continue;
+        }
+        const next = moveBucketTotal(data, fromCategory, toCategory);
         if (next !== data) {
           prevLists.push([key, data]);
           qc.setQueryData<ListIssuesCache>(key, next);
@@ -364,7 +445,12 @@ export function applyIssueChange(
       }
       if (isMember === false) {
         // Left the list entirely — the bucket it was counted in loses one.
-        const next = decrementBucketTotal(data, baseIssue.status);
+        const leavingCategory = issueStatusCategory(baseIssue);
+        if (!leavingCategory) {
+          staleKeys.push(key);
+          continue;
+        }
+        const next = decrementBucketTotal(data, leavingCategory);
         if (next !== data) {
           prevLists.push([key, data]);
           qc.setQueryData<ListIssuesCache>(key, next);
@@ -387,6 +473,7 @@ export function applyIssueChange(
       ...page,
       issues: page.issues.map((issue) => {
         if (issue.id !== id) return issue;
+        if (!acceptCurrent(issue)) return issue;
         found = issue;
         return { ...issue, ...patch };
       }),
@@ -410,6 +497,7 @@ export function applyIssueChange(
     let found: Issue | undefined;
     const rows = data.rows.map((row) => {
       if (row.issue.id !== id) return row;
+      if (!acceptCurrent(row.issue)) return row;
       found = row.issue;
       return { ...row, issue: { ...row.issue, ...patch } };
     });
@@ -419,8 +507,25 @@ export function applyIssueChange(
     qc.setQueryData<IssueTableRowCache>(key, { ...data, rows });
   }
 
+  // Sidebar lists are server-filtered and sorted too; their membership and
+  // order refresh through invalidateIssueDerivatives. A loaded row's entity is
+  // patched now, so a status picked from the sidebar shows at once.
+  for (const [key, data] of sidebarListEntries(qc, wsId)) {
+    let found: Issue | undefined;
+    const issues = data.issues.map((issue) => {
+      if (issue.id !== id) return issue;
+      if (!acceptCurrent(issue)) return issue;
+      found = issue;
+      return { ...issue, ...patch };
+    });
+    if (!found) continue;
+    if (!prevIssue) prevIssue = found;
+    prevSidebarLists.push([key, data]);
+    qc.setQueryData<ListIssuesResponse>(key, { ...data, issues });
+  }
+
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
-  if (prevDetail) {
+  if (prevDetail && acceptCurrent(prevDetail)) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
       ...prevDetail,
       ...patch,
@@ -428,20 +533,45 @@ export function applyIssueChange(
     if (!prevIssue) prevIssue = prevDetail;
   }
 
-  // Inbox rows carry an `issue_status` display snapshot; the issue's status
-  // is the real state, so the projection follows every status write.
+  // Inbox rows carry snapshots of the issue fields used by presentation and
+  // filtering. The issue is the real state, so the projections follow every
+  // write immediately.
   let prevInboxList: InboxItem[] | undefined;
-  if (patch.status !== undefined) {
+  let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
+  const inboxFields = ["project_id", "assignee_type", "assignee_id", "due_date"] as const;
+  if (patch.status !== undefined || patch.priority !== undefined || inboxFields.some((field) => patch[field] !== undefined)) {
     prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-    if (prevInboxList) patchInboxIssueStatus(qc, wsId, id, patch.status);
+    prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+    // Membership and facets are server-owned; callers refresh after commit.
+    // Full issue events also carry unchanged fields on title edits.
+    const archiveProjectionChanged =
+      (patch.status !== undefined && (changed.status || !prevIssue || prevIssue.status !== patch.status)) ||
+      (patch.priority !== undefined && (!prevIssue || prevIssue.priority !== patch.priority)) ||
+      inboxFields.some((field) => patch[field] !== undefined && (!prevIssue || prevIssue[field] !== patch[field]));
+    if (archiveProjectionChanged) {
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) })
+        .filter((query) => query.queryKey.length > inboxKeys.archived(wsId).length)
+        .map((query) => query.queryKey));
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.facets(wsId) }).map((query) => query.queryKey));
+    }
+    patchInboxIssueProjection(qc, wsId, id, {
+      status: patch.status,
+      priority: patch.priority,
+      project_id: patch.project_id,
+      assignee_type: patch.assignee_type,
+      assignee_id: patch.assignee_id,
+      due_date: patch.due_date,
+    });
   }
 
   return {
     prevLists,
     prevFlatLists,
     prevTableRows,
+    prevSidebarLists,
     prevDetail,
     prevInboxList,
+    prevArchivedInboxCaches,
     staleKeys,
     prevIssue,
   };
@@ -458,8 +588,10 @@ export function rollbackIssueChange(
     | "prevLists"
     | "prevFlatLists"
     | "prevTableRows"
+    | "prevSidebarLists"
     | "prevDetail"
     | "prevInboxList"
+    | "prevArchivedInboxCaches"
   >,
 ) {
   for (const [key, snapshot] of result.prevLists) {
@@ -471,24 +603,34 @@ export function rollbackIssueChange(
   for (const [key, snapshot] of result.prevTableRows) {
     qc.setQueryData(key, snapshot);
   }
+  for (const [key, snapshot] of result.prevSidebarLists) {
+    qc.setQueryData(key, snapshot);
+  }
   if (result.prevDetail !== undefined) {
     qc.setQueryData(issueKeys.detail(wsId, id), result.prevDetail);
   }
   if (result.prevInboxList !== undefined) {
     qc.setQueryData(inboxKeys.list(wsId), result.prevInboxList);
   }
+  for (const [key, snapshot] of result.prevArchivedInboxCaches ?? []) {
+    qc.setQueryData(key, snapshot);
+  }
 }
 
 /**
  * Refresh the aggregate projections a single-entity patch cannot recompute:
  * assignee-grouped boards (regrouping is server logic), every Project Gantt
- * (schedule membership + row mirrors), and project metrics when the change
- * could shift per-project counts.
+ * (schedule membership + row mirrors), and project metrics plus sidebar
+ * lists when the change could shift per-project counts.
  */
 export function invalidateIssueDerivatives(
   qc: QueryClient,
   wsId: string,
-  opts: { statusOrProjectChanged: boolean },
+  opts: {
+    statusOrProjectChanged: boolean;
+    /** False when the caller refreshes the sidebar lists it can target. */
+    refreshSidebar?: boolean;
+  },
 ) {
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -496,20 +638,57 @@ export function invalidateIssueDerivatives(
   if (opts.statusOrProjectChanged) {
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
   }
+  if (opts.refreshSidebar ?? opts.statusOrProjectChanged) {
+    qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
+  }
 }
 
-/** True when any object part of a query key encodes an "Updated date" ordering
- *  (`sort_by: "updated_at"`). Bucketed status boards and flat tables keep the
- *  sort in a standalone bag; assignee-grouped boards merge it into their filter
- *  bag (see `issueAssigneeGroupsOptions`). Scanning every object part matches
- *  all of those surfaces — workspace and My Issues — with one rule. */
-function queryKeyHasUpdatedAtSort(key: QueryKey): boolean {
+/**
+ * Refresh the sidebar lists one issue change can reorder or move it across:
+ * lists showing it, its old and new project's lists, and every view list,
+ * built-in ones included (view membership is a server-side filter the client
+ * cannot re-evaluate).
+ */
+export function invalidateSidebarListsForIssue(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  projectIds: readonly (string | null | undefined)[],
+) {
+  // `null` is no project; `undefined` says nothing about it.
+  const projectSources = new Set(
+    projectIds.flatMap((id) => (id ? [`project:${id}`] : id === null ? [NO_PROJECT_SIDEBAR_SOURCE] : [])),
+  );
+  const prefix = issueKeys.sidebarAll(wsId);
+  qc.invalidateQueries({
+    queryKey: prefix,
+    predicate: (query) => {
+      const source = query.queryKey[prefix.length];
+      if (typeof source !== "string") return false;
+      if (source.startsWith("view:") || source.startsWith("builtin:") || projectSources.has(source)) return true;
+      const data = query.state.data as ListIssuesResponse | undefined;
+      return !!data?.issues?.some((issue) => issue.id === issueId);
+    },
+  });
+}
+
+/** True when any object part of a query key encodes the requested ordering.
+ * Bucketed, flat and grouped surfaces use `sort_by`; server Table queries use
+ * the nested `sort.field` contract. */
+function queryKeyHasSort(key: QueryKey, field: string): boolean {
   return key.some(
-    (part) =>
-      !!part &&
-      typeof part === "object" &&
-      !Array.isArray(part) &&
-      (part as Record<string, unknown>).sort_by === "updated_at",
+    (part) => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+      const record = part as Record<string, unknown>;
+      if (record.sort_by === field) return true;
+      const sort = record.sort;
+      return (
+        !!sort &&
+        typeof sort === "object" &&
+        !Array.isArray(sort) &&
+        (sort as Record<string, unknown>).field === field
+      );
+    },
   );
 }
 
@@ -530,7 +709,20 @@ export function invalidateUpdatedAtSortedIssueLists(
 ): void {
   qc.invalidateQueries({
     queryKey: issueKeys.all(wsId),
-    predicate: (query) => queryKeyHasUpdatedAtSort(query.queryKey),
+    predicate: (query) => queryKeyHasSort(query.queryKey, "updated_at"),
+  });
+}
+
+/** Refetch only issue surfaces ordered by semantic activity. Auxiliary
+ * mutations carry no full Issue snapshot or sortable timestamp, so an
+ * authoritative refetch is the only safe way to restore their order. */
+export function invalidateLastActivitySortedIssueLists(
+  qc: QueryClient,
+  wsId: string,
+): void {
+  qc.invalidateQueries({
+    queryKey: issueKeys.all(wsId),
+    predicate: (query) => queryKeyHasSort(query.queryKey, "last_activity"),
   });
 }
 
@@ -542,6 +734,13 @@ export function invalidateStaleListKeys(qc: QueryClient, staleKeys: QueryKey[]) 
     const hash = hashKey(key);
     if (seen.has(hash)) continue;
     seen.add(hash);
-    qc.invalidateQueries({ queryKey: key, exact: true });
+    if (key[0] === "inbox") {
+      // A first archive page/facet request may predate this committed issue
+      // change. Cancel before invalidation even when it has no cached data.
+      void qc.cancelQueries({ queryKey: key, exact: true }).then(() =>
+        qc.invalidateQueries({ queryKey: key, exact: true }));
+    } else {
+      qc.invalidateQueries({ queryKey: key, exact: true });
+    }
   }
 }

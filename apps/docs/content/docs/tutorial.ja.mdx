@@ -1,0 +1,430 @@
+---
+title: 完全ガイド
+description: 空のワークスペースから始めて、個人サイトのプロジェクトで Multica の最新フローを一通り実践します。スペース構成、ランタイム接続、エージェント作成、タスクとローカル環境でのプレビュー、PR レビュー、スクワッド、スキル、オートパイロットまでを扱います。
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica は、人と AI エージェントが一緒に働くためのプラットフォームです。このガイドでは空のワークスペースから始めて、エンドツーエンドの流れを一通り実践します。
+
+- ワークスペースを作成し、**作業**、**チーム**、**チャット**、**オートパイロット** の 4 つのスペースを把握する
+- コンピュータを接続し、手動とチャットの両方でエージェントを構成する
+- タスクでコードを実装し、実行ログを確認し、**環境（Environments）** からワンクリックでライブプレビューを開く
+- フィードバックを指示に反映し、**Engineer** と読み取り専用の **Reviewer** を連携させる
+- 調整を **スクワッド** に任せ、有効な手順を **スキル** に蓄積し、定期点検を **オートパイロット** で自動化する
+
+サンプルプロジェクトには写真家の個人ポートフォリオサイトを使い、Multica の主要機能が実際の開発でどう連動するかを体験します。
+
+**始める前に必要なもの：**
+
+- Multica のアカウント（[multica.ai](https://multica.ai) で登録）
+- Claude Code や Codex など、AI コーディングツールを少なくとも 1 つインストールしてログイン済みのコンピュータ。対応ツールの一覧は[AI コーディングツールをインストールする](/install-agent-runtime)を参照してください
+
+## ワークスペースを作成する
+
+ワークスペースはチームが仕事をする場所です。タスク、プロジェクト、エージェント、実行履歴はすべて 1 つのワークスペースに収まります。登録後のオンボーディングで最初のワークスペースを作成でき、チームに招待された場合はログインするとそのままチームのワークスペースに入ります。
+
+このガイドでは新しいワークスペースを作成して進めます。
+
+<Steps>
+<Step>
+
+左端のアプリナビゲーション上部にあるワークスペースアイコンをクリックし、**ワークスペースを作成** を選択します。
+
+![アプリナビゲーションのワークスペースメニューからワークスペースを作成を開く](/images/docs/tutorial-create-workspace-menu.webp)
+
+</Step>
+<Step>
+
+次の 3 つを入力します。
+
+- **ワークスペース名**：メンバーに表示される名前です。後から変更できます。
+- **URL**：ワークスペースのアドレスに使う slug です（例：`multica.ai/personal-site` の `personal-site`）。作成後は変更できません。
+- **タスクプレフィックス**：URL から自動入力され、作成前に編集できます。`SITE` にするとタスク番号は `SITE-1`、`SITE-2` と付番されます（後から設定で変更可能）。
+
+![ワークスペース作成フォーム：名前、URL、タスクプレフィックスを入力](/images/docs/tutorial-create-workspace-form.webp)
+
+</Step>
+<Step>
+
+作成すると新しいワークスペースが開きます。画面構成を確認しましょう。
+
+- **左端のアプリナビゲーション**：上部にワークスペース切替、**新規タスク**（`C`）、**検索**（`⌘K`）、中央に 4 つのスペース（**作業**、**チーム**、**チャット**、**自動化**）、下部にヘルプ、**設定**、アカウントがあります。
+- **作業パネル**（ナビゲーションの隣）：最上部に **インボックス**、続いて組み込み・保存済みの **ビュー** と **プロジェクト** が並びます。
+- **下部ステータスバー**：左側に作業中エージェント数、右側にクイックチャット **Ask Multica**（`⌘J`）があります。
+
+タスク一覧はまだ空です。これからエージェントを加えて埋めていきます。
+
+![作成したばかりの空のワークスペース（作業スペース）](/images/docs/tutorial-empty-workspace.webp)
+
+</Step>
+</Steps>
+
+## コンピュータを接続する
+
+エージェントは接続したコンピュータ上で、そこにインストールされた AI コーディングツールを使って作業を実行します。
+
+ここでは [Multica Desktop](https://multica.ai/download) を使います。ログインするとデーモンが自動起動し、このコンピュータをランタイムとして登録してインストール済みの AI コーディングツールを検出します。アプリナビゲーションで **チーム** を開き、**リソース** 配下の **ランタイム** でコンピュータが **オンライン** になっていることを確認します。
+
+![チームスペースのランタイム一覧：このコンピュータがオンライン](/images/docs/tutorial-runtimes-list.webp)
+
+コンピュータをクリックすると、検出された各 AI コーディングツールとステータスが表示されます。
+
+![マシン詳細：Claude Code と Codex がオンライン](/images/docs/tutorial-runtime-detail.webp)
+
+Desktop を使わない場合は、**ランタイム** ページ右上の **+** から **その他のマシンまたはサーバー** を選び、案内されるコマンドをターミナルで実行してください。詳細は[デーモンとランタイム](/daemon-runtimes)を参照してください。
+
+## 最初のエージェントを作成する
+
+エージェントはワークスペースの正式なメンバーです。タスクを割り当てたり、スレッドで返信したり、チャットで会話したりできます。まず日々のワークスペース作業を任せるヘルパーを作成しましょう。後の手順の設定作業もこのエージェントに委ねます。
+
+**チーム** スペースのパネルヘッダーにある **+**（または **すべてのエージェント** の **新規エージェント**）をクリックします。
+
+<Steps>
+<Step>
+
+**ランタイムを選択**：先ほど接続したコンピュータ上でオンラインの AI コーディングツールを選びます。ここでは **Claude Code** を選びます。
+
+</Step>
+<Step>
+
+**エージェントを設定**：必要な項目を入力します（右上の **AI に任せる** を押すと、Agent Builder が対話しながら下書きを作成してくれます）。
+
+- **名前**：`Multica helper`
+- **説明**：`Handles workspace chores, agent setup, and status updates.`
+- **指示**：実行ごとに渡されるプロンプトです。担当範囲と触らない範囲を明記します。
+
+```text
+You are the helper of this workspace.
+
+You handle what members ask for in issues and chat: create or update
+issues, adjust statuses, configure agents, squads, skills, and autopilots,
+and answer questions about what is going on in the workspace.
+
+Keep replies short. After finishing something, reply with a one-line
+summary of what you did. Do not touch code or repositories. If a
+request is ambiguous, ask before acting.
+```
+
+モデル（ここでは Claude Sonnet）を選び、**アクセス** はデフォルトの **自分のみ** のままにします。
+
+![エージェント作成の設定画面：Multica helper の名前・説明・指示を入力](/images/docs/tutorial-create-agent-form.webp)
+
+</Step>
+<Step>
+
+**エージェントを作成** をクリックします。詳細ページで **Multica helper** が **オンライン · アイドル** になっていれば準備完了です。
+
+![エージェント詳細ページ：Multica helper がオンライン](/images/docs/tutorial-agent-detail.webp)
+
+</Step>
+</Steps>
+
+## 2 体目のエージェントをチャットで作る
+
+サイト構築にはコードを書けるエンジニアが必要です。フォームをもう一度入力する必要はありません。すでにいるエージェントにチャットで頼めば、Multica CLI 経由で作成してくれます。
+
+アプリナビゲーションで **チャット** を開き、**Multica helper** を選択して「同じ Claude Code ランタイム上に **Claude Opus 5** を使う **Engineer** エージェントを作成し、写真家ポートフォリオサイトの構築・保守を担当させてほしい」と伝えます。
+
+![チャットで Multica helper に Engineer の作成を依頼](/images/docs/tutorial-chat-create-engineer.webp)
+
+**チーム → すべてのエージェント → Engineer** を開くと、モデルが `claude-opus-5`、アクセスが所有者のみ、さらに業務指示まで整えられていることを確認できます。指示はいつでも編集できます。
+
+![Engineer の詳細ページと自動生成された指示](/images/docs/tutorial-engineer-instructions.webp)
+
+## サイトのリポジトリを準備する
+
+コードは GitHub リポジトリで管理します。[GitHub CLI](https://cli.github.com)（`gh`）がログイン済みであれば、リポジトリの作成と登録もエージェントに任せられます。
+
+**チャット** で **Engineer** を選び、自分の GitHub アカウントに空の `personal-website` リポジトリを `gh` で作成し、`multica repo add` でワークスペースへ登録するよう依頼します。
+
+![Engineer が personal-website の作成と登録完了を報告](/images/docs/tutorial-chat-create-repo.webp)
+
+アプリナビゲーション下部の **設定**（歯車アイコン）から **接続と拡張 → コード** を開きます。**リポジトリ** に `personal-website` が表示されていることを確認し、**GitHub を接続** をクリックして認可します。接続すると次の機能が有効になります。
+
+- タスク番号（例：`SITE-1`）を含むブランチ名やタイトルの Pull Request が自動でタスクに紐づく
+- PR の変更行数や CI チェック結果がタスクの右サイドバーに表示される
+- 紐づく PR がすべてマージされると、タスクを自動で **完了** に移動できる
+
+![設定 -> コード：GitHub 接続済みで personal-website と PR 自動リンクが有効](/images/docs/tutorial-repo-settings.webp)
+
+GitHub CLI を使わない場合は、GitHub 上でリポジトリを作成したうえで同じページの **+ リポジトリを追加** から登録できます。
+
+## 最初のタスク：サイトを構築する
+
+準備は完了です。ここからは日々の進め方に入ります。要件を **タスク** として書き、エージェントに渡し、実行ログ・議論・PR を 1 本のタイムラインで追跡します。
+
+サイトは shadcn の Next.js テンプレートを土台にし、Engineer がデザインとコンテンツを作り込みます。
+
+<Steps>
+<Step>
+
+アプリナビゲーション上部の **新規タスク**（ショートカット `C`）をクリックします。デフォルトの **エージェントで作成** モードではタイトル入力は不要です。**作成者** に **Engineer** を選び、要件をそのまま記述します（下部の **手動作成に切り替え** から手入力にも切り替えられます）。
+
+```text
+Work in the personal-website repository registered in this workspace.
+
+Start from a template instead of scaffolding from scratch:
+
+pnpm dlx shadcn@latest init --preset b5rR41Mtnc --template next --pointer
+
+Run the command, commit the template as-is, then build on top of it.
+
+The site is for a photographer. It needs:
+
+- Introduction — who I am and what I shoot
+- My work — a selection of photos
+- Contact — an email link that is easy to find
+- Pricing — decide where a pricing table fits and how to present it
+- Use placeholder images wherever a photo belongs, and list where I
+  should replace them with my own work
+
+Design:
+
+- Pick a style that fits a photography portfolio. It should feel
+  refined and understated; express that through layout, typography,
+  and spacing, and never use words like "premium" or "high-end"
+  in the copy.
+- Choose the fonts.
+
+Open a pull request when it is ready.
+```
+
+強い依頼文には 3 つの要素があります。明確な制約（テンプレートから始める）、具体的なコンテンツ要件、そして意図的な余白（レイアウトとフォント選定は Engineer に任せる）です。
+
+![エージェントで作成モードの新規タスクダイアログ（作成者：Engineer）](/images/docs/tutorial-new-issue-agent-mode.webp)
+
+</Step>
+<Step>
+
+送信すると Multica がタイトルを生成して `SITE-1` を作成し、担当者を **Engineer** にして即座に実行を開始します。ステータスは **進行中** になり、右サイドバーには **プロパティ**、**ウェイクアップ**、**Pull requests**、**環境**、**実行ログ** がまとまります。
+
+進捗はヘッダーの **Engineer is working** バッジや右側の **実行ログ** から確認できます。実行中に方向転換したい場合は、停止してやり直す必要はありません。コメント欄から **現在の実行に追加** で修正を送れば、次のステップ境界で[実行中のエージェントに割り込む](/mentioning-agents#実行中のエージェントに割り込む)ことができます。
+
+![Engineer 作業中の SITE-1：ステータスバッジと実行ログ](/images/docs/tutorial-issue-engineer-working.webp)
+
+</Step>
+<Step>
+
+**実行ログ** の実行行にカーソルを合わせて **トランスクリプトを表示** をクリックすると、エージェントの説明、**Bash** コマンド、**Read / Edit** 操作、所要時間まで全ステップを確認できます。右上の **ⓘ** からはマシン、AI コーディングツール、配布されたスキル、作業ディレクトリを確認できます。
+
+![実行ログのトランスクリプト：Engineer の全コマンドと編集ステップ](/images/docs/tutorial-execution-log.webp)
+
+</Step>
+</Steps>
+
+## プレビューと確認：クイックチャットと環境
+
+実行が終わると Engineer は `SITE-1` を **レビュー中** に移動し、プレースホルダー画像の差し替え箇所をまとめた完了コメントを投稿します。左の **作業** パネル上部の **インボックス** にも通知が届きます。
+
+![レビュー中の SITE-1：Engineer の完了コメントとインボックス通知](/images/docs/tutorial-issue-review-comment.webp)
+
+承認前に確認したいことが 2 つあります。ブラウザで実画面を見ること、そして右サイドバーの **Pull requests** が空のままになっている理由です。タイムラインを散らかさずに、下部ステータスバーの **クイックチャット** を使いましょう。
+
+<Steps>
+<Step>
+
+下部ステータスバー右端の **Ask Multica** をクリック（または `⌘J` / `⇧⌘J`）し、**Engineer** を選んで `@SITE-1` を参照しつつ 2 点を質問します。
+
+Engineer はフローティングウィンドウ内で即答します。`multica env start web` でローカル開発サーバーを起動したこと、PR #1 はブランチ名にもタイトルにも `SITE-1` がなく自動リンクされなかったためタイトルを更新したことがわかります。
+
+![SITE-1 上でステータスバーから開いたクイックチャット浮動ウィンドウ](/images/docs/tutorial-chat-ask-in-issue.webp)
+
+</Step>
+<Step>
+
+クイックチャットを閉じると、`SITE-1` の右サイドバーに 2 つのカードが並んでいます。
+
+- **Pull requests**：`#1 Build photographer portfolio website`（`+648 -14`、マージ時の自動完了表示付き）
+- **環境（Environments）**：`Maya's MacBook Pro` 上の `Web app · Running · localhost:41000`。ワンクリックでブラウザ表示でき、再起動・停止・ログ閲覧もここから行えます（詳細は[環境](/environments)）。
+
+![SITE-1 右サイドバー：リンク済み PR カードと稼働中の環境プレビュー](/images/docs/tutorial-issue-pr-and-env.webp)
+
+</Step>
+<Step>
+
+**環境** の **Web app** をクリックして `http://localhost:41000` を開き、完成したポートフォリオを確認します。
+
+![localhost:41000 で動作する写真家ポートフォリオサイト](/images/docs/tutorial-site-localhost.webp)
+
+</Step>
+</Steps>
+
+## フィードバックを指示に書き込む
+
+今回の確認で繰り返されがちな癖が 2 つ見つかりました。PR にタスク番号を入れ忘れて自動リンクが外れたこと、そしてブラウザプレビューで十分なのに完了後のスクリーンショット自己確認に時間をかけていたことです。
+
+どちらも今後の全タスクに効くルールなので、チャットから `multica agent update` で Engineer 自身の指示に追記してもらいます。
+
+![チャットで Engineer に 2 つのルールを自分の指示へ保存させる](/images/docs/tutorial-chat-update-instructions.webp)
+
+Engineer は指示を更新し、「スクリーンショット自己確認を省く分、表示崩れの検知はブラウザ確認に依存する」というトレードオフも添えて返信します。**チーム → すべてのエージェント → Engineer** で新しい **Working rules** が反映されていることを確認できます。
+
+![更新された Engineer の指示（Working rules が追加済み）](/images/docs/tutorial-engineer-updated-instructions.webp)
+
+エージェントを育てる基本はこれだけです。繰り返し起きる課題を見つけたら、一度指示に定着させます。
+
+## 3 体目のエージェント：Reviewer
+
+実装した本人は自分の見落としに気づきにくいものです。別のツール・別モデルで動く、新鮮なコンテキストの読み取り専用 **Reviewer** を追加します。
+
+<Steps>
+<Step>
+
+チャットで **Multica helper** に依頼し、**Codex**（`gpt-5.6-sol`）上で動く読み取り専用の **Reviewer** を作成します。PR の差分を要件とコード規約の両面から検証し、ファイルパスと行番号付きで指摘し、コード自体は一切変更しない設定です。**チーム → すべてのエージェント → Reviewer** で確認します。
+
+![Codex 上に構成された読み取り専用 Reviewer の詳細ページ](/images/docs/tutorial-reviewer-detail.webp)
+
+</Step>
+<Step>
+
+レビューに新規タスクも担当者変更も不要です。`SITE-1` のコメント欄で `@Reviewer` をメンションし、PR #1 のレビューを依頼します。送信前に下部のトリガープレビュー（`Reviewer · Will start when sent`）で起動対象を確認できます。
+
+![SITE-1 のコメント欄で @Reviewer をメンションした際のトリガープレビュー](/images/docs/tutorial-comment-mention-reviewer.webp)
+
+</Step>
+<Step>
+
+Reviewer は **Changes requested before merge** とともに 5 件の指摘を返します。料金表にプレースホルダー明記がない点や未確認の Instagram リンクといった要件ギャップ 2 件と、コード規約 3 件がすべてファイル・行番号付きで整理されています。
+
+同じスレッドで `@Engineer` をメンションして 5 件すべての修正を依頼すると、Engineer は同じ PR に修正をプッシュして 1 件ずつ報告します。
+
+![Reviewer の指摘一覧と @Engineer への修正依頼](/images/docs/tutorial-reviewer-findings.webp)
+
+</Step>
+<Step>
+
+もう一度 `@Reviewer` に再確認を依頼すると、5 件すべての修正とチェック通過が確認され、**Ready to merge** が返ってきます。
+
+![Reviewer の再確認完了コメント](/images/docs/tutorial-reviewer-recheck.webp)
+
+</Step>
+</Steps>
+
+1 つのタスク内で、実装の Engineer と監査の Reviewer が同じスレッドを共有しながら往復できます。
+
+## マージして完了する
+
+コメントで `@Engineer` に PR #1 のマージとクローズを依頼します。Engineer が `main` へマージしてブランチを削除し、ビルドを再確認して報告します。PR カードが **Merged** になり、開発環境が停止し、`SITE-1` は **完了** に移動します。
+
+![PR #1 がマージされ、SITE-1 が完了になった画面](/images/docs/tutorial-issue-done.webp)
+
+要件、実行ログ、プレビュー、レビュー指摘、修正、承認、マージまでが一本のタイムラインに残ります。
+
+## スクワッドを組む
+
+`SITE-1` のループはうまく回りましたが、毎回の引き継ぎはあなたが手動でメンションしていました。この調整役ごと任せられるのが **スクワッド（Squad）** です。リーダーエージェントが先頭に立ち、複数エージェントとメンバーを束ねます。
+
+タスクをスクワッドに割り当てると、リーダーが要件を読み、`@` メンションで適切なメンバーへ振り分けます。メンバーが返信するとリーダーが自動で再起動して次の工程へ進め、完了後にあなたへ承認依頼を届けます。
+
+既存の役割にリーダーを加えて **Website Team** を作ります。
+
+- **Lead**（新規・Claude Sonnet）：リーダー。スコープ整理、Engineer と Reviewer への振り分け、ステータス更新、承認用ブリーフの作成を担当（コード編集は行わない）。
+- **Engineer**（既存）：実装、指摘修正、承認後のマージ。
+- **Reviewer**（既存）：すべての PR を読み取り専用でレビュー。
+- **Maya Lin（あなた）**：最終承認とマージ判断。
+
+この構成と 2 つのスキル（Engineer 用の `tdd`、Lead 用の `delivery-brief`）、スクワッドの進行ルールをまとめて **Multica helper** にチャットで伝えると、CLI で一括構成してくれます。
+
+![Multica helper が Website Team、Lead、スキル紐づけを一括設定](/images/docs/tutorial-helper-create-squad.webp)
+
+**チーム → スクワッド → Website Team** を開くと、リーダー、メンバー、役割、ワークフロー指示がすべて確認できます（この画面からフォームで作成・編集することも可能です。詳細は[スクワッド](/squads)）。
+
+![Website Team の詳細ページ：リーダー、メンバー、役割、ワークフロー指示](/images/docs/tutorial-squad-detail.webp)
+
+## スキル：再利用できるメソッド
+
+先ほど指示に書いたルールは 1 体のエージェント専用でした。複数のエージェントで共有したい手法やコミュニティで公開されている手順は **スキル（Skill）** として保存します。
+
+スキルはオープン標準の Agent Skills 形式（`SKILL.md` と任意の参照資料・スクリプト）に従い、エージェントに紐づけると実行時にランタイムへ自動同期されます。**チーム → リソース → スキル** を開くと、先ほど登録した 2 つのスキルと利用エージェントが一覧できます。
+
+![チーム -> スキル一覧：Lead の delivery-brief と Engineer の tdd](/images/docs/tutorial-skills-list.webp)
+
+`tdd` を開くと、`SKILL.md` の内容、付属ファイル（`examples/test-first.md`、`references/checklist.md`）、履歴、紐づけ先エージェントを確認できます。
+
+![tdd スキルの詳細画面：SKILL.md、付属ファイル、紐づけ先 Engineer](/images/docs/tutorial-skill-detail.webp)
+
+2 つのスキルはワークフローの別々の側面を支えます。
+
+- **tdd**（Engineer に付与）：失敗するテストを先に書き、最小の実装で通し、リファクタリングする開発手順。
+- **delivery-brief**（Lead に付与）：先頭行に結論とアクションを置き、PR 要約と判断ポイントを番号付きで示し、承認なしにマージしない報告形式。
+
+**スキル** ページ右上の **+** を開くと、**手動で作成**、**ローカルからインポート**、**URL からインポート**（GitHub、ClawHub、Skills.sh）、**ランタイムからコピー** の 4 つの追加方法が選べます（詳細は[スキル](/skills)）。
+
+![+ メニューから選べる 4 つのスキル作成・インポート方法](/images/docs/tutorial-skill-new-modal.webp)
+
+外部スキルを取り込む前に中身を確認してください。Multica はスキルをサンドボックス化せず、そのまま AI コーディングツールに渡します。
+
+## 2 つ目のタスク：スクワッドに任せる
+
+今度は **Website Team** にまとまった仕事を渡します。サイトを汎用テンプレート化する作業です。個人名をプレースホルダーの `Alex Rivera`、メールアドレスを `hello@example.com` に置き換え、レイアウトとタイポグラフィは維持します。
+
+`C` で **新規タスク** を開き、**エージェントで作成** モードのまま **作成者** に **Website Team** を選んで依頼を送ります。スクワッドは個人や単体エージェントと同じように担当者として指定できます。
+
+`SITE-2` が **Website Team** に割り当てられると、以降は **Lead** が自動で全体を推進します。
+
+1. **Lead** が追加制約（`<title>`、Open Graph、`README.md` まで統一すること、および `tdd` に沿った設定テストの追加）を明示して `@Engineer` に着手させます。
+2. **Engineer** がテスト先行で実装し、PR #2（`SITE-2: Convert portfolio into reusable template`）を開いて報告します。
+3. **Lead** が自動起動し、PR #2 を `@Reviewer` に回します。
+4. **Reviewer** が差分とテストを確認し、指摘ゼロで **Ready to merge** を返します。
+
+![SITE-2 のスレッド：Lead の振り分け、Engineer の PR #2 報告、Reviewer の承認](/images/docs/tutorial-squad-dispatch.webp)
+
+レビュー通過を受けて **Lead** は `SITE-2` を **レビュー中** へ移し、`delivery-brief` スキルに沿った簡潔な承認ブリーフを投稿してあなたをメンションします。
+
+![Lead による SITE-2 の簡潔な納品ブリーフ（Maya へのメンション付き）](/images/docs/tutorial-squad-delivery.webp)
+
+要件の補完からテスト駆動実装、PR レビュー、承認ブリーフまで、あなたが手でつないだ工程は 1 つもありません。
+
+## 自動化：オートパイロット
+
+ここまでの実行はすべて、割り当て・メンション・チャットなどあなたの操作が起点でした。**オートパイロット** を使うと、スケジュールや Webhook で定期作業を自動起動できます。
+
+<Steps>
+<Step>
+
+チャットで **Multica helper** に依頼し、毎週月曜 9:00 に **Reviewer** が `personal-website` の健全性チェック（デッドコード、未使用エクスポート、古い依存関係、型改善）を **タスクを作成** モードで自動実行するオートパイロットを作成します。
+
+アプリナビゲーションから **自動化** を開くと、**Runbook**、スケジュール（`0 9 * * 1`、タイムゾーン、次回実行日時）、実行モード（**タスクを作成**／**実行のみ**）を確認できます。左パネルには既存タスク向けの **タスクウェイクアップ** 一覧もあります。
+
+月曜を待たずに右上の **今すぐ実行** をクリックして動作確認しましょう。
+
+![オートパイロット詳細画面：Runbook、毎週月曜 9:00 のスケジュール、今すぐ実行ボタン](/images/docs/tutorial-autopilot-detail.webp)
+
+</Step>
+<Step>
+
+すぐに `SITE-3` が自動作成され、**Reviewer** が読み取り専用の点検を開始します。以降は毎週月曜 9:00 に同じ点検が自動で走ります。
+
+![オートパイロットにより自動作成された SITE-3 と作業中の Reviewer](/images/docs/tutorial-autopilot-issue.webp)
+
+</Step>
+</Steps>
+
+オートパイロットはスケジュールに加えて GitHub・GitLab・汎用 **Webhook** にも対応し、担当者に **スクワッド** を指定することもできます。詳細は[オートパイロット](/autopilots)および[タスクウェイクアップ](/issue-wakeups)を参照してください。
+
+## ほかのメンバーと協働する
+
+ここまでワークスペースの人間メンバーはあなた 1 人でした。**チーム** パネル上部の **メンバーを招待** アイコン、または **設定 → メンバー** からメールアドレスでメンバーを招待できます。**メンバー**、**管理者** のほか、共有プロジェクトに限定される無料の **ゲスト** ロールも選べます。
+
+![設定 -> メンバーの招待ダイアログ（メンバー、管理者、ゲスト）](/images/docs/tutorial-invite-member.webp)
+
+参加したメンバーは同じようにタスクを作成し、共有エージェントを `@` メンションし、環境プレビューを開き、スクワッドに参加できます。
+
+## まとめ
+
+タスクが増えてきたら、同じ流れをそのままスケールさせる仕組みが揃っています。
+
+- **4 つのスペース** で日々の視界を整理できます：**作業**（インボックス、ビュー、プロジェクト）、**チーム**（エージェント、スクワッド、スキル、ランタイム、分析）、**チャット**、**オートパイロット**。
+- **プロジェクト** は関連タスクを束ね、共有コンテキスト、リポジトリやローカルフォルダ、フォルダー整理、進捗予測、さらにはステージ間を自動で引き継ぐカスタム[ワークフロー](/workflows)を提供します。
+
+空のワークスペースから始まり、コンピュータを接続し、4 体の専門エージェントを構築し、環境機能で初回 PR をプレビュー・マージし、フィードバックを指示とスキルへ定着させ、調整をスクワッドへ、定期点検をオートパイロットへ委ねるところまで完走しました。最後にあなたに残るのは、方向づけと承認だけです。
+
+## 次のステップ
+
+- [基本概念](/concepts) — Multica の主要オブジェクトの関係を 3 分で把握する。
+- [環境（Environments）](/environments) — `.multica/environments.toml` でワンクリックプレビューとライブログを定義する。
+- [プロジェクト](/projects) — 共有リポジトリ、フォルダー、進捗トラッキングで複数タスクを管理する。
+- [スクワッド](/squads) — リーダーのルーティング規則、再トリガー条件、運用プロトコル。
+- [スキル](/skills) — 再利用可能なメソッドの作成・インポート・更新・共有。
+- [オートパイロット](/autopilots) — スケジュール、Webhook、ペイロードフィルタリング、実行履歴。

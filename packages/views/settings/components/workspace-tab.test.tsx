@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -21,7 +21,9 @@ const workspaceRef = vi.hoisted(() => ({
   },
 }));
 const membersRef = vi.hoisted(() => ({
-  current: [{ user_id: "user-1", role: "owner" as "owner" | "admin" | "member" }],
+  current: [
+    { user_id: "user-1", role: "owner" as "owner" | "admin" | "member", name: "Ada" },
+  ] as { user_id: string; role: "owner" | "admin" | "member"; name?: string }[],
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -78,8 +80,14 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("../../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
+}));
+
+vi.mock("./private-projects-section", () => ({
+  PrivateProjectsSection: () => <div data-testid="private-projects" />,
 }));
 
 vi.mock("sonner", () => ({
@@ -113,7 +121,7 @@ describe("WorkspaceTab — automatic updates", () => {
       issue_prefix: "TES",
       repos: [],
     };
-    membersRef.current = [{ user_id: "user-1", role: "owner" }];
+    membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
     mockUpdateWorkspace.mockImplementation(
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
@@ -132,33 +140,16 @@ describe("WorkspaceTab — automatic updates", () => {
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   }
 
-  it("renders the current prefix in the shared input control", () => {
+  it("shows the prefix and slug as values, not editable fields", () => {
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
-    expect(input.value).toBe("TES");
+
+    expect(screen.getByText("TES")).toBeInTheDocument();
+    expect(screen.getByText("test-workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Slug" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
-  it("renders the workspace slug in the shared read-only input control", () => {
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    const input = screen.getByRole("textbox", { name: "Slug" }) as HTMLInputElement;
-    expect(input.value).toBe("test-workspace");
-    expect(input.readOnly).toBe(true);
-  });
-
-  it("uppercases and strips non-alphanumeric prefix input", async () => {
-    const user = setupUser();
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
-
-    await user.clear(input);
-    await user.type(input, "ab-12!cd");
-
-    expect(input.value).toBe("AB12CD");
-  });
-
-  it("auto-saves ordinary workspace fields without invalidating issue caches", async () => {
+  it("auto-saves ordinary workspace fields silently, without invalidating issue caches", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     const nameInput = screen.getByDisplayValue("Test Workspace");
@@ -170,79 +161,144 @@ describe("WorkspaceTab — automatic updates", () => {
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
         name: "Renamed Workspace",
-        description: "",
-        context: "",
       });
-      expect(mockToastSuccess).toHaveBeenCalledWith(
-        "Workspace settings saved",
-        { id: "settings-auto-save" },
-      );
     });
+    // The inline save state reports success; a toast would repeat it.
+    expect(mockToastSuccess).not.toHaveBeenCalled();
     expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("asks for confirmation on prefix blur and persists only after confirmation", async () => {
+  it("shows a context changed elsewhere and does not write the old one back", async () => {
     const user = setupUser();
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+    workspaceRef.current = { ...workspaceRef.current, context: "old context" };
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    expect(screen.getByDisplayValue("old context")).toBeInTheDocument();
 
-    await user.clear(input);
-    await user.type(input, "NEW");
+    workspaceRef.current = { ...workspaceRef.current, context: "new context" };
+    rerender(<WorkspaceTab />);
+    const contextInput = screen.getByDisplayValue("new context");
+    await user.click(contextInput);
     await user.tab();
+    await vi.advanceTimersByTimeAsync(1000);
 
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
-    await screen.findByText(/Change issue prefix/i);
-    expect(screen.getByText(/TES-N/)).toBeTruthy();
-    expect(screen.getByText(/NEW-N/)).toBeTruthy();
+  });
 
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+  it("keeps an unsaved edit when the same field changes elsewhere", async () => {
+    const user = setupUser();
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const nameInput = screen.getByDisplayValue("Test Workspace");
+    await user.type(nameInput, " mine");
+
+    workspaceRef.current = { ...workspaceRef.current, name: "Theirs", context: "new context" };
+    rerender(<WorkspaceTab />);
+    expect(nameInput).toHaveValue("Test Workspace mine");
+    await user.tab();
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1", {
+        name: "Test Workspace mine",
+      });
+    });
+  });
+
+  it("follows later changes to a field again once its own edit is saved", async () => {
+    const user = setupUser();
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const nameInput = screen.getByDisplayValue("Test Workspace");
+    await user.type(nameInput, " mine");
+    await user.tab();
+    await waitFor(() => expect(mockUpdateWorkspace).toHaveBeenCalledOnce());
+    workspaceRef.current = { ...workspaceRef.current, name: "Test Workspace mine" };
+    rerender(<WorkspaceTab />);
+    await vi.advanceTimersByTimeAsync(0);
+
+    workspaceRef.current = { ...workspaceRef.current, name: "Theirs" };
+    rerender(<WorkspaceTab />);
+
+    expect(nameInput).toHaveValue("Theirs");
+  });
+
+  it("changes the prefix only from its own dialog, after previewing the result", async () => {
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
+    const input = within(dialog).getByRole("textbox", { name: "New prefix" });
+
+    await user.clear(input);
+    await user.type(input, "ab-12!cd");
+    expect(input).toHaveValue("AB12CD");
+    expect(within(dialog).getByText("TES-123")).toBeInTheDocument();
+    expect(within(dialog).getByText("AB12CD-123")).toBeInTheDocument();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Change to AB12CD" }));
 
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
-        issue_prefix: "NEW",
+        issue_prefix: "AB12CD",
       });
     });
     expect(mockInvalidateQueries).toHaveBeenCalledWith({
       queryKey: ["issues", "workspace-1"],
     });
-    expect(mockToastSuccess).toHaveBeenCalledWith(
-      "Workspace settings saved",
-      { id: "settings-auto-save" },
-    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Change issue prefix" })).toBeNull();
+    });
   });
 
-  it("does not persist a prefix when the confirmation is cancelled", async () => {
+  it("does not persist a prefix when the dialog is cancelled", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
 
-    await user.clear(input);
-    await user.type(input, "NEW");
-    await user.tab();
-    await screen.findByText(/Change issue prefix/i);
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
+    await user.type(within(dialog).getByRole("textbox", { name: "New prefix" }), "X");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
-    expect(input.value).toBe("NEW");
   });
 
-  it("marks an empty prefix invalid and does not persist it", async () => {
+  it("cannot confirm an empty or unchanged prefix", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+
+    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
+    const input = within(dialog).getByRole("textbox", { name: "New prefix" });
+    expect(within(dialog).getByRole("button", { name: "Change to TES" })).toBeDisabled();
 
     await user.clear(input);
-    await user.tab();
-
     expect(input).toHaveAttribute("aria-invalid", "true");
-    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: /^Change to/ })).toBeDisabled();
   });
 
-  it("disables editable workspace controls for regular members", () => {
-    membersRef.current = [{ user_id: "user-1", role: "member" }];
+  it.each([
+    ["owner", true],
+    ["admin", false],
+    ["member", false],
+  ] as const)("shows the private projects overview to a workspace %s: %s", (role, shown) => {
+    membersRef.current = [
+      { user_id: "user-1", role, name: "Ada" },
+      { user_id: "user-2", role: "owner", name: "Grace" },
+    ];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByPlaceholderText("TES")).toBeDisabled();
-    expect(screen.getByDisplayValue("Test Workspace")).toBeDisabled();
+    expect(screen.queryByTestId("private-projects") !== null).toBe(shown);
+  });
+
+  it("shows regular members the values read-only, with who to ask", () => {
+    membersRef.current = [
+      { user_id: "user-1", role: "member" },
+      { user_id: "user-2", role: "owner", name: "Grace Hopper" },
+    ];
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByRole("note")).toHaveTextContent("Ask Grace Hopper");
+    expect(screen.queryByDisplayValue("Test Workspace")).toBeNull();
+    expect(screen.getByText("Test Workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change prefix..." })).toBeNull();
   });
 });

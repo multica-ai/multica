@@ -563,6 +563,9 @@ func (h *Handler) SaveAttachmentsToProjectSpace(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusNotFound, "attachment not found")
 			return
 		}
+		if !h.requireAttachmentVisible(w, r, uuidToString(project.WorkspaceID), attachment) {
+			return
+		}
 		key := h.Storage.KeyFromURL(attachment.Url)
 		if key == "" {
 			writeError(w, http.StatusBadRequest, "attachment storage is unavailable")

@@ -1,6 +1,9 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { cn } from "@multica/ui/lib/utils";
 import { QuickEmojiPicker } from "./quick-emoji-picker";
 
 interface ReactionItem {
@@ -40,6 +43,7 @@ interface ReactionBarProps {
   onToggle: (emoji: string) => void;
   getActorName: (type: string, id: string) => string;
   className?: string;
+  showPicker?: boolean;
 }
 
 function ReactionBar({
@@ -48,35 +52,52 @@ function ReactionBar({
   onToggle,
   getActorName,
   className,
+  showPicker = true,
 }: ReactionBarProps) {
   const grouped = groupReactions(reactions, currentUserId);
+  // Track emojis seen on mount so only newly added reactions pop in.
+  const seenRef = useRef<Set<string> | null>(null);
+  if (seenRef.current === null) {
+    seenRef.current = new Set(grouped.map((g) => g.emoji));
+  }
+  useEffect(() => {
+    const next = new Set(grouped.map((g) => g.emoji));
+    seenRef.current = next;
+  });
+
+  if (!showPicker && grouped.length === 0) return null;
 
   return (
-    <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
-      {grouped.map((g) => (
-        <Tooltip key={g.emoji}>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() => onToggle(g.emoji)}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors hover:bg-brand/15 ${
-                  g.reacted
-                    ? "border-brand/30 bg-brand/8 text-brand"
-                    : "border-brand/10 bg-brand/4 text-muted-foreground"
-                }`}
-              >
-                <span>{g.emoji}</span>
-                <span>{g.count}</span>
-              </button>
-            }
-          />
-          <TooltipContent side="top">
-            {g.actors.map((a) => getActorName(a.type, a.id)).join(", ")}
-          </TooltipContent>
-        </Tooltip>
-      ))}
-      <QuickEmojiPicker onSelect={onToggle} />
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      {grouped.map((g) => {
+        const isNew = !seenRef.current?.has(g.emoji);
+        return (
+          <Tooltip key={g.emoji}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => onToggle(g.emoji)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-caption transition-[background-color,border-color,color,scale] duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-brand/15 active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
+                    g.reacted
+                      ? "border-brand/30 bg-brand/8 text-brand"
+                      : "border-brand/10 bg-brand/4 text-muted-foreground",
+                    isNew && "animate-in fade-in zoom-in-95 duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none",
+                  )}
+                >
+                  <span>{g.emoji}</span>
+                  <NumberFlow value={g.count} className="leading-none" />
+                </button>
+              }
+            />
+            <TooltipContent side="top">
+              {g.actors.map((a) => getActorName(a.type, a.id)).join(", ")}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
+      {showPicker && <QuickEmojiPicker onSelect={onToggle} />}
     </div>
   );
 }

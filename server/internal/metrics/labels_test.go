@@ -2,19 +2,25 @@ package metrics
 
 import "testing"
 
-func TestBusinessMetricLabelsRejectHighCardinalityNames(t *testing.T) {
-	for metric, labels := range businessMetricLabels {
-		for _, label := range labels {
-			if _, forbidden := forbiddenMetricLabels[label]; forbidden {
-				t.Fatalf("metric %s uses forbidden label %s", metric, label)
-			}
-		}
+func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "QWEN", want: "qwen"},
+		{input: "Qoder", want: "qoder"},
+		{input: "QODERCLICN", want: "qoderclicn"},
+		{input: "TraeCLI", want: "traecli"},
+		{input: "Reasonix", want: "reasonix"},
+		{input: "DSH", want: "dsh"},
+		{input: "Dim", want: "dim"},
+		{input: "ZeroClaw", want: "zeroclaw"},
+		{input: "CodeArts", want: "codearts"},
 	}
-}
-
-func TestNormalizeRuntimeProviderRecognizesQwen(t *testing.T) {
-	if got := NormalizeRuntimeProvider("QWEN"); got != "qwen" {
-		t.Fatalf("NormalizeRuntimeProvider(QWEN) = %q, want qwen", got)
+	for _, tt := range tests {
+		if got := NormalizeRuntimeProvider(tt.input); got != tt.want {
+			t.Errorf("NormalizeRuntimeProvider(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }
 

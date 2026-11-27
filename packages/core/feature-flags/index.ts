@@ -18,8 +18,12 @@ export { FeatureFlagService } from "./service";
 export { StaticProvider } from "./static-provider";
 export { ChainProvider } from "./chain-provider";
 export {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   COMPOSIO_MCP_APPS_FLAG,
-  RESOURCE_LABELS_FLAG,
+  DASHBOARD_HISTORY_365D_FLAG,
+  DOCS_V1_FLAG,
+  PLUGINS_V1_FLAG,
+  WORKSPACE_GUESTS_FLAG,
 } from "./keys";
 export {
   FeatureFlagsProvider,

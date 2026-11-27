@@ -1,11 +1,38 @@
 package daemon
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+func TestClassifyPoisonedErrorIgnoresCodebuddyProtocolSummary(t *testing.T) {
+	for _, count := range []int{400, 1400, 4000} {
+		summary := fmt.Sprintf("\n[codebuddy protocol: exit_code=0 stdout_bytes=%d stderr_bytes=0 event_count=1 invalid_event_count=0 assistant_event_count=0 tool_use_count=0 saw_result=true result_is_error=true result_bytes=0 last_assistant_bytes=0 scanner_error=false]", count)
+		for _, tc := range []struct {
+			raw  string
+			want taskfailure.Reason
+		}{
+			{`HTTP 404 {"type":"invalid_request_error","message":"unknown model test-model","code":"model_not_found"}`, taskfailure.ReasonAgentModelNotFoundOrUnavailable},
+			{`HTTP 401 {"type":"invalid_request_error","message":"invalid api key","code":"invalid_api_key"}`, taskfailure.ReasonAgentProviderAuthOrAccess},
+		} {
+			raw := tc.raw + summary
+			if reason, poisoned := classifyPoisonedError(raw); poisoned || reason != "" {
+				t.Errorf("count=%d: non-poisoning failure classified as %q", count, reason)
+			}
+			if got := taskfailure.Classify(raw); got != tc.want {
+				t.Errorf("count=%d: provider reason=%s, want %s", count, got, tc.want)
+			}
+		}
+		if reason, poisoned := classifyPoisonedError(`HTTP 400 {"type":"invalid_request_error","message":"Could not process image"}` + summary); !poisoned || reason != FailureReasonAPIInvalidRequest {
+			t.Errorf("count=%d: lost actual poisoned request: %q/%v", count, reason, poisoned)
+		}
+	}
+}
 
 func TestClassifyPoisonedOutput(t *testing.T) {
 	cases := []struct {
@@ -72,6 +99,37 @@ on long outputs.`,
 			output: strings.Repeat("All checks passed and the bug is fixed. ", 10) + "i reached the iteration limit while debugging earlier.",
 			wantOK: false,
 		},
+		{
+			// GH #6402: the provider's context-exhaustion notice arriving as
+			// the run's successful answer. Same poisoning shape as the markers
+			// above — a session already over the limit cannot compact its way
+			// back under, so every resume reproduces it — and the reason has to
+			// be the one the resume blacklist covers.
+			name:       "context exhaustion with the provider's full wording",
+			output:     "Prompt is too long · the request is ~274931 tokens (limit 200000) but this conversation is only ~1597 tokens — the rest is system prompt, tool definitions, and attachment content. A single-exchange conversation cannot be compacted; reduce attached files/tools or start with less context.",
+			wantOK:     true,
+			wantReason: string(taskfailure.ReasonAgentContextOverflow),
+		},
+		{
+			name:       "compaction exhausted",
+			output:     "Compaction failed · conversation could not be reduced below the context limit",
+			wantOK:     true,
+			wantReason: string(taskfailure.ReasonAgentContextOverflow),
+		},
+		{
+			name:   "an agent discussing /compact is a real answer",
+			output: "The session is getting long; run /compact before the next batch.",
+			wantOK: false,
+		},
+		{
+			// The CLI's bare sentence is not matched on the success path: an
+			// agent asked about prompt length can answer exactly this, and the
+			// real provider frame always carries is_error, so it reaches the
+			// failure path where Classify already handles it.
+			name:   "bare provider sentence is left to the failure path",
+			output: "Prompt is too long",
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -110,6 +168,28 @@ func TestClassifyPoisonedError(t *testing.T) {
 			errMsg:     `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 213000 tokens > 200000 maximum"}}`,
 			wantOK:     true,
 			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// MUL-10116: the Claude backend's refusal marker, as reported for
+			// the captured Claude Code 2.1.280 resume. Every resume of a
+			// refused session is refused again, so it must be retired.
+			name:       "claude safeguards refusal",
+			errMsg:     agent.ClaudeModelRefusalMarker + ": the model declined this conversation, and resuming the session would send the refused message again (API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup).)",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// Only the backend's marker counts. Claude Code's own copy, or an
+			// agent quoting it, keeps the session: a false positive would
+			// throw away a healthy conversation.
+			name:   "refusal prose without the marker",
+			errMsg: "API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup). Try rephrasing the request in a new session or change your model.",
+			wantOK: false,
+		},
+		{
+			name:   "marker quoted mid-message",
+			errMsg: "tool failed: grep output mentioned " + agent.ClaudeModelRefusalMarker,
+			wantOK: false,
 		},
 		{
 			name:       "case insensitive",
@@ -157,6 +237,60 @@ func TestClassifyPoisonedError(t *testing.T) {
 			errMsg: "claude execution timeout after 10m",
 			wantOK: false,
 		},
+		{
+			// GH #6066: a run killed mid-reply left an empty assistant
+			// message in the transcript. The provider refuses to replay it
+			// and words the refusal with neither "invalid_request_error"
+			// nor a bare "400", so before taskfailure.UnresumableHistory
+			// this landed in agent_error.unknown — resume-safe by omission
+			// — and every later task on the issue resumed the dead session.
+			name:       "gh6066 empty assistant message in history",
+			errMsg:     "Invalid request: the message at position 37 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// GH #5760: the same defect on Kimi/ACP. Has a "400" but no
+			// "invalid_request_error", so the Anthropic clause missed it too.
+			name:       "gh5760 kimi empty assistant message",
+			errMsg:     "kimi provider error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// The narrowness guard: an emptiness complaint with no locator
+			// into the message history is some tool's validation error, and
+			// discarding a healthy session over it would lose real context.
+			name:   "tool validation emptiness is not poisoning",
+			errMsg: "validation error: field must not be empty",
+			wantOK: false,
+		},
+		{
+			// GH #5975: a Kiro resume rejected because the session
+			// history replays an image over the provider's max pixel
+			// dimensions. The conversation is unresumable, so it must be
+			// classified api_invalid_request even though the error is a
+			// -32603 "Internal error" (no 400 / invalid_request_error).
+			name:       "kiro oversized history image",
+			errMsg:     `kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)`,
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// A plain -32603 "Internal error" (the transient close
+			// handshake) shares the code but names neither image marker,
+			// so it must NOT be classified as poisoning.
+			name:   "plain kiro internal error is not poisoning",
+			errMsg: `kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Kiro failed to generate a response)`,
+			wantOK: false,
+		},
+		{
+			// The dimension phrase alone (without the image-content
+			// marker) is too weak to classify as a poisoned history.
+			name:   "dimension phrase without image-content marker",
+			errMsg: `some tool reported: image dimensions exceed max allowed size: 8000 pixels`,
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -169,6 +303,82 @@ func TestClassifyPoisonedError(t *testing.T) {
 				t.Fatalf("classifyPoisonedError(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+func TestClassifyResumeUnsafeTransport(t *testing.T) {
+	// The exact string the codex backend produces: startOrResumeThread's
+	// "codex thread/resume failed: %w" wrapping the reader goroutine's
+	// errCodexProcessExited + bufio.ErrTooLong.
+	const overflowErr = "codex thread/resume failed: codex process exited: bufio.Scanner: token too long"
+
+	cases := []struct {
+		name       string
+		provider   string
+		errMsg     string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name:       "codex resume overflow",
+			provider:   "codex",
+			errMsg:     overflowErr,
+			wantOK:     true,
+			wantReason: FailureReasonCodexResumeOversized,
+		},
+		{
+			// Overflow on a different RPC says nothing about the session:
+			// dropping the resume pointer would discard a healthy thread.
+			name:     "overflow outside a resume stays resumable",
+			provider: "codex",
+			errMsg:   "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			wantOK:   false,
+		},
+		{
+			// An ordinary resume rejection is already handled by the fresh
+			// -session fallback and must not be retired through this path.
+			name:     "plain resume failure stays resumable",
+			provider: "codex",
+			errMsg:   "codex thread/resume failed: thread not found",
+			wantOK:   false,
+		},
+		{
+			// Only codex replays its whole history through one line.
+			name:     "other provider same text is not classified",
+			provider: "claude",
+			errMsg:   overflowErr,
+			wantOK:   false,
+		},
+		{
+			name:     "empty error",
+			provider: "codex",
+			errMsg:   "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok := classifyResumeUnsafeTransport(tc.provider, tc.errMsg)
+			if ok != tc.wantOK {
+				t.Fatalf("classifyResumeUnsafeTransport(%q, %q) ok=%v, want %v", tc.provider, tc.errMsg, ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("classifyResumeUnsafeTransport(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestCodexResumeOversizedIsResumeUnsafe pins the cross-package contract that
+// makes the classifier above worth anything: classifying the failure only helps
+// if the resume lookup actually treats the reason as unsafe. The service-side
+// list and the two SQL blacklists are edited by hand in three places, so this
+// asserts the Go half rather than trusting that all three stayed in sync.
+func TestCodexResumeOversizedIsResumeUnsafe(t *testing.T) {
+	if !service.ResumeUnsafeFailure(FailureReasonCodexResumeOversized, "") {
+		t.Fatalf("ResumeUnsafeFailure(%q) = false, want true — the reason is classified but the session would still be resumed",
+			FailureReasonCodexResumeOversized)
 	}
 }
 
@@ -224,5 +434,19 @@ func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 				t.Fatalf("classifyResumeUnsafeTimeout(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+// MUL-10116: the error the Claude backend reports for a refusal has to end in a
+// failure reason the server refuses to resume, or the next comment on the
+// issue resumes the refused session and is refused again.
+func TestClaudeRefusalErrorRetiresSession(t *testing.T) {
+	errMsg := agent.ClaudeModelRefusalMarker + ": the model declined this conversation (API Error: Opus 5.5's safeguards flagged this message)"
+	reason, ok := classifyPoisonedError(errMsg)
+	if !ok {
+		t.Fatalf("refusal error %q was not classified", errMsg)
+	}
+	if !service.ResumeUnsafeFailure(reason, errMsg) {
+		t.Fatalf("failure_reason %q must be resume-unsafe", reason)
 	}
 }

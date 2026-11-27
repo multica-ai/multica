@@ -1,7 +1,9 @@
 "use client";
 
+import { docDetailOptions, docTreeOptions } from "@multica/core/docs";
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { issueStatusListOptions, buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import {
   parseTabSubject,
   resolveTabPresentation,
@@ -12,7 +14,7 @@ import {
   type TabEntityData,
   type TabLabelKey,
 } from "@multica/core/paths";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { autopilotDetailOptions } from "@multica/core/autopilots/queries";
 import {
@@ -22,13 +24,17 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
-  archivedInboxListOptions,
+  archivedInboxPagesOptions,
+  archivedInboxLookupOptions,
 } from "@multica/core/inbox/queries";
+import { useInboxFilters } from "@multica/core/inbox/filter-store";
 import { cn } from "@multica/ui/lib/utils";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -41,12 +47,10 @@ import { ROUTE_ICON_COMPONENTS } from "./route-icon-components";
  * live from the query cache. This is the view half of the contract whose pure
  * core is `@multica/core/paths` (`parseTabSubject` + `resolveTabPresentation`).
  *
- * Cache-only reads: every query in `useTabEntityData` is `enabled: false`. It
- * observes whatever the pages/directory already loaded and re-renders when that
- * data changes, so an open tab's icon/title stay in sync (project renamed,
- * issue status changed, chat session retitled) without amplifying requests. A
- * resource that has not loaded yet renders a stable type fallback until its
- * page fills the cache.
+ * Reads are cache-only by default. The desktop tab strip opts into fetching
+ * issue details and the status catalog so restored background tabs resolve
+ * without mounting their pages. Other resources observe the pages' caches and
+ * keep their type fallback until those pages load.
  *
  * The one exception is an actor tab's avatar: `ResourceLeadingVisual` renders
  * `ActorAvatar`, which loads the (workspace-global, sidebar-warmed) member /
@@ -68,24 +72,37 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "doc",
+  "docFolder",
+  "app",
   "machine",
   "runtime",
 ]);
 
-/** Gather cached entity data for a subject. All reads are cache-only. */
-function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
+interface ResolvedTabEntityData extends TabEntityData {
+  issue?: NonNullable<TabEntityData["issue"]> & { id: string };
+}
+
+function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): ResolvedTabEntityData {
   const { t: chatT } = useT("chat");
 
   // Read both inbox lists cache-only; the archived view keeps its own list, so
   // an archived selection has to resolve against the archived cache — the same
-  // list the InboxPage populates when `?view=archived` is active.
+  // list the InboxPage populates when `?view=archived` is active. A Snoozed
+  // selection is the snoozed issue itself.
   const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
-  const archivedInboxList = useQuery({
-    ...archivedInboxListOptions(wsId),
+  const inboxFilters = useInboxFilters(wsId);
+  const archivedPages = useInfiniteQuery({ ...archivedInboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
+  const archivedLookup = useQuery({
+    ...archivedInboxLookupOptions(wsId, subject.kind === "inbox" ? subject.selectedKey ?? "" : ""),
     enabled: false,
   }).data;
+  const archivedInboxList = useMemo(() => [
+    ...(archivedPages?.pages.flatMap((page) => page.items) ?? []),
+    ...(archivedLookup?.items ?? []),
+  ], [archivedPages, archivedLookup]);
   const activeInboxList =
-    subject.kind === "inbox" && subject.archived ? archivedInboxList : inboxList;
+    subject.kind === "inbox" && subject.view === "archived" ? archivedInboxList : inboxList;
   const inboxItem =
     subject.kind === "inbox" && subject.selectedKey
       ? (activeInboxList?.find(
@@ -94,14 +111,28 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
       : null;
 
   // One issue query serves both a direct issue tab and an inbox-selected issue.
+  //
+  // An inbox selection resolves straight from `selectedKey`: it IS the key the
+  // inbox groups by (`issue_id ?? id`), so for an issue-backed notification it
+  // already IS the issue id, and the hop through the list row was redundant.
+  // Going direct means a restored tab resolves from the issue cache alone,
+  // instead of silently depending on someone having fetched the whole Inbox
+  // first (MUL-6967). A key that is an issue-less notification's own id simply
+  // matches no issue, and falls through to the item branch below.
   const issueId =
     subject.kind === "issue"
       ? subject.id
-      : (inboxItem?.issue_id ?? "");
-  const issue = useQuery({
-    ...issueDetailOptions(wsId, issueId || NONE),
-    enabled: false,
-  }).data;
+      : subject.kind === "inbox"
+        ? (subject.selectedKey ?? "")
+        : "";
+  // An inbox key can name an issue-less notification. Only fetch known
+  // issue-backed rows; unknown selections can still resolve from cache.
+  // The canonical query seeds/subscribes to the UUID entry even when the URL
+  // uses an identifier, so background tabs receive realtime patches too.
+  const { issue } = useCanonicalIssue(wsId, issueId, {
+    enabled:
+      fetch && (subject.kind === "issue" || !!inboxItem?.issue_id || (subject.kind === "inbox" && subject.view === "snoozed")),
+  });
 
   const project = useQuery({
     ...projectDetailOptions(wsId, subject.kind === "project" ? subject.id : NONE),
@@ -114,6 +145,11 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     ),
     enabled: false,
   }).data;
+  const doc = useQuery({
+    ...docDetailOptions(wsId, subject.kind === "doc" ? subject.id : NONE),
+    enabled: false,
+  }).data;
+  const docTree = useQuery({ ...docTreeOptions(wsId), enabled: false }).data;
   const skill = useQuery({
     ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
     enabled: false,
@@ -124,15 +160,18 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
-  const data: TabEntityData = {};
+  const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
     case "issue":
       if (issue) {
         data.issue = {
+          id: issue.id,
           identifier: issue.identifier,
           title: issue.title,
           status: issue.status,
+          status_category: issue.status_category,
         };
       }
       break;
@@ -142,9 +181,20 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     case "autopilot":
       if (autopilot) data.autopilot = { title: autopilot.autopilot.title };
       break;
+    case "doc":
+      if (doc) data.doc = { title: doc.title };
+      break;
+    case "docFolder":
+      data.docFolder = docTree?.folders.find((f) => f.id === subject.id);
+      break;
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"
@@ -157,12 +207,12 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":
@@ -172,37 +222,54 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
       }
       break;
     case "inbox":
-      if (inboxItem) {
-        if (inboxItem.issue_id && issue) {
-          data.inboxSelection = {
-            kind: "issue",
-            identifier: issue.identifier,
-            title: issue.title,
-          };
-        } else if (!inboxItem.issue_id) {
-          data.inboxSelection = {
-            kind: "item",
-            title: getInboxDisplayTitle(inboxItem),
-          };
-        }
+      if (issue) {
+        // Issue-backed selection — answered by the issue cache alone.
+        data.inboxSelection = {
+          kind: "issue",
+          identifier: issue.identifier,
+          title: issue.title,
+        };
+      } else if (inboxItem && !inboxItem.issue_id) {
+        // An issue-less notification (autopilot paused, quota exceeded, …)
+        // carries its title only on the inbox row, so this branch is the one
+        // case that still needs the list cache.
+        data.inboxSelection = {
+          kind: "item",
+          title: getInboxDisplayTitle(inboxItem),
+        };
       }
       break;
   }
   return data;
 }
 
-/** Localize a title spec, preferring a persisted fallback while pending. */
-function useTabTitle(spec: TabTitleSpec, fallbackTitle?: string): string {
+/**
+ * Localize a title spec, preferring a persisted fallback while pending.
+ *
+ * `pending` is for identities the spec cannot report as pending on its own. A
+ * resource tab that has not loaded resolves to its type label, which
+ * `PENDING_RESOURCE_KEYS` recognizes; a CONTAINER tab with an unresolved
+ * selection resolves to the container's own nav label, which is
+ * indistinguishable from a container with nothing selected — so the caller,
+ * which still has the subject, decides.
+ */
+function useTabTitle(
+  spec: TabTitleSpec,
+  fallbackTitle?: string,
+  pending = false,
+): string {
   const { t: layoutT } = useT("layout");
+  const persisted = fallbackTitle?.trim();
   switch (spec.kind) {
     case "text":
       return spec.text;
     case "nav":
-      return layoutT(($) => $.nav[spec.navKey]);
+      return pending && persisted
+        ? persisted
+        : layoutT(($) => $.nav[spec.navKey]);
     case "tab": {
-      if (PENDING_RESOURCE_KEYS.has(spec.tabKey)) {
-        const clean = fallbackTitle?.trim();
-        if (clean) return clean;
+      if (pending || PENDING_RESOURCE_KEYS.has(spec.tabKey)) {
+        if (persisted) return persisted;
       }
       return layoutT(($) => $.tab[spec.tabKey]);
     }
@@ -212,6 +279,10 @@ function useTabTitle(spec: TabTitleSpec, fallbackTitle?: string): string {
 export interface TabPresentationResult {
   visual: TabVisual;
   title: string;
+  /** False while a resource title is only a type label or persisted fallback. */
+  titleResolved: boolean;
+  /** Also available for background tabs whose issue pages have not mounted. */
+  issueIdentity?: { id: string; identifier: string };
 }
 
 /**
@@ -224,13 +295,25 @@ export interface TabPresentationResult {
 export function useTabPresentation(
   url: string,
   fallbackTitle?: string,
+  { fetch = false }: { fetch?: boolean } = {},
 ): TabPresentationResult {
   const subject = useMemo(() => parseTabSubject(url), [url]);
   const ws = useCurrentWorkspace();
   const wsId = ws?.id ?? "";
-  const data = useTabEntityData(subject, wsId);
+  const data = useTabEntityData(subject, wsId, fetch);
+  const statuses = useQuery({
+    ...issueStatusListOptions(wsId),
+    enabled: fetch && !!wsId && subject.kind === "issue",
+  }).data;
+  const catalog = useMemo(() => buildIssueStatusCatalog(statuses), [statuses]);
   const { visual, title: titleSpec } = resolveTabPresentation(subject, data);
-  const title = useTabTitle(titleSpec, fallbackTitle);
+  // A selected notification or chat session not resolved from cache yet is
+  // pending in exactly the sense a not-yet-loaded issue is — keep the tab's
+  // persisted title instead of collapsing it to the bare container label.
+  const selectionPending =
+    (subject.kind === "inbox" && !!subject.selectedKey && !data.inboxSelection) ||
+    (subject.kind === "chat" && !!subject.sessionId && !data.chatSessionTitle);
+  const title = useTabTitle(titleSpec, fallbackTitle, selectionPending);
 
   // The actor avatar resolves through workspace directory queries and throws
   // if rendered before the workspace exists. Until it does, show a type icon.
@@ -247,7 +330,22 @@ export function useTabPresentation(
         }
       : visual;
 
-  return { visual: safeVisual, title };
+  return {
+    visual: safeVisual.kind === "issue-status" && safeVisual.status && catalog.entryOf(safeVisual.status)?.is_system === false
+      ? {
+          ...safeVisual,
+          category: safeVisual.category ?? catalog.categoryOf(safeVisual.status),
+          color: catalog.colorOf(safeVisual.status),
+          icon: catalog.iconOf(safeVisual.status),
+        }
+      : safeVisual,
+    title,
+    titleResolved: !selectionPending &&
+      (titleSpec.kind !== "tab" || !PENDING_RESOURCE_KEYS.has(titleSpec.tabKey)),
+    issueIdentity: data.issue
+      ? { id: data.issue.id, identifier: data.issue.identifier }
+      : undefined,
+  };
 }
 
 /**
@@ -271,8 +369,17 @@ export function ResourceLeadingVisual({
       break;
     }
     case "issue-status":
-      // A null status (loading) renders StatusIcon's neutral fallback glyph.
-      inner = <StatusIcon status={visual.status ?? ""} className="size-3.5" />;
+      inner = visual.status === null ? (
+        <Skeleton aria-hidden className="size-3 rounded-sm" />
+      ) : (
+        <StatusIcon
+          status={visual.status}
+          category={visual.category}
+          color={visual.color}
+          icon={visual.icon}
+          className="size-3.5"
+        />
+      );
       break;
     case "project-icon":
       inner = <ProjectIcon project={{ icon: visual.icon }} size="sm" />;

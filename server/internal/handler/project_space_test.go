@@ -9,7 +9,28 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/projectspace"
+	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestProjectSpaceRejectsAttachmentsFromHiddenProjects(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	target := dbfx.Project(t, "Shared project space")
+	attachment := insertCommentOnlyAttachment(t, f.secretComment, "private-notes.txt")
+	svc, err := projectspace.NewForTest(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	h := *testHandler
+	h.ProjectSpace = svc
+	h.Storage = storage.NewLocalStorageFromEnv()
+
+	req := asUser(newRequest(http.MethodPost, "/api/projects/"+target+"/space/save-attachments", map[string]any{
+		"attachment_ids": []string{attachment},
+	}), f.outsider)
+	testutil.Call(t, h.SaveAttachmentsToProjectSpace, withURLParam(req, "id", target)).Want(http.StatusNotFound)
+}
 
 func TestProjectSpaceFolderImportLifecycle(t *testing.T) {
 	svc, err := projectspace.NewForTest(t.TempDir(), t.TempDir())

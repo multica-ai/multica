@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 )
 
@@ -102,6 +103,12 @@ type APIClient interface {
 	// adapter: flattening and block assembly are the enricher's job.
 	ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error)
 
+	// DownloadMessageResource downloads one binary resource attached to a
+	// message via GET /open-apis/im/v1/messages/{message_id}/resources/{file_key}.
+	// Type is the Open Platform resource class ("image" for image_key,
+	// "file" for file_key-backed video/file/audio).
+	DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error)
+
 	// BatchGetUsers resolves a set of user open_ids to their display names
 	// via GET /open-apis/contact/v3/users/batch. The enricher uses it to
 	// label recent-context / quoted / forwarded speakers (and the sender
@@ -122,6 +129,34 @@ type APIClient interface {
 	// DeleteMessageReaction removes a previously-added reaction from a
 	// message. This is the cleanup half of the typing-indicator lifecycle.
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
+}
+
+// TokenCacheInvalidator is implemented by an APIClient that caches
+// tenant_access_token in-process, so credential rotation can tell it to
+// forget what it holds. Rotation is invisible otherwise: re-registering
+// a Bot issues a new app_secret under the SAME app_id, Lark revokes
+// every token minted from the old one, and the cache key does not
+// change.
+//
+// It is deliberately separate from APIClient rather than a method on it:
+// only the real HTTP client holds a cache, and the stub / fakes have
+// nothing to forget. Callers type-assert and skip when it is absent.
+type TokenCacheInvalidator interface {
+	InvalidateTokenCache(appID string)
+}
+
+// ReactionLister is implemented by an APIClient that can list the reactions
+// already sitting on a message (GET /im/v1/messages/{message_id}/reactions).
+// The typing-indicator sweep uses it to find and delete the bot's own Typing
+// reactions without consulting any in-process state, which is what keeps the
+// badge removable after a restart or on another replica.
+//
+// It is deliberately separate from APIClient rather than a method on it,
+// mirroring TokenCacheInvalidator: only clients that can read Lark implement
+// it, and fakes that only exercise the add/delete pair are not forced to grow
+// list plumbing. Callers type-assert and skip the sweep when it is absent.
+type ReactionLister interface {
+	ListMessageReactions(ctx context.Context, p ListMessageReactionsParams) ([]MessageReaction, error)
 }
 
 // ListMessagesParams selects a bounded, recent window of messages in a
@@ -149,6 +184,26 @@ type ListMessagesParams struct {
 	// rather than whatever is newest by the time the fetch runs. Ignored
 	// when ThreadID is set (the thread container rejects end_time).
 	EndTime int64
+}
+
+type DownloadResourceParams struct {
+	MessageID string
+	FileKey   string
+	Type      string
+}
+
+type DownloadedResource struct {
+	Data        []byte
+	ContentType string
+	Filename    string
+	SizeBytes   int64
+}
+
+type DownloadedResourceStream struct {
+	Body        io.ReadCloser
+	ContentType string
+	Filename    string
+	SizeBytes   int64
 }
 
 // LarkMessage is the normalized slice of an IM v1 message item the
@@ -303,6 +358,26 @@ type DeleteReactionParams struct {
 	ReactionID     string
 }
 
+// ListMessageReactionsParams is the input shape for listing the reactions
+// already on a message. EmojiType filters server-side (Lark's
+// reaction_type query parameter); empty lists every reaction.
+type ListMessageReactionsParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	EmojiType      string
+}
+
+// MessageReaction is one reaction on a message as Lark lists it. OperatorType
+// is "app" when the installed bot added it and "user" when a human did — the
+// distinction that lets the typing-indicator sweep delete only the badges the
+// bot itself put on.
+type MessageReaction struct {
+	ReactionID   string
+	OperatorType string
+	OperatorID   string
+	EmojiType    string
+}
+
 // InstallationCredentials is the per-installation transport context the
 // client needs to authenticate against Lark on behalf of a workspace's
 // bot. Passing these explicitly to each call (rather than constructing
@@ -397,6 +472,11 @@ func (s *stubAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (s *stubAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	s.log.Warn("lark stub client: ListChatMessages called", "chat_id", string(p.ChatID))
 	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	s.log.Warn("lark stub client: DownloadMessageResource called", "message_id", p.MessageID)
+	return DownloadedResource{}, ErrAPIClientNotConfigured
 }
 
 func (s *stubAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {

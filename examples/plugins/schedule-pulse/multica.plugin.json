@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.schedule-pulse",
+  "name": "Schedule Pulse",
+  "description": "A scheduled Hook that Multica wakes every five minutes. Each unique delivery is recorded once in workspace storage, including when the host retries.",
+  "version": "1.0.0",
+  "author": {
+    "name": "multica",
+    "url": "https://multica.ai"
+  },
+  "scopes": [
+    "storage:workspace",
+    "net:pulse.example.com"
+  ],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "pulse",
+        "type": "issue_panel",
+        "name": "Schedule pulse",
+        "entry": "ui/main.js",
+        "platforms": [
+          "web",
+          "desktop"
+        ]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "pulse",
+        "name": "Schedule pulse",
+        "description": "Records one workspace-storage pulse per planned delivery. Retries of the same delivery_id do not increment the count.",
+        "triggers": [
+          "schedule"
+        ],
+        "schedule": {
+          "cron": "*/5 * * * *",
+          "timezone": "UTC"
+        },
+        "transport": {
+          "type": "http",
+          "url": "https://pulse.example.com/hooks/pulse"
+        },
+        "timeout_ms": 8000
+      }
+    ]
+  }
+}

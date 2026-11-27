@@ -1,10 +1,12 @@
 import type { useT } from "../i18n";
 
-// Localized copy for a blocked @agent / @squad trigger outcome (MUL-4525 §2),
-// shared by the composer preview chip and the post-send toast so both name the
-// same reason the same way. `reason_code` is the enumeration-safe wire code; the
-// label it maps to never reveals the target's identity — the caller supplies the
-// name it already has from the user's own mention markup.
+// Shared blocked-trigger labels for preview and post-send feedback.
+// Do not infer more than reason_code guarantees: invocation_not_allowed covers
+// both an inaccessible target and one that does not resolve. Labels disclose no
+// target identity beyond the caller's existing mention markup.
+//
+// Keep remedies distinct for an unbound agent, an offline runtime, an unusable CLI,
+// denied runtime access, and a missing runtime profile.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -16,6 +18,14 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_runtime_offline);
+    case "runtime_unusable":
+      return t(($) => $.comment.trigger_blocked_runtime_unusable);
+    case "runtime_profile_missing":
+      return t(($) => $.comment.trigger_blocked_runtime_profile_missing);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -31,6 +41,14 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_short_runtime_offline);
+    case "runtime_unusable":
+      return t(($) => $.comment.trigger_blocked_short_runtime_unusable);
+    case "runtime_profile_missing":
+      return t(($) => $.comment.trigger_blocked_short_runtime_profile_missing);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

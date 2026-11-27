@@ -5,8 +5,8 @@
  * sheet and goes straight to the blank state for that agent.
  *
  * Filtering is delegated to the caller (the screen passes a pre-filtered
- * `agents` list) so the same filter logic — archived + canAssignAgent +
- * order — stays in one place.
+ * `agents` list) so the same filter logic — archived + canAssignAgentToIssue
+ * + order — stays in one place.
  *
  * Layout mirrors `components/issue/my-issues-filter-sheet.tsx`: transparent
  * Modal + dimmed backdrop + centered card. Bottom-sheet anchoring would be
@@ -18,6 +18,9 @@ import type { Agent } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { continuousCorners } from "@/lib/radius";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   visible: boolean;
@@ -34,6 +37,8 @@ export function AgentPickerSheet({
   onPick,
   onClose,
 }: Props) {
+  const { t } = useT("chat");
+
   return (
     <Modal
       visible={visible}
@@ -44,10 +49,13 @@ export function AgentPickerSheet({
       <Pressable className="flex-1 bg-black/40" onPress={onClose}>
         <View className="flex-1 items-center justify-center px-6">
           <Pressable onPress={() => {}} className="w-full max-w-sm">
-            <View className="bg-popover rounded-2xl overflow-hidden">
+            <View
+              className="bg-popover rounded-xl overflow-hidden"
+              style={continuousCorners}
+            >
               <View className="px-4 py-3 border-b border-border">
                 <Text className="text-base font-semibold text-foreground">
-                  Choose an agent
+                  {t("picker.title")}
                 </Text>
               </View>
 
@@ -55,15 +63,17 @@ export function AgentPickerSheet({
                 {agents.length === 0 ? (
                   <View className="px-4 py-8">
                     <Text className="text-sm text-muted-foreground text-center">
-                      No agents available.
+                      {t("picker.empty")}
                     </Text>
                   </View>
                 ) : (
                   agents.map((agent) => {
                     const selected = agent.id === currentAgentId;
+                    const runtimeBound = isAgentRuntimeBound(agent);
                     return (
                       <Pressable
                         key={agent.id}
+                        disabled={!runtimeBound}
                         onPress={() => {
                           onPick(agent);
                           onClose();
@@ -71,6 +81,7 @@ export function AgentPickerSheet({
                         className={cn(
                           "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
                           selected && "bg-secondary/60",
+                          !runtimeBound && "opacity-50",
                         )}
                       >
                         <ActorAvatar type="agent" id={agent.id} size={32} showPresence />
@@ -90,6 +101,11 @@ export function AgentPickerSheet({
                             </Text>
                           ) : null}
                         </View>
+                        {!runtimeBound ? (
+                          <Text className="text-xs font-medium text-warning">
+                            {t("picker.needs_runtime")}
+                          </Text>
+                        ) : null}
                         {selected ? (
                           <Text className="text-sm text-primary font-semibold">
                             ✓

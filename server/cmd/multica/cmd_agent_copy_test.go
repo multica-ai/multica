@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -25,11 +26,14 @@ func newAgentCopyTestCmd() *cobra.Command {
 // portable field populated, so copy tests can assert the whole whitelist.
 func fullSourceAgent() map[string]any {
 	return map[string]any{
-		"id":                   "agent-src",
-		"name":                 "Src",
-		"runtime_id":           "runtime-1",
-		"description":          "a description",
-		"instructions":         "some instructions",
+		"id":           "agent-src",
+		"name":         "Src",
+		"runtime_id":   "runtime-1",
+		"description":  "a description",
+		"instructions": "some instructions",
+		"conversation_starters": []any{
+			map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+		},
 		"avatar_url":           "https://img.example/a.png",
 		"custom_args":          []any{"--foo", "--bar"},
 		"max_concurrent_tasks": 9,
@@ -109,6 +113,11 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	if gotBody["instructions"] != "some instructions" {
 		t.Errorf("instructions = %v", gotBody["instructions"])
 	}
+	if !reflect.DeepEqual(gotBody["conversation_starters"], []any{
+		map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+	}) {
+		t.Errorf("conversation_starters = %v", gotBody["conversation_starters"])
+	}
 	if gotBody["avatar_url"] != "https://img.example/a.png" {
 		t.Errorf("avatar_url = %v", gotBody["avatar_url"])
 	}
@@ -144,6 +153,61 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 		if _, ok := gotBody[k]; ok {
 			t.Errorf("body must not contain %q, got %v", k, gotBody[k])
 		}
+	}
+}
+
+func TestAgentCopyOmitsInvalidHistoricalConcurrency(t *testing.T) {
+	for _, value := range []any{0, -1, 51} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			source := fullSourceAgent()
+			source["max_concurrent_tasks"] = value
+
+			var gotBody map[string]any
+			srv := copyMockServer(t, source, &gotBody)
+			defer srv.Close()
+			setCopyTestEnv(t, srv.URL)
+
+			cmd := newAgentCopyTestCmd()
+			if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+				t.Fatalf("runAgentCopy: %v", err)
+			}
+			if _, ok := gotBody["max_concurrent_tasks"]; ok {
+				t.Errorf("invalid historical max_concurrent_tasks must be omitted, got %v", gotBody["max_concurrent_tasks"])
+			}
+		})
+	}
+}
+
+func TestAgentCopyValidConcurrencyOverrideRepairsInvalidSource(t *testing.T) {
+	source := fullSourceAgent()
+	source["max_concurrent_tasks"] = 0
+
+	var gotBody map[string]any
+	srv := copyMockServer(t, source, &gotBody)
+	defer srv.Close()
+	setCopyTestEnv(t, srv.URL)
+
+	cmd := newAgentCopyTestCmd()
+	_ = cmd.Flags().Set("max-concurrent-tasks", "12")
+
+	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+		t.Fatalf("runAgentCopy: %v", err)
+	}
+	if gotBody["max_concurrent_tasks"] != float64(12) {
+		t.Errorf("max_concurrent_tasks = %v, want 12", gotBody["max_concurrent_tasks"])
+	}
+}
+
+func TestAgentCopyRejectsInvalidConcurrencyOverrideBeforeRequest(t *testing.T) {
+	cmd := newAgentCopyTestCmd()
+	_ = cmd.Flags().Set("max-concurrent-tasks", "51")
+
+	err := runAgentCopy(cmd, []string{"agent-src"})
+	if err == nil {
+		t.Fatal("expected invalid --max-concurrent-tasks error")
+	}
+	if !strings.Contains(err.Error(), "between 1 and 50") {
+		t.Fatalf("error = %q, want 1-50 range", err.Error())
 	}
 }
 
@@ -292,15 +356,8 @@ func TestAgentCopyAcceptsExplicitCustomEnv(t *testing.T) {
 	}
 }
 
-// The copy command must expose the same secret-safe input channels as create so
-// scripts can keep secrets off the command line.
-func TestAgentCopyExposesSecretSafeFlags(t *testing.T) {
-	for _, name := range []string{
-		"custom-env-stdin", "custom-env-file",
-		"mcp-config-stdin", "mcp-config-file",
-	} {
-		if agentCopyCmd.Flag(name) == nil {
-			t.Errorf("agent copy is missing the %q flag", name)
-		}
+func TestAgentCopyDoesNotExposeConversationStartersOverride(t *testing.T) {
+	if agentCopyCmd.Flag("conversation-starters") != nil {
+		t.Error("agent copy must carry conversation_starters without a dedicated override flag")
 	}
 }

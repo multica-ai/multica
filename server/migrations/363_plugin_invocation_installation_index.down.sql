@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_plugin_invocation_installation_created;

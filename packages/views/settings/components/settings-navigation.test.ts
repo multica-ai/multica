@@ -1,0 +1,127 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
+
+const resolve = (search: string) =>
+  resolveSettingsLocation(new URLSearchParams(search));
+
+describe("settings location", () => {
+  it.each([
+    ["tab=issue-statuses", { tab: "workflows", section: null, integration: null }],
+    ["tab=issue", { tab: "preferences", section: "issue", integration: null }],
+    ["tab=chat", { tab: "preferences", section: "chat", integration: null }],
+    ["tab=labs", { tab: "workspace", section: null, integration: null }],
+    [
+      "tab=preferences&section=appearance",
+      { tab: "appearance", section: null, integration: null },
+    ],
+    [
+      "tab=preferences&section=theme",
+      { tab: "appearance", section: "mode", integration: null },
+    ],
+    [
+      "tab=preferences&section=style",
+      { tab: "appearance", section: "theme", integration: null },
+    ],
+    ["tab=lark", { tab: "channels", section: null, integration: null }],
+    [
+      "tab=integrations&integration=slack",
+      { tab: "channels", section: null, integration: null },
+    ],
+    ["tab=channels&integration=telegram", { tab: "channels", section: null, integration: null }],
+    ["tab=integrations", { tab: "channels", section: null, integration: null }],
+    [
+      "tab=integrations&integration=vcs",
+      { tab: "code", section: "code-hosting", integration: null },
+    ],
+    [
+      "tab=integrations&integration=github",
+      { tab: "code", section: null, integration: null },
+    ],
+    [
+      "tab=integrations&integration=composio",
+      { tab: "apps", section: null, integration: null },
+    ],
+  ])("resolves the retired %s entry", (search, expected) => {
+    expect(resolve(search)).toEqual(expected);
+  });
+
+  it("keeps server redirects from the GitHub App install working", () => {
+    // github.go returns to one of these two tabs after the App is installed.
+    expect(resolve("tab=github")).toEqual({
+      tab: "code",
+      section: null,
+      integration: null,
+    });
+    expect(resolve("tab=repositories&github_connected=1")).toEqual({
+      tab: "code",
+      section: "repositories",
+      integration: null,
+    });
+  });
+
+  it.each(["connected=notion", "error=composio_connect_failed"])(
+    "sends the legacy personal Composio callback (%s) to the Apps page's Accounts",
+    (callback) => {
+      expect(resolve(`tab=integrations&${callback}`)).toEqual({ tab: "apps", section: "accounts", integration: null });
+    },
+  );
+
+  it("lands a team connect refused by the plan on the Apps page", () => {
+    expect(
+      resolve("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team"),
+    ).toEqual({ tab: "apps", section: null, integration: null });
+    expect(
+      resolve("tab=integrations&error=composio_connect_failed&reason=feature_locked").tab,
+    ).toBe("apps");
+  });
+
+  it.each([
+    ["tab=apps", null],
+    ["tab=apps&connected=gmail", "accounts"],
+    ["tab=apps&error=composio_connect_failed", "accounts"],
+    ["tab=apps&connected=gmail&scope=team", null],
+    ["tab=apps&error=composio_connect_failed&scope=team", null],
+    ["tab=apps&error=something_else", null],
+    ["tab=accounts", "accounts"],
+    ["tab=connected-accounts", "accounts"],
+  ])("routes %s to the Apps page (tab %s)", (search, section) => {
+    expect(resolve(search)).toEqual({ tab: "apps", section, integration: null });
+  });
+
+  it("keeps only the connect result when a settings link moves to the Apps page", () => {
+    expect(movedAppsHref("/acme/apps", new URLSearchParams("tab=apps"))).toBe("/acme/apps");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&connected=notion&scope=team&section=x")),
+    ).toBe("/acme/apps?connected=notion");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&error=composio_connect_failed&scope=team")),
+    ).toBe("/acme/apps?error=composio_connect_failed");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&error=composio_connect_failed&reason=feature_locked&scope=team")),
+    ).toBe("/acme/apps?error=composio_connect_failed&reason=feature_locked");
+    expect(
+      movedAppsHref("/acme/apps", new URLSearchParams("tab=apps&connected=gmail"), "accounts"),
+    ).toBe("/acme/apps?tab=accounts&connected=gmail");
+  });
+
+  it("passes current pages and anchors through untouched", () => {
+    expect(resolve("tab=code&section=pr-sidebar")).toEqual({
+      tab: "code",
+      section: "pr-sidebar",
+      integration: null,
+    });
+    expect(resolve("").tab).toBe("profile");
+  });
+
+  it("preserves unrelated query state while replacing page-specific state", () => {
+    expect(
+      settingsHref(
+        "/acme/settings",
+        new URLSearchParams("tab=preferences&section=chat&scope=skill&keep=1"),
+        "channels",
+        { integration: "slack" },
+      ),
+    ).toBe("/acme/settings?tab=channels&keep=1&integration=slack");
+  });
+});

@@ -58,6 +58,11 @@ type HistoryMessage struct {
 // HistoryPage is one normalized page. Messages are ordered OLDEST-FIRST so the
 // transcript reads top-to-bottom like the chat does.
 type HistoryPage struct {
+	// Native source fields are optional. Name and permalink depend on the
+	// installation's existing permissions and the provider's availability.
+	ChannelID   string `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	Permalink   string `json:"permalink,omitempty"`
 	// ChannelType is the platform the history came from ("slack"). Empty when
 	// the session is not bound to any channel (a web-only chat session).
 	ChannelType string `json:"channel_type,omitempty"`
@@ -81,4 +86,12 @@ type HistoryOptions struct {
 	// returns only messages strictly older than it. Empty starts at the most
 	// recent messages.
 	Before string
+	// After and Until are server-authoritative generation boundaries. Readers
+	// must treat the window as [After, Until); callers cannot set them via URL.
+	After           string
+	Until           string
+	BoundaryPending bool
+	// ContextRevision is the task's immutable channel context generation. Zero
+	// means this is a legacy or direct-chat read with no generation boundary.
+	ContextRevision int64
 }

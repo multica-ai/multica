@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_plugin_execution_manifest_task;

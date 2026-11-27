@@ -4,13 +4,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // Hoisted mock for the API singleton: vi.mock factories cannot reference
 // outside-of-scope vars, but vi.hoisted runs before the import graph.
 const getAttachmentMock = vi.hoisted(() => vi.fn());
+const getAttachmentForDownloadMock = vi.hoisted(() => vi.fn());
 const getBaseUrlMock = vi.hoisted(() => vi.fn(() => ""));
 const useWorkspaceSlugMock = vi.hoisted(() =>
   vi.fn<() => string | null>(() => "acme"),
 );
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachment: getAttachmentMock, getBaseUrl: getBaseUrlMock },
+  api: {
+    getAttachment: getAttachmentMock,
+    getAttachmentForDownload: getAttachmentForDownloadMock,
+    getBaseUrl: getBaseUrlMock,
+  },
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -47,6 +52,24 @@ afterEach(() => {
 });
 
 describe("useDownloadAttachment (web)", () => {
+  it("resolves a Markdown link without using the current workspace metadata route", async () => {
+    getAttachmentForDownloadMock.mockResolvedValueOnce({
+      attachment_download_url: "/api/attachments/att-1/signed-download?sig=member",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const { result } = renderHook(() => useDownloadAttachment("markdown-link"));
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(getAttachmentForDownloadMock).toHaveBeenCalledWith("att-1");
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalledOnce();
+  });
+
   it("clicks the unified download endpoint without opening a blank tab or buffering a Blob", async () => {
     getAttachmentMock.mockResolvedValueOnce({
       id: "att-1",
@@ -154,6 +177,108 @@ describe("useDownloadAttachment (web)", () => {
     );
   });
 
+  // #6092 mints a signed capability into `download_url` in proxy mode. A bare
+  // `<a download>` navigation can authenticate to it with no Authorization
+  // header and no session cookie, so the web path must prefer it over the
+  // cookie-gated slug endpoint that 401s to download.txt in token-mode
+  // self-hosting, where auth is a bearer token in JS and a bare navigation
+  // carries no credential at all.
+  it("navigates to the capability download_url in proxy mode, not the cookie-gated endpoint", async () => {
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor).toBeDefined();
+    expect(anchor!.getAttribute("href")).toBe(
+      "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+    );
+    // The capability is itself the credential and is signed over exactly one
+    // attachment id, so the workspace slug is no longer part of the URL. It is
+    // not bound to a user — the signature covers (version, attachment id,
+    // expiry) only — so it stays a bearer capability for its 60-second life.
+    expect(anchor!.getAttribute("href")).not.toContain("workspace_slug");
+  });
+
+  it("resolves the capability download_url against a configured API base (split origin)", async () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test/");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor!.href).toBe(
+      "https://api.example.test/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+    );
+  });
+
+  // Ordering guard, not a reachable user scenario: `api.getAttachment` resolves
+  // workspace context server-side and 400s when there is none, so the preflight
+  // would fail before this branch in real use. What this pins is purely the
+  // client-side order — `capabilityDownloadUrl` is consulted before the
+  // `workspaceSlug` guard — so a capability download never depends on the slug
+  // the legacy fallback needs.
+  it("consults the capability before the workspace-slug guard", async () => {
+    useWorkspaceSlugMock.mockReturnValueOnce(null);
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1735689600&sig=abc123",
+      filename: "file.md",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it("shows a toast and does not click a download link when the workspace slug is missing", async () => {
     useWorkspaceSlugMock.mockReturnValueOnce(null);
     getAttachmentMock.mockResolvedValueOnce({
@@ -192,6 +317,64 @@ describe("useDownloadAttachment (web)", () => {
     expect(openSpy).not.toHaveBeenCalled();
     expect(clickSpy).not.toHaveBeenCalled();
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  });
+
+  it("prefers the forced-attachment URL over the capability and slug endpoint", async () => {
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      // A proxy capability is present, but the forced-attachment URL wins.
+      download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=load",
+      attachment_download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+      filename: "pic.png",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const anchor = appendSpy.mock.calls
+      .map(([node]) => node)
+      .find((node): node is HTMLAnchorElement =>
+        node instanceof HTMLAnchorElement,
+      );
+    expect(anchor).toBeDefined();
+    // The forced-attachment capability is used verbatim (same-origin base).
+    expect(anchor!.getAttribute("href")).toBe(
+      "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+    );
+  });
+
+  it("uses the forced-attachment URL even when the workspace slug is missing", async () => {
+    useWorkspaceSlugMock.mockReturnValueOnce(null);
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      attachment_download_url:
+        "/api/attachments/att-1/signed-download?exp=1800000060&sig=dl&dl=1",
+      filename: "pic.png",
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    // The capability carries its own credential, so a missing slug — which only
+    // gates the legacy fallback — must not block it.
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 
@@ -267,6 +450,34 @@ describe("useDownloadAttachment (desktop)", () => {
     );
   });
 
+  // MUL-5292: in proxy mode the backend now answers with a capability URL —
+  // still server-relative, but carrying `?exp=&sig=`. The query is what makes
+  // the request authenticate itself, so it must survive the resolve step and
+  // reach the native downloader intact.
+  it("preserves the capability query when resolving a relative proxy-mode download_url", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/file.md",
+      download_url: "/api/attachments/att-1/signed-download?exp=1800000060&sig=deadbeef",
+      filename: "file.md",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(
+      "https://api.example.test/api/attachments/att-1/signed-download?exp=1800000060&sig=deadbeef",
+    );
+  });
+
   it("trims a trailing slash on the API base when resolving a relative download_url", async () => {
     const downloadURL = vi.fn();
     (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
@@ -313,5 +524,29 @@ describe("useDownloadAttachment (desktop)", () => {
     });
 
     expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL);
+  });
+
+  it("prefers the forced-attachment URL over download_url on desktop", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    const forced =
+      "https://cdn.example.test/att-1.png?response-content-disposition=attachment&Policy=p&Signature=s&Key-Pair-Id=k";
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "https://static.example.test/pic.png",
+      download_url: SIGNED_URL,
+      attachment_download_url: forced,
+      filename: "pic.png",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    // The forced-attachment URL wins over the load-intent download_url.
+    expect(downloadURL).toHaveBeenCalledWith(forced);
   });
 });
