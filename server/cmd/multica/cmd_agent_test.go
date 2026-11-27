@@ -2312,3 +2312,32 @@ func TestParseConversationStarters(t *testing.T) {
 		}
 	})
 }
+
+func TestStrValFormatsNumbersWithoutExponent(t *testing.T) {
+	t.Parallel()
+
+	m := map[string]any{
+		"small":    float64(4242),
+		"million":  float64(1000000),
+		"tokens":   float64(48211907),
+		"fraction": 0.25,
+		"negative": float64(-1500000),
+		"text":     "1e6",
+		"flag":     true,
+	}
+	cases := map[string]string{
+		"small":    "4242",
+		"million":  "1000000",
+		"tokens":   "48211907",
+		"fraction": "0.25",
+		"negative": "-1500000",
+		"text":     "1e6",
+		"flag":     "true",
+		"missing":  "",
+	}
+	for key, want := range cases {
+		if got := strVal(m, key); got != want {
+			t.Errorf("strVal(%q) = %q, want %q", key, got, want)
+		}
+	}
+}

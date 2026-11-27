@@ -431,3 +431,31 @@ func TestRuntimeUpdateWaitFailedJSONStillPrintsBody(t *testing.T) {
 		t.Fatalf("stdout = %#v, want the failed update object", got)
 	}
 }
+
+func TestRuntimeUsageTablePrintsLargeTokenCountsInFull(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/runtimes/rt-1/usage" {
+			t.Fatalf("path = %q, want /api/runtimes/rt-1/usage", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `[{"date":"2026-11-25","provider":"claude","model":"claude-opus-5-5","input_tokens":1531839,"output_tokens":204812,"cache_read_tokens":48211907,"cache_write_tokens":1000000}]`)
+	}))
+	defer srv.Close()
+
+	cmd := newRuntimeDeleteTestCmd(srv.URL)
+	cmd.Flags().Int("days", 7, "")
+	out, err := captureRuntimeStdout(t, func() error { return runRuntimeUsage(cmd, []string{"rt-1"}) })
+	if err != nil {
+		t.Fatalf("runRuntimeUsage: %v", err)
+	}
+	for _, want := range []string{"1531839", "204812", "48211907", "1000000"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage table missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "e+") {
+		t.Errorf("usage table uses exponent notation:\n%s", out)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1567,6 +1568,11 @@ func strVal(m map[string]any, key string) string {
 	v, ok := m[key]
 	if !ok || v == nil {
 		return ""
+	}
+	// JSON numbers decode as float64, and %v switches to exponent notation at
+	// seven digits: a 1531839-token day would print as "1.531839e+06".
+	if f, ok := v.(float64); ok {
+		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
 	return fmt.Sprintf("%v", v)
 }
