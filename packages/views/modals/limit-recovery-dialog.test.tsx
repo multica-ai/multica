@@ -247,6 +247,9 @@ describe("LimitRecoveryDialog", () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
     renderPrompt({ layered: true });
     const user = await openPrompt();
+    await waitFor(() =>
+      expect(queryRecoveryDialog()?.contains(document.activeElement)).toBe(true),
+    );
 
     await user.keyboard("{Escape}");
 
