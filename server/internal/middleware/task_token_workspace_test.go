@@ -35,7 +35,10 @@ const (
 // Anything else fails the test, so an unexpected query on this path is
 // caught rather than silently returning zero values.
 type fakeTaskTokenDB struct {
-	t *testing.T
+	t              *testing.T
+	grantAllowed   bool
+	createAgents   bool
+	fullDelegation bool
 }
 
 func (f *fakeTaskTokenDB) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
@@ -75,6 +78,29 @@ func (f *fakeTaskTokenDB) QueryRow(_ context.Context, sql string, args ...interf
 		}
 		return fakeRow{scan: func(dest ...any) {
 			*dest[0].(*pgtype.UUID) = util.MustParseUUID(id)
+		}}
+	case strings.Contains(sql, "name: AuthorizeTaskWorkspaceGrant"):
+		if !f.grantAllowed {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		if len(args) != 4 || args[0] != util.MustParseUUID(ttWorkspaceB) || args[1] != util.MustParseUUID(ttTaskID) ||
+			args[2] != util.MustParseUUID(ttAgentID) || args[3] != util.MustParseUUID(ttWorkspaceA) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{scan: func(dest ...any) {
+			*dest[0].(*pgtype.UUID) = util.MustParseUUID("55555555-0000-4000-8000-000000000005")
+			*dest[1].(*pgtype.UUID) = util.MustParseUUID("66666666-0000-4000-8000-000000000006")
+			*dest[2].(*bool) = f.createAgents
+		}}
+	case strings.Contains(sql, "name: AuthorizeFullAgentDelegation"):
+		if !f.fullDelegation {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		if len(args) != 4 || args[0] != util.MustParseUUID(ttWorkspaceB) || args[1] != util.MustParseUUID(ttTaskID) || args[2] != util.MustParseUUID(ttAgentID) || args[3] != util.MustParseUUID(ttWorkspaceA) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{scan: func(dest ...any) {
+			*dest[0].(*pgtype.UUID) = util.MustParseUUID("66666666-0000-4000-8000-000000000006")
 		}}
 	}
 	f.t.Errorf("unexpected QueryRow on task-token auth path: %s", sql)
@@ -222,6 +248,101 @@ func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
 			}
 			if gotSource != "task_token" {
 				t.Fatalf("X-Actor-Source = %q, want task_token", gotSource)
+			}
+		})
+	}
+}
+
+func TestAuth_TaskTokenGrantedWorkspace(t *testing.T) {
+	cases := []struct {
+		name, method, path  string
+		grant, createAgents bool
+		query               string
+		want                int
+	}{
+		{"granted list", "GET", "/api/issues/", true, false, "", 200},
+		{"granted get", "GET", "/api/issues/PERS-9", true, false, "", 200},
+		{"granted create", "POST", "/api/issues/", true, false, "", 200},
+		{"runtime list default denied", "GET", "/api/runtimes/", true, false, "", 403},
+		{"agent create default denied", "POST", "/api/agents/", true, false, "", 403},
+		{"runtime list enabled", "GET", "/api/runtimes/", true, true, "", 200},
+		{"agent create enabled", "POST", "/api/agents/", true, true, "", 200},
+		{"missing or revoked grant", "GET", "/api/issues/", false, false, "", 403},
+		{"conflicting selector", "GET", "/api/issues/", true, false, "workspace_id=" + ttWorkspaceA, 403},
+		{"unlisted route", "GET", "/api/projects/", true, true, "", 403},
+		{"issue mutation", "PUT", "/api/issues/PERS-9", true, true, "", 403},
+		{"issue list sibling", "GET", "/api/issues/search", true, true, "", 403},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotUser, gotAgent, gotTask, gotHome, gotWorkspace string
+			handler := Auth(db.New(&fakeTaskTokenDB{t: t, grantAllowed: tc.grant, createAgents: tc.createAgents}), nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotUser = r.Header.Get("X-User-ID")
+				gotAgent = r.Header.Get("X-Agent-ID")
+				gotTask = r.Header.Get("X-Task-ID")
+				gotHome = r.Header.Get("X-Task-Home-Workspace-ID")
+				gotWorkspace = r.Header.Get("X-Workspace-ID")
+				w.WriteHeader(http.StatusOK)
+			}))
+			path := tc.path
+			if tc.query != "" {
+				path += "?" + tc.query
+			}
+			req := httptest.NewRequest(tc.method, path, nil)
+			req.Header.Set("Authorization", "Bearer "+ttTestToken)
+			req.Header.Set("X-Workspace-ID", ttWorkspaceB)
+			req.Header.Set("X-User-ID", ttUserID)
+			req.Header.Set("X-Task-Home-Workspace-ID", ttWorkspaceB)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+			wantUser := "55555555-0000-4000-8000-000000000005"
+			if tc.path == "/api/runtimes/" || tc.path == "/api/agents/" {
+				wantUser = "66666666-0000-4000-8000-000000000006"
+			}
+			if tc.want == 200 && (gotUser != wantUser || gotAgent != ttAgentID || gotTask != ttTaskID || gotHome != ttWorkspaceA || gotWorkspace != ttWorkspaceB) {
+				t.Fatalf("unexpected stamped identity: user=%s agent=%s task=%s home=%s workspace=%s", gotUser, gotAgent, gotTask, gotHome, gotWorkspace)
+			}
+		})
+	}
+}
+
+func TestAuth_FullDelegationBindsGrantorAndRejectsSelectorForgery(t *testing.T) {
+	const grantor = "66666666-0000-4000-8000-000000000006"
+	for _, tc := range []struct {
+		name, path string
+		want       int
+	}{
+		{"target selected", "/api/issues/", http.StatusOK},
+		{"conflicting query selector", "/api/issues/?workspace_id=" + ttWorkspaceA, http.StatusForbidden},
+		{"malformed query selector", "/api/issues/?workspace_id=not-a-uuid", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			h := Auth(db.New(&fakeTaskTokenDB{t: t, fullDelegation: true}), nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				principal, ok := FullDelegationFromContext(r.Context())
+				if !ok || principal.GrantorUserID != grantor || principal.AgentID != ttAgentID || principal.TaskID != ttTaskID || principal.HomeWorkspaceID != ttWorkspaceA || principal.RuntimeOwnerUserID != ttUserID {
+					t.Fatalf("wrong delegation principal: %+v, present=%v", principal, ok)
+				}
+				if r.Header.Get("X-User-ID") != grantor || r.Header.Get("X-Full-Delegation-User-ID") != grantor || r.Header.Get("X-Agent-ID") != ttAgentID || r.Header.Get("X-Task-ID") != ttTaskID {
+					t.Fatalf("forged identity survived: %+v", r.Header)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+ttTestToken)
+			req.Header.Set("X-Workspace-ID", ttWorkspaceB)
+			req.Header.Set("X-User-ID", ttUserID)
+			req.Header.Set("X-Full-Delegation-User-ID", ttUserID)
+			req.Header.Set("X-Agent-ID", ttUserID)
+			req.Header.Set("X-Task-ID", ttUserID)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.want || called != (tc.want == http.StatusOK) {
+				t.Fatalf("status %d, want %d, called=%v: %s", w.Code, tc.want, called, w.Body.String())
 			}
 		})
 	}

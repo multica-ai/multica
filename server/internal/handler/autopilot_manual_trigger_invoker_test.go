@@ -25,7 +25,7 @@ import (
 func triggerInvokerFixture(t *testing.T, titleSuffix string) (autopilotID, agentID string) {
 	t.Helper()
 
-	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID).Scan(&agentID)
 
 	title := fmt.Sprintf("manual trigger invoker %s %d", titleSuffix, time.Now().UnixNano())
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
@@ -162,7 +162,7 @@ func TestTriggerAutopilot_RuntimeOwnerNeedsNoGrant(t *testing.T) {
 		t.Skip("database not available")
 	}
 	var agentID string
-	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID).Scan(&agentID)
 
 	// The ordering human owns the autopilot outright: they created it.
 	orderingHuman := plainMember(t, "ordering-human")

@@ -199,7 +199,7 @@ func (h *Handler) ListIssueSystemWakeups(w http.ResponseWriter, r *http.Request)
 // the rule wakes the issue's own assignee, whose invocation was already
 // authorized when the issue was assigned.
 func (h *Handler) systemWakeupHuman(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
-	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	actorType, actorID := h.permissionActor(r, requestUserID(r), workspaceID)
 	if actorType != "member" {
 		writeError(w, 403, "only members can change system wakeups")
 		return db.Member{}, false

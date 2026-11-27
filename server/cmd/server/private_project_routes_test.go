@@ -90,6 +90,8 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"import/{requestId}":             {why: "a runtime local-skill import request"},
 	"runtime-profiles/{profileId}":   {why: "a workspace runtime profile"},
 	"agents/{id}":                    {why: "a workspace agent; its runs are listed, not fetched through it"},
+	"agent-delegations/{agentId}":    {why: "the caller's grant to an agent, independent of any project"},
+	"workspace-grants/{workspaceId}": {why: "an additional workspace granted to an agent, not a project object"},
 	"pinned-agents/{agentId}":        {why: "the caller's pinned agent"},
 	"skills/{id}":                    {why: "a workspace skill"},
 	"skills/{skillId}":               {why: "a workspace skill"},

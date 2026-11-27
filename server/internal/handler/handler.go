@@ -954,6 +954,16 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	return "agent", agentID
 }
 
+// permissionActor is deliberately separate from resolveActor: a fully
+// delegated run is still authored by its source agent, but must never gain
+// visibility or management rights beyond its verified grantor's live rights.
+func (h *Handler) permissionActor(r *http.Request, userID, workspaceID string) (string, string) {
+	if p, ok := middleware.FullDelegationFromContext(r.Context()); ok {
+		return "member", p.GrantorUserID
+	}
+	return h.resolveActor(r, userID, workspaceID)
+}
+
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := requestUserID(r)
 	if userID == "" {

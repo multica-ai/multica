@@ -909,7 +909,12 @@
     "save": "更新資料",
     "saving": "更新中...",
     "toast_avatar_failed": "上傳頭像失敗",
-    "toast_profile_failed": "更新資料失敗"
+    "toast_profile_failed": "更新資料失敗",
+    "full_delegation_title": "已獲完全委託的代理程式",
+    "full_delegation_description": "這些代理程式可在你直接啟動的聊天中使用你目前的權限。你可隨時在此撤銷。",
+    "full_delegation_revoke": "撤銷",
+    "full_delegation_empty": "沒有已獲完全委託的代理程式。",
+    "full_delegation_error": "無法撤銷完全委託。"
   },
   "notifications": {
     "title": "收件箱",
