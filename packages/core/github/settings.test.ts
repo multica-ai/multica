@@ -7,8 +7,17 @@ function ws(settings: Record<string, unknown>): Pick<Workspace, "settings"> {
 }
 
 describe("deriveGitHubSettings", () => {
+  it("requires an explicit opt-in for initiator commit authors", () => {
+    for (const value of [undefined, null, false, "true", 1]) {
+      expect(deriveGitHubSettings(ws({ commit_author_is_initiator_enabled: value })))
+        .toMatchObject({ commitAuthorIsInitiator: false });
+    }
+    expect(deriveGitHubSettings(ws({ commit_author_is_initiator_enabled: true })))
+      .toMatchObject({ commitAuthorIsInitiator: true });
+  });
   it("defaults every flag to true when workspace is null", () => {
     expect(deriveGitHubSettings(null)).toEqual({
+      commitAuthorIsInitiator: false,
       enabled: true,
       prSidebar: true,
       coAuthor: true,
@@ -18,6 +27,7 @@ describe("deriveGitHubSettings", () => {
 
   it("defaults every flag to true on empty settings", () => {
     expect(deriveGitHubSettings(ws({}))).toEqual({
+      commitAuthorIsInitiator: false,
       enabled: true,
       prSidebar: true,
       coAuthor: true,
@@ -31,10 +41,12 @@ describe("deriveGitHubSettings", () => {
         github_enabled: false,
         github_pr_sidebar_enabled: true,
         co_authored_by_enabled: true,
+        commit_author_is_initiator_enabled: true,
         github_auto_link_prs_enabled: true,
       }),
     );
     expect(got).toEqual({
+      commitAuthorIsInitiator: false,
       enabled: false,
       prSidebar: false,
       coAuthor: false,

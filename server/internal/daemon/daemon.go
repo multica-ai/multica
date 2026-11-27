@@ -9548,18 +9548,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
 
+	d.refreshInitiatorAuthor(ctx, task, env, taskLog)
+
 	// Authenticate the localhost repo-checkout endpoint with the same
 	// task-scoped token the child receives. The endpoint derives identity and
 	// branch ownership from this in-memory record instead of trusting request
 	// fields or ambient process environment. Register only for the provider
 	// execution window and always remove the credential afterwards.
 	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
-		WorkspaceID: task.WorkspaceID,
-		TaskID:      task.ID,
-		IssueID:     task.IssueID,
-		AgentID:     task.AgentID,
-		AgentName:   task.Agent.Name,
-		WorkDir:     env.WorkDir,
+		InitiatorType:  task.InitiatorType,
+		InitiatorName:  task.InitiatorName,
+		InitiatorEmail: task.InitiatorEmail,
+		WorkspaceID:    task.WorkspaceID,
+		TaskID:         task.ID,
+		IssueID:        task.IssueID,
+		AgentID:        task.AgentID,
+		AgentName:      task.Agent.Name,
+		WorkDir:        env.WorkDir,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 	defer d.environments.trackTask(env.RootDir, localenv.Task{
