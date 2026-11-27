@@ -161,7 +161,8 @@
       "search": "Buscar zonas horarias..."
     },
     "sticky_comment_bar": {
-      "title": "Fijar la barra de comentarios abajo"
+      "title": "Fijar la barra de comentarios abajo",
+      "small_screens": "Fijar también en pantallas pequeñas"
     },
     "running_agent_reply": {
       "title": "Al responder a un agente en ejecución",

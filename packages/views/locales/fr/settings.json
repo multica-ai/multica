@@ -161,7 +161,8 @@
       "empty": "Aucun fuseau horaire correspondant"
     },
     "sticky_comment_bar": {
-      "title": "Épingler la barre de commentaire en bas"
+      "title": "Épingler la barre de commentaire en bas",
+      "small_screens": "Épingler aussi sur les petits écrans"
     },
     "running_agent_reply": {
       "title": "En répondant à un agent en cours d'exécution",

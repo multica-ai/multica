@@ -3926,9 +3926,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
         {/* Gutters: 32px is a comfortable reading margin on a desktop column
             but eats 16% of a 393px phone, so below `md` they drop to 12px.
             `max-md:pb-chat-launcher` reserves the launcher's corner at the end
-            of the scroll: below `md` the composer is not pinned (see
-            `useStickyComposer`), so it lands here — right where the launcher
-            floats — once the reader scrolls to the bottom. */}
+            of the scroll: below `md` the composer is not pinned by default
+            (see `useStickyComposer`), so it lands here — right where the
+            launcher floats — once the reader scrolls to the bottom. */}
         <div
           className={cn(
             // The peek is already a narrow column, so it takes a tighter gutter
@@ -4607,8 +4607,13 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
                 "sticky bottom-0 z-10 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
-              // Mirrors the column's bottom padding; the composer is never sticky below `md`.
-              stickyComposer && (isPeek ? "-mb-5" : "-mb-[var(--space-xl,2rem)]"),
+              // Mirrors the column's bottom padding, which below `md` is the
+              // launcher clearance. There the pinned card also stops short of
+              // the launcher's corner, so the send button stays clear of it.
+              stickyComposer &&
+                (isPeek
+                  ? "-mb-5"
+                  : "-mb-[var(--space-xl,2rem)] max-md:-mb-[var(--chat-launcher-clearance)] max-md:pe-chat-launcher"),
             )}
           >
             {/* key={id}: web's /issues/[id] route doesn't remount on

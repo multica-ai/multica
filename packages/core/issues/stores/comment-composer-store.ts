@@ -21,16 +21,20 @@ export type CommentImageLayout = "thumbnails" | "full";
  * Personal preferences for the issue-detail comment composer and timeline.
  *
  * `sticky` pins the bottom comment bar to the scroll viewport so it stays
- * reachable while reading a long timeline. `runningAgentReply` picks the
+ * reachable while reading a long timeline. `stickyOnSmallScreens` extends
+ * that pin below the `md` breakpoint, where it is off unless opted into
+ * (see `useStickyComposer`). `runningAgentReply` picks the
  * default for a reply to a running agent. `imageLayout` picks how comment
  * images lay out. All are personal habits (like theme), so they persist
  * globally via `defaultStorage` rather than per-workspace storage.
  */
 interface CommentComposerStore {
   sticky: boolean;
+  stickyOnSmallScreens: boolean;
   runningAgentReply: RunningAgentReply;
   imageLayout: CommentImageLayout;
   toggleSticky: () => void;
+  setStickyOnSmallScreens: (value: boolean) => void;
   setRunningAgentReply: (value: RunningAgentReply) => void;
   setImageLayout: (value: CommentImageLayout) => void;
 }
@@ -39,9 +43,11 @@ export const useCommentComposerStore = create<CommentComposerStore>()(
   persist(
     (set) => ({
       sticky: true,
+      stickyOnSmallScreens: false,
       runningAgentReply: "steer",
       imageLayout: "thumbnails",
       toggleSticky: () => set((s) => ({ sticky: !s.sticky })),
+      setStickyOnSmallScreens: (stickyOnSmallScreens) => set({ stickyOnSmallScreens }),
       setRunningAgentReply: (runningAgentReply) => set({ runningAgentReply }),
       setImageLayout: (imageLayout) => set({ imageLayout }),
     }),

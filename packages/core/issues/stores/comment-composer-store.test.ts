@@ -23,7 +23,7 @@ beforeAll(() => {
 
 describe("comment composer store", () => {
   beforeEach(() => {
-    useCommentComposerStore.setState({ sticky: true, runningAgentReply: "steer", imageLayout: "thumbnails" });
+    useCommentComposerStore.setState({ sticky: true, stickyOnSmallScreens: false, runningAgentReply: "steer", imageLayout: "thumbnails" });
   });
 
   it("toggleSticky flips the preference", () => {
@@ -44,7 +44,14 @@ describe("comment composer store", () => {
   it("keeps steering as the default for preferences saved before the option existed", async () => {
     localStorage.setItem("multica_comment_composer", JSON.stringify({ state: { sticky: false }, version: 0 }));
     await useCommentComposerStore.persist.rehydrate();
-    expect(useCommentComposerStore.getState()).toMatchObject({ sticky: false, runningAgentReply: "steer", imageLayout: "thumbnails" });
+    expect(useCommentComposerStore.getState()).toMatchObject({ sticky: false, stickyOnSmallScreens: false, runningAgentReply: "steer", imageLayout: "thumbnails" });
+  });
+
+  it("leaves small screens unpinned by default and remembers opting in", () => {
+    expect(useCommentComposerStore.getState().stickyOnSmallScreens).toBe(false);
+    useCommentComposerStore.getState().setStickyOnSmallScreens(true);
+    expect(useCommentComposerStore.getState().stickyOnSmallScreens).toBe(true);
+    expect(JSON.parse(localStorage.getItem("multica_comment_composer")!).state.stickyOnSmallScreens).toBe(true);
   });
 
   it("shows comment images as thumbnails by default and remembers full size", () => {

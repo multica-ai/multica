@@ -160,7 +160,8 @@
       "empty": "沒有匹配的時區"
     },
     "sticky_comment_bar": {
-      "title": "固定底部評論欄"
+      "title": "固定底部評論欄",
+      "small_screens": "小螢幕上也固定"
     },
     "running_agent_reply": {
       "title": "回覆正在執行的 AI 代理時",
