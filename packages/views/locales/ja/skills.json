@@ -39,6 +39,7 @@
     "name": "名前",
     "created_by": "追加者",
     "used_by": "使用中",
+    "labels": "ラベル",
     "source": "ソース",
     "updated": "更新日",
     "created": "作成日",

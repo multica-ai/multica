@@ -55,6 +55,7 @@ export const EMPTY_SKILL_FILTERS: SkillListFilters = {
 // are always visible.
 export type SkillColumnKey =
   | "usedBy"
+  | "labels"
   | "source"
   | "creator"
   | "updated"

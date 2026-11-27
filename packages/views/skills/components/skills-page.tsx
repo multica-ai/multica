@@ -13,6 +13,7 @@ import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
   AgentRuntime,
+  Label,
   MemberWithUser,
   Skill,
   SkillSummary,
@@ -79,6 +80,7 @@ import {
   SkillRowActions,
   type SkillActionsContext,
 } from "./skill-list-actions";
+import { LabelChip } from "../../labels/label-chip";
 import { useT, useTimeAgo } from "../../i18n";
 
 // Sort/filter/column types and defaults live in the core view store
@@ -110,6 +112,25 @@ function NameCell({ row }: { row: SkillRow }) {
       }
       description={skill.description || undefined}
     />
+  );
+}
+
+// Matches the Issues table: two chips, then a count, so a row keeps its height.
+const MAX_VISIBLE_LABELS = 2;
+
+function LabelsCell({ labels }: { labels: Label[] }) {
+  if (labels.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex min-w-0 items-center gap-1 overflow-hidden">
+      {labels.slice(0, MAX_VISIBLE_LABELS).map((label) => (
+        <LabelChip key={label.id} label={label} />
+      ))}
+      {labels.length > MAX_VISIBLE_LABELS && (
+        <span className="shrink-0 text-caption text-muted-foreground">
+          +{labels.length - MAX_VISIBLE_LABELS}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -400,6 +421,13 @@ export default function SkillsPage() {
         core: true,
         hideable: true,
         cell: (row) => <UsedByCell agents={row.agents} />,
+      },
+      {
+        key: "labels",
+        header: t(($) => $.table.labels),
+        width: 240,
+        hideable: true,
+        cell: (row) => <LabelsCell labels={row.skill.labels ?? []} />,
       },
       {
         key: "source",

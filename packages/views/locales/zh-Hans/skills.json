@@ -39,6 +39,7 @@
     "name": "名称",
     "created_by": "添加者",
     "used_by": "被谁使用",
+    "labels": "标签",
     "source": "来源",
     "updated": "更新时间",
     "created": "创建时间",

@@ -39,6 +39,7 @@
     "name": "Name",
     "created_by": "Added by",
     "used_by": "Used by",
+    "labels": "Labels",
     "source": "Source",
     "updated": "Updated",
     "created": "Created",

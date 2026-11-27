@@ -39,6 +39,7 @@
     "name": "Nombre",
     "created_by": "Añadida por",
     "used_by": "Usada por",
+    "labels": "Etiquetas",
     "source": "Origen",
     "updated": "Actualizada",
     "created": "Creada",
