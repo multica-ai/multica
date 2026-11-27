@@ -6,7 +6,7 @@ package execenv
 // flag that once gated it against a legacy verbose brief was retired in
 // MUL-4297, so this is now the only brief).
 //
-// Five kinds, mutually exclusive in practice. classifyTask documents the
+// Task kinds are mutually exclusive in practice. classifyTask documents the
 // tiebreak rule that applies if a future caller accidentally violates the
 // mutex.
 type taskKind int
@@ -73,7 +73,7 @@ func classifyTask(ctx TaskContextForEnv) taskKind {
 // agent into a guaranteed-failed CLI call. Note this is a kind-based
 // predicate, not a check on ctx.IssueID — kindIssue always carries an issue
 // id by construction (the daemon refuses to dispatch it otherwise), and the
-// other three kinds never do.
+// other kinds never do.
 func (k taskKind) hasIssueContext() bool {
 	return k == kindIssue
 }
