@@ -15,6 +15,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// InboxItemResponse.Title is a snapshot written when the notification was
+// raised. For issue-backed rows, IssueTitle carries the issue's CURRENT title
+// so a rename shows up without waiting for the next notification; clients
+// prefer it when present.
 type InboxItemResponse struct {
 	ID            string  `json:"id"`
 	WorkspaceID   string  `json:"workspace_id"`
@@ -35,6 +39,7 @@ type InboxItemResponse struct {
 	CreatedAt       string  `json:"created_at"`
 	IssueStatus     *string `json:"issue_status"`
 	IssuePriority   *string `json:"issue_priority"`
+	IssueTitle      *string `json:"issue_title"`
 	// Issue fields the inbox filters match on. List rows always carry them
 	// (an empty label list included), which is how a client tells a server
 	// that supports those filters from an older one.
@@ -160,6 +165,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow, issuePrefix string) InboxItemRes
 		CreatedAt:         timestampToString(r.CreatedAt),
 		IssueStatus:       textToPtr(r.IssueStatus),
 		IssuePriority:     textToPtr(r.IssuePriority),
+		IssueTitle:        textToPtr(r.IssueTitle),
 		IssueProjectID:    uuidToPtr(r.IssueProjectID),
 		IssueAssigneeType: textToPtr(r.IssueAssigneeType),
 		IssueAssigneeID:   uuidToPtr(r.IssueAssigneeID),
@@ -199,6 +205,8 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 		resp.IssueStatus = &s
 		p := issue.Priority
 		resp.IssuePriority = &p
+		title := issue.Title
+		resp.IssueTitle = &title
 		resp.IssueProjectID = uuidToPtr(issue.ProjectID)
 		resp.IssueAssigneeType = textToPtr(issue.AssigneeType)
 		resp.IssueAssigneeID = uuidToPtr(issue.AssigneeID)

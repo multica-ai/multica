@@ -775,7 +775,8 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
        iss.due_date AS issue_due_date,
        ARRAY(SELECT il.label_id::text FROM issue_to_label il
              WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
-             ORDER BY il.label_id)::text[] AS issue_label_ids
+             ORDER BY il.label_id)::text[] AS issue_label_ids,
+       iss.title AS issue_title
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -817,6 +818,7 @@ type ListArchivedInboxItemsRow struct {
 	IssueAssigneeID   pgtype.UUID        `json:"issue_assignee_id"`
 	IssueDueDate      pgtype.Date        `json:"issue_due_date"`
 	IssueLabelIds     []string           `json:"issue_label_ids"`
+	IssueTitle        pgtype.Text        `json:"issue_title"`
 }
 
 // Archived counterpart of ListInboxItems, backing the inbox's "Archived"
@@ -882,6 +884,7 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 			&i.IssueAssigneeID,
 			&i.IssueDueDate,
 			&i.IssueLabelIds,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -904,7 +907,8 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
        iss.due_date AS issue_due_date,
        ARRAY(SELECT il.label_id::text FROM issue_to_label il
              WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
-             ORDER BY il.label_id)::text[] AS issue_label_ids
+             ORDER BY il.label_id)::text[] AS issue_label_ids,
+       iss.title AS issue_title
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -953,6 +957,7 @@ type ListInboxItemsRow struct {
 	IssueAssigneeID   pgtype.UUID        `json:"issue_assignee_id"`
 	IssueDueDate      pgtype.Date        `json:"issue_due_date"`
 	IssueLabelIds     []string           `json:"issue_label_ids"`
+	IssueTitle        pgtype.Text        `json:"issue_title"`
 }
 
 // The issue projections feed the inbox filters. Keep this column list
@@ -1005,6 +1010,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.IssueAssigneeID,
 			&i.IssueDueDate,
 			&i.IssueLabelIds,
+			&i.IssueTitle,
 		); err != nil {
 			return nil, err
 		}

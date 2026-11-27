@@ -93,6 +93,10 @@ export function getInboxDisplayTitle(item: InboxItem): string {
       return i18n.t("inbox:type.app_tool_calls_quota_exceeded");
   }
   if (item.type === "quick_create_done") {
+    // The live issue title never carries the "Created MUL-1:" wrapper; only
+    // the notification snapshot does, so clean just the fallback.
+    const issueTitle = singleLine(item.issue_title);
+    if (issueTitle) return issueTitle;
     const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
     if (cleanedTitle) return cleanedTitle;
     const prompt = singleLine(details.original_prompt);
@@ -105,7 +109,9 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
   }
-  return item.title;
+  // Prefer the issue's current title: `title` is the snapshot written with the
+  // notification and goes stale on rename. Mirrors packages/views inbox-display.
+  return item.issue_title || item.title;
 }
 
 /** Issue-less notices that open in the inbox's own detail sheet. */

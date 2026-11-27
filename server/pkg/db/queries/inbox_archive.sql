@@ -95,6 +95,7 @@ WITH base AS MATERIALIZED (
     LIMIT sqlc.arg(page_limit)::int
 )
 SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority,
+       iss.title AS issue_title,
        iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,

@@ -3468,6 +3468,7 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
+      issue_title: z.string().nullish(),
       issue_project_id: z.string().nullish(),
       issue_assignee_type: z.string().nullish(),
       issue_assignee_id: z.string().nullish(),

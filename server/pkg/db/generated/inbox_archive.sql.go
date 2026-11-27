@@ -292,6 +292,7 @@ WITH base AS MATERIALIZED (
     LIMIT $20::int
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, i.returned_at, selected.issue_status, selected.issue_priority,
+       iss.title AS issue_title,
        iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
@@ -346,6 +347,7 @@ type ListArchivedInboxPageRow struct {
 	InboxItem         InboxItem   `json:"inbox_item"`
 	IssueStatus       pgtype.Text `json:"issue_status"`
 	IssuePriority     pgtype.Text `json:"issue_priority"`
+	IssueTitle        pgtype.Text `json:"issue_title"`
 	IssueNumber       pgtype.Int4 `json:"issue_number"`
 	IssueProjectID    pgtype.UUID `json:"issue_project_id"`
 	IssueAssigneeType pgtype.Text `json:"issue_assignee_type"`
@@ -417,6 +419,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.ReturnedAt,
 			&i.IssueStatus,
 			&i.IssuePriority,
+			&i.IssueTitle,
 			&i.IssueNumber,
 			&i.IssueProjectID,
 			&i.IssueAssigneeType,

@@ -539,7 +539,7 @@ export function applyIssueChange(
   let prevInboxList: InboxItem[] | undefined;
   let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
   const inboxFields = ["project_id", "assignee_type", "assignee_id", "due_date"] as const;
-  if (patch.status !== undefined || patch.priority !== undefined || inboxFields.some((field) => patch[field] !== undefined)) {
+  if (patch.status !== undefined || patch.priority !== undefined || patch.title !== undefined || inboxFields.some((field) => patch[field] !== undefined)) {
     prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
     prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
     // Membership and facets are server-owned; callers refresh after commit.
@@ -557,6 +557,7 @@ export function applyIssueChange(
     patchInboxIssueProjection(qc, wsId, id, {
       status: patch.status,
       priority: patch.priority,
+      title: patch.title,
       project_id: patch.project_id,
       assignee_type: patch.assignee_type,
       assignee_id: patch.assignee_id,

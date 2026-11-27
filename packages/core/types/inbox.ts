@@ -100,6 +100,12 @@ export interface InboxItem {
   issue_assignee_id?: string | null;
   issue_due_date?: string | null;
   issue_label_ids?: string[] | null;
+  /**
+   * Current title of the linked issue. `title` is a snapshot taken when the
+   * notification was written and goes stale once the issue is renamed.
+   * Optional for the same older-backend reason as `issue_priority`.
+   */
+  issue_title?: string | null;
   read: boolean;
   archived: boolean;
   created_at: string;
