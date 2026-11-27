@@ -11031,8 +11031,11 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend.
 //
-// Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
-// somewhere between its budget and budget + tick, never earlier.
+// Periodic polling uses idleWatchdogTickInterval so long windows stay bounded
+// and native tool activity is refreshed. Once the remaining silence is less
+// than one tick, the next wake is scheduled for that remainder, so a run is
+// force-stopped at the budget rather than waiting out another full tick
+// (GitHub #11613).
 //
 // Budgets are measured on awakeclock, so they count only time the host was
 // awake. lastActivityAt and every native tool timestamp are awakeclock
@@ -11050,13 +11053,22 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 	if toolWindow > 0 && toolWindow < tickWindow {
 		tickWindow = toolWindow
 	}
-	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
-	defer ticker.Stop()
+	interval := idleWatchdogTickInterval(tickWindow)
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	// reschedule arms the next wake. After receiving from timer.C the
+	// timer is already drained, so Reset is safe without Stop.
+	reschedule := func(delay time.Duration) {
+		if delay <= 0 {
+			delay = time.Nanosecond
+		}
+		timer.Reset(delay)
+	}
 	for {
 		select {
 		case <-agentCtx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			// Pick the silence budget. A tool in flight is expected to be
 			// silent (a long build/install/test emits nothing between
 			// tool_use and tool_result), so it gets the larger toolWindow;
@@ -11065,6 +11077,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			toolInFlight := inFlightTools() > 0
 			if toolInFlight {
 				if toolWindow <= 0 {
+					reschedule(interval)
 					continue
 				}
 				threshold = toolWindow
@@ -11072,12 +11085,14 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			last := lastActivityAt.Load()
 			idleFor := awakeNow() - time.Duration(last)
 			if idleFor < threshold {
+				reschedule(idleWatchdogRemainingDelay(threshold-idleFor, interval))
 				continue
 			}
 			// A buffered-but-undrained message means the drain loop is
 			// behind, not the backend. Wait one more tick rather than
 			// killing a backend that is still producing output.
 			if len(messages) > 0 {
+				reschedule(interval)
 				continue
 			}
 			// Cursor can stop its owned background tools without aborting the
@@ -11092,6 +11107,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			if toolInFlight && interruptBackground != nil && interruptBackground() {
 				lastActivityAt.Store(int64(awakeNow()))
 				taskLog.Info("tool watchdog stopped background tools; waiting for agent result")
+				reschedule(interval)
 				continue
 			}
 			// A natural tool completion may race the callback or the tick.
@@ -11104,6 +11120,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			currentActivity := lastActivityAt.Load()
 			if currentActivity != last ||
 				currentToolInFlight != toolInFlight || len(messages) > 0 {
+				reschedule(interval)
 				continue
 			}
 			if agentCtx.Err() != nil {
@@ -11127,6 +11144,20 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			return
 		}
 	}
+}
+
+// idleWatchdogRemainingDelay is the wait until the next re-check when the
+// silence budget has not yet elapsed. Periodic ticks stay at interval so
+// native tool activity is still refreshed; the final wait shrinks to the
+// remainder so early activity cannot push the firing past a full extra tick.
+func idleWatchdogRemainingDelay(remaining, interval time.Duration) time.Duration {
+	if remaining <= 0 {
+		return time.Nanosecond
+	}
+	if remaining < interval {
+		return remaining
+	}
+	return interval
 }
 
 func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {

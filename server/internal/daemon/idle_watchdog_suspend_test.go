@@ -176,3 +176,63 @@ func runSuspendScenario(t *testing.T, sc suspendScenario, c *hostClock, now func
 	synctest.Wait()
 	return probe, &threshold
 }
+
+func TestIdleWatchdogRemainingDelay(t *testing.T) {
+	interval := idleWatchdogMaxTick
+	tests := []struct {
+		name      string
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{name: "long remainder keeps the regular tick", remaining: 30 * time.Minute, want: interval},
+		{name: "exact tick stays on the regular interval", remaining: interval, want: interval},
+		{name: "short remainder wakes at the budget", remaining: 3 * time.Second, want: 3 * time.Second},
+		{name: "already due wakes immediately", remaining: 0, want: time.Nanosecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := idleWatchdogRemainingDelay(tt.remaining, interval); got != tt.want {
+				t.Fatalf("idleWatchdogRemainingDelay(%s, %s) = %s, want %s", tt.remaining, interval, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIdleWatchdogFiresAtBudgetAfterEarlyActivity covers GitHub #11613: a
+// session-ready message a few seconds after start used to make the OpenCode
+// 10-minute window miss the tick at T+10m (idleFor was just under budget) and
+// wait until T+15m. The hung backend often exited in between, so the
+// watchdog appeared never to fire. After early activity the watchdog must
+// still fire at the silence budget, not budget plus a full max tick.
+func TestIdleWatchdogFiresAtBudgetAfterEarlyActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		window := 10 * time.Minute
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		var last, threshold atomic.Int64
+		var fired atomic.Bool
+		last.Store(int64(awakeclock.Now()))
+		go new(Daemon).runIdleWatchdogWithClock(ctx, window, window, &last, func() int32 { return 0 }, &fired, &threshold,
+			cancel, make(chan agent.Message), nil, nil, slog.Default(), awakeclock.Now)
+		synctest.Wait()
+
+		time.Sleep(3 * time.Second)
+		last.Store(int64(awakeclock.Now()))
+		synctest.Wait()
+
+		time.Sleep(window - time.Second)
+		synctest.Wait()
+		if fired.Load() {
+			t.Fatal("watchdog fired before the silence budget elapsed")
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if !fired.Load() {
+			t.Fatal("watchdog did not fire at the silence budget after early activity")
+		}
+		if got := time.Duration(threshold.Load()); got != window {
+			t.Fatalf("threshold = %s, want %s", got, window)
+		}
+	})
+}
