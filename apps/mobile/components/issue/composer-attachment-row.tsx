@@ -79,6 +79,7 @@ export interface ComposerAttachmentItem {
 }
 
 interface Props {
+  disabled?: boolean;
   mentions: MentionChip[];
   attachments: ComposerAttachmentItem[];
   onRemoveMention: (type: MentionChipType, id: string) => void;
@@ -87,6 +88,7 @@ interface Props {
 }
 
 export function ComposerAttachmentRow({
+  disabled = false,
   mentions,
   attachments,
   onRemoveMention,
@@ -107,6 +109,7 @@ export function ComposerAttachmentRow({
           key={`m:${m.type}:${m.id}`}
           mention={m}
           onRemove={onRemoveMention}
+          disabled={disabled}
         />
       ))}
       {attachments.map((a) => (
@@ -114,6 +117,7 @@ export function ComposerAttachmentRow({
           key={a.localId}
           item={a}
           onRemove={onRemoveAttachment}
+          disabled={disabled}
           onRetry={onRetryAttachment}
         />
       ))}
@@ -126,7 +130,9 @@ export function ComposerAttachmentRow({
 function MentionChipView({
   mention,
   onRemove,
+  disabled,
 }: {
+  disabled: boolean;
   mention: MentionChip;
   onRemove: (type: MentionChipType, id: string) => void;
 }) {
@@ -153,6 +159,7 @@ function MentionChipView({
       <Text className="text-xs font-medium text-foreground">{label}</Text>
       <Pressable
         onPress={() => onRemove(mention.type, mention.id)}
+        disabled={disabled}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={t("a11y.remove_mention", { name: mention.name })}
@@ -167,12 +174,13 @@ function MentionChipView({
 // Attachment chip — image / file capsule with status overlay.
 
 interface AttachmentChipProps {
+  disabled: boolean;
   item: ComposerAttachmentItem;
   onRemove: (localId: string) => void;
   onRetry?: (localId: string) => void;
 }
 
-function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
+function AttachmentChipView({ item, onRemove, onRetry, disabled }: AttachmentChipProps) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
   const { open } = useLightbox();
@@ -216,6 +224,7 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled && item.status === "failed"}
       accessibilityRole={item.status === "failed" ? "button" : "image"}
       accessibilityLabel={
         item.status === "failed"
@@ -245,6 +254,7 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
       </Text>
       <Pressable
         onPress={() => onRemove(item.localId)}
+        disabled={disabled}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={t("a11y.remove_file", { name: item.filename })}

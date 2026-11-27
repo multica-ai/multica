@@ -23,8 +23,8 @@ export interface ComposerActions {
  * Which trailing actions the composer offers. One slot holds Send or Stop:
  * during a run that accepts sends, content claims the slot for Send and an
  * empty composer (or an upload) keeps Stop reachable, matching web chat.
- * While a send is in flight the slot stays on a disabled Send: the composer
- * clears optimistically, and swapping straight to Stop would put a
+ * While a send is in flight the slot stays on a disabled Send while the
+ * draft awaits acceptance. Swapping straight to Stop would put a
  * run-ending button under the finger that just tapped Send.
  */
 export function composerActions(input: ComposerActionInput): ComposerActions {
