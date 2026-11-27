@@ -10,6 +10,8 @@ import type {
 } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  COMMAND_PROVIDER,
+  commandExecutable,
   effectiveAccessScope,
   qoderAgentId,
   summarizeActivityWindow,
@@ -85,7 +87,11 @@ export function AgentPropertiesPanel({
     changeRuntime,
   } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
 
-  const appsEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false) && !qoderRuntime;
+  const commandRuntime = runtime?.provider === COMMAND_PROVIDER;
+  const appsEnabled =
+    useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false) &&
+    !qoderRuntime &&
+    !commandRuntime;
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const week = summarizeActivityWindow(activityMap.get(agent.id), 7);
 
@@ -155,6 +161,14 @@ export function AgentPropertiesPanel({
             <Value>
               <span className="truncate font-mono">
                 {qoderAgentId(agent.runtime_config) || "—"}
+              </span>
+            </Value>
+          </ObjectProperty>
+        ) : runtime?.provider === COMMAND_PROVIDER ? (
+          <ObjectProperty label={t(($) => $.tab_body.mcp_config.dialog_command_label)}>
+            <Value>
+              <span className="truncate font-mono">
+                {commandExecutable(agent.runtime_config) || "—"}
               </span>
             </Value>
           </ObjectProperty>

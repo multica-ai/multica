@@ -170,7 +170,9 @@
     "copy_link": "Copiar enlace",
     "copy_id": "Copiar ID del agente",
     "link_copied_toast": "Enlace copiado",
-    "id_copied_toast": "ID del agente copiado"
+    "id_copied_toast": "ID del agente copiado",
+    "command_cwd": "Directorio de trabajo: {{dir}}",
+    "command_timeout": "Tiempo de espera: {{seconds}} s"
   },
   "inspector": {
     "section_profile": "Perfil",
@@ -201,7 +203,9 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "command_working_dir": "Directorio de trabajo",
+    "command_variables_hint": "Variables: {{vars}}"
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",
@@ -1052,6 +1056,8 @@
       "agent_error_runtime_version_unsupported": "Versión de la CLI del agente no compatible",
       "agent_error_runtime_missing_executable": "CLI del agente no instalada",
       "agent_error_unknown": "Error de ejecución del agente",
+      "command_check_failed": "Verificación fallida",
+      "command_tool_error": "Error de ejecución del comando",
       "agent_fallback_message": "El agente no pudo generar una respuesta válida",
       "codex_resume_oversized": "Sesión demasiado grande para reanudar",
       "idle_watchdog": "El agente se detuvo por inactividad",

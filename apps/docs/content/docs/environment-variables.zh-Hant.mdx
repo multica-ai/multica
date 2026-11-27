@@ -47,6 +47,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 應用預設 | 日誌級別 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到終止訊號後，開始優雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 執行時離線後可重新連線且不終止在途執行的寬限時間；低於 `150s` 時按 `150s` 處理 |
+| `MULTICA_COMMAND_DISABLED` | `false` | 在 API 服務端設為 `true`（或 `1`）以在整套部署中停用非 LLM 的 Command 代理：拒絕註冊 `command` 執行時、建立或繫結 Command 代理以及入隊或認領其執行 |
 | `FF_LOCAL_SEARCH_INDEX` | `on` | Web 和 Desktop 為每個工作區維護本地搜尋索引；設為 `off` 可切回由服務端搜尋 |
 | `FF_DASHBOARD_HISTORY_365D` | `on` | 在資料統計頁開啟 365 天時間範圍；如果整年統計查詢對資料庫壓力過大可設為 `off` |
 
@@ -253,6 +254,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自託管 `false` | 是否自動檢查並更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 檢查更新的間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二進位制被帶外替換（`brew upgrade`、重新下載、本地構建）後重啟到新二進位制。與 `MULTICA_DAEMON_AUTO_UPDATE` 相互獨立 |
+| `MULTICA_COMMAND_DISABLED` | `false` | 設為 `true`（或 `1`）以在本機停用內建的非 LLM `command` 執行時，不再註冊也不執行 Command 代理任務。也可透過 `multica config set disable_command true` 或 `--no-command` 配置 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 執行工作目錄的根目錄 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 僅適用於 Linux/macOS。每次執行的私有臨時目錄的父目錄；必須是現有、可寫的絕對路徑，無效值會使執行啟動失敗，不會回退到 `/tmp`。請選擇較短的路徑——子工具可能會在其中繫結 AF_UNIX socket；Linux 的 `sun_path` 上限為 108 位元組，macOS 為 104 位元組 |
 
@@ -395,6 +397,7 @@ multica config show
 | `disable_auto_update` | 跟隨環境 | `true` 關閉自動更新；`false` 清除本地覆蓋，回到環境變數或預設 |
 | `auto_update_check_interval` | `6h` | 檢查更新的間隔 |
 | `disable_auto_reload` | 跟隨環境 | `true` 讓守護程序不再跟隨磁碟上被替換的二進位制；`false` 清除本地覆蓋。與 `disable_auto_update` 分開解析 |
+| `disable_command` | 跟隨環境 | `true` 在本機停用內建的非 LLM `command` 執行時；`false` 清除本地覆蓋並回退到 `MULTICA_COMMAND_DISABLED` 或預設值（`false`） |
 | `daemon_log_max_size_mb` | `20` | `daemon.log` 達到多少 MB 時輪轉，見[守護程序日誌](#daemon-logs) |
 | `daemon_log_max_backups` | `5` | 最多保留幾個輪轉檔案 |
 | `daemon_log_max_age_days` | `30` | 輪轉檔案保留的天數 |

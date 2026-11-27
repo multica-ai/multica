@@ -47,6 +47,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 실행을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `MULTICA_COMMAND_DISABLED` | `false` | API 서버에서 `true`(또는 `1`)로 설정하면 배포 전체에서 비-LLM Command 에이전트를 비활성화합니다. `command` 런타임 등록, Command 에이전트 생성·재연결, 실행 큐 등록 및 수락을 차단합니다 |
 | `FF_LOCAL_SEARCH_INDEX` | `on` | Web과 Desktop이 워크스페이스별 로컬 검색 인덱스를 유지합니다. `off`로 설정하면 클라이언트가 다시 서버를 통해 검색합니다 |
 | `FF_DASHBOARD_HISTORY_365D` | `on` | 분석 페이지에서 365일 범위를 활성화합니다. 1년 단위 대시보드 쿼리가 데이터베이스에 너무 느리면 `off`로 설정하세요 |
 
@@ -257,6 +258,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
+| `MULTICA_COMMAND_DISABLED` | `false` | `true`(또는 `1`)로 설정하면 이 호스트에서 내장 비-LLM `command` 런타임을 비활성화하여 등록하거나 Command 에이전트를 실행하지 않습니다. `multica config set disable_command true` 또는 `--no-command`로도 설정할 수 있습니다 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행용 작업 디렉터리의 루트 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 실행별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 실행 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
 
@@ -399,6 +401,7 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `disable_command` | 환경을 따름 | `true`는 이 호스트에서 내장 비-LLM `command` 런타임을 비활성화함. `false`는 로컬 덮어쓰기를 지우고 `MULTICA_COMMAND_DISABLED` 또는 기본값(`false`)으로 되돌림 |
 | `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB). [데몬 로그](#daemon-logs) 참고 |
 | `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
 | `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |

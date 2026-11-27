@@ -124,6 +124,7 @@ export function AgentAdvancedSettings({
   );
 
   const qoderRuntime = runtime?.provider === "qoder_cloud";
+  const commandRuntime = runtime?.provider === "command";
 
   const settingsSections = useMemo(
     () =>
@@ -146,7 +147,7 @@ export function AgentAdvancedSettings({
   );
 
   const capabilitySections = useMemo(() => {
-    if (qoderRuntime) return [];
+    if (qoderRuntime || commandRuntime) return [];
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
@@ -156,6 +157,7 @@ export function AgentAdvancedSettings({
     });
   }, [
     canEdit,
+    commandRuntime,
     composioMCPAppsEnabled,
     qoderRuntime,
     runtime,

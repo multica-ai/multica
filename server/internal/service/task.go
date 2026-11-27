@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -165,7 +166,24 @@ func truncateForSummary(s string, maxRunes int) string {
 // posted, even partially, to the issue thread (GH #5455).
 const maxSynthesizedFallbackCommentRunes = 8000
 
+// maxCommandFallbackCommentRunes bounds the comment synthesized from a
+// non-LLM Command Agent's stdout report. Unlike LLM agents (which post their
+// own comments during the run and only use CompleteTask's Output as a
+// fallback), a Command Agent's stdout report is its primary deliverable (e.g.
+// a full code review or test suite report).
+const maxCommandFallbackCommentRunes = 128000
+
 const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
+
+// truncateCommandCommentBody bounds a Command Agent's stdout comment at
+// maxRunes, clipping with an ellipsis rather than discarding the report.
+func truncateCommandCommentBody(body string, maxRunes int) string {
+	if utf8.RuneCountInString(body) <= maxRunes {
+		return body
+	}
+	runes := []rune(body)
+	return string(runes[:maxRunes]) + "\n\n… *(output truncated)*"
+}
 
 // truncateFallbackCommentBody bounds a synthesized completion-fallback comment
 // body. Unlike truncateForSummary (which flattens newlines for a one-line row
@@ -198,6 +216,25 @@ const (
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
 )
+
+func (s *TaskService) isCommandRuntimeTask(ctx context.Context, task db.AgentTaskQueue) bool {
+	if !task.RuntimeID.Valid {
+		return false
+	}
+	rt, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID)
+	return err == nil && rt.Provider == "command"
+}
+
+func (s *TaskService) guardCommandRuntimeEnabled(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
+	if !agentpkg.CommandAgentsDisabled() || !runtimeID.Valid {
+		return nil
+	}
+	rt, err := q.GetAgentRuntime(ctx, runtimeID)
+	if err == nil && rt.Provider == "command" {
+		return agentpkg.ErrCommandAgentsDisabled
+	}
+	return nil
+}
 
 func (s *TaskService) trackTaskForReclaim(task db.AgentTaskQueue, checkAfter time.Time) {
 	if !task.RuntimeID.Valid || !task.ID.Valid || task.Status != "dispatched" {
@@ -1365,6 +1402,10 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if err := s.guardCommandRuntimeEnabled(ctx, s.Queries, agent.RuntimeID); err != nil {
+		slog.Info("task enqueue refused: command agents disabled", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1543,6 +1584,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if err := s.guardCommandRuntimeEnabled(ctx, s.Queries, agent.RuntimeID); err != nil {
+		slog.Info("mention task enqueue refused: command agents disabled", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, err
 	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
@@ -2158,6 +2203,9 @@ func (s *TaskService) enqueueChatTaskTx(
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
+	if err := s.guardCommandRuntimeEnabled(ctx, qtx, agent.RuntimeID); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	binding, bindingErr := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
@@ -2546,6 +2594,9 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		if !carrier.RuntimeID.Valid {
 			return ErrChatTaskAgentNoRuntime
+		}
+		if err := s.guardCommandRuntimeEnabled(ctx, qtx, carrier.RuntimeID); err != nil {
+			return err
 		}
 
 		// The database status of every newly-created task is "queued" until a
@@ -3848,6 +3899,10 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "runtime_mismatch"
 			return nil
 		}
+		if err := s.guardCommandRuntimeEnabled(ctx, qtx, claimRuntimeID); err != nil {
+			outcome = "command_disabled"
+			return nil
+		}
 
 		t0 = time.Now()
 		running, err := qtx.CountRunningTasks(ctx, agentID)
@@ -5076,7 +5131,15 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 					} else {
 						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
 						// must never reach the issue thread, even as a clipped excerpt.
-						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+						// Non-LLM Command Agents emit their primary report on stdout and
+						// use the dedicated command rune cap instead.
+						redactedBody := redact.Text(body)
+						var content string
+						if s.isCommandRuntimeTask(ctx, task) {
+							content = truncateCommandCommentBody(redactedBody, maxCommandFallbackCommentRunes)
+						} else {
+							content = truncateFallbackCommentBody(redactedBody, maxSynthesizedFallbackCommentRunes)
+						}
 						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
 					}
 				}
@@ -5749,7 +5812,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		commentType := "system"
+		body := redact.Text(errMsg)
+		if failureReason == "command_check_failed" {
+			// A Command Agent check failure (e.g. a code review or test runner
+			// exiting non-zero with findings on stdout) posts its report as a
+			// formatted Markdown agent comment rather than a system crash notice.
+			commentType = "comment"
+			body = truncateCommandCommentBody(body, maxCommandFallbackCommentRunes)
+		}
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, body, commentType, task.TriggerCommentID, task.ID)
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the

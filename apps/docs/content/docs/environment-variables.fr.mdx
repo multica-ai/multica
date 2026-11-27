@@ -47,6 +47,7 @@ Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification
 | `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+| `MULTICA_COMMAND_DISABLED` | `false` | Définissez `true` (ou `1`) sur le serveur API pour désactiver les agents Command sans LLM sur tout le déploiement : empêche l'enregistrement du runtime `command`, la création ou réassociation d'agents Command, ainsi que la mise en file ou la prise en charge de leurs exécutions |
 | `FF_LOCAL_SEARCH_INDEX` | `on` | Le Web et le Desktop maintiennent un index de recherche local par espace de travail ; définissez `off` pour renvoyer les recherches vers le serveur |
 | `FF_DASHBOARD_HISTORY_365D` | `on` | Active la plage de 365 jours sur la page Statistiques ; définissez `off` si les requêtes annuelles sont trop lentes pour votre base de données |
 
@@ -254,6 +255,7 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true` ; auto-hébergé `false` | Vérifier et appliquer automatiquement ou non les mises à jour du CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Intervalle de vérification des mises à jour |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Redémarrer ou non sur un binaire `multica` remplacé sur disque par un moyen externe (`brew upgrade`, un nouveau téléchargement, une compilation locale). Indépendant de `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_COMMAND_DISABLED` | `false` | Définissez `true` (ou `1`) pour désactiver le runtime intégré `command` sans LLM sur cet hôte afin qu'il n'enregistre ni n'exécute d'agents Command. Configurable également via `multica config set disable_command true` ou `--no-command` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Répertoire racine des répertoires de travail des exécutions |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS uniquement. Répertoire parent des répertoires temporaires privés de chaque exécution ; doit être un répertoire absolu existant et accessible en écriture, et une valeur invalide fait échouer le démarrage de l'exécution au lieu de se rabattre sur `/tmp`. Choisissez un chemin court — les outils enfants peuvent y lier des sockets AF_UNIX, et `sun_path` est limité à 108 octets sous Linux et à 104 sous macOS |
 
@@ -396,6 +398,7 @@ Clés prises en charge :
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
 | `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
 | `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+| `disable_command` | suit l'environnement | `true` désactive le runtime intégré `command` sans LLM sur cet hôte ; `false` efface la surcharge locale et revient à `MULTICA_COMMAND_DISABLED` ou à la valeur par défaut (`false`) |
 | `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne ; voir [Journaux du daemon](#daemon-logs) |
 | `daemon_log_max_backups` | `5` | Nombre maximal de fichiers de journaux tournés conservés |
 | `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |

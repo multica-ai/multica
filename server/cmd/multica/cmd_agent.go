@@ -164,6 +164,7 @@ func init() {
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
+	agentCreateCmd.Flags().String("command", "", "Executable or script path for a Command Agent (sets runtime_config.command)")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
 	agentCreateCmd.Flags().String("service-tier", "", "Codex execution speed: empty = inherit local Codex configuration; default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast.")
@@ -188,6 +189,7 @@ func init() {
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
+	agentUpdateCmd.Flags().String("command", "", "New executable or script path for a Command Agent (sets runtime_config.command)")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution speed: default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast. Pass an empty string to clear and inherit local Codex configuration.")
@@ -689,6 +691,15 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["runtime_config"] = rc
 	}
+	if cmd.Flags().Changed("command") {
+		v, _ := cmd.Flags().GetString("command")
+		rcMap, ok := body["runtime_config"].(map[string]any)
+		if !ok {
+			rcMap = map[string]any{}
+		}
+		rcMap["command"] = strings.TrimSpace(v)
+		body["runtime_config"] = rcMap
+	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")
 		ca, err := parseCustomArgs(v)
@@ -786,6 +797,15 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--runtime-config must be valid JSON: %w", err)
 		}
 		body["runtime_config"] = rc
+	}
+	if cmd.Flags().Changed("command") {
+		v, _ := cmd.Flags().GetString("command")
+		rcMap, ok := body["runtime_config"].(map[string]any)
+		if !ok {
+			rcMap = map[string]any{}
+		}
+		rcMap["command"] = strings.TrimSpace(v)
+		body["runtime_config"] = rcMap
 	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")

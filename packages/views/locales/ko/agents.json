@@ -161,12 +161,16 @@
     "copy_link": "링크 복사",
     "copy_id": "에이전트 ID 복사",
     "link_copied_toast": "링크를 복사했습니다",
-    "id_copied_toast": "에이전트 ID를 복사했습니다"
+    "id_copied_toast": "에이전트 ID를 복사했습니다",
+    "command_cwd": "작업 디렉터리: {{dir}}",
+    "command_timeout": "제한 시간: {{seconds}}초"
   },
   "inspector": {
     "section_profile": "프로필",
     "section_execution": "실행 설정",
     "qoder_execution_note": "모델, 도구, 스킬은 Qoder Cloud Agents의 에이전트에서 설정합니다.",
+    "command_working_dir": "작업 디렉터리",
+    "command_variables_hint": "변수: {{vars}}",
     "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",
@@ -906,6 +910,8 @@
       "agent_error_runtime_version_unsupported": "지원되지 않는 에이전트 CLI 버전",
       "agent_error_runtime_missing_executable": "에이전트 CLI가 설치되지 않음",
       "agent_error_unknown": "에이전트 실행 오류",
+      "command_check_failed": "검사 실패",
+      "command_tool_error": "명령 실행 오류",
       "agent_fallback_message": "에이전트가 유효한 응답을 생성하지 못함",
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",

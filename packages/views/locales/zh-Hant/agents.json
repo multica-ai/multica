@@ -161,12 +161,16 @@
     "copy_link": "複製連結",
     "copy_id": "複製 AI 代理 ID",
     "link_copied_toast": "連結已複製",
-    "id_copied_toast": "AI 代理 ID 已複製"
+    "id_copied_toast": "AI 代理 ID 已複製",
+    "command_cwd": "工作目錄：{{dir}}",
+    "command_timeout": "逾時時間：{{seconds}} 秒"
   },
   "inspector": {
     "section_profile": "資料",
     "section_execution": "執行配置",
     "qoder_execution_note": "模型、工具和 skill 在 Qoder Cloud Agents 中的 AI 代理上設定。",
+    "command_working_dir": "工作目錄",
+    "command_variables_hint": "變數：{{vars}}",
     "section_access": "訪問權限",
     "section_properties": "屬性",
     "section_details": "詳情",
@@ -1047,6 +1051,8 @@
       "agent_error_runtime_version_unsupported": "AI 代理 CLI 版本不受支援",
       "agent_error_runtime_missing_executable": "未安裝 AI 代理 CLI",
       "agent_error_unknown": "AI 代理執行出錯",
+      "command_check_failed": "檢查未通過",
+      "command_tool_error": "命令執行出錯",
       "agent_fallback_message": "AI 代理未能產生有效回覆",
       "codex_resume_oversized": "會話過大，無法恢復",
       "idle_watchdog": "AI 代理長時間無活動，執行已停止",

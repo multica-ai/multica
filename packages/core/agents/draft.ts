@@ -1,3 +1,9 @@
+import {
+  COMMAND_PROVIDER,
+  commandExecutable,
+  parseCommandRuntimeConfig,
+  serializeCommandRuntimeConfig,
+} from "./command-runtime-config";
 import { qoderAgentId } from "./qoder-runtime-config";
 import { isRuntimeUsableForUser } from "../runtimes/access";
 import type {
@@ -33,6 +39,7 @@ export interface AgentDraft {
   avatarUrl: string | null;
   runtimeId: string;
   qoderAgentId: string;
+  command: string;
   model: string;
   /** Runtime-native reasoning/effort token, scoped to `model`. */
   thinkingLevel: string;
@@ -53,6 +60,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   avatarUrl: null,
   runtimeId: "",
   qoderAgentId: "",
+  command: "",
   model: "",
   thinkingLevel: "",
   serviceTier: "",
@@ -79,6 +87,7 @@ export function applyDraftRuntimeChange(
     ...draft,
     runtimeId,
     qoderAgentId: "",
+    command: "",
     model: "",
     thinkingLevel: "",
     serviceTier: "",
@@ -207,6 +216,7 @@ export function buildDuplicateDraft(
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
     qoderAgentId: keepsRuntime ? qoderAgentId(source.runtime_config) : "",
+    command: keepsRuntime ? commandExecutable(source.runtime_config) : "",
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
@@ -232,19 +242,39 @@ export function buildCreateAgentRequest(options: {
 }): CreateAgentRequest {
   const { runtimeId, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
+  const command = runtimeProvider === COMMAND_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
-  // hides them once Qoder is chosen.
+  // hides them once Qoder is chosen. Command agents similarly take a runner
+  // executable in runtime_config rather than an LLM model / thinking / speed.
   const draft: AgentDraft = qoder
     ? {
         ...options.draft,
+        command: "",
         model: "",
         thinkingLevel: "",
         serviceTier: "",
         skillIds: new Set(),
       }
-    : runtimeProvider
-      ? { ...options.draft, qoderAgentId: "" }
-      : options.draft;
+    : command
+      ? {
+          ...options.draft,
+          qoderAgentId: "",
+          model: "",
+          thinkingLevel: "",
+          serviceTier: "",
+        }
+      : runtimeProvider
+        ? { ...options.draft, qoderAgentId: "", command: "" }
+        : options.draft;
+  const trimmedCommand = (draft.command ?? "").trim();
+  const commandConfig = trimmedCommand
+    ? serializeCommandRuntimeConfig({
+        ...(duplicateSource && duplicateSource.runtime_id === runtimeId
+          ? parseCommandRuntimeConfig(duplicateSource.runtime_config)
+          : {}),
+        command: trimmedCommand,
+      })
+    : null;
   const request: CreateAgentRequest = {
     name: draft.name.trim(),
     description: draft.description.trim(),
@@ -259,7 +289,11 @@ export function buildCreateAgentRequest(options: {
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
-    ...(draft.qoderAgentId ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } } : {}),
+    ...(draft.qoderAgentId
+      ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } }
+      : commandConfig
+        ? { runtime_config: commandConfig }
+        : {}),
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
     service_tier: draft.serviceTier.trim() || undefined,

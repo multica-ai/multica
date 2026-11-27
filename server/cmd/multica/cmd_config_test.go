@@ -82,6 +82,7 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 		"disable_auto_update:",
 		"auto_update_check_interval:",
 		"disable_auto_reload:",
+		"disable_command:",
 	} {
 		if !strings.Contains(out, key) {
 			t.Fatalf("runConfigShow output missing %q:\n%s", key, out)
@@ -218,6 +219,7 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		{"disable_auto_update", "true"},
 		{"auto_update_check_interval", "12h"},
 		{"disable_auto_reload", "true"},
+		{"disable_command", "true"},
 	}
 	for _, p := range pairs {
 		if err := applyConfigSet(&cfg, p.key, p.val); err != nil {
@@ -235,7 +237,8 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		cfg.CodexHandshakeTimeout != "45s" ||
 		cfg.DisableAutoUpdate != true ||
 		cfg.AutoUpdateCheckInterval != "12h" ||
-		cfg.DisableAutoReload != true {
+		cfg.DisableAutoReload != true ||
+		cfg.DisableCommand != true {
 		t.Fatalf("cfg after set = %+v", cfg)
 	}
 }
@@ -388,6 +391,7 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 		{"disable_auto_update bad bool", "disable_auto_update", "maybe", "true"},
 		{"auto_update_check_interval zero", "auto_update_check_interval", "0s", "positive"},
 		{"disable_auto_reload bad bool", "disable_auto_reload", "maybe", "true"},
+		{"disable_command bad bool", "disable_command", "maybe", "true"},
 	}
 	for _, tc := range cases {
 		tc := tc

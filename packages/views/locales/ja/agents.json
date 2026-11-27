@@ -161,12 +161,16 @@
     "copy_link": "リンクをコピー",
     "copy_id": "エージェント ID をコピー",
     "link_copied_toast": "リンクをコピーしました",
-    "id_copied_toast": "エージェント ID をコピーしました"
+    "id_copied_toast": "エージェント ID をコピーしました",
+    "command_cwd": "作業ディレクトリ: {{dir}}",
+    "command_timeout": "タイムアウト: {{seconds}}秒"
   },
   "inspector": {
     "section_profile": "プロフィール",
     "section_execution": "実行設定",
     "qoder_execution_note": "モデル、ツール、スキルは Qoder Cloud Agents のエージェントで設定します。",
+    "command_working_dir": "作業ディレクトリ",
+    "command_variables_hint": "変数: {{vars}}",
     "section_access": "アクセス",
     "section_properties": "プロパティ",
     "section_details": "詳細",
@@ -906,6 +910,8 @@
       "agent_error_runtime_version_unsupported": "エージェント CLI のバージョンが非対応です",
       "agent_error_runtime_missing_executable": "エージェント CLI がインストールされていません",
       "agent_error_unknown": "エージェント実行エラー",
+      "command_check_failed": "チェックに失敗しました",
+      "command_tool_error": "コマンド実行エラー",
       "agent_fallback_message": "エージェントが有効な返信を生成できませんでした",
       "codex_resume_oversized": "セッションが大きすぎて再開できません",
       "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",

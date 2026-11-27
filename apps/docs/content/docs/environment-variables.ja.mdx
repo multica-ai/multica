@@ -47,6 +47,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
+| `MULTICA_COMMAND_DISABLED` | `false` | API サーバーで `true`（または `1`）に設定すると、デプロイ全体で非 LLM の Command エージェントを無効化します。`command` ランタイムの登録、Command エージェントの作成・再紐付け、実行のキュー投入および取得を拒否します |
 | `FF_LOCAL_SEARCH_INDEX` | `on` | Web と Desktop がワークスペースごとにローカル検索インデックスを保持します。`off` にするとクライアントはサーバー経由の検索に切り替わります |
 | `FF_DASHBOARD_HISTORY_365D` | `on` | 分析ページで 365 日の期間を有効にします。1 年分の集計クエリがデータベースに重い場合は `off` にしてください |
 
@@ -257,6 +258,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
+| `MULTICA_COMMAND_DISABLED` | `false` | `true`（または `1`）に設定すると、このホスト上で組み込みの非 LLM `command` ランタイムを無効化し、登録も実行も行いません。`multica config set disable_command true` や `--no-command` でも設定できます |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 実行用作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 
@@ -399,6 +401,7 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `disable_command` | 環境に従う | `true` でこのホストの組み込み非 LLM `command` ランタイムを無効化。`false` はローカルの上書きをクリアし、`MULTICA_COMMAND_DISABLED` またはデフォルト（`false`）に戻します |
 | `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB）。[デーモンのログ](#daemon-logs)を参照 |
 | `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
 | `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |

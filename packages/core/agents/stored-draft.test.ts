@@ -11,6 +11,7 @@ import {
 
 const draft = (): AgentDraft => ({
   qoderAgentId: "agent_qca",
+  command: "",
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",
@@ -77,6 +78,15 @@ describe("stored agent draft", () => {
       applied_message_id: "applied",
       dismissed_message_id: null,
     });
+    expect(StoredAgentDraftSchema.parse({ ...stored, command: 42 }).command).toBeUndefined();
+  });
+
+  it("round-trips the command field through StoredAgentDraftSchema", () => {
+    const original = { ...draft(), command: "python3" };
+    const stored = toStoredAgentDraft(original, "msg-1");
+    const parsed = StoredAgentDraftSchema.parse(stored);
+    expect(parsed.command).toBe("python3");
+    expect(fromStoredAgentDraft(parsed, original.runtimeId)).toEqual(original);
   });
 
   // Autosave compares on the stored form: a Set rebuilt with the same members

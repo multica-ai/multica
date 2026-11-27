@@ -170,12 +170,16 @@
     "copy_link": "Copier le lien",
     "copy_id": "Copier l'ID de l'agent",
     "link_copied_toast": "Lien copié",
-    "id_copied_toast": "ID de l'agent copié"
+    "id_copied_toast": "ID de l'agent copié",
+    "command_cwd": "Répertoire de travail : {{dir}}",
+    "command_timeout": "Délai d'expiration : {{seconds}} s"
   },
   "inspector": {
     "section_profile": "Profil",
     "section_execution": "Exécution",
     "qoder_execution_note": "Le modèle, les outils et les skills se configurent sur l’agent dans Qoder Cloud Agents.",
+    "command_working_dir": "Répertoire de travail",
+    "command_variables_hint": "Variables : {{vars}}",
     "section_access": "Accès",
     "section_properties": "Propriétés",
     "section_details": "Détails",
@@ -1077,6 +1081,8 @@
       "agent_error_runtime_version_unsupported": "Version du CLI de l'agent non prise en charge",
       "agent_error_runtime_missing_executable": "CLI de l'agent non installé",
       "agent_error_unknown": "Erreur d'exécution de l'agent",
+      "command_check_failed": "Échec de la vérification",
+      "command_tool_error": "Erreur d'exécution de la commande",
       "agent_fallback_message": "L'agent n'a pas pu produire de réponse valide",
       "codex_resume_oversized": "Session trop volumineuse pour être reprise",
       "idle_watchdog": "Agent arrêté après une période d'inactivité",

@@ -47,6 +47,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
+| `MULTICA_COMMAND_DISABLED` | `false` | Set to `true` (or `1`) on the API server to disable non-LLM Command Agents deployment-wide: blocks registering `command` runtimes, creating or rebinding Command Agents, and enqueueing or claiming their runs |
 | `FF_LOCAL_SEARCH_INDEX` | `on` | Web and Desktop keep a local search index per workspace; set to `off` to make clients search through the server instead |
 | `FF_DASHBOARD_HISTORY_365D` | `on` | Enables the 365-day range on the Analytics page; set to `off` if year-long dashboard queries are too slow for your database |
 
@@ -257,6 +258,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_COMMAND_DISABLED` | `false` | Set to `true` (or `1`) to disable the built-in non-LLM `command` runtime on this host so it neither registers nor runs Command Agents. Also configurable via `multica config set disable_command true` or `--no-command` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for run working directories |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-run temp dirs; must be an existing, writable absolute directory, and an invalid value fails run startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 
@@ -405,6 +407,7 @@ Supported keys:
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
+| `disable_command` | follows environment | `true` disables the built-in non-LLM `command` runtime on this host; `false` clears the local override and returns to `MULTICA_COMMAND_DISABLED` or the default (`false`) |
 | `daemon_log_max_size_mb` | `20` | Size in MB at which `daemon.log` rotates; see [Daemon logs](#daemon-logs) |
 | `daemon_log_max_backups` | `5` | Maximum number of rotated log files kept |
 | `daemon_log_max_age_days` | `30` | Days rotated log files are kept |

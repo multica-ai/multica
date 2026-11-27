@@ -153,6 +153,20 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsNoCommand(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-command", false, "")
+	if err := cmd.Flags().Set("no-command", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--no-command"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 // TestPrintDaemonStatusExplainsDeferredRestart: when the daemon has confirmed a
 // version change but is still busy, `daemon status` is where a user finds out.
 // The row is absent otherwise so it reads as an explanation, not a status line.

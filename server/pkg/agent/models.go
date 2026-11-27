@@ -371,6 +371,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// model selection to consume one. An empty list keeps manual entry
 		// available without spawning anything.
 		return Catalog{Models: []Model{}}, nil
+	case "command":
+		// Command Agents execute deterministic scripts or binaries directly with
+		// no LLM provider or model catalog.
+		return Catalog{Models: []Model{}}, nil
 	case "zcode":
 		// ZCode has no model-catalog command or RPC — the catalog lives only
 		// inside a running session's snapshot (settings.model.available,
@@ -491,7 +495,7 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
-	case "qwenpaw", "mcode", "zeroclaw", "museapp":
+	case "qwenpaw", "mcode", "zeroclaw", "museapp", "command":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
 		// shared, persistent agent config. Model override is therefore

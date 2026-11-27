@@ -7,6 +7,7 @@ import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../comp
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   agentDescriptionLength,
+  COMMAND_PROVIDER,
   applyDraftModelChange,
   applyDraftRuntimeChange,
   type AgentDraft,
@@ -105,6 +106,7 @@ export function AgentConfigurationPanel({
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
+  const commandRuntime = selectedRuntime?.provider === COMMAND_PROVIDER;
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
     if (onRuntimeSelect) {
@@ -173,7 +175,7 @@ export function AgentConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
-          {conversationStartersSupported ? (
+          {conversationStartersSupported && !commandRuntime ? (
             <DraftFieldRow
               compact={compact}
               align="start"
@@ -189,43 +191,45 @@ export function AgentConfigurationPanel({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.behavior)}
-      >
-        <SettingsCard>
-          <DraftFieldRow
-            compact
-            label={t(($) => $.create_dialog.instructions.label)}
-            htmlFor="agent-create-instructions"
-          >
-            <Textarea
-              id="agent-create-instructions"
-              name="agent-instructions"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.instructions.label)}
-              value={draft.instructions}
-              onChange={(event) => set("instructions", event.target.value)}
-              placeholder={t(
-                ($) => $.create_dialog.instructions.editor_placeholder,
-              )}
-              rows={compact ? 9 : 12}
-              className="min-h-44 resize-y font-mono text-label leading-6"
-            />
-          </DraftFieldRow>
-          {qoderRuntime ? (
-            <p className="px-4 py-3 text-caption text-muted-foreground">
-              {t(($) => $.creation_studio.cloud_fields_note)}
-            </p>
-          ) : (
-            <div className="px-4 py-4">
-              <SkillMultiSelect
-                selectedIds={draft.skillIds}
-                onChange={(ids) => set("skillIds", ids)}
+      {!commandRuntime && (
+        <SettingsSection
+          title={t(($) => $.creation_studio.sections.behavior)}
+        >
+          <SettingsCard>
+            <DraftFieldRow
+              compact
+              label={t(($) => $.create_dialog.instructions.label)}
+              htmlFor="agent-create-instructions"
+            >
+              <Textarea
+                id="agent-create-instructions"
+                name="agent-instructions"
+                autoComplete="off"
+                aria-label={t(($) => $.create_dialog.instructions.label)}
+                value={draft.instructions}
+                onChange={(event) => set("instructions", event.target.value)}
+                placeholder={t(
+                  ($) => $.create_dialog.instructions.editor_placeholder,
+                )}
+                rows={compact ? 9 : 12}
+                className="min-h-44 resize-y font-mono text-label leading-6"
               />
-            </div>
-          )}
-        </SettingsCard>
-      </SettingsSection>
+            </DraftFieldRow>
+            {qoderRuntime ? (
+              <p className="px-4 py-3 text-caption text-muted-foreground">
+                {t(($) => $.creation_studio.cloud_fields_note)}
+              </p>
+            ) : (
+              <div className="px-4 py-4">
+                <SkillMultiSelect
+                  selectedIds={draft.skillIds}
+                  onChange={(ids) => set("skillIds", ids)}
+                />
+              </div>
+            )}
+          </SettingsCard>
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title={t(($) => $.creation_studio.sections.execution)}
@@ -263,6 +267,28 @@ export function AgentConfigurationPanel({
                 onChange={(value) => set("qoderAgentId", value)}
                 disabled={runtimeLocked}
               />
+            ) : commandRuntime ? (
+              <div className="min-w-0 space-y-1.5">
+                <label
+                  htmlFor="agent-create-command"
+                  className="block text-caption font-medium text-muted-foreground"
+                >
+                  {t(($) => $.tab_body.mcp_config.dialog_command_label)}
+                </label>
+                <Input
+                  id="agent-create-command"
+                  name="agent-command"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
+                  value={draft.command}
+                  onChange={(event) => set("command", event.target.value)}
+                  // eslint-disable-next-line no-restricted-syntax -- technical CLI command example
+                  placeholder="python3"
+                  disabled={!selectedRuntime || runtimeLocked}
+                  className="font-mono text-caption"
+                />
+              </div>
             ) : (
               <ModelDropdown
                 runtimeId={selectedRuntime?.id ?? null}
@@ -285,12 +311,14 @@ export function AgentConfigurationPanel({
               already set and needs clearing), so an offline runtime, a failed
               discovery or an empty model shows nothing instead of an input
               that cannot be honoured. */}
-          <AgentExecutionOverrides
-            draft={draft}
-            runtime={selectedRuntime}
-            disabled={runtimeLocked}
-            onChange={onChange}
-          />
+          {!commandRuntime && (
+            <AgentExecutionOverrides
+              draft={draft}
+              runtime={selectedRuntime}
+              disabled={runtimeLocked}
+              onChange={onChange}
+            />
+          )}
         </SettingsCard>
       </SettingsSection>
 

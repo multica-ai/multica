@@ -17,6 +17,7 @@ import {
 
 const draft = (): AgentDraft => ({
   qoderAgentId: "",
+  command: "",
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
@@ -389,4 +390,24 @@ it("drops settings a Qoder runtime cannot run from a draft started elsewhere", (
   const local = buildCreateAgentRequest({ draft: current, runtimeId: "runtime-1", runtimeProvider: "codex" });
   expect(local).not.toHaveProperty("runtime_config");
   expect(local.skill_ids).toEqual(["skill-1"]);
+});
+
+it("persists a Command Agent runner config and drops LLM overrides", () => {
+  const current: AgentDraft = {
+    ...draft(),
+    command: " ./scripts/verify.sh ",
+    model: "gpt-5",
+    thinkingLevel: "high",
+    serviceTier: "priority",
+  };
+  const request = buildCreateAgentRequest({
+    draft: current,
+    runtimeId: "rt-cmd",
+    runtimeProvider: "command",
+  });
+  expect(request.runtime_config).toEqual({ command: "./scripts/verify.sh" });
+  expect(request.model).toBeUndefined();
+  expect(request.thinking_level).toBeUndefined();
+  expect(request.service_tier).toBeUndefined();
+  expect(applyDraftRuntimeChange(current, "another-runtime").command).toBe("");
 });
