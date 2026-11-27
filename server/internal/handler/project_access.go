@@ -25,7 +25,7 @@ func (h *Handler) hiddenProjects(r *http.Request, workspaceID string) (projectac
 		return projectaccess.Hidden{}, err
 	}
 	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorType, actorID := h.permissionActor(r, userID, workspaceID)
 	if actorType == "agent" {
 		return h.hiddenProjectsForAgentRun(ctx, wsUUID, actorID, r.Header.Get("X-Task-ID"))
 	}

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
@@ -36,6 +38,14 @@ export function AccountTab() {
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const qc = useQueryClient();
+  const delegationKey = ["my-agent-full-delegations", user?.id];
+  const delegations = useQuery({ queryKey: delegationKey, queryFn: () => api.listMyAgentFullDelegations(), enabled: !!user });
+  const revokeDelegation = useMutation({
+    mutationFn: (agentId: string) => api.revokeMyAgentFullDelegation(agentId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: delegationKey }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : t(($) => $.account.full_delegation_error)),
+  });
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileDescription, setProfileDescription] = useState(
@@ -184,6 +194,24 @@ export function AccountTab() {
               ) : null}
             </div>
           </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.account.full_delegation_title)}>
+        <SettingsCard>
+          <div className="p-4 space-y-3">
+            <p className="text-caption text-muted-foreground">{t(($) => $.account.full_delegation_description)}</p>
+            {delegations.data?.length ? delegations.data.map((grant) => (
+              <div key={grant.agent_id} className="flex items-center justify-between gap-4 border-t border-border pt-3">
+                <div className="min-w-0">
+                  <p className="text-body font-medium truncate">{grant.agent_name}</p>
+                  <p className="text-caption text-muted-foreground">{grant.workspace_name || grant.workspace_id}</p>
+                </div>
+                <Button variant="outline" size="sm" disabled={revokeDelegation.isPending} onClick={() => revokeDelegation.mutate(grant.agent_id)}>
+                  {t(($) => $.account.full_delegation_revoke)}
+                </Button>
+              </div>
+            )) : <p className="text-caption text-muted-foreground">{t(($) => $.account.full_delegation_empty)}</p>}
+          </div>
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>

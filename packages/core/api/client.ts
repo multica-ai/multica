@@ -28,7 +28,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -98,6 +98,9 @@ import type {
   WorkspaceRepo,
   WorkspaceMcpServer,
   MemberWithUser,
+  WorkspaceSuperuserPolicy,
+  SuperuserChatSummary,
+  SuperuserChatMessage,
   User,
   Skill,
   SkillSummary,
@@ -641,6 +644,9 @@ import {
   ShareLinkListResponseSchema,
   ShareLinkInfoSchema,
   JoinShareLinkResponseSchema,
+  WorkspaceSuperuserPolicySchema,
+  SuperuserChatSummaryListSchema,
+  SuperuserChatMessageListSchema,
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
@@ -2314,6 +2320,54 @@ export class ApiClient {
 
   async getAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`);
+  }
+
+  async listAgentWorkspaceGrants(id: string): Promise<Array<{ workspace_id: string; can_create_agents: boolean }>> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/workspace-grants`);
+    const parsed = parseWithFallback(raw, z.object({
+      workspace_ids: z.array(z.string()).default([]),
+      grants: z.array(z.object({ workspace_id: z.string(), can_create_agents: z.boolean().default(false) })).optional(),
+    }), { workspace_ids: [] as string[], grants: undefined as Array<{ workspace_id: string; can_create_agents: boolean }> | undefined }, {
+      endpoint: "GET /api/agents/{id}/workspace-grants",
+    });
+    return parsed.grants ?? parsed.workspace_ids.map((workspace_id) => ({ workspace_id, can_create_agents: false }));
+  }
+
+  async addAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}`, { method: "PUT" });
+  }
+
+  async removeAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}`, { method: "DELETE" });
+  }
+
+  async setAgentWorkspaceGrantAgentCreation(id: string, workspaceId: string, allow: boolean): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}/agent-creation`, {
+      method: "PUT",
+      body: JSON.stringify({ can_create_agents: allow }),
+    });
+  }
+
+  async getAgentFullDelegation(id: string): Promise<{ enabled: boolean; grantor_user_id: string }> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/full-delegation`);
+    return parseWithFallback(raw, z.object({ enabled: z.boolean().default(false), grantor_user_id: z.string().default("") }), { enabled: false, grantor_user_id: "" }, {
+      endpoint: "GET /api/agents/{id}/full-delegation",
+    });
+  }
+
+  async setAgentFullDelegation(id: string, enabled: boolean): Promise<void> {
+    await this.fetch(`/api/agents/${id}/full-delegation`, { method: "PUT", body: JSON.stringify({ enabled }) });
+  }
+
+  async listMyAgentFullDelegations(): Promise<Array<{ agent_id: string; agent_name: string; workspace_id: string; workspace_name: string; created_at: string }>> {
+    const raw = await this.fetch<unknown>("/api/me/agent-delegations");
+    return parseWithFallback(raw, z.array(z.object({ agent_id: z.string(), agent_name: z.string(), workspace_id: z.string(), workspace_name: z.string().default(""), created_at: z.string() })), [], {
+      endpoint: "GET /api/me/agent-delegations",
+    });
+  }
+
+  async revokeMyAgentFullDelegation(id: string): Promise<void> {
+    await this.fetch(`/api/me/agent-delegations/${id}`, { method: "DELETE" });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
@@ -4194,6 +4248,29 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",
     });
+  }
+
+  async listWorkspaceSuperusers(workspaceId: string): Promise<WorkspaceSuperuserPolicy> {
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/superusers`);
+    return parseWithFallback(raw, WorkspaceSuperuserPolicySchema, { enabled: false, grants: [] }, {
+      endpoint: "listWorkspaceSuperusers",
+    });
+  }
+
+  async setWorkspaceSuperuser(workspaceId: string, memberId: string, granted: boolean): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/superusers/${memberId}`, {
+      method: granted ? "PUT" : "DELETE",
+    });
+  }
+
+  async listSuperuserChats(query = "", offset = 0): Promise<SuperuserChatSummary[]> {
+    const raw = await this.fetch(`/api/chat/superuser/sessions?q=${encodeURIComponent(query)}&offset=${offset}`);
+    return parseWithFallback(raw, SuperuserChatSummaryListSchema, [], { endpoint: "listSuperuserChats" });
+  }
+
+  async listSuperuserChatMessages(sessionId: string): Promise<SuperuserChatMessage[]> {
+    const raw = await this.fetch(`/api/chat/superuser/sessions/${encodeURIComponent(sessionId)}/messages`);
+    return parseWithFallback(raw, SuperuserChatMessageListSchema, [], { endpoint: "listSuperuserChatMessages" });
   }
 
   async leaveWorkspace(workspaceId: string): Promise<void> {

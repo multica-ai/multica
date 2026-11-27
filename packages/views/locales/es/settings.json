@@ -919,7 +919,12 @@
     "save": "Actualizar perfil",
     "saving": "Actualizando...",
     "toast_avatar_failed": "Error al subir el avatar",
-    "toast_profile_failed": "Error al actualizar el perfil"
+    "toast_profile_failed": "Error al actualizar el perfil",
+    "full_delegation_title": "Agentes con delegación completa",
+    "full_delegation_description": "Estos agentes pueden usar tus permisos actuales en chats que inicias directamente. Puedes revocar el acceso aquí.",
+    "full_delegation_revoke": "Revocar",
+    "full_delegation_empty": "Ningún agente tiene delegación completa.",
+    "full_delegation_error": "No se pudo revocar la delegación."
   },
   "notifications": {
     "title": "Bandeja de entrada",
@@ -1697,6 +1702,30 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "Superusuarios",
+      "description": "Un propietario puede conceder explícitamente acceso total a un miembro. Los superusuarios pueden gestionar recursos, incluidos proyectos y agentes privados, leer todos los chats y eliminar el espacio de trabajo.",
+      "loading": "Cargando superusuarios...",
+      "error": "No se pudo actualizar el acceso.",
+      "enabled": "Este espacio permite que superusuarios designados gestionen recursos y lean todos los chats.",
+      "disabled": "El acceso de superusuario no está habilitado.",
+      "none": "Nadie tiene acceso de superusuario.",
+      "choose": "Elige un miembro",
+      "grant": "Conceder acceso",
+      "revoke": "Revocar",
+      "chats_title": "Inspeccionar chats",
+      "search": "Buscar títulos y mensajes",
+      "search_button": "Buscar",
+      "chats_error": "No se pudieron cargar los chats.",
+      "chats_empty": "No se encontraron chats.",
+      "untitled": "Chat sin título",
+      "confirm_title": "¿Conceder acceso total al espacio?",
+      "confirm_description": "{{name}} podrá gestionar recursos privados, leer todos los chats y eliminar este espacio. Se notificará a los miembros actuales.",
+      "confirm_cancel": "Cancelar",
+      "confirm_grant": "Conceder acceso total",
+      "previous": "Anterior",
+      "next": "Siguiente"
+    },
     "invite_title": "Invitar miembro",
     "invite_email_placeholder": "usuario@empresa.com",
     "invite_button": "Invitar",

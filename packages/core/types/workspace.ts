@@ -112,6 +112,26 @@ export interface MemberWithUser {
   project_ids?: string[];
 }
 
+export interface WorkspaceSuperuserPolicy {
+  enabled: boolean;
+  grants: Array<{ member_id: string; user_id: string; name: string; email: string }>;
+}
+
+export interface SuperuserChatSummary {
+  id: string;
+  creator_id: string;
+  agent_id: string;
+  title: string;
+  status: string;
+  updated_at: string;
+}
+
+export interface SuperuserChatMessage {
+  id: string;
+  role: string;
+  content: string;
+}
+
 export interface Invitation {
   id: string;
   workspace_id: string;
@@ -126,6 +146,8 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+  /** Whether named superusers can inspect all member chats, including history. */
+  superuser_policy_enabled?: boolean;
   /** The projects a guest invitation grants. */
   project_ids?: string[];
 }
@@ -150,4 +172,5 @@ export interface ShareLinkInfo {
   workspace_slug: string;
   creator_name?: string;
   role: MemberRole;
+  superuser_policy_enabled?: boolean;
 }

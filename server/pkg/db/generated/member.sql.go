@@ -158,6 +158,27 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 	return items, nil
 }
 
+const hasActiveWorkspaceSuperuserGrant = `-- name: HasActiveWorkspaceSuperuserGrant :one
+SELECT EXISTS (
+    SELECT 1 FROM workspace_superuser_grant g
+    JOIN workspace_superuser_policy p ON p.workspace_id = g.workspace_id
+    JOIN member m ON m.id = g.member_id AND m.workspace_id = g.workspace_id AND m.user_id = g.user_id
+    WHERE g.workspace_id = $1 AND g.user_id = $2 AND m.role IN ('owner', 'admin', 'member')
+)
+`
+
+type HasActiveWorkspaceSuperuserGrantParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) HasActiveWorkspaceSuperuserGrant(ctx context.Context, arg HasActiveWorkspaceSuperuserGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveWorkspaceSuperuserGrant, arg.WorkspaceID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listDepartedMemberAssetHolders = `-- name: ListDepartedMemberAssetHolders :many
 SELECT DISTINCT refs.workspace_id::uuid AS workspace_id, refs.user_id::uuid AS user_id
 FROM (

@@ -227,10 +227,11 @@ func (h *Handler) RevokeShareLink(w http.ResponseWriter, r *http.Request) {
 // It deliberately excludes internal IDs (workspace_id), the invite code, and
 // the inviter's email address.
 type ShareLinkInfoResponse struct {
-	WorkspaceName string `json:"workspace_name"`
-	WorkspaceSlug string `json:"workspace_slug"`
-	CreatorName   string `json:"creator_name,omitempty"`
-	Role          string `json:"role"`
+	WorkspaceName          string `json:"workspace_name"`
+	WorkspaceSlug          string `json:"workspace_slug"`
+	CreatorName            string `json:"creator_name,omitempty"`
+	Role                   string `json:"role"`
+	SuperuserPolicyEnabled bool   `json:"superuser_policy_enabled"`
 }
 
 // GetShareLinkInfo — public preview of a workspace share link. No auth is
@@ -251,11 +252,17 @@ func (h *Handler) GetShareLinkInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var policyEnabled bool
+	if err := h.DB.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM workspace_superuser_policy WHERE workspace_id = $1)`, row.WorkspaceID).Scan(&policyEnabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace policy")
+		return
+	}
 	writeJSON(w, http.StatusOK, ShareLinkInfoResponse{
-		WorkspaceName: row.WorkspaceName,
-		WorkspaceSlug: row.WorkspaceSlug,
-		CreatorName:   row.CreatorName,
-		Role:          row.Role,
+		WorkspaceName:          row.WorkspaceName,
+		WorkspaceSlug:          row.WorkspaceSlug,
+		CreatorName:            row.CreatorName,
+		Role:                   row.Role,
+		SuperuserPolicyEnabled: policyEnabled,
 	})
 }
 

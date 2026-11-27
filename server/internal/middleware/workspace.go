@@ -16,12 +16,26 @@ type contextKey int
 const (
 	ctxKeyWorkspaceID contextKey = iota
 	ctxKeyMember
+	ctxKeyActualMember
+	ctxKeySuperuser
 )
 
 // MemberFromContext returns the workspace member injected by the workspace middleware.
 func MemberFromContext(ctx context.Context) (db.Member, bool) {
 	m, ok := ctx.Value(ctxKeyMember).(db.Member)
 	return m, ok
+}
+
+// ActualMemberFromContext retains the persisted role when a separate
+// superuser grant broadens this request's effective workspace permissions.
+func ActualMemberFromContext(ctx context.Context) (db.Member, bool) {
+	m, ok := ctx.Value(ctxKeyActualMember).(db.Member)
+	return m, ok
+}
+
+func SuperuserFromContext(ctx context.Context) bool {
+	granted, _ := ctx.Value(ctxKeySuperuser).(bool)
+	return granted
 }
 
 // WorkspaceIDFromContext returns the workspace ID injected by the workspace middleware.
@@ -35,6 +49,7 @@ func WorkspaceIDFromContext(ctx context.Context) string {
 // and want to share the member with downstream code.
 func SetMemberContext(ctx context.Context, workspaceID string, member db.Member) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyWorkspaceID, workspaceID)
+	ctx = context.WithValue(ctx, ctxKeyActualMember, member)
 	ctx = context.WithValue(ctx, ctxKeyMember, member)
 	return ctx
 }
@@ -249,11 +264,30 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				RefuseGuest(w, r)
 				return
 			}
+			effectiveMember := member
+			superuserGranted := false
+			if member.Role != "guest" {
+				source := r.Header.Get("X-Actor-Source")
+				principal, delegated := FullDelegationFromContext(r.Context())
+				if source == "" || (source == "task_token" && delegated && principal.GrantorUserID == userID) {
+					granted, err := queries.HasActiveWorkspaceSuperuserGrant(r.Context(), db.HasActiveWorkspaceSuperuserGrantParams{
+						WorkspaceID: wsUUID, UserID: userUUID,
+					})
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, "failed to check superuser grant")
+						return
+					}
+					if granted {
+						effectiveMember.Role = "owner"
+						superuserGranted = true
+					}
+				}
+			}
 
 			if len(roles) > 0 {
 				allowed := false
 				for _, role := range roles {
-					if member.Role == role {
+					if effectiveMember.Role == role {
 						allowed = true
 						break
 					}
@@ -265,6 +299,8 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 			}
 
 			ctx := SetMemberContext(r.Context(), workspaceID, member)
+			ctx = context.WithValue(ctx, ctxKeyMember, effectiveMember)
+			ctx = context.WithValue(ctx, ctxKeySuperuser, superuserGranted)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

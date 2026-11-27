@@ -868,8 +868,7 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		if !ok {
 			return issueTableSQL{}, false
 		}
-		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+		allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 		if !ok {
 			writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
 			return issueTableSQL{}, false

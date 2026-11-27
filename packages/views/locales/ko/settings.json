@@ -909,7 +909,12 @@
     "save": "프로필 업데이트",
     "saving": "업데이트 중...",
     "toast_avatar_failed": "아바타를 업로드하지 못했습니다",
-    "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
+    "toast_profile_failed": "프로필을 업데이트하지 못했습니다",
+    "full_delegation_title": "전체 위임이 허용된 에이전트",
+    "full_delegation_description": "직접 시작한 채팅에서 이 에이전트들이 현재 권한을 사용할 수 있습니다. 여기에서 언제든지 철회할 수 있습니다.",
+    "full_delegation_revoke": "철회",
+    "full_delegation_empty": "전체 위임이 허용된 에이전트가 없습니다.",
+    "full_delegation_error": "전체 위임을 철회하지 못했습니다."
   },
   "notifications": {
     "title": "인박스",
@@ -1424,6 +1429,30 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "최고 관리자",
+      "description": "소유자는 지정된 멤버에게 워크스페이스 전체 접근 권한을 명시적으로 부여할 수 있습니다. 최고 관리자는 비공개 프로젝트와 에이전트를 포함한 리소스를 관리하고, 이전과 이후의 모든 멤버 채팅을 읽고, 워크스페이스를 삭제할 수 있습니다.",
+      "loading": "최고 관리자 불러오는 중...",
+      "error": "권한을 변경하지 못했습니다.",
+      "enabled": "이 워크스페이스에서는 지정된 최고 관리자가 리소스를 관리하고 모든 채팅을 볼 수 있습니다.",
+      "disabled": "최고 관리자 권한이 활성화되지 않았습니다.",
+      "none": "권한을 가진 최고 관리자가 없습니다.",
+      "choose": "멤버 선택",
+      "grant": "권한 부여",
+      "revoke": "취소",
+      "chats_title": "채팅 살펴보기",
+      "search": "제목과 메시지 검색",
+      "search_button": "검색",
+      "chats_error": "채팅을 불러오지 못했습니다.",
+      "chats_empty": "채팅을 찾지 못했습니다.",
+      "untitled": "제목 없는 채팅",
+      "confirm_title": "워크스페이스 전체 접근 권한을 부여할까요?",
+      "confirm_description": "{{name}}님은 비공개 리소스를 관리하고 모든 멤버의 채팅을 읽으며 워크스페이스를 삭제할 수 있습니다. 기존 멤버에게 알립니다.",
+      "confirm_cancel": "취소",
+      "confirm_grant": "전체 접근 권한 부여",
+      "previous": "이전",
+      "next": "다음"
+    },
     "invite_title": "멤버 초대",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "초대",

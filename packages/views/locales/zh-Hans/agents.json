@@ -852,7 +852,20 @@
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "注意：该智能体已启用已连接应用。共享后，所有有权限运行该智能体的成员都可以通过它使用这些应用。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "workspace_grants_title": "此智能体可使用的其他工作区",
+    "workspace_grants_description": "只要发起运行的用户和智能体所有者仍有访问权限，运行就可以在这些工作区列出、查看和创建议题。此授权不允许将该智能体分配给这些议题。",
+    "workspace_grants_empty": "你未加入其他工作区。",
+    "workspace_grants_error": "无法更新工作区访问权限。",
+    "workspace_grants_agent_creation": "允许此智能体在此工作区创建智能体",
+    "full_delegation_title": "完整用户权限委托",
+    "full_delegation_description": "在你发起的聊天中，此智能体可在所有工作区使用你当前的权限，包括读取你的其他聊天。其他人不能使用此授权。凭据、账单和身份操作仍须由本人执行。",
+    "full_delegation_label": "委托我的权限",
+    "full_delegation_confirm_title": "允许完全委托？",
+    "full_delegation_confirm_description": "此智能体可读取和修改你目前有权访问的资源。新增权限会自动生效，你可随时撤销授权。",
+    "full_delegation_cancel": "取消",
+    "full_delegation_confirm": "允许完全委托",
+    "full_delegation_error": "无法更新完全委托。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

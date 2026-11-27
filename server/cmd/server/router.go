@@ -1870,7 +1870,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/theme-store/themes/{themeId}/package", h.GetStoreThemePackage)
 		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
 		r.Get("/api/me", h.GetMe)
-		r.Patch("/api/me", h.UpdateMe)
+		r.With(handler.RequireHumanActor).Get("/api/me/agent-delegations", h.ListMyAgentFullDelegations)
+		r.With(handler.RequireHumanActor).Delete("/api/me/agent-delegations/{agentId}", h.RevokeMyAgentFullDelegation)
+		r.With(handler.RequireHumanActor).Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
@@ -1928,6 +1930,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
+					r.Get("/superusers", h.ListWorkspaceSuperusers)
 					// Paid-feature states for read-only and upgrade UI; the
 					// server enforces on every write regardless.
 					r.Get("/features", h.GetWorkspaceFeatures)
@@ -1974,6 +1977,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)
+					r.Put("/superusers/{memberId}", h.ChangeWorkspaceSuperuser)
+					r.Delete("/superusers/{memberId}", h.ChangeWorkspaceSuperuser)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
@@ -2161,19 +2166,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// group (registered above with the other public OAuth/webhook routes —
 		// see MUL-3843). All return 503 when COMPOSIO_API_KEY is unset.
 		r.Route("/api/integrations/composio", func(r chi.Router) {
-			r.Post("/connect/init", h.ComposioConnectInit)
+			r.With(handler.RequireHumanActor).Post("/connect/init", h.ComposioConnectInit)
 			r.Get("/toolkits", h.ListComposioToolkits)
 			r.Get("/connections", h.ListComposioConnections)
-			r.Delete("/connections/{id}", h.DeleteComposioConnection)
+			r.With(handler.RequireHumanActor).Delete("/connections/{id}", h.DeleteComposioConnection)
 			r.Get("/connections/{id}/impact", h.GetComposioConnectionImpact)
 		})
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
-		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
-		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
-		r.Post("/api/share-links/join", h.JoinByShareLink)
+		r.With(handler.RequireHumanActor).Post("/api/invitations/{id}/accept", h.AcceptInvitation)
+		r.With(handler.RequireHumanActor).Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+		r.With(handler.RequireHumanActor).Post("/api/share-links/join", h.JoinByShareLink)
 
 		// PAT management is human-only (MUL-8154): a machine credential must
 		// not mint a non-expiring PAT, enumerate the owner's PATs, or revoke
@@ -2262,7 +2267,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Local search index sync for Web/Desktop (MUL-7754). Human clients
 			// only: agents search through /api/issues/search.
 			r.Route("/api/search-index", func(r chi.Router) {
-				r.Use(handler.RequireHumanActor)
+				r.Use(handler.RequireHumanOrDelegatedActor)
 				r.Use(h.RequireLocalSearchIndex)
 				r.Get("/manifest", h.GetSearchIndexManifest)
 				r.Get("/snapshot", h.GetSearchIndexSnapshot)
@@ -2328,8 +2333,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/system-wakeups/{rule}", h.UpdateIssueSystemWakeup)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
-					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
-					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements/{commentId}/retry", h.RetryTaskSupplement)
+					r.With(handler.RequireHumanOrDelegatedActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
+					r.With(handler.RequireHumanOrDelegatedActor).Post("/tasks/{taskId}/supplements/{commentId}/retry", h.RetryTaskSupplement)
 					r.Post("/rerun", h.RerunIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
@@ -2365,7 +2370,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
 			r.With(handler.RequireHumanActor).Delete("/api/tasks/{taskId}/messages", h.PurgeTaskTranscript)
 			r.Get("/api/tasks/{taskId}/context-receipt", h.GetTaskContextReceipt)
-			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
+			r.With(handler.RequireHumanOrDelegatedActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
 			// Issue quick actions (definitions; running one lives under
 			// /api/issues/{id}/quick-actions/{quickActionId}/run)
@@ -2442,7 +2447,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateDoc)
 					r.Post("/edits", h.EditDoc)
 					r.Post("/collab-ticket", h.CreateDocCollabTicket)
-					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDoc)
+					r.With(handler.RequireHumanOrDelegatedActor).Delete("/", h.DeleteDoc)
 					r.Post("/move", h.MoveDoc)
 					r.Get("/versions", h.ListDocVersions)
 					r.Get("/versions/{number}", h.GetDocVersion)
@@ -2452,7 +2457,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// Agents reply in discussions; the rest stays with people.
 						r.Post("/", h.CreateDocComment)
 						r.Group(func(r chi.Router) {
-							r.Use(handler.RequireHumanActor)
+							r.Use(handler.RequireHumanOrDelegatedActor)
 							r.Post("/{docCommentId}/resolve", h.ResolveDocComment)
 							r.Post("/{docCommentId}/reopen", h.ReopenDocComment)
 							r.Delete("/{docCommentId}", h.DeleteDocComment)
@@ -2465,7 +2470,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateDocFolder)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Patch("/", h.UpdateDocFolder)
-					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDocFolder)
+					r.With(handler.RequireHumanOrDelegatedActor).Delete("/", h.DeleteDocFolder)
 					r.Post("/move", h.MoveDocFolder)
 				})
 			})
@@ -2476,7 +2481,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Workspace owner only: every private project, joined or not.
 				// Human-only: a machine credential carries its owner's user
 				// id and must not use the owner's way into private projects.
-				r.With(handler.RequireHumanActor).Get("/private", h.ListPrivateProjectsForOwner)
+				r.With(handler.RequireHumanOrDelegatedActor).Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
@@ -2485,7 +2490,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/activity", h.ListProjectActivity)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
-					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)
+					r.With(handler.RequireHumanOrDelegatedActor).Post("/join", h.JoinPrivateProject)
 					r.Post("/archive", h.ArchiveProject)
 					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
@@ -2587,8 +2592,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
-				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
-				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
+				r.With(handler.RequireHumanOrDelegatedActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
+				r.With(handler.RequireHumanOrDelegatedActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
 				// Same handler under a path servers from before #8296 do not
@@ -2615,6 +2620,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.With(handler.RequireHumanActor).Get("/workspace-grants", h.ListAgentWorkspaceGrants)
+					r.With(handler.RequireHumanActor).Get("/full-delegation", h.GetAgentFullDelegation)
+					r.With(handler.RequireHumanActor).Put("/full-delegation", h.SetAgentFullDelegation)
+					r.With(handler.RequireHumanActor).Put("/workspace-grants/{workspaceId}", h.AddAgentWorkspaceGrant)
+					r.With(handler.RequireHumanActor).Put("/workspace-grants/{workspaceId}/agent-creation", h.SetAgentWorkspaceGrantAgentCreation)
+					r.With(handler.RequireHumanActor).Delete("/workspace-grants/{workspaceId}", h.RemoveAgentWorkspaceGrant)
 					r.Get("/apps", h.ListAgentApps)
 					r.With(handler.RequireHumanActor).Put("/apps", h.UpdateAgentApps)
 					r.Post("/archive", h.ArchiveAgent)
@@ -2810,6 +2821,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})
+			})
+			r.Route("/api/chat/superuser", func(r chi.Router) {
+				r.Get("/sessions", h.ListSuperuserChats)
+				r.Get("/sessions/{sessionId}", h.GetSuperuserChat)
+				r.Get("/sessions/{sessionId}/messages", h.ListSuperuserChatMessages)
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)

@@ -22,7 +22,7 @@ func (h *Handler) loadProjectForSubscription(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return db.Project{}, "", false
 	}
-	if actorType, _ := h.resolveActor(r, userID, uuidToString(project.WorkspaceID)); actorType == "agent" {
+	if actorType, _ := h.permissionActor(r, userID, uuidToString(project.WorkspaceID)); actorType == "agent" {
 		writeError(w, http.StatusForbidden, "agents cannot subscribe to projects")
 		return db.Project{}, "", false
 	}

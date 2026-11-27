@@ -78,6 +78,15 @@ WITH
 deleted_members AS (
     DELETE FROM member WHERE member.workspace_id = $1
 ),
+deleted_superuser_audit AS (
+    DELETE FROM workspace_superuser_audit WHERE workspace_id = $1
+),
+deleted_superuser_grants AS (
+    DELETE FROM workspace_superuser_grant WHERE workspace_id = $1
+),
+deleted_superuser_policy AS (
+    DELETE FROM workspace_superuser_policy WHERE workspace_id = $1
+),
 deleted_notification_preferences AS (
     DELETE FROM notification_preference
     WHERE notification_preference.workspace_id = $1
@@ -112,6 +121,10 @@ func (q *Queries) DeleteWorkspaceAdministration(ctx context.Context, workspaceID
 }
 
 const deleteWorkspaceAgents = `-- name: DeleteWorkspaceAgents :exec
+WITH deleted_delegations AS (
+    DELETE FROM agent_full_delegation
+    WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1)
+)
 DELETE FROM agent WHERE agent.workspace_id = $1
 `
 

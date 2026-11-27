@@ -909,7 +909,12 @@
     "save": "更新资料",
     "saving": "更新中...",
     "toast_avatar_failed": "上传头像失败",
-    "toast_profile_failed": "更新资料失败"
+    "toast_profile_failed": "更新资料失败",
+    "full_delegation_title": "已获完全委托的智能体",
+    "full_delegation_description": "这些智能体可在你直接启动的聊天中使用你当前的权限。你可随时在此撤销。",
+    "full_delegation_revoke": "撤销",
+    "full_delegation_empty": "没有已获完全委托的智能体。",
+    "full_delegation_error": "无法撤销完全委托。"
   },
   "notifications": {
     "title": "收件箱",
@@ -1681,6 +1686,30 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "超级用户",
+      "description": "所有者可以明确授予指定成员完整的工作区权限。超级用户可以管理包括私有项目和智能体在内的资源，阅读所有成员过去和今后的聊天，并删除工作区。",
+      "loading": "正在加载超级用户...",
+      "error": "无法更新超级用户权限。",
+      "enabled": "此工作区允许指定的超级用户管理资源并查看所有成员的聊天。",
+      "disabled": "尚未启用超级用户权限。",
+      "none": "目前没有超级用户。",
+      "choose": "选择成员",
+      "grant": "授予权限",
+      "revoke": "撤销",
+      "chats_title": "查看聊天",
+      "search": "搜索标题和消息",
+      "search_button": "搜索",
+      "chats_error": "无法加载聊天。",
+      "chats_empty": "未找到聊天。",
+      "untitled": "无标题聊天",
+      "confirm_title": "授予完整工作区权限？",
+      "confirm_description": "{{name}} 将能够管理私有资源、阅读所有成员的聊天并删除此工作区。现有成员会收到通知。",
+      "confirm_cancel": "取消",
+      "confirm_grant": "授予完整权限",
+      "previous": "上一页",
+      "next": "下一页"
+    },
     "invite_title": "邀请成员",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀请",

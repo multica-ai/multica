@@ -4908,6 +4908,7 @@ export const ShareLinkInfoSchema = z.object({
   workspace_slug: z.string().optional().default(""),
   creator_name: z.string().optional().default(""),
   role: z.string().optional().default("member"),
+  superuser_policy_enabled: z.boolean().optional().default(false),
 }).loose();
 
 export const EMPTY_SHARE_LINK_INFO: ShareLinkInfo = {
@@ -4926,6 +4927,22 @@ export const MemberWithUserSchema = z.object({
   email: z.string().optional().default(""),
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
+
+export const WorkspaceSuperuserPolicySchema = z.object({
+  enabled: z.boolean().optional().default(false),
+  grants: z.array(z.object({
+    member_id: z.string(), user_id: z.string(), name: z.string(), email: z.string(),
+  })).optional().default([]),
+}).loose();
+
+export const SuperuserChatSummaryListSchema = z.array(z.object({
+  id: z.string(), creator_id: z.string(), agent_id: z.string(),
+  title: z.string(), status: z.string(), updated_at: z.string(),
+})).default([]);
+
+export const SuperuserChatMessageListSchema = z.array(z.object({
+  id: z.string(), role: z.string(), content: z.string(),
+})).default([]);
 
 export const JoinShareLinkResponseSchema = z.object({
   member: MemberWithUserSchema,

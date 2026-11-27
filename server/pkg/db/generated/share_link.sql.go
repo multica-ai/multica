@@ -120,7 +120,7 @@ func (q *Queries) GetActiveShareLinkByCode(ctx context.Context, code string) (Wo
 }
 
 const getShareLinkInfoByCode = `-- name: GetShareLinkInfoByCode :one
-SELECT wsl.role,
+SELECT wsl.workspace_id, wsl.role,
        w.name  AS workspace_name,
        w.slug  AS workspace_slug,
        u.name  AS creator_name
@@ -133,16 +133,18 @@ WHERE wsl.code = $1 AND wsl.is_active = true
 `
 
 type GetShareLinkInfoByCodeRow struct {
-	Role          string `json:"role"`
-	WorkspaceName string `json:"workspace_name"`
-	WorkspaceSlug string `json:"workspace_slug"`
-	CreatorName   string `json:"creator_name"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Role          string      `json:"role"`
+	WorkspaceName string      `json:"workspace_name"`
+	WorkspaceSlug string      `json:"workspace_slug"`
+	CreatorName   string      `json:"creator_name"`
 }
 
 func (q *Queries) GetShareLinkInfoByCode(ctx context.Context, code string) (GetShareLinkInfoByCodeRow, error) {
 	row := q.db.QueryRow(ctx, getShareLinkInfoByCode, code)
 	var i GetShareLinkInfoByCodeRow
 	err := row.Scan(
+		&i.WorkspaceID,
 		&i.Role,
 		&i.WorkspaceName,
 		&i.WorkspaceSlug,

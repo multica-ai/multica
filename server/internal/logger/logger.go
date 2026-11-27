@@ -85,6 +85,14 @@ func RequestAttrs(r *http.Request) []any {
 	if uid := r.Header.Get("X-User-ID"); uid != "" {
 		attrs = append(attrs, "user_id", uid)
 	}
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		attrs = append(attrs, "caller_type", "agent", "caller_agent_id", r.Header.Get("X-Agent-ID"),
+			"caller_task_id", r.Header.Get("X-Task-ID"), "home_workspace_id", r.Header.Get("X-Task-Home-Workspace-ID"),
+			"runtime_owner_user_id", r.Header.Get("X-Task-Runtime-Owner-ID"))
+		if delegated := r.Header.Get("X-Full-Delegation-User-ID"); delegated != "" {
+			attrs = append(attrs, "effective_user_id", delegated)
+		}
+	}
 	platform, version, os := middleware.ClientMetadataFromContext(r.Context())
 	if platform != "" {
 		attrs = append(attrs, "client_platform", platform)

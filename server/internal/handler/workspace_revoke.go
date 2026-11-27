@@ -363,6 +363,9 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	}); err != nil {
 		return empty, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM workspace_superuser_grant WHERE member_id = $1 AND workspace_id = $2`, memberID, workspaceID); err != nil {
+		return empty, err
+	}
 	if demote {
 		if _, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: memberID, Role: projectaccess.RoleGuest}); err != nil {
 			return empty, err

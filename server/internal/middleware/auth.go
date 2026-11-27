@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -82,6 +83,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// fixed in #4313.
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
+			r.Header.Del("X-Task-Home-Workspace-ID")
+			r.Header.Del("X-Full-Delegation-User-ID")
+			r.Header.Del("X-Task-Runtime-Owner-ID")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -100,7 +104,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// Agent task token: "mat_" prefix. Minted by the server at
 			// task-claim time and injected by the daemon into the agent
 			// process. Authoritative for actor identity — the bound
-			// (user_id, agent_id, task_id, workspace_id) triple is
+			// (user_id, agent_id, task_id, workspace_id) identity is
 			// written into request headers here, OVERRIDING whatever the
 			// client sent, so a downstream actor-resolver cannot be
 			// tricked by a client that strips or forges X-Agent-ID /
@@ -124,18 +128,62 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				boundWorkspaceID := uuidToString(tt.WorkspaceID)
+				// An explicit target ID may select a workspace granted to this
+				// agent. All other selectors must agree with it below.
+				selectedWorkspaceID := boundWorkspaceID
+				if target := r.Header.Get("X-Workspace-ID"); target != "" {
+					if parsed, err := util.ParseUUID(target); err == nil {
+						selectedWorkspaceID = uuidToString(parsed)
+					}
+				}
+				selectedUUID, err := util.ParseUUID(selectedWorkspaceID)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid workspace_id")
+					return
+				}
+				grantor, fullErr := queries.AuthorizeFullAgentDelegation(r.Context(), db.AuthorizeFullAgentDelegationParams{
+					TaskID: tt.TaskID, AgentID: tt.AgentID, HomeWorkspaceID: tt.WorkspaceID, TargetWorkspaceID: selectedUUID,
+				})
+				if fullErr != nil && !errors.Is(fullErr, pgx.ErrNoRows) {
+					slog.Error("auth: full delegation lookup failed", "error", fullErr)
+					writeError(w, http.StatusInternalServerError, "failed to check agent delegation")
+					return
+				}
+				fullDelegation := fullErr == nil && grantor.Valid
+				if fullDelegation {
+					userID = uuidToString(grantor)
+					if rejectTemporarilyDisabledUser(w, r, userID, "", "full_agent_delegation") {
+						return
+					}
+				} else if selectedWorkspaceID != boundWorkspaceID {
+					var ok bool
+					userID, ok = authorizeTaskWorkspaceTarget(w, r, queries, tt, selectedWorkspaceID)
+					if !ok {
+						return
+					}
+				}
 				// An explicit workspace selector that disagrees with the
-				// token's binding is rejected here, BEFORE the overwrite
+				// selected authorized workspace is rejected here, BEFORE the overwrite
 				// below erases what the client asked for. Silently
 				// swapping the target let a request for workspace B run
 				// against A (GitHub #9403).
-				if checkTaskTokenWorkspaceTarget(w, r, queries, boundWorkspaceID) {
+				if checkTaskTokenWorkspaceTarget(w, r, queries, selectedWorkspaceID) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
+				r.Header.Set("X-Task-Runtime-Owner-ID", uuidToString(tt.UserID))
+				if fullDelegation {
+					r.Header.Set("X-Full-Delegation-User-ID", userID)
+					r = r.WithContext(withFullDelegation(r.Context(), FullDelegationPrincipal{
+						GrantorUserID: userID, AgentID: uuidToString(tt.AgentID), TaskID: uuidToString(tt.TaskID),
+						HomeWorkspaceID: boundWorkspaceID, RuntimeOwnerUserID: uuidToString(tt.UserID),
+					}))
+					slog.Info("full agent delegation authorized", "agent_id", uuidToString(tt.AgentID), "task_id", uuidToString(tt.TaskID), "home_workspace_id", boundWorkspaceID, "target_workspace_id", selectedWorkspaceID, "grantor_user_id", userID, "runtime_owner_user_id", uuidToString(tt.UserID), "method", r.Method, "path", r.URL.Path)
+				}
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
-				r.Header.Set("X-Workspace-ID", boundWorkspaceID)
+				r.Header.Set("X-Task-Home-Workspace-ID", boundWorkspaceID)
+				r.Header.Set("X-Workspace-ID", selectedWorkspaceID)
 				// X-Actor-Source flags the auth path so resolveActor and
 				// any owner-only handler can deny without re-querying the
 				// token table. The value "task_token" is the only signal

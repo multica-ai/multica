@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -277,6 +278,9 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	member, ok := h.workspaceMember(w, r, id)
 	if !ok {
 		return
+	}
+	if actual, ok := middleware.ActualMemberFromContext(r.Context()); ok {
+		member = actual
 	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), idUUID)
@@ -1621,6 +1625,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete agent workspace grants",
+			run:  func() error { return qtx.DeleteAgentWorkspaceGrantsForWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete full agent delegations",
+			run:  func() error { return qtx.DeleteAgentFullDelegationsForWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete agents",
 			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },
 		},
@@ -1631,6 +1643,17 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete administration data",
 			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete superuser data",
+			run: func() error {
+				for _, table := range []string{"workspace_superuser_audit", "workspace_superuser_grant", "workspace_superuser_policy"} {
+					if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE workspace_id = $1", requester.WorkspaceID); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
 		},
 		{
 			// At this point workspaceMember has resolved → workspaceID is a

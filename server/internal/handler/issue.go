@@ -3461,6 +3461,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID &&
+		assigneeType.Valid && assigneeType.String == "agent" &&
+		uuidToString(assigneeID) == r.Header.Get("X-Agent-ID") {
+		writeError(w, http.StatusBadRequest, "a source-workspace agent cannot run on a target-workspace issue; assign a target-workspace agent")
+		return
+	}
 	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
 		writeError(w, status, msg)
 		return

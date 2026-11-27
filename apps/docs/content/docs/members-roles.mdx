@@ -31,6 +31,8 @@ Guests cannot run agents. Each agent has its own Access scope, and `owner` and `
 Roles do not open private projects either. An `owner` or `admin` sees a private project only when they are on its member list. See [Private projects](/projects#private-projects).
 </Callout>
 
+A workspace `owner` can separately grant a named member **superuser access** in **Settings → Members**. This leaves their actual role unchanged but gives them owner-level workspace permissions, including private projects and agents, all past and future member chats, and workspace deletion. The grant is disclosed before joining, notifies existing members, and can be revoked immediately. See [Chat](/chat).
+
 ## Invite members
 
 `owner` and `admin` open **Settings → Members**, click **Invite member**, enter an email, pick a role, and send. Invitations can grant `admin`, `member`, or [guest](#guests) access; an `owner` must join the workspace first and then be promoted by an existing `owner`.

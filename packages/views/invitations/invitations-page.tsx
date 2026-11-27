@@ -251,6 +251,11 @@ function InvitationRow({
             ? t(($) => $.list.invited_admin, { inviter })
             : t(($) => $.list.invited_member, { inviter })}
         </div>
+        {invitation.superuser_policy_enabled && (
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.list.superuser_policy)}
+          </p>
+        )}
       </div>
       <Button variant="ghost" size="sm" onClick={onDecline} disabled={disabled} aria-busy={declining}>
         {declining ? t(($) => $.list.declining) : t(($) => $.list.decline)}

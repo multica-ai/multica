@@ -75,6 +75,12 @@ type AgentBuilderDraft struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AgentFullDelegation struct {
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	GrantorUserID pgtype.UUID        `json:"grantor_user_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -206,6 +212,14 @@ type AgentToLabel struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentWorkspaceGrant struct {
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	CanCreateAgents bool               `json:"can_create_agents"`
 }
 
 type AppActionRequest struct {
@@ -2408,4 +2422,30 @@ type WorkspaceShareLink struct {
 	UseCount    int32              `json:"use_count"`
 	IsActive    bool               `json:"is_active"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceSuperuserAudit struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	ActorAgentID  pgtype.UUID        `json:"actor_agent_id"`
+	ActorTaskID   pgtype.UUID        `json:"actor_task_id"`
+	TargetUserID  pgtype.UUID        `json:"target_user_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Action        string             `json:"action"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceSuperuserGrant struct {
+	MemberID    pgtype.UUID        `json:"member_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	GrantedAt   pgtype.Timestamptz `json:"granted_at"`
+}
+
+type WorkspaceSuperuserPolicy struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EnabledAt   pgtype.Timestamptz `json:"enabled_at"`
+	EnabledBy   pgtype.UUID        `json:"enabled_by"`
 }

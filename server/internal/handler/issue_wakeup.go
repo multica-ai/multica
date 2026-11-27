@@ -68,7 +68,7 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 		agentID = uuidToString(id)
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, 500, "failed to resolve agent access")
 		return
@@ -142,8 +142,7 @@ func (h *Handler) ListIssueWakeups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, 500, "failed to resolve agent access")
 		return
@@ -169,8 +168,7 @@ func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, 500, "failed to resolve agent access")
 		return

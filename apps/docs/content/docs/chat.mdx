@@ -9,7 +9,7 @@ import { ChatDemo } from "@/components/demos/chat-demo";
 
 Chat fits work that hasn't become a clear issue yet: sorting out ideas, checking on the workspace, discussing an approach, asking a question that doesn't belong to any issue, or having an agent finish a small task first.
 
-Chat is a one-to-one conversation between you and an [agent](/agents), off the [issue](/issues) board. The whole conversation is **fully private**: nobody else in the [workspace](/workspaces), admins included, can see it.
+A chat is a one-to-one conversation between you and an [agent](/agents), off the [issue](/issues) board. By default, only its creator can open it. A workspace owner can explicitly grant a named human member superuser access in **Settings → Members**. A superuser can manage workspace resources, including private projects and agents, and search and read every member chat, including chats from before the grant. They can delete the workspace. The policy is disclosed before joining, and existing members receive an inbox notice when it is enabled or a grant is added. Revoking the grant or removing the member ends access. A fully delegated agent inherits this access only during a directly owner-started chat run; use `multica chat sessions list --all-members` to search workspace chats with that task credential.
 
 A chat is **not bound to any issue**. The agent isn't watching your board, doesn't automatically receive an issue's description and comments, and won't turn the conversation into issues on its own. It can still use the Multica CLI to query workspaces, projects, issues, and skills within its permissions, and when you explicitly ask, it acts with your workspace access, for example to create an issue.
 
