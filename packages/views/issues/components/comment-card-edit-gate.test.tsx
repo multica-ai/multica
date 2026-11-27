@@ -6,11 +6,15 @@ import type { Attachment, TimelineEntry } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
+import { COMMENT_PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
 
 const apiUploadFile = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
+}));
+const editorPasteAsFile = vi.hoisted(() => ({
+  values: [] as Array<number | undefined>,
 }));
 
 // The real handle mints an id when it inserts the placeholder and hands it to
@@ -79,6 +83,7 @@ vi.mock("../../editor", async () => ({
       defaultValue,
       onUpdate,
       onUploadFile,
+      pasteAsFileThreshold,
       onUploadingChange,
       onSubmit,
       placeholder,
@@ -87,6 +92,7 @@ vi.mock("../../editor", async () => ({
       defaultValue?: string;
       onUpdate?: (markdown: string) => void;
       onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
+      pasteAsFileThreshold?: number;
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
       placeholder?: string;
@@ -95,6 +101,7 @@ vi.mock("../../editor", async () => ({
     ref: Ref<unknown>,
   ) {
     editorDefaultValues.values.push(defaultValue);
+    editorPasteAsFile.values.push(pasteAsFileThreshold);
     const valueRef = useRef(defaultValue ?? "");
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     // Mirrors the real editor's `uploading` node attrs — see the sibling
@@ -213,6 +220,7 @@ beforeEach(() => {
   apiUploadFile.mockReset();
   useCommentDraftStore.setState({ drafts: {} });
   editorDefaultValues.values = [];
+  editorPasteAsFile.values = [];
 });
 
 describe("comment edit — draft snapshot", () => {
@@ -230,6 +238,31 @@ describe("comment edit — draft snapshot", () => {
         .getDraft("edit:issue-1:comment-1"),
     ).toBe("test.de");
     expect(editorDefaultValues.values.at(-1)).toBe("Original body");
+  });
+});
+
+describe("comment edit — paste-as-file threshold", () => {
+  // A comment converts at the same point on the way in and on the way back
+  // out: the edit form must not inline what the composer turned into a file.
+  it("opts the top-level comment's edit form in at the comment threshold", async () => {
+    renderCard();
+    await startEditing();
+
+    expect(editorPasteAsFile.values.at(-1)).toBe(COMMENT_PASTE_AS_FILE_THRESHOLD);
+  });
+
+  it("opts a reply's edit form in at the same comment threshold", async () => {
+    const reply: TimelineEntry = { ...entry, id: "reply-1", parent_id: entry.id, content: "Reply body" };
+    renderCard(undefined, { replies: [reply] });
+    const rowMenu = document.querySelectorAll('button[aria-haspopup="menu"]');
+    const trigger = rowMenu[rowMenu.length - 1];
+    if (!trigger) throw new Error("Expected the reply's actions menu trigger");
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByText("Edit"));
+    await screen.findByTestId("editor");
+
+    expect(editorDefaultValues.values.at(-1)).toBe("Reply body");
+    expect(editorPasteAsFile.values.at(-1)).toBe(COMMENT_PASTE_AS_FILE_THRESHOLD);
   });
 });
 

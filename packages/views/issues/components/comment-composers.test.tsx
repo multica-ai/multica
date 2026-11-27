@@ -10,6 +10,7 @@ import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
+import { COMMENT_PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
 
@@ -45,6 +46,11 @@ const editorDefaultValues = vi.hoisted(() => ({
 // editor records it — that prop being absent is exactly the MUL-5588 bug.
 const editorQuickActionMenu = vi.hoisted(() => ({
   last: undefined as QuickActionMenuProp | undefined,
+}));
+// Paste-as-file is opted into per editor through a ContentEditor prop; the
+// mock records what each composer passes.
+const editorPasteAsFile = vi.hoisted(() => ({
+  last: undefined as number | undefined,
 }));
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
@@ -136,6 +142,7 @@ vi.mock("../../editor", async () => ({
       onUpdate,
       placeholder,
       onUploadFile,
+      pasteAsFileThreshold,
       onUploadingChange,
       onSubmit,
       onReady,
@@ -146,6 +153,7 @@ vi.mock("../../editor", async () => ({
       onUpdate?: (markdown: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
+      pasteAsFileThreshold?: number;
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
       onReady?: () => void;
@@ -155,6 +163,7 @@ vi.mock("../../editor", async () => ({
   ) {
     editorDefaultValues.values.push(defaultValue);
     editorQuickActionMenu.last = quickActionMenu;
+    editorPasteAsFile.last = pasteAsFileThreshold;
     editorUploadSignal.notify = onUploadingChange;
     const initialValue = value ?? defaultValue ?? "";
     const valueRef = useRef(initialValue);
@@ -338,6 +347,7 @@ beforeEach(() => {
   useCommentDraftStore.setState({ drafts: {} });
   editorDefaultValues.values = [];
   editorQuickActionMenu.last = undefined;
+  editorPasteAsFile.last = undefined;
   focusCalls.focused = 0;
   focusCalls.blurred = 0;
 });
@@ -1479,6 +1489,22 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
     await Promise.resolve();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("comment composers — paste-as-file threshold", () => {
+  it("opts the new-comment composer in at the comment threshold, not chat's", () => {
+    renderCommentInput();
+    activateComposer("comment-composer-shell");
+
+    expect(editorPasteAsFile.last).toBe(COMMENT_PASTE_AS_FILE_THRESHOLD);
+  });
+
+  it("opts the reply composer in at the same comment threshold", () => {
+    renderReplyInput();
+    activateComposer("reply-composer-shell");
+
+    expect(editorPasteAsFile.last).toBe(COMMENT_PASTE_AS_FILE_THRESHOLD);
   });
 });
 

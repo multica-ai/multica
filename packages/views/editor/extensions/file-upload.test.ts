@@ -14,6 +14,7 @@ import {
   pastedTextSource,
   PASTED_TEXT_FILENAME,
 } from "./file-upload";
+import { COMMENT_PASTE_AS_FILE_THRESHOLD, PASTE_AS_FILE_THRESHOLD } from "../paste-as-file";
 
 const BLOB_URL = "blob:test-image";
 const FINAL_URL = "https://cdn.example.com/photo.png";
@@ -486,6 +487,64 @@ describe("paste-as-file", () => {
     expect(editor.getMarkdown()).not.toContain("x".repeat(THRESHOLD + 1));
 
     upload.resolve(null);
+  });
+
+  // Issue comments opt in at their own, much higher threshold: a write-up
+  // well past chat's limit is still prose for the thread and stays inline,
+  // while a machine-sized paste becomes the attachment.
+  describe("at the comment threshold", () => {
+    function makeCommentEditor(handler: (file: File) => Promise<UploadResult | null>) {
+      const onUploadFileRef = { current: handler };
+      const thresholdRef = { current: COMMENT_PASTE_AS_FILE_THRESHOLD };
+      const element = document.createElement("div");
+      document.body.appendChild(element);
+      const editor = new Editor({
+        element,
+        extensions: createEditorExtensions({
+          onUploadFileRef: onUploadFileRef as React.RefObject<
+            ((file: File) => Promise<UploadResult | null>) | undefined
+          >,
+          pasteAsFileThresholdRef: thresholdRef as React.RefObject<number | undefined>,
+          disableMentions: true,
+        }),
+      });
+      editors.push(editor);
+      return editor;
+    }
+
+    it("keeps a paste past chat's threshold inline", () => {
+      const handler = vi.fn(async (_file: File) => null);
+      const editor = makeCommentEditor(handler);
+
+      paste(editor, { text: "x".repeat(PASTE_AS_FILE_THRESHOLD * 2) });
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(editor.getMarkdown()).toContain("x".repeat(PASTE_AS_FILE_THRESHOLD * 2));
+    });
+
+    it("keeps a paste of exactly the comment threshold inline", () => {
+      const handler = vi.fn(async (_file: File) => null);
+      const editor = makeCommentEditor(handler);
+
+      paste(editor, { text: "x".repeat(COMMENT_PASTE_AS_FILE_THRESHOLD) });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("converts a machine-sized paste into pasted-text.txt", async () => {
+      const upload = deferred<UploadResult | null>();
+      const handler = vi.fn((_file: File) => upload.promise);
+      const editor = makeCommentEditor(handler);
+      const dump = "x".repeat(COMMENT_PASTE_AS_FILE_THRESHOLD + 1);
+
+      expect(paste(editor, { text: dump })).toBe(true);
+
+      await vi.waitFor(() => expect(handler).toHaveBeenCalled());
+      expect(handler.mock.calls[0]![0].name).toBe(PASTED_TEXT_FILENAME);
+      expect(editor.getMarkdown()).not.toContain(dump);
+
+      upload.resolve(null);
+    });
   });
 
   it("keeps a long paste inline inside a code block", () => {

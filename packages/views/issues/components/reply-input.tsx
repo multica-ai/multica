@@ -7,6 +7,7 @@ import { useCallback, useRef, useState, useEffect, useImperativeHandle, useMemo,
 import { toast } from "sonner";
 import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
+import { COMMENT_PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -337,6 +338,7 @@ function ReplyInput({
             }}
             onSubmit={submit}
             onUploadFile={handleUpload}
+            pasteAsFileThreshold={COMMENT_PASTE_AS_FILE_THRESHOLD}
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
             currentIssueId={issueId}

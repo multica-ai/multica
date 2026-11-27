@@ -153,9 +153,9 @@ function UploadHost({
 /**
  * Paste-as-file recovery lives here, not in a composer test, because the hook
  * is the single responder for it: the upload outlives its mount, so no editor
- * can own the failure path. Only chat opts into paste-as-file today
- * (`pasteAsFileThreshold`), but the recovery contract is the hook's regardless
- * of which surface turns the feature on.
+ * can own the failure path. Chat and the issue comment editors opt into
+ * paste-as-file (`pasteAsFileThreshold`), each at its own threshold, but the
+ * recovery contract is the hook's regardless of which surface turns it on.
  */
 describe("useCoordinatedUploads paste-as-file recovery", () => {
   it("puts a failed paste's source text back into the persisted body after the mount dies", async () => {
