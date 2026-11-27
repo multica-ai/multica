@@ -590,7 +590,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "museapp":
 		return &museappBackend{cfg: cfg}, nil
 	case "zcode":
-		return &zcodeBackend{cfg: cfg}, nil
+		return newZcodeBackend(cfg), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
