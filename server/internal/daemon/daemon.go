@@ -9548,6 +9548,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
 
+	d.refreshInitiatorAuthor(ctx, task, env, taskLog)
+
 	// Authenticate the localhost repo-checkout endpoint with the same
 	// task-scoped token the child receives. The endpoint derives identity and
 	// branch ownership from this in-memory record instead of trusting request

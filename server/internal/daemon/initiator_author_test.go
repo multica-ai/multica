@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
 func TestRepoCheckoutUsesTrustedInitiatorAuthor(t *testing.T) {
@@ -77,5 +81,32 @@ func TestWorkspaceCommitAuthorIsInitiatorEnabled(t *testing.T) {
 				t.Fatal("unknown workspace enabled")
 			}
 		})
+	}
+}
+
+type refreshingRepoCache struct {
+	recordingRepoCache
+	workDir string
+	params  repocache.WorktreeParams
+	calls   int
+}
+
+func (c *refreshingRepoCache) RefreshInitiatorAuthor(_ context.Context, workDir string, params repocache.WorktreeParams) error {
+	c.calls++
+	c.workDir, c.params = workDir, params
+	return nil
+}
+
+func TestRunStartRefreshesInitiatorAuthor(t *testing.T) {
+	cache := &refreshingRepoCache{}
+	d := &Daemon{repoCache: cache, workspaces: map[string]*workspaceState{"ws": newWorkspaceState("ws", nil, "", nil, json.RawMessage(`{"commit_author_is_initiator_enabled":true}`))}}
+	task := Task{WorkspaceID: "ws", InitiatorType: "member", InitiatorName: "Bob", InitiatorEmail: "bob@example.com"}
+	d.refreshInitiatorAuthor(context.Background(), task, &execenv.Environment{WorkDir: "/work/task"}, nil)
+	if cache.calls != 1 || cache.workDir != "/work/task" || !cache.params.CommitAuthorIsInitiatorEnabled || cache.params.InitiatorName != "Bob" || cache.params.InitiatorEmail != "bob@example.com" {
+		t.Fatalf("refresh = %d %q %+v", cache.calls, cache.workDir, cache.params)
+	}
+	d.refreshInitiatorAuthor(context.Background(), task, &execenv.Environment{WorkDir: "/user/dir", LocalDirectory: true}, nil)
+	if cache.calls != 1 {
+		t.Fatal("refreshed a user-owned local directory")
 	}
 }
