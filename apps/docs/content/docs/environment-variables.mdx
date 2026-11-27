@@ -65,6 +65,7 @@ The primary and replica connection limits are independent. Budget their sum acro
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
 | `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
 | `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
+| `NEXT_PUBLIC_BASE_PATH` | empty | URL path prefix for serving the web app under a sub-path, such as `/multica`. Read at build time: pass it as a build arg to `Dockerfile.web` and rebuild the image after changing it |
 
 <Callout type="warning">
 `MULTICA_DAEMON_SERVER_URL` is returned by the unauthenticated `/api/config` endpoint and is visible to clients. Treat it as public configuration; never put credentials, tokens, or other secrets in it.
