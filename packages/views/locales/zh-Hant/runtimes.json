@@ -70,12 +70,15 @@
       "offline": "離線"
     }
   },
-  "mika_setup": {
-    "title": "執行時已準備好，和 Mika 開始。",
-    "description": "讓 Mika 幫你安排任務和協調 AI 代理。",
-    "action": "和 Mika 開始",
-    "failed": "無法啟動 Mika",
-    "dialog_title": "讓 Mika 在哪臺機器上執行？",
+  "agent_setup": {
+    "title": "建立你的 AI 代理",
+    "description": "一個只有你能用的私人 AI 代理，在你自己的電腦上執行。建好後直接開啟對話。",
+    "action": "建立 AI 代理",
+    "dialog_title": "建立你的 AI 代理",
+    "name_label": "AI 代理名稱",
+    "private_note": "只有你能用。之後可以在「AI 代理」裡分享給團隊。",
+    "create": "建立並開始對話",
+    "failed": "沒能建立你的 AI 代理",
     "cancel": "取消"
   },
   "machine": {

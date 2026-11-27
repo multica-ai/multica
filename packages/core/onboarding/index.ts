@@ -8,6 +8,7 @@ export type {
 } from "./types";
 export {
   saveQuestionnaire,
+  recordOnboardingStarted,
   completeOnboarding,
   joinCloudWaitlist,
 } from "./store";
@@ -32,3 +33,21 @@ export {
   memberNeedsMikaSetup,
   workspaceNeedsMika,
 } from "./mika";
+export {
+  createPersonalAgent,
+  findPersonalAgent,
+  uniqueAgentName,
+  type CreatePersonalAgentInput,
+} from "./personal-agent";
+export {
+  CODING_TOOL_IDS,
+  type CodingToolError,
+  type CodingToolErrorCode,
+  type CodingToolId,
+  type CodingToolPhase,
+  type CodingToolProbe,
+  type CodingToolRunEvent,
+  type CodingToolRunKind,
+  type CodingToolStartResult,
+  type CodingToolsBridge,
+} from "./coding-tools";

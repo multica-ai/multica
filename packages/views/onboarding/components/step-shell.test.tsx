@@ -70,7 +70,7 @@ describe("onboarding step shell", () => {
 
     const compact = container.querySelector("main .md\\:hidden")!;
     expect(compact).not.toBeNull();
-    expect(compact.textContent).toContain("Meet Mika");
+    expect(compact.textContent).toContain("Connect AI tools");
     expect(compact.querySelector("button")).not.toBeNull();
   });
 
@@ -108,20 +108,18 @@ describe("onboarding progress rail", () => {
   // only the steps already behind the member are reachable from the rail.
   it("links completed steps and leaves the current and later ones inert", async () => {
     const onStepChange = vi.fn();
-    renderShell({ currentStep: "workspace", onStepChange });
+    renderShell({ currentStep: "runtime", onStepChange });
 
-    const back = screen.getByRole("button", { name: /about you/i });
+    const back = screen.getByRole("button", { name: /^workspace/i });
     await userEvent.click(back);
-    expect(onStepChange).toHaveBeenCalledWith("about_you");
+    expect(onStepChange).toHaveBeenCalledWith("workspace");
 
-    expect(screen.queryByRole("button", { name: /meet mika/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^workspace/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /connect ai tools/i })).toBeNull();
   });
 
   it("is display-only when the flow supplies no step handler", () => {
     renderShell({ currentStep: "runtime" });
 
-    expect(screen.queryByRole("button", { name: /about you/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^workspace/i })).toBeNull();
   });
 
@@ -129,11 +127,11 @@ describe("onboarding progress rail", () => {
   // the rail jump away would abandon it mid-create.
   it("stops rail navigation while the step reports work in flight", () => {
     renderShell({
-      currentStep: "workspace",
+      currentStep: "runtime",
       onStepChange: vi.fn(),
       backDisabled: true,
     });
 
-    expect(screen.queryByRole("button", { name: /about you/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^workspace/i })).toBeNull();
   });
 });

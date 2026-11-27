@@ -70,12 +70,15 @@
       "offline": "Hors ligne"
     }
   },
-  "mika_setup": {
-    "title": "Votre runtime est prêt. Commencez avec Mika.",
-    "description": "Laissez Mika organiser les tâches et coordonner les agents.",
-    "action": "Commencer avec Mika",
-    "failed": "Impossible de démarrer Mika",
-    "dialog_title": "Où Mika doit-il s'exécuter ?",
+  "agent_setup": {
+    "title": "Créez votre agent",
+    "description": "Un agent privé réservé à votre usage, qui s'exécute sur l'un de vos ordinateurs. Une conversation s'ouvre dès qu'il est prêt.",
+    "action": "Créer l'agent",
+    "dialog_title": "Créez votre agent",
+    "name_label": "Nom de l'agent",
+    "private_note": "Réservé à votre usage. Vous pourrez le partager avec votre équipe plus tard dans Agents.",
+    "create": "Créer et commencer à discuter",
+    "failed": "Impossible de créer votre agent",
     "cancel": "Annuler"
   },
   "machine": {

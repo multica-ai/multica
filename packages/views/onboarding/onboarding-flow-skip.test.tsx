@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { ApiError } from "@multica/core/api";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enOnboarding from "../locales/en/onboarding.json";
@@ -16,13 +17,13 @@ const TEST_RESOURCES = {
   en: { common: enCommon, onboarding: enOnboarding, workspace: enWorkspace },
 };
 
-const { mockCreateIssue, mockCompleteOnboarding, mockToastError } = vi.hoisted(
-  () => ({
+const { mockCreateIssue, mockCompleteOnboarding, mockCreatePersonalAgent, mockToastError } =
+  vi.hoisted(() => ({
     mockCreateIssue: vi.fn(),
     mockCompleteOnboarding: vi.fn(),
+    mockCreatePersonalAgent: vi.fn(),
     mockToastError: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("sonner", () => ({ toast: { error: mockToastError } }));
 
@@ -44,7 +45,7 @@ vi.mock("@multica/core/api", async () => {
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     (selector: (s: { user: unknown }) => unknown) =>
-      selector({ user: { id: "u-1", onboarding_questionnaire: {} } }),
+      selector({ user: { id: "u-1", name: "Ada", onboarding_questionnaire: {} } }),
     { getState: () => ({ user: { id: "u-1" } }) },
   ),
 }));
@@ -60,7 +61,7 @@ vi.mock("@multica/core/onboarding", async () => {
   return {
     ...actual,
     completeOnboarding: (...args: unknown[]) => mockCompleteOnboarding(...args),
-    useBootstrapMika: () => ({ mutateAsync: vi.fn() }),
+    createPersonalAgent: (...args: unknown[]) => mockCreatePersonalAgent(...args),
   };
 });
 
@@ -74,15 +75,33 @@ vi.mock("./steps/step-workspace", () => ({
   ),
 }));
 
-vi.mock("./steps/step-runtime-connect", () => ({
-  StepRuntimeConnect: ({
-    onNext,
+vi.mock("./steps/step-agent-setup", () => ({
+  StepAgentSetup: ({
+    onSkip,
+    onCreate,
+    userName,
   }: {
-    onNext: (rt: null) => Promise<void>;
+    onSkip: () => Promise<void>;
+    onCreate: (request: unknown) => Promise<void>;
+    userName: string;
   }) => (
-    <button type="button" onClick={() => void onNext(null)}>
-      skip runtime
-    </button>
+    <>
+      <button type="button" onClick={() => void onSkip()}>
+        skip runtime
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onCreate({
+            runtime: { id: "rt-1" },
+            name: `${userName}'s assistant`,
+            description: "personal",
+          }).catch(() => undefined)
+        }
+      >
+        create agent
+      </button>
+    </>
   ),
 }));
 
@@ -91,16 +110,22 @@ import { OnboardingFlow } from "./onboarding-flow";
 function renderAtRuntimeStep() {
   const onComplete = vi.fn();
   render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <OnboardingFlow
-        mode="new_workspace"
-        onCancel={vi.fn()}
-        onComplete={onComplete}
-      />
-    </I18nProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <OnboardingFlow
+          mode="new_workspace"
+          onCancel={vi.fn()}
+          onComplete={onComplete}
+        />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: "create workspace" }));
-  return { onComplete, skip: screen.getByRole("button", { name: "skip runtime" }) };
+  return {
+    onComplete,
+    skip: screen.getByRole("button", { name: "skip runtime" }),
+    create: screen.getByRole("button", { name: "create agent" }),
+  };
 }
 
 function duplicateGuideConflict(body?: unknown) {
@@ -114,7 +139,7 @@ function duplicateGuideConflict(body?: unknown) {
       issue: {
         id: "issue-existing",
         identifier: "NEW-1",
-        title: "Connect a runtime to start with Mika",
+        title: "Connect an AI coding tool and create your agent",
       },
     },
   );
@@ -124,6 +149,47 @@ beforeEach(() => {
   mockCreateIssue.mockReset();
   mockCompleteOnboarding.mockReset();
   mockToastError.mockReset();
+  mockCreatePersonalAgent.mockReset();
+});
+
+describe("OnboardingFlow — creating the personal agent", () => {
+  it("creates the agent in the new workspace, completes onboarding, then opens its chat", async () => {
+    mockCreatePersonalAgent.mockResolvedValueOnce({
+      agent: { id: "agent-1" },
+      chatSession: { id: "session-1" },
+    });
+    mockCompleteOnboarding.mockResolvedValueOnce(undefined);
+    const { onComplete, create } = renderAtRuntimeStep();
+
+    fireEvent.click(create);
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, { kind: "chat", sessionId: "session-1" });
+    });
+    expect(mockCreatePersonalAgent).toHaveBeenCalledWith({
+      workspaceSlug: "new-ws",
+      workspaceId: "ws-new",
+      queryClient: expect.any(QueryClient),
+      runtimeId: "rt-1",
+      name: "Ada's assistant",
+      description: "personal",
+    });
+    expect(mockCompleteOnboarding).toHaveBeenCalledWith("full", "ws-new");
+    expect(mockCreatePersonalAgent.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCompleteOnboarding.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not complete onboarding when the agent cannot be created", async () => {
+    mockCreatePersonalAgent.mockRejectedValueOnce(new Error("runtime offline"));
+    const { onComplete, create } = renderAtRuntimeStep();
+
+    fireEvent.click(create);
+
+    await waitFor(() => expect(mockCreatePersonalAgent).toHaveBeenCalledOnce());
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
 });
 
 describe("OnboardingFlow — skipping runtime setup", () => {
@@ -143,7 +209,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     const [body, workspaceSlug] = mockCreateIssue.mock.calls[0]!;
     expect(workspaceSlug).toBe("new-ws");
     expect(body).toMatchObject({
-      title: "Connect a runtime to start with Mika",
+      title: "Connect an AI coding tool and create your agent",
       status: "in_progress",
       assignee_type: "member",
       assignee_id: "u-1",

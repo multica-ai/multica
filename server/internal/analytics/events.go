@@ -442,10 +442,9 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // broadcast via analytics (PII risk + low cardinality ask).
 // OnboardingStarted fires from the server side the first time a user's
 // onboarding state transitions from untouched (no questionnaire payload
-// recorded) to any non-empty patch. Frontends emit their own
-// onboarding_started on first page open; the server emission is what
-// lights up the Prometheus counter so Grafana can be cross-checked
-// against the PostHog funnel without depending on the SDK roundtrip.
+// recorded) to any non-empty patch. Onboarding asks no questions, so the
+// flow writes an empty v2 questionnaire when a first-run user opens it;
+// that write is what lights up the Prometheus counter.
 //
 // platform is the X-Client-Platform header value at the time of the
 // first onboarding interaction, fed into the

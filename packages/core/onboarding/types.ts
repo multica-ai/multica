@@ -1,8 +1,4 @@
-export type OnboardingStep =
-  | "welcome"
-  | "about_you"
-  | "workspace"
-  | "runtime";
+export type OnboardingStep = "welcome" | "workspace" | "runtime";
 
 /**
  * Exit path from the onboarding flow. Sent to

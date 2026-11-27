@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Bot,
   Check,
   Cloud,
   Download,
@@ -23,16 +24,15 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
-  memberNeedsMikaSetup,
-  useBootstrapMika,
+  createPersonalAgent,
+  findPersonalAgent,
+  uniqueAgentName,
 } from "@multica/core/onboarding";
-import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
 import {
   useRequiredWorkspaceSlug,
   useWorkspacePaths,
 } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import {
   runtimeListOptions,
@@ -46,6 +46,7 @@ import {
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Input } from "@multica/ui/components/ui/input";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -64,9 +65,9 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
-  MikaRuntimeChoice,
-  type MikaRuntimeSelection,
-} from "./mika-runtime-choice";
+  AgentRuntimeChoice,
+  type AgentRuntimeSelection,
+} from "./agent-runtime-choice";
 import {
   CollectionCreateButton,
   CollectionNoMatches,
@@ -84,7 +85,6 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useRestoredScrollRef } from "../../platform/scroll-restoration";
-import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
 import { qoderOptions } from "@multica/core/runtimes/qoder";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
 import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
@@ -204,11 +204,14 @@ export function RuntimesPage({
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  // The Mika entrypoint is per member, not per workspace: the agent alone does
-  // not say whether *this* member's conversation was ever opened and kicked
-  // off. See memberNeedsMikaSetup.
-  const { data: chatSessions = [], isLoading: chatSessionsLoading } = useQuery(
-    chatSessionsOptions(wsId),
+
+  // The member's own agent runs on one of their own machines.
+  const ownRuntimes = useMemo(
+    () =>
+      runtimes.filter(
+        (runtime) => runtime.owner_id === currentUserId && runtime.provider !== "qoder_cloud",
+      ),
+    [runtimes, currentUserId],
   );
 
   const handleDaemonEvent = useCallback(() => {
@@ -545,16 +548,14 @@ export function RuntimesPage({
           />
           <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
             {!agentsLoading &&
-              !chatSessionsLoading &&
-              memberNeedsMikaSetup(agents, chatSessions) &&
-              runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
-                <MikaSetupCard
-                  workspaceId={wsId}
-                  runtimes={runtimes.filter(
-                    (runtime) => runtime.provider !== "qoder_cloud",
-                  )}
+              currentUserId &&
+              !findPersonalAgent(agents, currentUserId) &&
+              ownRuntimes.length > 0 && (
+                <PersonalAgentSetupCard
+                  runtimes={ownRuntimes}
                   runtimesLoading={runtimesLoading}
-                  currentUserId={currentUserId ?? null}
+                  currentUserId={currentUserId}
+                  takenNames={agents.map((agent) => agent.name)}
                 />
               )}
             {orphanProfileRuntimes.length > 0 && (
@@ -908,66 +909,76 @@ function RuntimeStatusCell({
   }
 }
 
+/** The coding tools onboarding sets up, picked first when one is online. */
+const PREFERRED_PROVIDERS = ["claude", "codex", "cursor"];
+
 /**
- * Entry point for creating Mika once a runtime exists.
+ * Entry point for creating the member's own agent once they have connected a
+ * computer — where the onboarding skip path sends them back to.
  *
- * The action opens a picker rather than provisioning straight away. It used to
- * take `runtimes.find(online) ?? runtimes[0]` and create Mika on it silently —
- * but one machine commonly exposes every agent CLI it has installed (nine, on
- * the box this was reported from), so "the first online one" is arbitrary and
- * could well be a CLI the member never intended to run their Chief of Staff
- * on. Onboarding already makes this an explicit choice; this is the same
- * decision reached from a different entry point, so it asks the same way and
- * reuses the same two controls.
+ * The action opens a picker rather than creating straight away: one machine
+ * commonly exposes every agent CLI it has installed, so "the first online
+ * one" would be an arbitrary choice of tool.
  */
-function MikaSetupCard({
-  workspaceId,
+function PersonalAgentSetupCard({
   runtimes,
   runtimesLoading,
   currentUserId,
+  takenNames,
 }: {
-  workspaceId: string;
   runtimes: AgentRuntime[];
   runtimesLoading?: boolean;
-  currentUserId: string | null;
+  currentUserId: string;
+  takenNames: string[];
 }) {
-  const { t, i18n } = useT("runtimes");
+  const { t } = useT("runtimes");
+  const { t: tOnboarding } = useT("onboarding");
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const wsSlug = useRequiredWorkspaceSlug();
-  const bootstrapMika = useBootstrapMika(workspaceId);
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+  const userName = useAuthStore((state) => state.user?.name) ?? "";
 
   const [open, setOpen] = useState(false);
-  // Seeded with the old heuristic so the dialog opens on a sensible default;
-  // the point is that it is now visible and changeable, not that it is unset.
+  const [creating, setCreating] = useState(false);
+  const online = runtimes.filter((runtime) => runtime.status === "online");
   const defaultRuntimeId =
-    runtimes.find((runtime) => runtime.status === "online")?.id ??
+    PREFERRED_PROVIDERS.map((provider) => online.find((runtime) => runtime.provider === provider))
+      .find(Boolean)?.id ??
+    online[0]?.id ??
     runtimes[0]?.id ??
     "";
-  const [choice, setChoice] = useState<MikaRuntimeSelection | null>(null);
-
-  const value: MikaRuntimeSelection = choice ?? {
-    runtimeId: defaultRuntimeId,
-    model: "",
-  };
+  const [choice, setChoice] = useState<AgentRuntimeSelection | null>(null);
+  const value: AgentRuntimeSelection = choice ?? { runtimeId: defaultRuntimeId, model: "" };
   const runtimeId = value.runtimeId;
 
-  const handleStart = async () => {
-    if (!runtimeId || bootstrapMika.isPending) return;
-    const lang = pickContentLang(i18n.language);
+  const defaultName = uniqueAgentName(
+    tOnboarding(($) => $.step_agent.agent_default_name, { name: userName }),
+    takenNames,
+  );
+  const [name, setName] = useState<string | null>(null);
+  const agentName = (name ?? defaultName).trim();
+
+  const handleCreate = async () => {
+    if (!runtimeId || !agentName || creating) return;
+    setCreating(true);
     try {
-      const result = await bootstrapMika.mutateAsync({
+      const { chatSession } = await createPersonalAgent({
         workspaceSlug: wsSlug,
+        workspaceId: wsId,
+        queryClient: qc,
         runtimeId,
+        name: agentName,
+        description: tOnboarding(($) => $.step_agent.agent_description, { name: userName }),
         model: value.model || undefined,
-        ...getMikaOnboarding(lang),
       });
       setOpen(false);
-      navigation.push(paths.chatSession(result.chatSession.id));
+      navigation.push(paths.chatSession(chatSession.id));
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t(($) => $.mika_setup.failed),
-      );
+      toast.error(error instanceof Error ? error.message : t(($) => $.agent_setup.failed));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -975,56 +986,54 @@ function MikaSetupCard({
     <>
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
         <span
-          role="img"
-          aria-label={t(($) => $.mika_setup.title)}
-          className="flex size-10 shrink-0 select-none items-center justify-center rounded-full bg-muted text-title-lg leading-none"
+          aria-hidden
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
         >
-          {MIKA_PLACEHOLDER_EMOJI}
+          <Bot className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-body font-semibold">
-            {t(($) => $.mika_setup.title)}
-          </h2>
+          <h2 className="text-body font-semibold">{t(($) => $.agent_setup.title)}</h2>
           <p className="mt-1 text-body leading-relaxed text-muted-foreground">
-            {t(($) => $.mika_setup.description)}
+            {t(($) => $.agent_setup.description)}
           </p>
         </div>
         <Button className="shrink-0" onClick={() => setOpen(true)}>
-          {t(($) => $.mika_setup.action)}
+          {t(($) => $.agent_setup.action)}
         </Button>
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>{t(($) => $.mika_setup.dialog_title)}</DialogTitle>
+            <DialogTitle>{t(($) => $.agent_setup.dialog_title)}</DialogTitle>
           </DialogHeader>
 
-          <MikaRuntimeChoice
-            runtimes={runtimes}
-            runtimesLoading={runtimesLoading}
-            currentUserId={currentUserId}
-            value={value}
-            onChange={setChoice}
-            disabled={bootstrapMika.isPending}
-          />
+          <div className="flex min-w-0 flex-col gap-3">
+            <Input
+              aria-label={t(($) => $.agent_setup.name_label)}
+              value={name ?? defaultName}
+              maxLength={100}
+              onChange={(event) => setName(event.target.value)}
+              disabled={creating}
+            />
+            <AgentRuntimeChoice
+              runtimes={runtimes}
+              runtimesLoading={runtimesLoading}
+              currentUserId={currentUserId}
+              value={value}
+              onChange={setChoice}
+              disabled={creating}
+            />
+            <p className="text-caption text-muted-foreground">{t(($) => $.agent_setup.private_note)}</p>
+          </div>
 
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={bootstrapMika.isPending}
-            >
-              {t(($) => $.mika_setup.cancel)}
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={creating}>
+              {t(($) => $.agent_setup.cancel)}
             </Button>
-            <Button
-              onClick={handleStart}
-              disabled={!runtimeId || bootstrapMika.isPending}
-            >
-              {bootstrapMika.isPending && (
-                <Loader2 aria-hidden className="size-4 animate-spin" />
-              )}
-              {t(($) => $.mika_setup.action)}
+            <Button onClick={handleCreate} disabled={!runtimeId || !agentName || creating}>
+              {creating && <Loader2 aria-hidden className="size-4 animate-spin" />}
+              {t(($) => $.agent_setup.create)}
             </Button>
           </DialogFooter>
         </DialogContent>

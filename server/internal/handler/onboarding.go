@@ -197,7 +197,8 @@ func (q questionnaireAnswers) useCaseResolved() bool {
 // future v3 row can't be silently mis-counted against v2 semantics.
 const questionnaireSchemaVersion = 2
 
-// complete covers the IN-FLOW questionnaire only: role + use_case.
+// complete covers role + use_case. Onboarding stopped asking them, so
+// only users who answered in earlier versions resolve this.
 // Source moved out of the onboarding flow (MUL-5159) — it is collected
 // later by the workspace backfill prompt, and its resolution is
 // tracked by the separate `onboarding_source_submitted` emission in
@@ -265,9 +266,8 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Server-side onboarding_started: fire on the first PATCH that
-	// actually carries a questionnaire payload. The frontend also
-	// emits its own onboarding_started on page open; the two together
-	// let Grafana cross-check the funnel against PostHog.
+	// actually carries a questionnaire payload. The onboarding flow
+	// sends an empty v2 questionnaire when a first-run user opens it.
 	if firstTouch && req.Questionnaire != nil && len(*req.Questionnaire) > 0 && string(*req.Questionnaire) != "{}" {
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingStarted(userID, platform))

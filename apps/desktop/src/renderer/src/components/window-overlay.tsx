@@ -10,6 +10,7 @@ import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore, type WindowOverlay as WindowOverlayData } from "@/stores/window-overlay-store";
 import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
+import { useDesktopRuntimeContext } from "./use-desktop-runtime-context";
 
 const OVERLAY_ENTER_DURATION = 0.18;
 const OVERLAY_EXIT_DURATION = 0.16;
@@ -67,6 +68,7 @@ function WindowOverlayInner({
   // Live local-daemon signal for the onboarding runtime step so it doesn't
   // flash "no runtime found" while the daemon is still probing CLI versions.
   const runtimesPending = useLocalRuntimesPending();
+  const { localDaemonId } = useDesktopRuntimeContext();
 
   // Back is only meaningful when there's somewhere to go — i.e. the user
   // has at least one workspace. Zero-workspace users can only Log out or
@@ -80,6 +82,7 @@ function WindowOverlayInner({
   const restartDaemon = async () => {
     await window.daemonAPI?.restart?.();
   };
+  const codingTools = window.desktopAPI?.codingTools;
 
   return (
     <motion.div
@@ -98,14 +101,16 @@ function WindowOverlayInner({
       )}
     >
       {/* Creating a workspace is the onboarding flow entered at the
-          workspace step: a second workspace still needs its own runtime and
-          its own Mika, so running one flow keeps the two from drifting. */}
+          workspace step: a second workspace still needs its own agent, so
+          running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
         <OnboardingFlow
           mode="new_workspace"
           onCancel={onBack}
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          codingTools={codingTools}
+          localDaemonId={localDaemonId}
           onComplete={(ws, destination) => {
             close();
             if (ws && destination?.kind === "chat") {
@@ -122,6 +127,10 @@ function WindowOverlayInner({
         <InvitationsPage
           invitationId={overlay.invitationId}
           onBack={onBack}
+          codingTools={codingTools}
+          localDaemonId={localDaemonId}
+          onRuntimeRefresh={restartDaemon}
+          runtimesPending={runtimesPending}
         />
       )}
       {overlay.type === "onboarding" && (
@@ -142,9 +151,11 @@ function WindowOverlayInner({
               push(paths.root());
             }
           }}
-          // Restart the bundled daemon when the user hits Refresh on
+          // Restart the bundled daemon so a newly installed tool registers.
           onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
+          codingTools={codingTools}
+          localDaemonId={localDaemonId}
         />
       )}
     </motion.div>

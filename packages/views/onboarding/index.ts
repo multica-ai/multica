@@ -6,3 +6,4 @@ export {
 export { CliInstallInstructions } from "./steps/cli-install-instructions";
 export { CloudWaitlistExpand } from "./components/cloud-waitlist-expand";
 export { SourceBackfillModal } from "./source-backfill-modal";
+export { JoinedAgentSetup } from "./joined-agent-setup";

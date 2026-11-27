@@ -1,16 +1,16 @@
 /**
- * Skip path: "Connect a runtime to start with Mika".
+ * Skip path: "Connect an AI coding tool and create your agent".
  *
  * Written to a new issue (assigned to the user themselves) by OnboardingFlow
- * when the user takes the Skip exit on Step 3, which then opens it. Content
- * is the install-runtime tutorial; each supported locale can recommend the
- * quickest runtime path that best fits that audience.
+ * when the user takes the Skip exit on Step 3, which then opens it. Desktop
+ * installs the tool itself, so the guide leads with that and keeps the
+ * terminal route as the fallback.
  */
 
 /**
  * Localized so users see the title in their current supported locale on the
- * board. The Runtimes page owns the follow-up Mika bootstrap once a runtime
- * appears, so this guide does not ask the member to copy an agent prompt.
+ * board. Once a tool is connected, the Runtimes page offers to create the
+ * member's agent, so this guide ends there.
  *
  * Note: server's deprecation shim (`onboarding_shim.go:noRuntimeIssueTitle`)
  * still uses the bare English string for its title-based dedupe — that
@@ -18,180 +18,130 @@
  * the v3 frontend population, so the two title-spaces drifting is fine.
  */
 export const INSTALL_RUNTIME_ISSUE_TITLE = {
-  en: "Connect a runtime to start with Mika",
-  zh: "连接运行时，和 Mika 开始",
-  ko: "runtime을 연결하고 Mika와 시작하기",
-  ja: "runtime を接続して Mika と始める",
+  en: "Connect an AI coding tool and create your agent",
+  zh: "连接 AI 编程工具，创建你的智能体",
+  ko: "AI 코딩 도구를 연결하고 나만의 에이전트 만들기",
+  ja: "AI コーディングツールを接続して、自分のエージェントを作る",
 } as const;
 
 const en = `Welcome to Multica.
 
-Agents need a runtime before they can execute work. You can still use Multica as a lightweight project-management workspace while you install one.
+Your agent works through an AI coding tool on your computer — Claude Code, Codex, or Cursor CLI. Connect any one of them and you can create your personal agent.
 
-## Try Multica first
+## The quickest way: Multica Desktop
 
-Before the runtime is ready, you can:
+1. Open Multica Desktop (on the web, Multica offers the download).
+2. Pick a tool. Multica installs it and signs you in — no terminal needed.
+3. Confirm the name, create your agent, and start chatting.
 
-1. Create a project for your current work.
-2. Create a few issues and move them across backlog, todo, in_progress, and done.
-3. Add priorities, labels, comments, and subscriptions.
-4. Use Inbox to track assignments and mentions.
+Download: https://multica.ai/download
 
-That gives you the project-management layer first. Once a runtime is connected, agents can start working from the same issues.
+## Prefer the terminal?
 
-## Install your first agent runtime
+Install one tool, sign in, then connect this computer:
+
+- Claude Code: \`curl -fsSL https://claude.ai/install.sh | bash\`, then \`claude\`
+- Codex: \`npm i -g @openai/codex\` (or \`brew install codex\`), then \`codex login\`
+- Cursor CLI: \`curl https://cursor.com/install -fsS | bash\`, then \`cursor-agent login\`
+
+Then open Runtimes → Connect a computer and run the commands it shows. A running daemon picks up newly installed tools within a few minutes; \`multica daemon restart\` applies it right away.
 
 Full guide: https://multica.ai/docs/install-agent-runtime
 
-For English users, the fastest first path is Codex:
+## When it's connected
 
-1. Make sure Node.js is installed.
-2. Install Codex:
-   npm i -g @openai/codex
-3. Sign in:
-   codex
-4. Confirm your terminal can find it:
-   which codex
-   codex --version
-5. Wait for Multica to pick it up. A running daemon re-checks for newly
-   installed CLIs every couple of minutes, so no restart is normally needed.
-   To apply it immediately:
-   multica daemon restart
-   In the desktop app, open any local runtime and click Restart. Quitting and
-   reopening the app is NOT enough — the daemon keeps running in the background.
-6. Return to Runtimes and refresh. You should see a Codex runtime online.
-7. Open Runtimes. The page will offer **Start with Mika**; use it to create Mika and open the guided first chat.
+Open Runtimes. The page offers **Create your agent** — it makes a private agent only you can use and opens a chat with it.
 
-Codex reference: https://developers.openai.com/codex/cli
-
-Mika will turn one real goal into an issue, start it with the right agent, and suggest reusable specialists when your workflow needs them.`;
+In the meantime you can already use Multica to track work: create a project, add a few issues, and move them across the board.`;
 
 const zh = `欢迎来到 Multica。
 
-智能体需要先连上运行时才能执行工作。运行时还没准备好时,你也可以先把 Multica 当作轻量项目管理工具体验起来。
+智能体要用你电脑上的 AI 编程工具干活：Claude Code、Codex 或 Cursor CLI。装好任意一个，就能创建你的个人智能体。
 
-## 先体验项目管理功能
+## 最快的方式：Multica 桌面端
 
-运行时安装前,你可以先做这些事:
+1. 打开 Multica 桌面端（网页端会提示你下载）。
+2. 选一个工具，Multica 帮你装好并登录，不用打开终端。
+3. 确认名字，创建智能体，开始对话。
 
-1. 为当前工作创建一个项目。
-2. 新建几个任务,并在 backlog、todo、in_progress、done 之间流转。
-3. 给任务加优先级、标签、评论和订阅。
-4. 用收件箱追踪分配给你的事项和 @mention。
+下载：https://multica.ai/download
 
-这样你先熟悉项目管理层。连上运行时后,智能体会直接在这些任务上开始工作。
+## 想用终端？
 
-## 安装第一个 Agent 运行时
+装好一个工具并登录，再把这台电脑连上来：
 
-完整文档:https://multica.ai/docs/install-agent-runtime
+- Claude Code：\`curl -fsSL https://claude.ai/install.sh | bash\`，然后运行 \`claude\`
+- Codex：\`npm i -g @openai/codex\`（或 \`brew install codex\`），然后运行 \`codex login\`
+- Cursor CLI：\`curl https://cursor.com/install -fsS | bash\`，然后运行 \`cursor-agent login\`
 
-中文用户建议先装 Kimi Code CLI（旧版 Kimi CLI 已停止维护）。
+然后打开「运行时」→「连接电脑」，按页面上的命令执行。运行中的守护进程几分钟内会识别新装的工具；想立刻生效可以运行 \`multica daemon restart\`。
 
-Windows 用户请先安装 [Git for Windows](https://gitforwindows.org/)，Kimi Code CLI 需要其中的 Git Bash。若 Git Bash 安装在非标准路径，请将 KIMI_SHELL_PATH 设为 bash.exe 的绝对路径。
+完整文档：https://multica.ai/docs/install-agent-runtime
 
-1. 安装 Kimi Code CLI：
-   Linux / macOS：
-   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-   Windows PowerShell：
-   irm https://code.kimi.com/kimi-code/install.ps1 | iex
-2. 重新打开终端，让安装时修改的 PATH 生效，再确认能找到 Kimi：
-   kimi --version
-3. 在你想让 Kimi 工作的项目目录里启动一次:
-   kimi
-4. 首次启动后输入 /login，按提示完成 Kimi Code 或 API key 配置。
-5. 等 Multica 识别到它。运行中的守护进程每隔几分钟会重新检查一次新装的 CLI，通常不需要重启。
-   想立刻生效:
-   multica daemon restart
-   桌面端请打开任意一个本机 runtime 并点 Restart。退出再打开 app 是不够的 —— 守护进程会继续在后台运行。
-6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。
-7. 打开"运行时"页面。页面会显示 **和 Mika 开始**；点击后会创建 Mika，并进入引导式的首次对话。
+## 连上之后
 
-Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
+打开「运行时」页面，点 **创建你的智能体**：它会建一个只有你能用的私有智能体，并打开和它的对话。
 
-Mika 会把一个真实目标转化为任务，交给合适的智能体启动执行，并在工作流需要时建议添加可复用的 specialist。`;
+在这之前，你也可以先用 Multica 管理工作：建一个项目，加几个任务，在看板上流转。`;
 
 const ko = `Multica에 오신 것을 환영합니다.
 
-agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Multica를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
+에이전트는 내 컴퓨터의 AI 코딩 도구(Claude Code, Codex, Cursor CLI)로 일합니다. 이 중 하나만 연결하면 나만의 에이전트를 만들 수 있습니다.
 
-## 먼저 Multica를 사용해 보기
+## 가장 빠른 방법: Multica 데스크톱
 
-runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
+1. Multica 데스크톱을 엽니다(웹에서는 다운로드를 안내합니다).
+2. 도구를 하나 고릅니다. Multica가 설치하고 로그인까지 해 줍니다. 터미널은 필요 없습니다.
+3. 이름을 확인하고 에이전트를 만든 뒤 대화를 시작합니다.
 
-1. 현재 작업을 위한 project를 만듭니다.
-2. 태스크 몇 개를 만들고 backlog, todo, in_progress, done 사이에서 이동해 봅니다.
-3. priority, label, comment, subscription을 추가합니다.
-4. Inbox에서 나에게 배정된 작업과 mention을 확인합니다.
+다운로드: https://multica.ai/download
 
-이렇게 프로젝트 관리 계층을 먼저 익힐 수 있습니다. runtime이 연결되면 agent가 같은 태스크에서 바로 작업을 시작합니다.
+## 터미널이 편하다면
 
-## 첫 agent runtime 설치하기
+도구 하나를 설치하고 로그인한 다음 이 컴퓨터를 연결합니다:
+
+- Claude Code: \`curl -fsSL https://claude.ai/install.sh | bash\` 후 \`claude\`
+- Codex: \`npm i -g @openai/codex\`(또는 \`brew install codex\`) 후 \`codex login\`
+- Cursor CLI: \`curl https://cursor.com/install -fsS | bash\` 후 \`cursor-agent login\`
+
+그다음 Runtimes → 컴퓨터 연결을 열고 안내된 명령을 실행합니다. 실행 중인 daemon은 몇 분 안에 새로 설치된 도구를 인식합니다. 바로 적용하려면 \`multica daemon restart\`를 실행하세요.
 
 전체 가이드: https://multica.ai/docs/install-agent-runtime
 
-한국어 사용자는 Codex로 시작하는 것이 가장 빠릅니다:
+## 연결된 다음에는
 
-1. Node.js가 설치되어 있는지 확인합니다.
-2. Codex를 설치합니다:
-   npm i -g @openai/codex
-3. 로그인합니다:
-   codex
-4. 터미널에서 찾을 수 있는지 확인합니다:
-   which codex
-   codex --version
-5. Multica가 인식할 때까지 기다립니다. 실행 중인 daemon은 몇 분마다 새로 설치된 CLI를
-   다시 확인하므로 보통 재시작이 필요하지 않습니다.
-   바로 적용하려면:
-   multica daemon restart
-   데스크톱 앱에서는 아무 로컬 runtime을 열고 Restart를 누르세요. 앱을 종료하고 다시 여는
-   것만으로는 충분하지 않습니다 — daemon은 백그라운드에서 계속 실행됩니다.
-6. Runtimes로 돌아가 새로고침합니다. Codex runtime이 online으로 보여야 합니다.
-7. Runtimes를 엽니다. **Mika와 시작**을 눌러 Mika를 만들고 안내되는 첫 채팅을 시작합니다.
+Runtimes를 엽니다. **나만의 에이전트 만들기**를 누르면 나만 쓸 수 있는 비공개 에이전트가 만들어지고 대화가 열립니다.
 
-Codex 참고 문서: https://developers.openai.com/codex/cli
-
-Mika가 실제 목표 하나를 태스크로 만들고 적합한 에이전트와 실행을 시작하며, 워크플로에 필요할 때 재사용 가능한 specialist를 제안합니다.`;
+그동안에도 Multica로 일을 관리할 수 있습니다. 프로젝트를 만들고 태스크 몇 개를 추가해 보드에서 옮겨 보세요.`;
 
 const ja = `Multica へようこそ。
 
-agent が作業を実行するには、まず runtime が必要です。runtime をインストールしている間も、Multica を軽量なプロジェクト管理ワークスペースとして先に使うことができます。
+エージェントは、あなたのコンピューター上の AI コーディングツール(Claude Code、Codex、Cursor CLI)で作業します。どれか 1 つを接続すれば、自分専用のエージェントを作れます。
 
-## まず Multica を使ってみる
+## いちばん早い方法: Multica デスクトップ
 
-runtime が準備できる前に、次のことを試せます:
+1. Multica デスクトップを開きます(Web ではダウンロードを案内します)。
+2. ツールを 1 つ選びます。インストールとサインインは Multica が行うので、ターミナルは不要です。
+3. 名前を確認してエージェントを作成し、チャットを始めます。
 
-1. いまの仕事のための project を作る。
-2. タスクをいくつか作り、backlog、todo、in_progress、done の間で動かしてみる。
-3. priority、label、comment、subscription を追加する。
-4. Inbox で自分への割り当てや mention を確認する。
+ダウンロード: https://multica.ai/download
 
-これでまずプロジェクト管理のレイヤーに慣れることができます。runtime を接続すると、agent が同じタスクから作業を始められます。
+## ターミナルを使う場合
 
-## 最初の agent runtime をインストールする
+ツールを 1 つインストールしてサインインし、このコンピューターを接続します:
+
+- Claude Code: \`curl -fsSL https://claude.ai/install.sh | bash\` の後に \`claude\`
+- Codex: \`npm i -g @openai/codex\`(または \`brew install codex\`)の後に \`codex login\`
+- Cursor CLI: \`curl https://cursor.com/install -fsS | bash\` の後に \`cursor-agent login\`
+
+次に Runtimes → コンピューターを接続 を開き、表示されたコマンドを実行します。動作中の daemon は数分以内に新しいツールを認識します。すぐに反映するには \`multica daemon restart\` を実行してください。
 
 詳しいガイド: https://multica.ai/docs/install-agent-runtime
 
-日本語ユーザーには、Codex で始めるのが最も速い経路です:
+## 接続できたら
 
-1. Node.js がインストールされていることを確認します。
-2. Codex をインストールします:
-   npm i -g @openai/codex
-3. サインインします:
-   codex
-4. ターミナルから見つけられるか確認します:
-   which codex
-   codex --version
-5. Multica が認識するまで待ちます。動作中の daemon は数分ごとに新しくインストールされた
-   CLI を再チェックするため、通常は再起動は不要です。
-   すぐに反映したい場合:
-   multica daemon restart
-   デスクトップアプリではローカル runtime を開いて Restart を押してください。アプリを終了して
-   開き直すだけでは不十分です — daemon はバックグラウンドで動き続けます。
-6. Runtimes に戻って再読み込みします。Codex runtime が online と表示されるはずです。
-7. Runtimes を開き、**Mika と始める**を選びます。Mika が作成され、案内付きの最初のチャットが開きます。
+Runtimes を開き、**自分のエージェントを作る** を選びます。自分だけが使える非公開のエージェントが作成され、チャットが開きます。
 
-Codex のリファレンス: https://developers.openai.com/codex/cli
-
-Mika は実際の目標を 1 つのタスクにし、適切なエージェントで実行を開始し、ワークフローに必要なときは再利用可能な specialist を提案します。`;
+それまでの間も、Multica で仕事を管理できます。プロジェクトを作り、タスクをいくつか追加してボード上で動かしてみてください。`;
 
 export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;

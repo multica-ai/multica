@@ -14,6 +14,13 @@ import type {
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
+  CodingToolId,
+  CodingToolProbe,
+  CodingToolRunEvent,
+  CodingToolRunKind,
+  CodingToolStartResult,
+} from "../shared/coding-tools";
+import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
@@ -144,6 +151,18 @@ interface DesktopAPI {
   openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
+  /** Install and sign in to AI coding tools from onboarding. */
+  codingTools: {
+    /** Which tools this machine has, their versions and whether they are signed in. */
+    probe: () => Promise<CodingToolProbe[]>;
+    /** Start an install (download → install → sign in → test run) or a sign-in run. */
+    start: (toolId: CodingToolId, kind: CodingToolRunKind) => Promise<CodingToolStartResult>;
+    /** Hand the code a browser sign-in page showed to the waiting CLI. */
+    submitCode: (runId: string, code: string) => Promise<boolean>;
+    cancel: (runId: string) => Promise<void>;
+    /** Progress of every run. Returns an unsubscribe function. */
+    onEvent: (callback: (event: CodingToolRunEvent) => void) => () => void;
+  };
   /** On-device voice input: speech models and transcription in main. */
   voice: {
     listModels: () => Promise<VoiceModelsSnapshot>;
