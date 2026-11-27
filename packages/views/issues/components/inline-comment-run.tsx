@@ -2,17 +2,14 @@
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
-import { issueTimelineOptions } from "@multica/core/issues/queries";
-import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 import { dispatchReasonCode } from "@multica/core/api";
-import type { AgentTask, TimelineEntry } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -33,6 +30,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { useDeliveredSteersForTask, type DeliveredSteer } from "./issue-run-lookup-context";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
@@ -131,7 +129,7 @@ function RunStopControl({ task }: { task: AgentTask }) {
   </>;
 }
 
-export function InlineCommentRun({ run, className, viewState, showIdentity = false, presentation = "inline", replyTo, replacesFailureNotice = false }: {
+interface InlineCommentRunProps {
   run: CommentRun;
   className?: string;
   viewState?: InlineCommentRunState;
@@ -141,7 +139,88 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   replyTo?: ReactNode;
   /** The run's reply is only its failure notice, which this block stands in for. */
   replacesFailureNotice?: boolean;
+}
+
+export function InlineCommentRun(props: InlineCommentRunProps) {
+  if (props.presentation === "header" && showCommentRunInHeader(props.run)) {
+    return <HeaderCommentRun run={props.run} viewState={props.viewState} />;
+  }
+  return <InlineCommentRunBody {...props} />;
+}
+
+/**
+ * Header-only log trigger for a replied run. Avoids mounting timeline/message
+ * queries, step builders, and motion/mutation hooks until the reader opens
+ * the full transcript dialog.
+ */
+function HeaderCommentRun({ run, viewState }: { run: CommentRun; viewState?: InlineCommentRunState }) {
+  const { task } = run;
+  const { t } = useT("issues");
+  const [localFullLogOpen, setLocalFullLogOpen] = useState(false);
+  const [localLogFromKeyboard, setLocalLogFromKeyboard] = useState(false);
+  const fullLogOpen = viewState ? viewState.fullLogOpen : localFullLogOpen;
+  const setFullLogOpen = viewState ? viewState.setFullLogOpen : setLocalFullLogOpen;
+  const logFromKeyboard = viewState ? viewState.logFromKeyboard : localLogFromKeyboard;
+  const openFullLog = viewState
+    ? viewState.openFullLog
+    : (event: React.MouseEvent<HTMLElement>) => {
+        setLocalLogFromKeyboard(event.detail === 0);
+        setLocalFullLogOpen(true);
+      };
+
+  return (
+    <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
+      <Tooltip>
+        <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
+          className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+          aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
+          onClick={openFullLog}>
+          <ScrollText aria-hidden className="size-3.5" />
+        </Button>} />
+        <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
+      </Tooltip>
+      {fullLogOpen && (
+        <HeaderTranscriptDialog
+          task={task}
+          logFromKeyboard={logFromKeyboard}
+          onOpenChange={setFullLogOpen}
+        />
+      )}
+    </span>
+  );
+}
+
+function HeaderTranscriptDialog({ task, logFromKeyboard, onOpenChange }: {
+  task: AgentTask;
+  logFromKeyboard: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useT("issues");
+  const { getActorName } = useActorName();
+  const active = isActiveCommentRun(task);
+  const name = getActorName("agent", task.agent_id);
+  const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, true);
+  const items = useMemo(() => buildTimeline(data ?? []), [data]);
+  return (
+    <AgentTranscriptDialog
+      open
+      onOpenChange={onOpenChange}
+      task={task}
+      items={items}
+      agentName={name}
+      isLive={active}
+      finalFocus={logFromKeyboard}
+      contentState={
+        isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
+          : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
+            <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
+          </div> : undefined
+      }
+    />
+  );
+}
+
+function InlineCommentRunBody({ run, className, viewState, showIdentity = false, presentation = "inline", replyTo, replacesFailureNotice = false }: InlineCommentRunProps) {
   const { task, hasReply } = run;
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
@@ -177,11 +256,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
-  const { data: steers = NO_STEERS } = useQuery({
-    ...issueTimelineOptions(task.issue_id),
-    enabled: false,
-    select: (entries: TimelineEntry[]) => deliveredSteers(entries, task.id),
-  });
+  const steers = useDeliveredSteersForTask(task.id, task.issue_id);
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -316,28 +391,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
 }
 
 const PRE_RUN_STATUSES: AgentTask["status"][] = ["queued", "dispatched", "waiting_local_directory"];
-
-interface DeliveredSteer {
-  id: string;
-  actorType: string;
-  actorId: string;
-  content: string;
-  deliveredAt: string;
-}
-
-const NO_STEERS: DeliveredSteer[] = [];
-
-function deliveredSteers(entries: TimelineEntry[], taskId: string): DeliveredSteer[] {
-  const out: DeliveredSteer[] = [];
-  for (const entry of entries) {
-    if (entry.type !== "comment") continue;
-    const receipt = commentSupplementReceipts(entry)
-      .find((r) => r.task_id === taskId && r.status === "delivered" && r.delivered_at);
-    if (!receipt) continue;
-    out.push({ id: entry.id, actorType: entry.actor_type, actorId: entry.actor_id, content: entry.content ?? "", deliveredAt: receipt.delivered_at! });
-  }
-  return out.length ? out : NO_STEERS;
-}
 
 function rowStartedAt(row: TraceRow): number {
   const at = isGroupRow(row) ? row.steps[0]?.startedAt : row.startedAt;
