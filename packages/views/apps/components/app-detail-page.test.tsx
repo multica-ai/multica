@@ -1,18 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
+import { workspaceFeatureKeys } from "@multica/core/billing";
+import { toast } from "sonner";
+import enBilling from "../../locales/en/billing.json";
 import type { AppsOverview, MemberRole } from "@multica/core/types";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
 import { AppDetailPage } from "./app-detail-page";
 
-vi.mock("@multica/core/api", () => ({ ApiError: class ApiError extends Error {}, api: {
+vi.mock("@multica/core/api", async (importOriginal) => ({ ...(await importOriginal<object>()), api: {
   getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), listAgents: vi.fn(), updateAgentApps: vi.fn(),
   listAppActivity: vi.fn(), getIssue: vi.fn(), requestTeamApp: vi.fn(), dismissTeamAppRequests: vi.fn(),
-  connectApp: vi.fn(),
+  connectApp: vi.fn(), getWorkspaceFeatures: vi.fn(),
 } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -31,15 +35,17 @@ vi.mock("@multica/core/permissions", async (importOriginal) => ({
 }));
 vi.mock("@multica/core/auth", () => {
   const state = { user: { id: "me" } };
-  return { useAuthStore: (selector: (s: typeof state) => unknown) => selector(state) };
+  return { useAuthStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), { getState: () => state }) };
 });
 vi.mock("../../common/use-composio-available", () => ({ useComposioAvailable: () => true }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 
 let overview: AppsOverview;
+const clients: QueryClient[] = [];
 
 beforeEach(() => {
   viewer.role = "member";
+  vi.mocked(api.getWorkspaceFeatures).mockResolvedValue({ features: {} });
   overview = {
     catalog_mode: "all", can_manage: false, personal: [],
     team: [{ id: "t-notion", toolkit_slug: "notion", status: "active", connected_at: "", last_used_at: null }],
@@ -82,6 +88,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  for (const client of clients.splice(0)) client.clear();
   vi.clearAllMocks();
 });
 
@@ -91,18 +98,37 @@ function renderPage() {
     searchParams: new URLSearchParams(), hash: "", getShareableUrl: (p) => p,
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(
+  clients.push(client);
+  const view = renderWithI18n(
     <QueryClientProvider client={client}>
       <NavigationProvider value={adapter}>
         <AppDetailPage toolkitSlug="notion" />
       </NavigationProvider>
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 const agentSwitch = (agent: string) => screen.getByRole("switch", { name: `Let ${agent} use Notion` });
 
 describe("AppDetailPage", () => {
+  it.each([
+    { error: new Error("Could not save app access"), message: "Could not save app access", locked: false },
+    { error: new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "team_app_accounts" }), message: enBilling.paid_feature.locked_error, locked: true },
+  ])("reports an agent's save failure after leaving the app page (feature locked: $locked)", async ({ error, message, locked }) => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.updateAgentApps).mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    const view = renderPage();
+    await waitFor(() => expect(agentSwitch("Mine")).not.toHaveAttribute("aria-disabled", "true"));
+    await userEvent.setup().click(agentSwitch("Mine"));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(view.client.isMutating()).toBe(1);
+    await act(async () => reject(error));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(message);
+    if (locked) expect(view.client.getQueryState(workspaceFeatureKeys.all("ws-1"))?.isInvalidated).toBe(true);
+  });
+
   it("lists live agents with whose account each uses", async () => {
     renderPage();
     await waitFor(() => expect(agentSwitch("Mine")).toBeChecked());
