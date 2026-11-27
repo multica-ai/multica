@@ -166,6 +166,18 @@ type Config struct {
 	// prefers a matching, executable override over resolving the profile's
 	// command_name on PATH. nil/empty means "always resolve via PATH".
 	ProfileCommandOverrides map[string]string
+
+	// ControlTokenFile, when set, holds the bearer token that POST /drain and
+	// POST /resume require (MULTICA_DAEMON_CONTROL_TOKEN_FILE). It keeps
+	// admission control away from processes that can reach the loopback port
+	// but cannot read the file.
+	ControlTokenFile string
+
+	// StartPaused starts the daemon with new claims paused, as if a drain had
+	// already completed (MULTICA_DAEMON_START_PAUSED). It keeps a daemon that
+	// is restarted during maintenance from claiming runs until the operator
+	// calls POST /resume.
+	StartPaused bool
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -670,6 +682,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateCheckInterval:         autoUpdateInterval,
 		AutoReloadEnabled:               autoReloadEnabled,
 		HealthPort:                      healthPort,
+		ControlTokenFile:                strings.TrimSpace(os.Getenv("MULTICA_DAEMON_CONTROL_TOKEN_FILE")),
+		StartPaused:                     boolFromEnv("MULTICA_DAEMON_START_PAUSED", false),
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,
 		WSClaimPollInterval:             wsClaimPollInterval,

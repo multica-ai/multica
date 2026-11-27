@@ -254,6 +254,8 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true` ; auto-hébergé `false` | Vérifier et appliquer automatiquement ou non les mises à jour du CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Intervalle de vérification des mises à jour |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Redémarrer ou non sur un binaire `multica` remplacé sur disque par un moyen externe (`brew upgrade`, un nouveau téléchargement, une compilation locale). Indépendant de `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_DAEMON_CONTROL_TOKEN_FILE` | non défini | Fichier dont le contenu devient le jeton bearer exigé par `POST /drain` et `POST /resume` en local sur le daemon ; non défini, seule la liaison loopback les protège. Voir [Suspendre les nouvelles exécutions avant une maintenance](/daemon-runtimes#drain) |
+| `MULTICA_DAEMON_START_PAUSED` | `false` | Démarre le daemon avec les prises suspendues jusqu'à `POST /resume`. Voir [Suspendre les nouvelles exécutions avant une maintenance](/daemon-runtimes#drain) |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Répertoire racine des répertoires de travail des exécutions |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS uniquement. Répertoire parent des répertoires temporaires privés de chaque exécution ; doit être un répertoire absolu existant et accessible en écriture, et une valeur invalide fait échouer le démarrage de l'exécution au lieu de se rabattre sur `/tmp`. Choisissez un chemin court — les outils enfants peuvent y lier des sockets AF_UNIX, et `sun_path` est limité à 108 octets sous Linux et à 104 sous macOS |
 

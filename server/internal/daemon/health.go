@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -92,6 +94,19 @@ type HealthResponse struct {
 type healthWorkspace struct {
 	ID       string   `json:"id"`
 	Runtimes []string `json:"runtimes"`
+}
+
+type drainResponse struct {
+	Generation       uint64 `json:"generation"`
+	Status           string `json:"status"`
+	ActiveTaskCount  int64  `json:"active_task_count"`
+	RunningTaskCount int64  `json:"running_task_count"`
+	ClaimsInFlight   int    `json:"claims_in_flight"`
+	StartedPaused    bool   `json:"started_paused,omitempty"`
+}
+
+type drainRequest struct {
+	TimeoutMS int `json:"timeout_ms"`
 }
 
 // listenHealth binds the health port for callers without a prebound listener.
@@ -444,12 +459,216 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// drainSnapshot returns the externally visible admission state.
+func (d *Daemon) drainSnapshot() drainResponse {
+	d.claimMu.Lock()
+	paused := d.drainPaused
+	generation := d.drainGeneration
+	claims := d.claimsInFlight
+	startedPaused := d.startedPaused
+	d.claimMu.Unlock()
+	active := d.activeTasks.Load()
+	status := "running"
+	if paused {
+		status = "draining"
+		if claims == 0 && active == 0 {
+			status = "drained"
+		}
+	}
+	return drainResponse{Generation: generation, Status: status, ActiveTaskCount: active, RunningTaskCount: d.runningTasks.Load(), ClaimsInFlight: claims, StartedPaused: startedPaused}
+}
+
+// startPausedWarnInterval is how often a daemon that started paused reminds
+// the operator that it is not claiming runs.
+const startPausedWarnInterval = 5 * time.Minute
+
+// warnWhileStartPaused logs a warning until the start pause is lifted, so a
+// daemon left paused after maintenance is visible in its logs.
+func (d *Daemon) warnWhileStartPaused(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		d.claimMu.Lock()
+		paused := d.startedPaused
+		d.claimMu.Unlock()
+		if !paused {
+			return
+		}
+		d.logger.Warn("daemon started paused and is not claiming runs; POST /resume on the health port to start")
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// endDrain lifts the operator pause if it still belongs to generation and no
+// request has reported it as drained yet, so a stale timeout or a caller that
+// went away cannot cancel a newer drain or one the operator already relies on.
+func (d *Daemon) endDrain(generation uint64) {
+	d.claimMu.Lock()
+	if d.drainPaused && d.drainGeneration == generation && !d.drainHeld {
+		d.drainPaused = false
+	}
+	d.claimMu.Unlock()
+}
+
+// holdDrain records that generation reached drained. It returns false when
+// that generation was already lifted, in which case the caller must not
+// report success.
+func (d *Daemon) holdDrain(generation uint64) bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if !d.drainPaused || d.drainGeneration != generation {
+		return false
+	}
+	if d.claimsInFlight != 0 || d.activeTasks.Load() != 0 {
+		return false
+	}
+	d.drainHeld = true
+	return true
+}
+
+// authorizeControl gates the admission-control writes. With
+// MULTICA_DAEMON_CONTROL_TOKEN_FILE set, a request must carry
+// "Authorization: Bearer <file contents>"; the file is read on every request
+// so it can be rotated without a restart, and an unreadable or empty file
+// rejects everything. Without it the endpoints rely on the loopback bind
+// only, which also lets processes started by tasks reach them.
+func (d *Daemon) authorizeControl(w http.ResponseWriter, r *http.Request) bool {
+	path := d.cfg.ControlTokenFile
+	if path == "" {
+		return true
+	}
+	raw, err := os.ReadFile(path)
+	want := strings.TrimSpace(string(raw))
+	if err != nil || want == "" {
+		http.Error(w, "admission control unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(got)), []byte(want)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+// drainHandler pauses admission and waits until no claim is in flight and no
+// claimed task is still running. Running tasks are never interrupted. If the
+// wait times out or the caller goes away before any request has seen the
+// drain complete, admission resumes automatically so an abandoned drain
+// cannot leave the runtime idle forever. Once a request reports drained, the
+// pause holds until POST /resume or process exit; repeated requests join the
+// same generation. It is local-only: serveHealth binds only to loopback.
+func (d *Daemon) drainHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(d.drainSnapshot())
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !d.authorizeControl(w, r) {
+			return
+		}
+		req := drainRequest{TimeoutMS: 30000}
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+		}
+		if req.TimeoutMS <= 0 {
+			req.TimeoutMS = 30000
+		}
+		if req.TimeoutMS > 60*60*1000 {
+			req.TimeoutMS = 60 * 60 * 1000
+		}
+		d.claimMu.Lock()
+		if !d.drainPaused {
+			d.drainPaused = true
+			d.drainHeld = false
+			d.drainGeneration++
+		}
+		generation := d.drainGeneration
+		d.claimMu.Unlock()
+
+		deadline := time.NewTimer(time.Duration(req.TimeoutMS) * time.Millisecond)
+		defer deadline.Stop()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			snapshot := d.drainSnapshot()
+			if snapshot.Generation != generation || snapshot.Status == "running" {
+				// Resumed (or superseded) while waiting.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(snapshot)
+				return
+			}
+			if snapshot.Status == "drained" && d.holdDrain(generation) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(d.drainSnapshot())
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				d.endDrain(generation)
+				return
+			case <-deadline.C:
+				d.endDrain(generation)
+				snapshot = d.drainSnapshot()
+				if snapshot.Generation == generation && snapshot.Status == "drained" {
+					// Another request completed this generation first; it holds.
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(snapshot)
+					return
+				}
+				snapshot.Status = "timeout"
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestTimeout)
+				_ = json.NewEncoder(w).Encode(snapshot)
+				return
+			case <-ticker.C:
+			}
+		}
+	}
+}
+
+// resumeHandler lifts the operator drain. It never touches the auto-update
+// barrier.
+func (d *Daemon) resumeHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !d.authorizeControl(w, r) {
+			return
+		}
+		d.claimMu.Lock()
+		d.drainPaused = false
+		d.drainHeld = false
+		d.startedPaused = false
+		d.claimMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(d.drainSnapshot())
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/drain", d.drainHandler())
+	mux.HandleFunc("/resume", d.resumeHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 	mux.HandleFunc("/environments/start", d.environmentStartHandler())
 	mux.HandleFunc("/environments/stop", d.environmentStopHandler())

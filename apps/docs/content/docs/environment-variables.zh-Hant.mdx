@@ -253,6 +253,8 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自託管 `false` | 是否自動檢查並更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 檢查更新的間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二進位制被帶外替換（`brew upgrade`、重新下載、本地構建）後重啟到新二進位制。與 `MULTICA_DAEMON_AUTO_UPDATE` 相互獨立 |
+| `MULTICA_DAEMON_CONTROL_TOKEN_FILE` | 不設 | 檔案內容作為 daemon 本機 `POST /drain`、`POST /resume` 要求的 bearer 權杖；不設時只靠迴環綁定保護。見[維護前先停接新執行](/daemon-runtimes#drain) |
+| `MULTICA_DAEMON_START_PAUSED` | `false` | daemon 啟動後先不領取新執行，直到 `POST /resume`。見[維護前先停接新執行](/daemon-runtimes#drain) |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 執行工作目錄的根目錄 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 僅適用於 Linux/macOS。每次執行的私有臨時目錄的父目錄；必須是現有、可寫的絕對路徑，無效值會使執行啟動失敗，不會回退到 `/tmp`。請選擇較短的路徑——子工具可能會在其中繫結 AF_UNIX socket；Linux 的 `sun_path` 上限為 108 位元組，macOS 為 104 位元組 |
 

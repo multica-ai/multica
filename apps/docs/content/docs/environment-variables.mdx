@@ -257,6 +257,8 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_DAEMON_CONTROL_TOKEN_FILE` | unset | File whose contents become the bearer token required by the daemon's local `POST /drain` and `POST /resume`; unset leaves them protected only by the loopback bind. See [Pause new runs before maintenance](/daemon-runtimes#drain) |
+| `MULTICA_DAEMON_START_PAUSED` | `false` | Start the daemon with new claims paused until `POST /resume`. See [Pause new runs before maintenance](/daemon-runtimes#drain) |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for run working directories |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-run temp dirs; must be an existing, writable absolute directory, and an invalid value fails run startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 

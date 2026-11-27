@@ -732,6 +732,21 @@ type Daemon struct {
 	claimMu        sync.Mutex
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	// drainPaused is the operator admission pause set by POST /drain. It is
+	// separate from pauseClaims so an operator drain and the auto-update
+	// barrier never release each other. drainGeneration identifies the current
+	// drain; it changes only when a new drain starts, so repeated drain
+	// requests are idempotent and wait on the same operation.
+	drainPaused     bool
+	drainGeneration uint64
+	// drainHeld is set once any request has reported the current drain as
+	// drained. From then on only /resume lifts it, so a concurrent request
+	// for the same generation cannot undo a drain the operator already relies
+	// on by timing out or disconnecting.
+	drainHeld bool
+	// startedPaused marks a drain that came from MULTICA_DAEMON_START_PAUSED
+	// rather than POST /drain. It is cleared by POST /resume.
+	startedPaused bool
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -871,6 +886,12 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if cfg.StartPaused {
+		d.drainPaused = true
+		d.drainHeld = true
+		d.drainGeneration = 1
+		d.startedPaused = true
+	}
 	return d
 }
 
@@ -2202,6 +2223,9 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// preflight is never misreported as a started daemon. resolveAuth has
 	// already run, so a missing token still fails fast before we begin serving.
 	go d.serveHealth(ctx, healthLn, time.Now())
+	if d.cfg.StartPaused {
+		go d.warnWhileStartPaused(ctx, startPausedWarnInterval)
+	}
 
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering
@@ -5426,7 +5450,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.drainPaused {
 		return false
 	}
 	d.claimsInFlight++

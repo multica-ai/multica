@@ -102,6 +102,22 @@ Lorsqu'une version plus récente est disponible pour un daemon CLI autonome, les
 
 L'installation démarre automatiquement dès que la dernière tâche en cours se termine. Une seule mise à jour inachevée est autorisée par machine ; une mise à jour en attente expire après 24 heures si la machine ne devient jamais inactive, et peut être annulée tant que l'installation n'a pas commencé. Les daemons sur une version plus ancienne sans prise en charge de la file d'attente refusent la mise à jour à distance tant que la machine est occupée ; réessayez lorsqu'elle est inactive. Les daemons lancés par Multica Desktop sont gérés par Desktop et mis à jour avec l'application Desktop.
 
+### Suspendre les nouvelles exécutions avant une maintenance [#drain]
+
+Avant de redémarrer ou de remplacer vous-même un daemon (nouvelle image de conteneur, redémarrage de l'hôte), vous pouvez l'empêcher de prendre de nouvelles exécutions et attendre la fin de celles qu'il a déjà prises. Les points d'accès sont sur le port de santé local du daemon (`127.0.0.1:19514` pour le profil par défaut) et ne sont pas joignables depuis le serveur Multica :
+
+```bash
+curl -X POST http://127.0.0.1:19514/drain -d '{"timeout_ms": 1800000}'   # attendre au plus 30 minutes
+curl http://127.0.0.1:19514/drain                                        # état seulement
+curl -X POST http://127.0.0.1:19514/resume
+```
+
+`POST /drain` renvoie `200` avec `"status": "drained"` dès qu'aucune prise n'est en cours et qu'aucune exécution prise ne tourne encore. Les nouvelles exécutions restent en file d'attente sur le serveur et sont prises par le prochain daemon qui se connecte pour ce runtime. Le travail en cours n'est jamais interrompu. Si l'attente expire (`408`, une heure au plus) ou si l'appelant se déconnecte avant la fin, le daemon reprend les prises de lui-même. Une suspension terminée dure jusqu'à `POST /resume` ou la fin du processus, et des appels `POST /drain` répétés rejoignent la même suspension.
+
+Tout processus de la machine peut joindre le port loopback, y compris les exécutions elles-mêmes. Pour restreindre les deux appels d'écriture, définissez `MULTICA_DAEMON_CONTROL_TOKEN_FILE` sur un fichier lisible par l'opérateur seul ; les requêtes doivent alors porter `Authorization: Bearer <contenu du fichier>`.
+
+Pour qu'un daemon ne prenne rien pendant que vous travaillez sur la machine, par exemple au fil de plusieurs redémarrages, définissez `MULTICA_DAEMON_START_PAUSED=true`. Le daemon démarre alors comme si une suspension était déjà terminée : `GET /drain` renvoie `"status": "drained"` avec `"started_paused": true`, il journalise un avertissement toutes les cinq minutes et ne prend des exécutions qu'après `POST /resume`. Pendant ce temps, le runtime reste affiché en ligne et ses exécutions s'accumulent dans la file.
+
 ## Distribution et statut en ligne
 
 Une fois enregistré, un runtime maintient une connexion persistante. Lorsqu'une nouvelle exécution entre dans la file d'attente, le serveur prévient le daemon concerné ; le daemon interroge aussi le serveur périodiquement pour ne pas manquer une notification si la connexion tombe. Lorsqu'un runtime est en ligne et dispose de capacité libre, les exécutions démarrent généralement immédiatement.
