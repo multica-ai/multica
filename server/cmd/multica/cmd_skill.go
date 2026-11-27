@@ -64,7 +64,7 @@ var skillDeleteCmd = &cobra.Command{
 
 var skillImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com) or a local .skill/.zip archive",
+	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com), a local .skill/.zip archive, or a local folder",
 	RunE:  runSkillImport,
 }
 
@@ -155,8 +155,9 @@ func init() {
 	skillDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 
 	// skill import
-	skillImportCmd.Flags().String("url", "", "URL to import from (clawhub.ai, skills.sh, or github.com). Mutually exclusive with --file.")
-	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url.")
+	skillImportCmd.Flags().String("url", "", "URL to import from (clawhub.ai, skills.sh, or github.com). Mutually exclusive with --file and --dir.")
+	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url and --dir.")
+	skillImportCmd.Flags().String("dir", "", "Path to a local folder with SKILL.md at its top, imported with its supporting files. Mutually exclusive with --url and --file.")
 	skillImportCmd.Flags().String("on-conflict", "fail", "Conflict strategy when a skill with the same name exists: fail, overwrite, rename, or skip")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -543,11 +544,18 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	importURL, _ := cmd.Flags().GetString("url")
 	importFile, _ := cmd.Flags().GetString("file")
+	importDir, _ := cmd.Flags().GetString("dir")
+	sources := 0
+	for _, source := range []string{importURL, importFile, importDir} {
+		if source != "" {
+			sources++
+		}
+	}
 	switch {
-	case importURL == "" && importFile == "":
-		return fmt.Errorf("either --url or --file is required")
-	case importURL != "" && importFile != "":
-		return fmt.Errorf("--url and --file are mutually exclusive")
+	case sources == 0:
+		return fmt.Errorf("one of --url, --file, or --dir is required")
+	case sources > 1:
+		return fmt.Errorf("--url, --file, and --dir are mutually exclusive")
 	}
 	onConflict, _ := cmd.Flags().GetString("on-conflict")
 	if !validSkillImportConflictStrategy(onConflict) {
@@ -558,12 +566,24 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	var result map[string]any
-	if importFile != "" {
-		fileData, readErr := os.ReadFile(importFile)
-		if readErr != nil {
-			return fmt.Errorf("read skill archive: %w", readErr)
+	if importFile != "" || importDir != "" {
+		var fileData []byte
+		var filename string
+		if importDir != "" {
+			var packErr error
+			fileData, filename, packErr = packSkillDir(importDir, os.Stderr)
+			if packErr != nil {
+				return packErr
+			}
+		} else {
+			var readErr error
+			fileData, readErr = os.ReadFile(importFile)
+			if readErr != nil {
+				return fmt.Errorf("read skill archive: %w", readErr)
+			}
+			filename = filepath.Base(importFile)
 		}
-		if err := client.ImportSkillFile(ctx, fileData, filepath.Base(importFile), onConflict, &result); err != nil {
+		if err := client.ImportSkillFile(ctx, fileData, filename, onConflict, &result); err != nil {
 			if handledErr := handleSkillImportError(cmd, err); handledErr != nil {
 				return handledErr
 			}

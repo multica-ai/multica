@@ -544,7 +544,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `member list/invite <email>` | 查看成员、发出邀请 | `invite`：`--role`（member 或 admin，默认 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作区仓库并检出到本机 | `--url`（可重复）；`checkout`：`--ref` |
 | `skill` | `list/get/create/update/delete` | 管理 skill | `get`：`--with-content`（默认只返回元数据和 `revision`）；`update`：`--base-revision`（取自 `skill get`，内容已变更时返回 HTTP 409 拒绝覆盖） |
-| | `import` | 从 URL 或本地文件导入 skill | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`，默认 `fail`） |
+| | `import` | 从 URL、本地压缩包或本地文件夹导入 skill | `--url` / `--file` / `--dir`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`，默认 `fail`） |
 | | `search <query>` | 搜索 skill | |
 | | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | `list`：`--with-content`；`upsert` / `delete`：`--base-revision`（内容已变更时返回 HTTP 409 拒绝覆盖） |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的标签 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短前缀 |

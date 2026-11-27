@@ -552,7 +552,7 @@ Migration depuis l'ancien découpage CSV : remplacez `--attachment a,b` par `--a
 | | `member list/invite <email>` | Consulter les membres, envoyer des invitations | `invite` : `--role` (member ou admin, member par défaut) |
 | `repo` | `list/add/remove/checkout` | Gérer les dépôts de l'espace de travail et les extraire localement | `--url` (répétable) ; `checkout` : `--ref` |
 | `skill` | `list/get/create/update/delete` | Gérer les skills | `get` : `--with-content` (renvoie métadonnées et `revision` par défaut) ; `update` : `--base-revision` (issu de `skill get` ; refuse d'écraser une modification concurrente avec HTTP 409) |
-| | `import` | Importer un skill depuis une URL ou un fichier local | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip` ; `fail` par défaut) |
+| | `import` | Importer un skill depuis une URL, une archive locale ou un dossier local | `--url` / `--file` / `--dir`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip` ; `fail` par défaut) |
 | | `search <query>` | Rechercher des skills | |
 | | `files list/upsert/delete <skill-id>` | Gérer les fichiers d'un skill | `list` : `--with-content` ; `upsert` / `delete` : `--base-revision` (refuse d'écraser une modification concurrente avec HTTP 409) |
 | | `label list/add/remove <skill-id>` | Gérer les étiquettes d'un skill | `add` / `remove` : `<label-id>` accepte un UUID complet ou un préfixe court |
