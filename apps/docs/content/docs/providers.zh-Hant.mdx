@@ -134,6 +134,20 @@ Multica 儲存工具返回的會話標識。下次在同一任務中繼續工作
 
 有關重試和會話恢復的規則，見 [執行](/tasks#手動重試)。
 
+### 調整 Codex 長任務的上下文
+
+在達到自動壓縮門檻前，Codex 每次模型請求都可能重讀較長的上下文。整次執行的輸入總量可能包含快取命中的 token，且遠大於單次請求的輸入量。
+
+可先針對一個 Codex 代理試用較早的壓縮和較短的工具輸出。在[自定義引數](/agents-create)逐項加入以下四項。範例值適用於較大的上下文視窗。
+
+```json
+["-c", "model_auto_compact_token_limit=250000", "-c", "tool_output_token_limit=3000"]
+```
+
+第一項設定降低歷史自動壓縮門檻。第二項設定限制 Codex 在歷史中保留的單筆工具結果 token 數。若頻繁壓縮或缺少任務所需的細節，提高對應上限，或移除對應的 `-c` 和設定值。
+
+daemon 收到這次執行的壓縮完成事件後會記錄 `codex context compaction completed`。如果 Codex 提供用量資料，日誌也會記錄最近一次請求的輸入量、快取命中的輸入量與模型上下文視窗。調整時，比較類似執行中壓縮後的下一次請求輸入量及任務結果。
+
 ## MCP 配置
 
 Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暫不讀取 AI 代理中的 MCP 配置，建立 AI 代理時不顯示這一項。

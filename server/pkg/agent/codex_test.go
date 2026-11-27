@@ -4223,6 +4223,78 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 	}
 }
 
+func TestCodexLogsCompletedContextCompaction(t *testing.T) {
+	c, _, _ := newTestCodexClient(t)
+	c.setThreadID("thread-current")
+	c.notificationProtocol = "unknown"
+	gate := &codexTurnNotificationGate{}
+	c.acceptNotification = gate.accept
+	var logs bytes.Buffer
+	c.cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	notify := func(method string, params map[string]any) {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.handleLine(string(data))
+	}
+	compaction := func(threadID, turnID string) map[string]any {
+		return map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"item":     map[string]any{"type": "contextCompaction", "id": "compact-1"},
+		}
+	}
+	notify("item/completed", compaction("thread-current", "turn-old"))
+	gate.arm()
+	notify("turn/started", map[string]any{
+		"threadId": "thread-current",
+		"turn":     map[string]any{"id": "turn-current"},
+	})
+	usage := codexThreadTokenUsageParams("thread-current", "turn-current",
+		map[string]any{"inputTokens": float64(40_000_000)},
+		map[string]any{"inputTokens": float64(300_000), "cachedInputTokens": float64(280_000)},
+	)
+	usage["tokenUsage"].(map[string]any)["modelContextWindow"] = float64(450_000)
+	notify("thread/tokenUsage/updated", usage)
+	notify("item/started", compaction("thread-current", "turn-current"))
+	notify("item/completed", compaction("thread-other", "turn-current"))
+	notify("item/completed", compaction("thread-current", "turn-old"))
+	notify("item/completed", compaction("thread-current", "turn-current"))
+
+	var record map[string]any
+	reports := 0
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry["msg"] == "codex context compaction completed" {
+			reports++
+			record = entry
+		}
+	}
+	if reports != 1 {
+		t.Fatalf("logged %d compactions, want 1; logs: %s", reports, &logs)
+	}
+	for key, want := range map[string]any{
+		"thread_id":                "thread-current",
+		"turn_id":                  "turn-current",
+		"last_input_tokens":        float64(300_000),
+		"last_cached_input_tokens": float64(280_000),
+		"model_context_window":     float64(450_000),
+	} {
+		if got := record[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func TestCodexThreadTokenUsageUpdatedDropsResumeReplay(t *testing.T) {
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"

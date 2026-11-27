@@ -132,6 +132,20 @@ Multica stocke l'identifiant de session renvoyé par l'outil. La prochaine fois 
 
 Les règles de relance et de reprise de session se trouvent dans [Exécutions](/tasks#relance-manuelle).
 
+### Ajuster le contexte des longues exécutions Codex
+
+Codex peut relire un contexte volumineux à chaque requête avant d’atteindre son seuil de compactage automatique. Le total des jetons d’entrée d’une exécution peut inclure les jetons mis en cache et largement dépasser celui d’une seule requête.
+
+Pour tester un compactage plus précoce et des résultats d’outils plus courts, ajoutez ces quatre éléments aux [arguments personnalisés](/agents-create) d’un agent Codex. Ces valeurs sont données en exemple pour une grande fenêtre de contexte.
+
+```json
+["-c", "model_auto_compact_token_limit=250000", "-c", "tool_output_token_limit=3000"]
+```
+
+Le premier réglage abaisse le seuil de compactage automatique de l’historique. Le deuxième limite le nombre de jetons que Codex conserve dans l’historique pour chaque résultat d’outil. Si le compactage se répète ou que des informations utiles disparaissent, augmentez la limite correspondante ou retirez sa paire d’arguments `-c`.
+
+Le daemon consigne `codex context compaction completed` à la réception d’un événement de fin de compactage pour l’exécution. Lorsque Codex fournit les données d’utilisation, le journal indique les jetons d’entrée de la dernière requête signalée, ceux servis par le cache et la fenêtre de contexte du modèle. Pour affiner les réglages, comparez les jetons d’entrée de la requête suivante et le résultat de la tâche sur des exécutions similaires.
+
 ## Configuration MCP
 
 Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code et ZeroClaw ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
