@@ -28,9 +28,7 @@ export interface DeviceOption {
 }
 
 export interface RuntimeChoiceGroups {
-  /** This device, or null when the client cannot run harnesses (web). */
-  local: DeviceOption | null;
-  remotes: DeviceOption[];
+  devices: DeviceOption[];
   /** Remote devices with no harness this member may use. */
   hiddenRemoteCount: number;
   /** Managed cloud runtimes other than Qoder, which has its own tile. */
@@ -73,8 +71,7 @@ export function buildRuntimeChoiceGroups(
   machines: RuntimeMachine[],
   currentUserId: string | null,
 ): RuntimeChoiceGroups {
-  let local: DeviceOption | null = null;
-  const remotes: DeviceOption[] = [];
+  const devices: DeviceOption[] = [];
   let hiddenRemoteCount = 0;
   const cloud: HarnessOption[] = [];
   let qoderRuntime: RuntimeDevice | null = null;
@@ -83,15 +80,6 @@ export function buildRuntimeChoiceGroups(
     const usable = machine.runtimes.filter((runtime) =>
       isRuntimeUsableForUser(runtime, currentUserId),
     );
-    if (machine.section === "local") {
-      local = {
-        machine,
-        harnesses: usable
-          .map((runtime) => harnessOption(runtime, machine.title))
-          .sort(byLabel),
-      };
-      continue;
-    }
     if (machine.section === "cloud") {
       for (const runtime of usable) {
         if (runtime.provider === QODER_PROVIDER) {
@@ -102,11 +90,11 @@ export function buildRuntimeChoiceGroups(
       }
       continue;
     }
-    if (usable.length === 0) {
+    if (machine.section === "remote" && usable.length === 0) {
       hiddenRemoteCount += 1;
       continue;
     }
-    remotes.push({
+    devices.push({
       machine,
       harnesses: usable
         .map((runtime) => harnessOption(runtime, machine.title))
@@ -114,7 +102,7 @@ export function buildRuntimeChoiceGroups(
     });
   }
 
-  return { local, remotes, hiddenRemoteCount, cloud: cloud.sort(byLabel), qoderRuntime };
+  return { devices, hiddenRemoteCount, cloud: cloud.sort(byLabel), qoderRuntime };
 }
 
 export function normalizeQuery(query: string): string {
