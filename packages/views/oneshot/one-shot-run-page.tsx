@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
@@ -22,6 +22,7 @@ export function OneShotRunPage({ taskId }: { taskId: string }) {
   const live = !!run.data && ACTIVE.has(run.data.task.status);
   const messages = useQuery({
     queryKey: ["oneshot-run-messages", wsId, taskId, live],
+    placeholderData: keepPreviousData,
     queryFn: () => api.listTaskMessages(taskId),
     enabled: !!run.data,
     refetchInterval: live ? 2000 : false,
