@@ -2057,7 +2057,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		h.archiveActorInboxOnAgentTrigger(ctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
-	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
+	h.noteCommentTriggerFailures(ctx, issue, comment, outcomes)
 	return outcomes
 }
 
@@ -2348,6 +2348,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if errors.Is(err, service.ErrIssueAgentConsecutiveFailures) {
+		return ReasonIssueAgentConsecutiveFailures
+	}
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}

@@ -15,21 +15,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-func (h *Handler) noteCommentInvocationDenied(ctx context.Context, issue db.Issue, comment db.Comment, outcomes []CommentTriggerOutcome) {
-	var denied []CommentTriggerOutcome
+func (h *Handler) noteCommentTriggerFailures(ctx context.Context, issue db.Issue, comment db.Comment, outcomes []CommentTriggerOutcome) {
+	var blocked []CommentTriggerOutcome
 	for _, outcome := range outcomes {
-		// invocation_not_allowed hides private/foreign targets;
-		// target_unavailable covers malformed mention ids and targets that are
-		// gone (archived agent, missing squad). Both leave the mention looking
-		// successful on the saved comment, so both need a receipt. Runtime
-		// refusals are excluded: noteBlockedRuntimeTargets already leaves their
-		// own, more specific notice.
-		if outcome.Status == DispatchBlocked &&
-			(outcome.ReasonCode == ReasonInvocationNotAllowed || outcome.ReasonCode == ReasonTargetUnavailable) {
-			denied = append(denied, outcome)
+		if outcome.Status != DispatchBlocked {
+			continue
+		}
+		switch outcome.ReasonCode {
+		case ReasonInvocationNotAllowed, ReasonTargetUnavailable, ReasonIssueAgentConsecutiveFailures:
+			blocked = append(blocked, outcome)
 		}
 	}
-	if len(denied) == 0 {
+	if len(blocked) == 0 {
 		return
 	}
 	// Labels come only from the submitted text. Resolving a denied target's
@@ -43,12 +40,16 @@ func (h *Handler) noteCommentInvocationDenied(ctx context.Context, issue db.Issu
 	}
 	var content strings.Builder
 	fmt.Fprintf(&content, "These mentions did not start when the parent comment was submitted on %s:\n", comment.UpdatedAt.Time.UTC().Format("Jan 2, 2006 at 15:04:05 MST"))
-	for _, outcome := range denied {
+	for _, outcome := range blocked {
 		label := labels[outcome.TargetType+":"+outcome.TargetID]
 		if label == "" {
 			label = outcome.TargetType + " " + outcome.TargetID
 		}
-		fmt.Fprintf(&content, "\n- **%s**: Target not found or permission not granted.", escapeMarkdownInline(label))
+		reason := "Target not found or permission not granted."
+		if outcome.ReasonCode == ReasonIssueAgentConsecutiveFailures {
+			reason = "Automatic runs paused after three consecutive failures. Complete a manual run successfully to resume."
+		}
+		fmt.Fprintf(&content, "\n- **%s**: %s", escapeMarkdownInline(label), reason)
 	}
 	h.noteTriggerFailure(ctx, issue, content.String(), comment.ID)
 }

@@ -26,6 +26,8 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_agent_runtime_required);
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_runtime_access_denied);
+    case "issue_agent_consecutive_failures":
+      return t(($) => $.comment.trigger_blocked_issue_agent_consecutive_failures);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -49,6 +51,8 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
+    case "issue_agent_consecutive_failures":
+      return t(($) => $.comment.trigger_blocked_short_issue_agent_consecutive_failures);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

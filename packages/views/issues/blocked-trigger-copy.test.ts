@@ -23,6 +23,13 @@ const t = ((selector: (bundle: unknown) => Leaf) => {
 }) as Parameters<typeof blockedReasonLabel>[1];
 
 describe("blocked trigger copy", () => {
+  it("explains how to resume paused automatic runs", () => {
+    const code = "issue_agent_consecutive_failures";
+
+    expect(blockedReasonLabel(code, t)).toBe(en.comment.trigger_blocked_issue_agent_consecutive_failures);
+    expect(blockedShortReasonLabel(code, t)).toBe(en.comment.trigger_blocked_short_issue_agent_consecutive_failures);
+  });
+
   it("distinguishes an unbound agent from an offline runtime", () => {
     const unbound = blockedReasonLabel("agent_runtime_required", t);
     const offline = blockedReasonLabel("runtime_offline", t);

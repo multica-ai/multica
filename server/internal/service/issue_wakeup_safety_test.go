@@ -6,10 +6,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -227,5 +230,115 @@ func TestCompleteTaskSkipsFallbackCommentOnlyAfterCheckIn(t *testing.T) {
 	}
 	if n := complete(`{}`, false); n != 1 {
 		t.Fatalf("assignment run posted %d fallback comments, want 1", n)
+	}
+}
+
+func TestWakeupFailureStreakRetainsInputAndAllowsWakeNow(t *testing.T) {
+	f, s, issueID, agentID := conditionFixture(t)
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := time.Now().Add(-time.Duration(minutesAgo) * time.Minute)
+		f.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	w := wakeCreate(t, f, s, issueID, WakeupInput{
+		AgentID: agentID, Kind: "event", Mode: "continuous",
+		EventTypes: []string{"comment.created"}, Instruction: "Answer new comments",
+	})
+	f.Comment(t, util.UUIDToString(issueID), "input to retain")
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("automatic wakeup started %d runs during failure pause", n)
+	}
+	if !got.Enabled || !got.LastError.Valid {
+		t.Fatalf("paused wakeup enabled = %t, last error = %q", got.Enabled, got.LastError.String)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND processed_at IS NULL", w.ID); n != 1 {
+		t.Fatalf("automatic wakeup retained %d inputs, want 1", n)
+	}
+	if err := s.Trigger(t.Context(), issueID, w.ID, parseTestUUID(t, f.UserID)); err != nil {
+		t.Fatalf("wake now: %v", err)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("wake now started %d runs, want 1", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1 AND context->>'manual_issue_dispatch'='true'", util.UUIDToString(w.ID)); n != 1 {
+		t.Fatalf("wake now stored %d manually initiated runs, want 1", n)
+	}
+}
+
+func TestChildDoneWakeupRetainsInputDuringFailureStreak(t *testing.T) {
+	f, s, issueID, agentID := conditionFixture(t)
+	ctx := t.Context()
+	f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$1 WHERE id=$2", agentID, issueID)
+	childID := f.Issue(t, "Child closing during failure streak", testutil.Cols{"parent_issue_id": issueID, "status": "in_progress"})
+	f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", issueID)
+	if err := s.ProcessChildEvents(ctx, issueID); err != nil {
+		t.Fatal(err)
+	}
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := time.Now().Add(-time.Duration(minutesAgo) * time.Minute)
+		f.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", childID)
+	if err := s.ProcessChildEvents(ctx, issueID); err != nil {
+		t.Fatal(err)
+	}
+	w, err := f.q.GetSystemWakeup(ctx, db.GetSystemWakeupParams{IssueID: issueID, SystemRule: systemRuleText(SystemRuleChildDone)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("child-done wakeup started %d runs during failure pause", n)
+	}
+	if !w.Enabled || w.LastError.String != ErrIssueAgentConsecutiveFailures.Error() {
+		t.Fatalf("child-done rule enabled = %t, last error = %q", w.Enabled, w.LastError.String)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND processed_at IS NULL", w.ID); n != 1 {
+		t.Fatalf("child-done rule retained %d inputs, want 1", n)
+	}
+	f.Task(t, agentID, testutil.Cols{"issue_id": issueID, "status": "completed", "completed_at": time.Now()})
+	if err := s.dispatchSystem(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("child-done rule resumed with %d runs, want 1", n)
+	}
+}
+
+func TestManualAppDecisionRunCanClearIssueFailureStreak(t *testing.T) {
+	f, s, issueID, agentID := conditionFixture(t)
+	ctx := t.Context()
+	f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$1 WHERE id=$2", agentID, issueID)
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := time.Now().Add(-time.Duration(minutesAgo) * time.Minute)
+		f.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	issue, err := f.q.GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Tasks.EnqueueTaskForIssue(ctx, issue); !errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+		t.Fatalf("automatic dispatch before app decision: %v", err)
+	}
+	requestID := dbid.NewV7()
+	if err := s.Tasks.EnqueueAppDecisionRun(ctx, issueID, parseTestUUID(t, agentID), parseTestUUID(t, f.UserID), requestID, "approved"); err != nil {
+		t.Fatalf("enqueue app approval run: %v", err)
+	}
+	var taskID pgtype.UUID
+	f.QueryRow(t, "SELECT id FROM agent_task_queue WHERE trigger_evidence_ref_id=$1", requestID).Scan(&taskID)
+	f.Exec(t, "UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1", taskID)
+	if _, err := s.Tasks.CompleteTask(ctx, taskID, []byte("{}"), "", "", "", false, "", ""); err != nil {
+		t.Fatalf("complete app approval run: %v", err)
+	}
+	if _, err := s.Tasks.EnqueueTaskForIssue(ctx, issue); err != nil {
+		t.Fatalf("automatic dispatch after successful app approval run: %v", err)
 	}
 }

@@ -358,7 +358,7 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+-- Manual issue dispatch is recorded independently of attribution and rerun lineage.
 -- fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 -- Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
@@ -407,6 +407,10 @@ SELECT
     END || CASE
         WHEN COALESCE(sqlc.narg('fresh_rerun')::boolean, FALSE)
         THEN '{"fresh_rerun":true}'::jsonb
+        ELSE '{}'::jsonb
+    END || CASE
+        WHEN COALESCE(sqlc.narg(manual_issue_dispatch)::boolean, FALSE)
+        THEN '{"manual_issue_dispatch":true}'::jsonb
         ELSE '{}'::jsonb
     END || CASE
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
@@ -464,7 +468,8 @@ SELECT
     sqlc.narg(usage_squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
-        'channel_issue_media_pending', TRUE
+        'channel_issue_media_pending', TRUE,
+        'manual_issue_dispatch', NULLIF(sqlc.narg(manual_issue_dispatch)::boolean, FALSE)
     )),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
@@ -600,7 +605,7 @@ SELECT
     p.doc_id, p.doc_thread_id, p.doc_comment_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
-    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context - 'manual_issue_dispatch',
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
               OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
@@ -1132,6 +1137,13 @@ RETURNING *;
 -- pointing at the same id resurrects it on the next run.
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
+    context = CASE
+        WHEN issue_id IS NOT NULL
+          AND COALESCE(context->>'type', '') <> 'triage'
+          AND COALESCE(context->>'manual_issue_dispatch', '') <> 'true'
+        THEN COALESCE(context, '{}'::jsonb) || '{"issue_automatic_completion":true}'::jsonb
+        ELSE context
+    END,
     session_id = CASE WHEN sqlc.arg('session_rollout_missing') THEN NULL ELSE $3 END,
     work_dir = $4,
     durable_work_dir = COALESCE(sqlc.narg('durable_work_dir'), durable_work_dir),
@@ -1240,6 +1252,31 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   )
 ORDER BY terminal_at DESC
 LIMIT 1;
+
+-- name: IssueAgentHasConsecutiveRunFailures :one
+-- Use committed outcomes. A regular automatic success breaks a streak before
+-- it reaches three, but only a manual success clears an existing pause. A
+-- completion written before the pause feature is the legacy history boundary.
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT status,
+               lag(status, 1) OVER outcome_order AS next_status,
+               lag(status, 2) OVER outcome_order AS second_next_status,
+               bool_or(status = 'completed' AND
+                       COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                   OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+        FROM agent_task_queue
+        WHERE issue_id = $1 AND agent_id = $2
+          AND status IN ('completed', 'failed')
+          AND COALESCE(context->>'type', '') <> 'triage'
+        WINDOW outcome_order AS (
+            ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+        )
+    ) outcomes
+    WHERE NOT reset_seen
+      AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+);
 
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
@@ -2234,6 +2271,36 @@ WHERE recovery.author_type = 'system'
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
+  -- A pause blocks another run, but exhausted signals still need their
+  -- terminal explanation and settlement. Use the same ordered outcomes as
+  -- IssueAgentHasConsecutiveRunFailures, and skip two attempts of the budget
+  -- delegatedFailureRecoveryMaxTaskAttempts before checking for exhaustion.
+  AND CASE WHEN EXISTS (
+      SELECT 1
+      FROM (
+          SELECT status,
+                 lag(status, 1) OVER outcome_order AS next_status,
+                 lag(status, 2) OVER outcome_order AS second_next_status,
+                 bool_or(status = 'completed' AND
+                         COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                     OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+          FROM agent_task_queue
+          WHERE issue_id = source_issue.id AND agent_id = source_agent.id
+            AND status IN ('completed', 'failed')
+            AND COALESCE(context->>'type', '') <> 'triage'
+          WINDOW outcome_order AS (
+              ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+          )
+      ) outcomes
+      WHERE NOT reset_seen
+        AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+  ) THEN EXISTS (
+      SELECT 1
+      FROM agent_task_queue attempt
+      WHERE attempt.trigger_evidence_kind = 'delegated_failure'
+        AND attempt.trigger_evidence_ref_id = failed.id
+      OFFSET 2
+  ) ELSE TRUE END
   AND NOT EXISTS (
       SELECT 1
       FROM agent_task_queue retry

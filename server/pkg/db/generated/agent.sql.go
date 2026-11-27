@@ -2111,6 +2111,13 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
+    context = CASE
+        WHEN issue_id IS NOT NULL
+          AND COALESCE(context->>'type', '') <> 'triage'
+          AND COALESCE(context->>'manual_issue_dispatch', '') <> 'true'
+        THEN COALESCE(context, '{}'::jsonb) || '{"issue_automatic_completion":true}'::jsonb
+        ELSE context
+    END,
     session_id = CASE WHEN $5 THEN NULL ELSE $3 END,
     work_dir = $4,
     durable_work_dir = COALESCE($6, durable_work_dir),
@@ -2435,10 +2442,10 @@ func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilder
 
 const createAgentTask = `-- name: CreateAgentTask :one
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $28::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, $29::uuid) AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $28::uuid))
+      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $29::uuid))
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
@@ -2468,11 +2475,14 @@ SELECT
         THEN '{"fresh_rerun":true}'::jsonb
         ELSE '{}'::jsonb
     END || CASE
-        WHEN $15::bigint IS NOT NULL
-        THEN jsonb_build_object('workflow_handoff_revision', $15::bigint)
+        WHEN COALESCE($15::boolean, FALSE)
+        THEN '{"manual_issue_dispatch":true}'::jsonb
+        ELSE '{}'::jsonb
+    END || CASE
+        WHEN $16::bigint IS NOT NULL
+        THEN jsonb_build_object('workflow_handoff_revision', $16::bigint)
         ELSE '{}'::jsonb
     END, '{}'::jsonb),
-    $16,
     $17,
     $18,
     $19,
@@ -2482,10 +2492,11 @@ SELECT
     $23,
     $24,
     $25,
+    $26,
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
-    COALESCE($26::text, (SELECT i.status FROM issue i WHERE i.id = $2)),
+    COALESCE($27::text, (SELECT i.status FROM issue i WHERE i.id = $2)),
     $3,
-    COALESCE($27::uuid, gen_random_uuid())
+    COALESCE($28::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by
 `
@@ -2505,6 +2516,7 @@ type CreateAgentTaskParams struct {
 	UsageSquadID            pgtype.UUID        `json:"usage_squad_id"`
 	HeadSha                 pgtype.Text        `json:"head_sha"`
 	FreshRerun              pgtype.Bool        `json:"fresh_rerun"`
+	ManualIssueDispatch     pgtype.Bool        `json:"manual_issue_dispatch"`
 	WorkflowHandoffRevision pgtype.Int8        `json:"workflow_handoff_revision"`
 	OriginatorUserID        pgtype.UUID        `json:"originator_user_id"`
 	AccountableUserID       pgtype.UUID        `json:"accountable_user_id"`
@@ -2528,7 +2540,7 @@ type CreateAgentTaskParams struct {
 // head_sha stamps the commit under review into the task's context JSONB so the
 // reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 // against an OLD head apart from a fresh request against a NEW head (TEN-356).
-// Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+// Manual issue dispatch is recorded independently of attribution and rerun lineage.
 // fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 // Issue-linked tasks never hit quick-create context
 // parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
@@ -2561,6 +2573,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.UsageSquadID,
 		arg.HeadSha,
 		arg.FreshRerun,
+		arg.ManualIssueDispatch,
 		arg.WorkflowHandoffRevision,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
@@ -2650,10 +2663,10 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 
 const createDeferredChannelIssueTask = `-- name: CreateDeferredChannelIssueTask :one
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $25::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, $26::uuid) AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $25::uuid))
+      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $26::uuid))
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
@@ -2675,9 +2688,9 @@ SELECT
     $11,
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE($12::text, ''), ''),
-        'channel_issue_media_pending', TRUE
+        'channel_issue_media_pending', TRUE,
+        'manual_issue_dispatch', NULLIF($13::boolean, FALSE)
     )),
-    $13,
     $14,
     $15,
     $16,
@@ -2688,9 +2701,10 @@ SELECT
     $21,
     $22,
     $23,
+    $24,
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
     (SELECT i.status FROM issue i WHERE i.id = $2),
-    COALESCE($24::uuid, gen_random_uuid())
+    COALESCE($25::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by
 `
@@ -2708,6 +2722,7 @@ type CreateDeferredChannelIssueTaskParams struct {
 	SquadID              pgtype.UUID        `json:"squad_id"`
 	UsageSquadID         pgtype.UUID        `json:"usage_squad_id"`
 	HeadSha              pgtype.Text        `json:"head_sha"`
+	ManualIssueDispatch  pgtype.Bool        `json:"manual_issue_dispatch"`
 	OriginatorUserID     pgtype.UUID        `json:"originator_user_id"`
 	AccountableUserID    pgtype.UUID        `json:"accountable_user_id"`
 	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
@@ -2744,6 +2759,7 @@ func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg Create
 		arg.SquadID,
 		arg.UsageSquadID,
 		arg.HeadSha,
+		arg.ManualIssueDispatch,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuntimeMcpOverlay,
@@ -3114,7 +3130,7 @@ SELECT
     p.doc_id, p.doc_thread_id, p.doc_comment_id,
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
-    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context - 'manual_issue_dispatch',
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
               OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
@@ -5292,6 +5308,44 @@ func (q *Queries) IsTaskSessionRetired(ctx context.Context, arg IsTaskSessionRet
 	return retired, err
 }
 
+const issueAgentHasConsecutiveRunFailures = `-- name: IssueAgentHasConsecutiveRunFailures :one
+SELECT EXISTS (
+    SELECT 1
+    FROM (
+        SELECT status,
+               lag(status, 1) OVER outcome_order AS next_status,
+               lag(status, 2) OVER outcome_order AS second_next_status,
+               bool_or(status = 'completed' AND
+                       COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                   OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+        FROM agent_task_queue
+        WHERE issue_id = $1 AND agent_id = $2
+          AND status IN ('completed', 'failed')
+          AND COALESCE(context->>'type', '') <> 'triage'
+        WINDOW outcome_order AS (
+            ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+        )
+    ) outcomes
+    WHERE NOT reset_seen
+      AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+)
+`
+
+type IssueAgentHasConsecutiveRunFailuresParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Use committed outcomes. A regular automatic success breaks a streak before
+// it reaches three, but only a manual success clears an existing pause. A
+// completion written before the pause feature is the legacy history boundary.
+func (q *Queries) IssueAgentHasConsecutiveRunFailures(ctx context.Context, arg IssueAgentHasConsecutiveRunFailuresParams) (bool, error) {
+	row := q.db.QueryRow(ctx, issueAgentHasConsecutiveRunFailures, arg.IssueID, arg.AgentID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2
@@ -6231,6 +6285,36 @@ WHERE recovery.author_type = 'system'
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
+  -- A pause blocks another run, but exhausted signals still need their
+  -- terminal explanation and settlement. Use the same ordered outcomes as
+  -- IssueAgentHasConsecutiveRunFailures, and skip two attempts of the budget
+  -- delegatedFailureRecoveryMaxTaskAttempts before checking for exhaustion.
+  AND CASE WHEN EXISTS (
+      SELECT 1
+      FROM (
+          SELECT status,
+                 lag(status, 1) OVER outcome_order AS next_status,
+                 lag(status, 2) OVER outcome_order AS second_next_status,
+                 bool_or(status = 'completed' AND
+                         COALESCE(context->>'issue_automatic_completion', '') <> 'true')
+                     OVER (outcome_order ROWS UNBOUNDED PRECEDING) AS reset_seen
+          FROM agent_task_queue
+          WHERE issue_id = source_issue.id AND agent_id = source_agent.id
+            AND status IN ('completed', 'failed')
+            AND COALESCE(context->>'type', '') <> 'triage'
+          WINDOW outcome_order AS (
+              ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+          )
+      ) outcomes
+      WHERE NOT reset_seen
+        AND status = 'failed' AND next_status = 'failed' AND second_next_status = 'failed'
+  ) THEN EXISTS (
+      SELECT 1
+      FROM agent_task_queue attempt
+      WHERE attempt.trigger_evidence_kind = 'delegated_failure'
+        AND attempt.trigger_evidence_ref_id = failed.id
+      OFFSET 2
+  ) ELSE TRUE END
   AND NOT EXISTS (
       SELECT 1
       FROM agent_task_queue retry

@@ -1254,11 +1254,13 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		return commit()
 	}
 	ids := make([]pgtype.UUID, 0, len(receipts))
-	manual := true
+	manual, hasManualReceipt := true, false
 	for _, r := range receipts {
 		ids = append(ids, r.ID)
 		manual = manual && r.EventType == wakeupManualEventType
+		hasManualReceipt = hasManualReceipt || r.EventType == wakeupManualEventType
 	}
+	pendingNext := next
 	if w.Mode == "once" {
 		enabled = false
 		next = pgtype.Timestamptz{}
@@ -1316,6 +1318,23 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	}
 	var chain []string
 	if !taskExists {
+		if err = guardIssueAgentFailureStreak(ctx, q, issue.ID, agent.ID, hasManualReceipt); err != nil {
+			if !errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+				return err
+			}
+			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{
+				ID: w.ID, Enabled: w.Enabled, NextFireAt: pendingNext,
+				LastError: pgtype.Text{String: ErrIssueAgentConsecutiveFailures.Error(), Valid: true},
+			}); err != nil {
+				return err
+			}
+			if timedOut {
+				if err = markTimedOut(); err != nil {
+					return err
+				}
+			}
+			return commit()
+		}
 		var loop bool
 		if chain, loop, err = wakeupChain(ctx, q, w, receipts); err != nil {
 			return err
@@ -1380,7 +1399,11 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 				}
 			}
 		}
-		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain})
+		wakeupContext := map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain}
+		if hasManualReceipt {
+			wakeupContext["manual_issue_dispatch"] = true
+		}
+		contextJSON, _ := json.Marshal(wakeupContext)
 		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: leaderSquadID.Valid, Valid: true}, SquadID: leaderSquadID, UsageSquadID: usageSquadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
 	}
 	if err != nil {
