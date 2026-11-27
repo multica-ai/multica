@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -91,18 +90,27 @@ func TestStopHermesTaskGateway(t *testing.T) {
 	}
 }
 
-func TestStopHermesTaskGatewayRejectsHostState(t *testing.T) {
-	home, host := t.TempDir(), t.TempDir()
-	path := filepath.Join(host, "gateway.pid")
-	if err := os.WriteFile(path, []byte("host gateway"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(path, filepath.Join(home, "gateway.pid")); err != nil {
-		t.Fatal(err)
-	}
-	cfg := Config{ExecutablePath: filepath.Join(home, "must-not-run"), Env: map[string]string{"HERMES_HOME": home}}
-	if err := StopHermesTaskGateway(cfg, home); err == nil || !strings.Contains(err.Error(), "non-local") {
-		t.Fatalf("cleanup through host PID link = %v, want refusal", err)
+func TestStopHermesTaskGatewayLeavesSharedOwner(t *testing.T) {
+	for _, name := range []string{"gateway.lock", "gateway.pid"} {
+		t.Run(name, func(t *testing.T) {
+			home, owner, tools := t.TempDir(), t.TempDir(), t.TempDir()
+			record, path := filepath.Join(tools, "invocation"), filepath.Join(tools, "hermes")
+			writeTestExecutable(t, path, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECORD\"\n"))
+			target := filepath.Join(owner, name)
+			if err := os.WriteFile(target, []byte("container gateway"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(home, name)); err != nil {
+				t.Fatal(err)
+			}
+			cfg := Config{ExecutablePath: path, Logger: slog.Default(), Env: map[string]string{"HERMES_HOME": home, "RECORD": record}}
+			if err := StopHermesTaskGateway(cfg, home); err != nil {
+				t.Fatalf("cleanup of an attached home = %v, want nil", err)
+			}
+			if _, err := os.Stat(record); !os.IsNotExist(err) {
+				t.Fatal("cleanup must not stop a gateway owned by another home")
+			}
+		})
 	}
 }
 
