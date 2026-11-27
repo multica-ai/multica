@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ListTodo, MessageSquare, Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useIssuesScope } from "@multica/core/issues/stores/issues-scope-store";
@@ -7,11 +8,16 @@ import { useStartChatWithDraft } from "../../chat/use-start-chat-with-draft";
 import { useT } from "../../i18n";
 import { CollectionPageState } from "../../layout/collection-page";
 import { IssueSurface } from "../surface/issue-surface";
+import type { IssueSurfaceController } from "../surface/use-issue-surface-controller";
 import { IssueViewHeader } from "../../issue-views/view-header";
 
 const WORKSPACE_BASE = { kind: "workspace" } as const;
 
-export function IssuesPage() {
+interface IssuesPageProps {
+  renderHeaderTrailing?: (controller: IssueSurfaceController) => ReactNode;
+}
+
+export function IssuesPage({ renderHeaderTrailing }: IssuesPageProps = {}) {
   const { t } = useT("issues");
   const scope = useIssuesScope("issues");
   const startChat = useStartChatWithDraft();
@@ -22,7 +28,9 @@ export function IssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
-        renderHeader={({ controller }) => <IssueViewHeader controller={controller} base={WORKSPACE_BASE} />}
+        renderHeader={({ controller }) => (
+          <IssueViewHeader controller={controller} base={WORKSPACE_BASE} trailing={renderHeaderTrailing?.(controller)} />
+        )}
         renderEmpty={({ controller, canCreate }) => (
           <CollectionPageState
             icon={ListTodo}

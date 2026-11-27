@@ -282,7 +282,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function renderProjectDetail(search = "") {
+function renderProjectDetail(search = "", renderHeaderTrailing?: React.ComponentProps<typeof ProjectDetail>["renderHeaderTrailing"]) {
   qc.setQueryData(["members"], [{ user_id: "user-1", name: "User One", role: mocks.role }]);
   const adapter: NavigationAdapter = {
     push: mocks.push,
@@ -297,7 +297,7 @@ function renderProjectDetail(search = "") {
   return renderWithI18n(
     <QueryClientProvider client={qc}>
       <NavigationProvider value={adapter}>
-        <ProjectDetail projectId={PROJECT.id} />
+        <ProjectDetail projectId={PROJECT.id} renderHeaderTrailing={renderHeaderTrailing} />
       </NavigationProvider>
     </QueryClientProvider>,
   );
@@ -690,6 +690,13 @@ describe("ProjectDetail project deletion", () => {
       screen.queryByRole("button", { name: "Delete project" }),
     ).not.toBeInTheDocument();
   });
+});
+
+it("composes the optional trajectory entry with the original project menu and sidebar", async () => {
+  renderProjectDetail("tab=issues", () => <button type="button">Open project trajectory</button>);
+  expect(screen.getByRole("button", { name: "Open project trajectory" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Rename project" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Toggle right sidebar" })).toBeEnabled();
 });
 
 describe("ProjectDetail loading skeleton", () => {

@@ -1,0 +1,40 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { projectKeys } from "@multica/core/projects/queries";
+import { issueViewKeys } from "@multica/core/issue-views/queries";
+import { trajectoryCapabilityKeys } from "@multica/core/trajectory/capability";
+import { useActiveIssueViewStore, issueViewContainerKey } from "@multica/core/issue-views/active-view-store";
+import type { ReactNode } from "react";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { renderWithI18n } from "../../../../../../packages/views/test/i18n";
+import { NavigationProvider, type NavigationAdapter } from "@multica/views/navigation";
+import type { TrajectoryHeaderRenderer } from "@multica/views/issues/trajectory-entry";
+import { ProjectDetailPage } from "./project-detail-page";
+
+vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "project-1" }) }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@/hooks/use-document-title", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/platform/issue-view-tabs", () => ({ IssueViewUrlSync: ({ children }: { children: ReactNode }) => children }));
+vi.mock("@multica/views/issues/trajectory-entry", async original => {
+  const actual = await original<typeof import("@multica/views/issues/trajectory-entry")>();
+  return { ...actual, TrajectoryRouteHost: ({ children }: { children: (trailing: TrajectoryHeaderRenderer) => ReactNode }) => <actual.TrajectoryRouteHost loadPage={async () => ({ default: (props: { onNativeFallback: () => void }) => <><p>Activated desktop trajectory</p><button type="button" onClick={props.onNativeFallback}>Back to list</button></> })}>{children}</actual.TrajectoryRouteHost> };
+});
+vi.mock("@multica/views/projects/components", () => ({ ProjectDetail: ({ projectId, renderHeaderTrailing }: { projectId: string; renderHeaderTrailing?: TrajectoryHeaderRenderer }) => <><input aria-label="Native project search" defaultValue="A" />{renderHeaderTrailing?.({ projectId, tableQuerySpec: { scope: { kind: "project", project_id: projectId }, filters: {}, sort: { field: "created_at", direction: "asc" } }, tableSearch: "A", viewMode: "table", isLoading: false, filterDependencyError: null } as Parameters<TrajectoryHeaderRenderer>[0])}</> }));
+afterEach(cleanup);
+it("registers the desktop project route's existing slot with a mounted native child", async () => {
+  const adapter: NavigationAdapter = { pathname: "/synthetic/projects/project-1", searchParams: new URLSearchParams("view=A"), hash: "", push: vi.fn(), replace: vi.fn(), back: vi.fn(), getShareableUrl: p => p };
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  client.setQueryData(trajectoryCapabilityKeys.detail("workspace-1"), { enabled: true });
+  const scope = { scope_type: "project" as const, scope_id: "project-1" };
+  client.setQueryData(projectKeys.detail("workspace-1", "project-1"), { title: "Project A" });
+  client.setQueryData(issueViewKeys.list("workspace-1", scope), [{ id: "A" }]);
+  useActiveIssueViewStore.setState({ active: { [issueViewContainerKey("workspace-1", scope)]: "A" } });
+  renderWithI18n(<QueryClientProvider client={client}><NavigationProvider value={adapter}><ProjectDetailPage /></NavigationProvider></QueryClientProvider>);
+  const native = screen.getByRole("textbox", { name: "Native project search" });
+  fireEvent.click(screen.getByRole("button", { name: "Open trajectory" }));
+  await screen.findByText("Activated desktop trajectory");
+  fireEvent.click(screen.getByRole("button", { name: "Back to list" }));
+  expect(screen.getByRole("textbox", { name: "Native project search" })).toBe(native);
+  expect(native).toHaveValue("A");
+  client.clear();
+});

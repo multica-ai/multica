@@ -2256,6 +2256,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
+			r.Get("/api/trajectory/capability", h.GetTrajectoryCapability)
+
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
@@ -2274,6 +2276,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/table/groups", h.ListIssueTableGroups)
 				r.Post("/table/rows", h.ListIssueTableRows)
 				r.Post("/table/facets", h.ListIssueTableFacets)
+				r.Post("/trajectory", h.ListTaskTrajectory)
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/pull-requests", h.ListIssuePullRequestSummaries)
@@ -2296,6 +2299,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/trajectory", h.GetTrajectory)
 					r.Put("/", h.UpdateIssue)
 					r.Post("/description/edits", h.EditIssueDescription)
 					r.Post("/collab-ticket", h.CreateIssueCollabTicket)

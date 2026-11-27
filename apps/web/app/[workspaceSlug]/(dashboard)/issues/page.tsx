@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
+import { TrajectoryRouteHost } from "@multica/views/issues/trajectory-entry";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIssueViewUrlSync } from "../../../../platform/use-issue-view-url-sync";
@@ -17,7 +18,9 @@ export default function Page() {
       <Suspense fallback={null}>
         <IssueViewUrlSync />
       </Suspense>
-      <IssuesPage />
+      <TrajectoryRouteHost>
+        {(renderHeaderTrailing) => <IssuesPage renderHeaderTrailing={renderHeaderTrailing} />}
+      </TrajectoryRouteHost>
     </ErrorBoundary>
   );
 }

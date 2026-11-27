@@ -679,6 +679,11 @@ function renderWithQuery(ui: React.ReactElement) {
 // ---------------------------------------------------------------------------
 
 describe("IssuesPage (shared)", () => {
+  it("shows the optional Trajectory action through the existing native header", async () => {
+    renderWithQuery(<IssuesPage renderHeaderTrailing={controller => <button type="button">Open {controller.tableQuerySpec.scope.kind} trajectory</button>} />);
+    expect(await screen.findByRole("button", { name: "Open workspace trajectory" })).toBeVisible();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal(

@@ -79,6 +79,8 @@ function NavigationProviderInner({
   const adapter: NavigationAdapter = {
     push: router.push,
     replace: router.replace,
+    // Next.js copies its entry state and updates useSearchParams for native writes.
+    replaceInPlace: (path) => window.history.replaceState(null, "", path),
     back: router.back,
     forward: router.forward,
     canGoBack: canGoBackInApp,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, use } from "react";
+import { TrajectoryRouteHost } from "@multica/views/issues/trajectory-entry";
 import { ProjectDetail } from "@multica/views/projects/components";
 import { useIssueViewUrlSync } from "../../../../../platform/use-issue-view-url-sync";
 
@@ -21,7 +22,9 @@ export default function ProjectDetailPage({
       <Suspense fallback={null}>
         <IssueViewUrlSync projectId={id} />
       </Suspense>
-      <ProjectDetail projectId={id} />
+      <TrajectoryRouteHost key={id}>
+        {(renderHeaderTrailing) => <ProjectDetail projectId={id} renderHeaderTrailing={renderHeaderTrailing} />}
+      </TrajectoryRouteHost>
     </>
   );
 }

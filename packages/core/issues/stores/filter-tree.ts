@@ -596,6 +596,26 @@ export function advancedFilterToTableQuery(
   return { match: pruned.match, children: pruned.children.map(convert) };
 }
 
+const TABLE_FIELD_DIMENSION = Object.fromEntries(
+  Object.entries(FILTER_DIMENSION_TABLE_FIELD).map(([dimension, field]) => [field, dimension]),
+) as Record<IssueTableNegatableFilter, NegatableFilterDimension>;
+
+/** The editable tree of a table-query group: the inverse of {@link advancedFilterToTableQuery}. */
+export function advancedFilterFromTableQuery(group: IssueTableFilterGroup | null | undefined): AdvancedFilterGroup {
+  if (!group) return createFilterGroup();
+  const convert = (node: IssueTableFilterNode): AdvancedFilterNode =>
+    "children" in node
+      ? createFilterGroup(node.match, node.children.map(convert))
+      : createFilterCondition(
+          node.field.startsWith(PROPERTY_FIELD_PREFIX)
+            ? (node.field as PropertyFilterField)
+            : TABLE_FIELD_DIMENSION[node.field as IssueTableNegatableFilter],
+          [...node.values],
+          node.negate === true,
+        );
+  return createFilterGroup(group.match, group.children.map(convert));
+}
+
 export interface StatusColumnFilter<S extends string = string> {
   statuses: readonly string[];
   negated: boolean;

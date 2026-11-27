@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "exports": {
+    "./issues/trajectory-entry": "./issues/components/trajectory/graph/trajectory-route-host.tsx",
     "./navigation": "./navigation/index.ts",
     "./dev-toolbar": "./dev-toolbar/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",

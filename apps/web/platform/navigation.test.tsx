@@ -47,6 +47,7 @@ function renderAdapter(): () => NavigationAdapter {
 
 beforeEach(() => {
   router.push.mockReset();
+  router.replace.mockReset();
 });
 
 describe("WebNavigationProvider internal link bridge", () => {
@@ -165,5 +166,28 @@ describe("WebNavigationProvider prefetch", () => {
     adapter().prefetch?.("/acme/issues/MUL-1");
 
     expect(router.prefetch).toHaveBeenCalledWith("/acme/issues/MUL-1", { kind: "full" });
+  });
+});
+
+describe("WebNavigationProvider replaceInPlace", () => {
+  it("uses native history without replacing or adding a route entry", () => {
+    const adapter = renderAdapter();
+    const previousUrl = window.location.href;
+    const previousState = window.history.state;
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const target = "/acme/issues?view=custom&trajectory=1&target_kind=run&target_id=r1";
+    const historyLength = window.history.length;
+
+    try {
+      adapter().replaceInPlace?.(target);
+
+      expect(replaceState).toHaveBeenCalledWith(null, "", target);
+      expect(window.location.pathname + window.location.search).toBe(target);
+      expect(window.history.length).toBe(historyLength);
+      expect(router.replace).not.toHaveBeenCalled();
+    } finally {
+      replaceState.mockRestore();
+      window.history.replaceState(previousState, "", previousUrl);
+    }
   });
 });
