@@ -41,7 +41,10 @@ func TestOpenclawWindowsPromptFile(t *testing.T) {
 			t.Setenv("MULTICA_OPENCLAW_PROMPT_TEST_RECORD", recordPath)
 			prompt := strings.Repeat("quoted \"input\" & %PATH%\r\n", 4000) + "Привет"
 			system := "Literal system instructions"
-			config := Config{ExecutablePath: executable, Logger: slog.Default()}
+			config := Config{ExecutablePath: executable, Logger: slog.Default(), Env: map[string]string{
+				"MULTICA_OPENCLAW_PROMPT_TEST_HELPER": "1",
+				"MULTICA_OPENCLAW_PROMPT_TEST_RECORD": recordPath,
+			}}
 			if shim {
 				config.ExecutablePath = os.Getenv("ComSpec")
 				if config.ExecutablePath == "" {
