@@ -149,6 +149,9 @@ function normalizeHttpUrl(value: string, field: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Invalid desktop runtime config: ${field} must use http or https`);
   }
+  if (url.username || url.password) {
+    throw new Error(`Invalid desktop runtime config: ${field} must not include credentials`);
+  }
   url.search = "";
   url.hash = "";
   return trimTrailingSlash(url.toString());

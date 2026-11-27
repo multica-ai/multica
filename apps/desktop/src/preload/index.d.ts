@@ -53,6 +53,11 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /** Save a new API endpoint and restart the app to connect to it. */
+  setRuntimeConfig: (apiUrl: string) => Promise<{
+    ok: boolean;
+    error?: string;
+  }>;
   /** Main tabbed window or a dedicated issue-only window. */
   windowContext: DesktopWindowContext;
   /** Read any freeze/crash breadcrumb from a previous session, so the renderer
