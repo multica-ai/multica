@@ -1220,6 +1220,13 @@ export interface DashboardUsageBySquad extends DashboardUsageByAgent {
   squad_id: string;
 }
 
+// Per-(date, agent, autopilot, model) token totals, splitting manual runs
+// from autopilot runs. autopilot_id is null for manual runs.
+export interface DashboardUsageBySource extends DashboardUsageByAgent {
+  date: string;
+  autopilot_id: string | null;
+}
+
 // Per-(squad, agent) terminal-task run-time + counts for the workspace dashboard.
 // squad_id is "" for standalone (non-squad-triggered) agent runs.
 export interface DashboardSquadRunTime extends DashboardAgentRunTime {

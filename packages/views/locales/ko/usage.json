@@ -133,5 +133,13 @@
   },
   "duration": {
     "less_than_minute": "1분 미만"
+  },
+  "source": {
+    "title": "수동 대 오토파일럿",
+    "manual": "수동",
+    "autopilot": "오토파일럿",
+    "share": "오토파일럿 비중",
+    "autopilot_col": "오토파일럿",
+    "deleted_autopilot": "삭제된 오토파일럿"
   }
 }

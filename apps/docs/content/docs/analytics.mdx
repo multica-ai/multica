@@ -35,6 +35,8 @@ Run time and Runs count only runs that actually started executing (completed, fa
 
 The trend card plots Tokens, Cost, Time, or Runs on one time axis, at a **Daily** or **Weekly** grain. `30d` and `90d` offer both; `1d` and `7d` are daily only, `180d` and `365d` weekly only. Weeks start on Monday, and the current, unfinished week is drawn lighter; hovering it marks the bar as partial and says how many of its 7 days have passed.
 
+Once some spend in the range came from an autopilot, a **Manual vs autopilot** card appears below the trend: tokens or cost split into manual runs and autopilot runs over time, the autopilot share, and the autopilots that spent the most. A run counts as an autopilot's when the autopilot started it or created the issue it ran on. Usage of a deleted autopilot's runs counts as manual; runs on issues it created stay with it, listed as **Deleted autopilot**.
+
 The **Leaderboard** lists tokens, cost, run time, and runs, ranked by whichever of the four you pick. It shows the top 10; **Show all** reveals the rest. When the workspace has squads and Attribution is set to **All attribution**, switch between **Agents** and **Squads**:
 
 - Under **Agents**, two aggregate rows keep the list reconciled with the totals above:

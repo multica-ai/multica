@@ -135,5 +135,13 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "source": {
+    "title": "Manual vs autopilot",
+    "manual": "Manual",
+    "autopilot": "Autopilot",
+    "share": "Autopilot share",
+    "autopilot_col": "Autopilot",
+    "deleted_autopilot": "Deleted autopilot"
   }
 }

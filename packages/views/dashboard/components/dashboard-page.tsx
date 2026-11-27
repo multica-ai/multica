@@ -21,12 +21,14 @@ import { workspaceSubscriptionPricesOptions } from "@multica/core/billing";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent, Squad } from "@multica/core/types";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardKeys,
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
   dashboardUsageBySquadOptions,
+  dashboardUsageBySourceOptions,
   dashboardAgentRunTimeOptions,
   dashboardSquadRunTimeOptions,
   dashboardRunTimeDailyOptions,
@@ -83,6 +85,7 @@ import {
 } from "./dashboard-shared";
 import { ProjectFilter, SquadFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
+import { UsageSourceCard } from "./usage-source-card";
 import { Leaderboard, type LeaderboardGroupBy } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
 import {
@@ -99,6 +102,8 @@ import { dashboardTimeRanges } from "./dashboard-shared";
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_BY_SQUAD: import("@multica/core/types").DashboardUsageBySquad[] = [];
+const EMPTY_BY_SOURCE: import("@multica/core/types").DashboardUsageBySource[] = [];
+const EMPTY_AUTOPILOTS: import("@multica/core/types").Autopilot[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_SQUAD_RUNTIME: import("@multica/core/types").DashboardSquadRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
@@ -285,6 +290,19 @@ export function DashboardPage() {
       squadFilterParam,
     ),
   );
+  // Same date-bucketed shape and fetch window as the daily series, so it is
+  // trimmed to the range the same way.
+  const bySourceQuery = useQuery(
+    dashboardUsageBySourceOptions(
+      wsId,
+      chartFetchDays,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+  );
+  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery(autopilotListOptions(wsId));
   const byAgentQuery = useQuery(
     dashboardUsageByAgentOptions(
       wsId,
@@ -429,6 +447,16 @@ export function DashboardPage() {
   const dailyUsageInWindow = useMemo(
     () => dailyUsage.filter((u) => u.date >= dailyCutoffIso),
     [dailyUsage, dailyCutoffIso],
+  );
+  const bySourceRows = bySourceQuery.data ?? EMPTY_BY_SOURCE;
+  const bySourceInWindow = useMemo(
+    () => bySourceRows.filter((r) => r.date >= dailyCutoffIso),
+    [bySourceRows, dailyCutoffIso],
+  );
+  // Only worth a card once some spend in range came from an autopilot.
+  const hasAutopilotUsage = useMemo(
+    () => bySourceInWindow.some((r) => r.autopilot_id !== null),
+    [bySourceInWindow],
   );
   const runTimeDailyInWindow = useMemo(
     () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
@@ -802,6 +830,14 @@ export function DashboardPage() {
                   weeklyTasks={weeklyTasks}
                   lessThanMinuteLabel={lessThanMinuteLabel}
                 />
+
+                {hasAutopilotUsage && (
+                  <UsageSourceCard
+                    rows={bySourceInWindow}
+                    autopilots={autopilots}
+                    allowedDims={allowedDims}
+                  />
+                )}
 
                 <Leaderboard
                   rows={visibleAgentRows}

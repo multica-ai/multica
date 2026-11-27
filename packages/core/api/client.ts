@@ -117,6 +117,7 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardUsageBySquad,
+  DashboardUsageBySource,
   DashboardAgentRunTime,
   DashboardSquadRunTime,
   DashboardRunTimeDaily,
@@ -377,6 +378,7 @@ import {
   DashboardFailureBySquadListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageBySquadListSchema,
+  DashboardUsageBySourceListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -3266,6 +3268,15 @@ export class ApiClient {
       params,
       DashboardUsageBySquadListSchema,
       "GET /api/dashboard/usage/by-squad",
+    );
+  }
+
+  async getDashboardUsageBySource(params: DashboardRequestParams): Promise<DashboardUsageBySource[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-source",
+      params,
+      DashboardUsageBySourceListSchema,
+      "GET /api/dashboard/usage/by-source",
     );
   }
 

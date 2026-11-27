@@ -35,6 +35,8 @@ Le temps d'exécution et le nombre d'exécutions ne comptent que les exécutions
 
 La carte de tendance affiche Tokens, Coût, Temps ou Exécutions sur un même axe temporel, en **Quotidien** ou **Hebdomadaire**. `30d` et `90d` proposent les deux ; `1d` et `7d` sont uniquement quotidiens, `180d` et `365d` uniquement hebdomadaires. Les semaines commencent le lundi, et la semaine en cours, pas encore terminée, est dessinée plus pâle ; au survol, la barre est marquée comme partielle avec le nombre de jours écoulés sur 7.
 
+Dès qu'une partie de la consommation de la période vient d'une automatisation, une carte **Manuel ou automatisation** apparaît sous la tendance : tokens ou coût répartis entre exécutions manuelles et exécutions d'automatisations dans le temps, la part des automatisations et celles qui ont le plus consommé. Une exécution compte pour une automatisation quand celle-ci l'a lancée ou a créé la tâche sur laquelle elle tourne. Après suppression d'une automatisation, les exécutions qu'elle a lancées comptent comme manuelles ; celles sur les tâches qu'elle a créées lui restent, sous **Automatisation supprimée**.
+
 Le **Classement** liste les tokens, le coût, le temps et les exécutions, triés selon l'une de ces quatre valeurs. Il affiche les 10 premiers ; **Tout afficher** montre le reste. Quand l'espace de travail contient des squads et qu'Attribution est sur **Toute attribution**, basculez entre **Agents** et **Squads** :
 
 - Par **Agents**, deux lignes agrégées maintiennent la concordance avec les totaux du haut :

@@ -20,6 +20,7 @@ type DashboardKeyPart =
   | "daily"
   | "by-agent"
   | "by-squad"
+  | "by-source"
   | "agent-runtime"
   | "squad-runtime"
   | "runtime-daily"
@@ -253,6 +254,26 @@ export function dashboardUsageBySquadOptions(
   return dashboardOptions(
     "by-squad",
     (params) => api.getDashboardUsageBySquad(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardUsageBySourceOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "by-source",
+    (params) => api.getDashboardUsageBySource(params),
     wsId,
     days,
     projectId,

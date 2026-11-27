@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DashboardUsageBySourceListSchema,
   AgentTaskSchema,
   IssueSchema,
   AppConfigSchema,
@@ -2663,5 +2664,17 @@ describe("Issue requester compatibility", () => {
     expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
     expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
     expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
+  });
+});
+
+describe("DashboardUsageBySourceListSchema", () => {
+  it("reads a missing or malformed autopilot id as a manual run", () => {
+    const rows = DashboardUsageBySourceListSchema.parse([
+      { date: "2026-11-24", agent_id: "a1", autopilot_id: "ap1", input_tokens: 5, task_count: 1 },
+      { date: "2026-11-24", agent_id: "a1", input_tokens: 2 },
+      { date: "2026-11-24", agent_id: "a1", autopilot_id: 7 },
+    ]);
+    expect(rows.map((r) => r.autopilot_id)).toEqual(["ap1", null, null]);
+    expect(rows[1]?.task_count).toBe(0);
   });
 });
