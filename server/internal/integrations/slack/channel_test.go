@@ -232,6 +232,78 @@ func TestSendMarkdownWithMetadata_ChunksLongRepliesWithinLimit(t *testing.T) {
 	}
 }
 
+func TestSendMarkdownWithMetadata_ResplitsOnMsgBlocksTooLong(t *testing.T) {
+	var accepted []string
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		attempts++
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(r.PostForm.Get("blocks")), &blocks); err != nil {
+			t.Fatalf("decode blocks: %v", err)
+		}
+		if len(blocks) != 1 || blocks[0].Type != "markdown" {
+			t.Fatalf("attempt %d blocks = %+v", attempts, blocks)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// Simulate Slack expanding emoji to :shortcode: so a 1,900-rune chunk
+		// exceeds the 12,000-character limit and triggers msg_blocks_too_long.
+		if utf8.RuneCountInString(blocks[0].Text) > 800 {
+			_, _ = w.Write([]byte(`{"ok":false,"error":"msg_blocks_too_long"}`))
+			return
+		}
+		accepted = append(accepted, blocks[0].Text)
+		_, _ = fmt.Fprintf(w, `{"ok":true,"channel":"C1","ts":"1.%d"}`, len(accepted))
+	}))
+	defer srv.Close()
+
+	// 1,900 runes of emoji-heavy content fits under maxMarkdownBlockRunes on
+	// the initial pass, then gets halved until every piece fits <= 800 runes.
+	body := strings.Repeat("🚀", 1900)
+	c := newSlackSender(credentials{TeamID: "T1"}, slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")), nil)
+	res, err := c.SendMarkdownWithMetadata(context.Background(), channel.OutboundMessage{
+		ChatID:   "C1",
+		Text:     body,
+		ThreadID: "1.0",
+	}, slack.SlackMetadata{})
+	if err != nil {
+		t.Fatalf("SendMarkdownWithMetadata: %v", err)
+	}
+	if len(accepted) < 3 {
+		t.Fatalf("expected >=3 accepted sub-chunks, got %d", len(accepted))
+	}
+	if strings.Join(accepted, "") != body {
+		t.Fatalf("re-split lost content: got %d runes, want %d", utf8.RuneCountInString(strings.Join(accepted, "")), utf8.RuneCountInString(body))
+	}
+	if len(res.MessageIDs) != len(accepted) || res.MessageID != res.MessageIDs[len(res.MessageIDs)-1] {
+		t.Fatalf("MessageID=%q MessageIDs=%v", res.MessageID, res.MessageIDs)
+	}
+}
+
+func TestSendMarkdownWithMetadata_FailsLoudlyOnOtherSlackErrors(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error":"channel_not_found"}`))
+	}))
+	defer srv.Close()
+
+	c := newSlackSender(credentials{TeamID: "T1"}, slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")), nil)
+	if _, err := c.SendMarkdownWithMetadata(context.Background(), channel.OutboundMessage{
+		ChatID: "C1",
+		Text:   "hello",
+	}, slack.SlackMetadata{}); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt without retry, got %d", attempts)
+	}
+}
+
 func TestChunkMarkdown(t *testing.T) {
 	t.Run("short unchanged", func(t *testing.T) {
 		got := chunkMarkdown("hello", 50)

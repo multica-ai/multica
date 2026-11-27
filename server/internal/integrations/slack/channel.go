@@ -63,32 +63,77 @@ func (c *slackSender) SendMarkdownWithMetadata(ctx context.Context, out channel.
 		return channel.SendResult{}, errors.New("slack: api client not configured")
 	}
 	threadTS := outboundThreadTS(out)
-	var lastTS string
 	var messageIDs []string
 	for _, chunk := range chunkMarkdown(out.Text, maxMarkdownBlockRunes) {
-		fallback := formatMrkdwn(chunk)
-		if utf8.RuneCountInString(fallback) > maxMessageRunes {
-			fallback = string([]rune(fallback)[:maxMessageRunes])
-		}
-		opts := []slack.MsgOption{
-			slack.MsgOptionText(fallback, false),
-			slack.MsgOptionBlocks(slack.NewMarkdownBlock("", chunk)),
-			slack.MsgOptionDisableLinkUnfurl(),
-		}
-		if metadata.EventType != "" {
-			opts = append(opts, slack.MsgOptionMetadata(metadata))
-		}
-		if threadTS != "" {
-			opts = append(opts, slack.MsgOptionTS(threadTS))
-		}
-		_, ts, err := c.api.PostMessageContext(ctx, out.ChatID, opts...)
+		ids, err := c.postMarkdownChunk(ctx, out.ChatID, threadTS, chunk, maxMarkdownBlockRunes, metadata)
 		if err != nil {
-			return channel.SendResult{}, fmt.Errorf("slack: chat.postMessage: %w", err)
+			return channel.SendResult{}, err
 		}
-		lastTS = ts
-		messageIDs = append(messageIDs, ts)
+		messageIDs = append(messageIDs, ids...)
+	}
+	var lastTS string
+	if len(messageIDs) > 0 {
+		lastTS = messageIDs[len(messageIDs)-1]
 	}
 	return channel.SendResult{MessageID: lastTS, MessageIDs: messageIDs}, nil
+}
+
+func (c *slackSender) postMarkdownChunk(
+	ctx context.Context,
+	chatID, threadTS, chunk string,
+	limit int,
+	metadata slack.SlackMetadata,
+) ([]string, error) {
+	fallback := formatMrkdwn(chunk)
+	if utf8.RuneCountInString(fallback) > maxMessageRunes {
+		fallback = string([]rune(fallback)[:maxMessageRunes])
+	}
+	opts := []slack.MsgOption{
+		slack.MsgOptionText(fallback, false),
+		slack.MsgOptionBlocks(slack.NewMarkdownBlock("", chunk)),
+		slack.MsgOptionDisableLinkUnfurl(),
+	}
+	if metadata.EventType != "" {
+		opts = append(opts, slack.MsgOptionMetadata(metadata))
+	}
+	if threadTS != "" {
+		opts = append(opts, slack.MsgOptionTS(threadTS))
+	}
+	_, ts, err := c.api.PostMessageContext(ctx, chatID, opts...)
+	if err == nil {
+		return []string{ts}, nil
+	}
+	// Slack counts Unicode emoji by their :shortcode: length against the
+	// 12,000-character markdown block limit, so a rune-capped chunk with many
+	// emoji can still trigger msg_blocks_too_long. Halve and re-split just
+	// that chunk rather than guessing shortcode expansion sizes.
+	if isSlackMsgBlocksTooLong(err) {
+		chunkRunes := utf8.RuneCountInString(chunk)
+		nextLimit := min(limit, chunkRunes) / 2
+		if nextLimit >= 1 {
+			subChunks := chunkMarkdown(chunk, nextLimit)
+			if len(subChunks) > 1 {
+				var ids []string
+				for _, sub := range subChunks {
+					subIDs, subErr := c.postMarkdownChunk(ctx, chatID, threadTS, sub, nextLimit, metadata)
+					if subErr != nil {
+						return nil, subErr
+					}
+					ids = append(ids, subIDs...)
+				}
+				return ids, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("slack: chat.postMessage: %w", err)
+}
+
+func isSlackMsgBlocksTooLong(err error) bool {
+	var slackErr slack.SlackErrorResponse
+	if errors.As(err, &slackErr) {
+		return slackErr.Err == "msg_blocks_too_long"
+	}
+	return err != nil && err.Error() == "msg_blocks_too_long"
 }
 
 func (c *slackSender) send(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
