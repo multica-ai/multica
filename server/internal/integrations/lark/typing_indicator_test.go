@@ -2,6 +2,7 @@ package lark
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"sync"
@@ -122,6 +123,36 @@ type fakeTypingCreds struct{ secret string }
 
 func (f fakeTypingCreds) DecryptAppSecret(inst Installation) (string, error) {
 	return f.secret, nil
+}
+
+func (f fakeTypingCreds) SealAppSecret(secret string) ([]byte, error) {
+	return []byte("sealed:" + secret), nil
+}
+
+// The snapshot outlives the installation row, so it must carry the secret
+// sealed under the current key, not the ciphertext read with the row.
+func TestTypingIndicatorSnapshotResealsSecret(t *testing.T) {
+	api := &fakeTypingAPIClient{addReturn: "reaction-123"}
+	queries := &fakeTypingQueries{}
+	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
+	session := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+
+	mgr.Add(context.Background(), Installation{AppID: "cli_test", AppSecretEncrypted: []byte("stale"), Region: "feishu"}, session, "msg-1", "", session)
+
+	queries.ledgerMu.Lock()
+	defer queries.ledgerMu.Unlock()
+	if len(queries.ledger) != 1 {
+		t.Fatalf("ledger rows = %d, want 1", len(queries.ledger))
+	}
+	for _, row := range queries.ledger {
+		var snap Installation
+		if err := json.Unmarshal(row.InstallationSnapshot, &snap); err != nil {
+			t.Fatal(err)
+		}
+		if string(snap.AppSecretEncrypted) != "sealed:shh" {
+			t.Fatalf("snapshot secret = %q, want the re-sealed value", snap.AppSecretEncrypted)
+		}
+	}
 }
 
 func TestTypingIndicatorAddRecordsState(t *testing.T) {

@@ -44,6 +44,13 @@ type TypingIndicatorQueries interface {
 	IsChannelMessageTypingActive(ctx context.Context, arg db.IsChannelMessageTypingActiveParams) (bool, error)
 }
 
+// TypingCredentials decrypts an installation's app secret and re-seals it
+// for the cleanup snapshot.
+type TypingCredentials interface {
+	CredentialsResolver
+	SealAppSecret(secret string) ([]byte, error)
+}
+
 // TypingIndicatorManager owns the "processing" reaction lifecycle for
 // inbound Lark messages. When a message is successfully ingested it adds
 // a Typing reaction; when the run ends — with a reply, a failure or a
@@ -55,7 +62,7 @@ type TypingIndicatorQueries interface {
 // no tracked state is a no-op.
 type TypingIndicatorManager struct {
 	client      APIClient
-	credentials CredentialsResolver
+	credentials TypingCredentials
 	queries     TypingIndicatorQueries
 	log         *slog.Logger
 
@@ -65,7 +72,7 @@ type TypingIndicatorManager struct {
 
 // NewTypingIndicatorManager constructs a manager. All dependencies must
 // be non-nil; the manager panics on nil client / credentials / queries.
-func NewTypingIndicatorManager(client APIClient, credentials CredentialsResolver, queries TypingIndicatorQueries, log *slog.Logger) *TypingIndicatorManager {
+func NewTypingIndicatorManager(client APIClient, credentials TypingCredentials, queries TypingIndicatorQueries, log *slog.Logger) *TypingIndicatorManager {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -111,7 +118,15 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 
 	// The external anchor must be committed before HTTP can create a badge.
 	// No registration means no Add: terminal workers must never miss an input.
-	snapshot, err := json.Marshal(Installation{ID: inst.ID, WorkspaceID: inst.WorkspaceID, AppID: inst.AppID, AppSecretEncrypted: inst.AppSecretEncrypted, TenantKey: inst.TenantKey, Region: inst.Region})
+	// Re-seal rather than copy inst.AppSecretEncrypted: inst may have been read
+	// before the row was re-sealed under a new key, and the snapshot outlives
+	// the previous key.
+	sealedSecret, err := m.credentials.SealAppSecret(creds.AppSecret)
+	if err != nil {
+		m.log.Warn("lark typing: seal installation snapshot secret", "err", err)
+		return
+	}
+	snapshot, err := json.Marshal(Installation{ID: inst.ID, WorkspaceID: inst.WorkspaceID, AppID: inst.AppID, AppSecretEncrypted: sealedSecret, TenantKey: inst.TenantKey, Region: inst.Region})
 	if err != nil {
 		m.log.Warn("lark typing: encode installation snapshot", "err", err)
 		return
