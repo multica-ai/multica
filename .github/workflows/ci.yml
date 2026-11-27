@@ -759,10 +759,10 @@ jobs:
 
       - name: Test Windows execution-environment isolation
         working-directory: server
-        # Keep this job scoped to the runtime regression it exists to prove.
+        # Run the process-isolation and worktree cleanup regressions on Windows.
         # The package's legacy OpenClaw HOME tests are not Windows-safe and are
         # outside this PR; the normal backend job still runs the full package.
-        run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
+        run: go test ./internal/daemon/execenv -v -run '^(TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$|TestRemoveLocalWorktreeDir)' -count=1 -timeout=5m
 
       - name: Test Windows daemon local-skill discovery
         working-directory: server

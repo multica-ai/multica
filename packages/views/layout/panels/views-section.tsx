@@ -54,6 +54,7 @@ import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
+import { ViewVisibilityMenuItems } from "../../issue-views/view-visibility-menu-items";
 import { BUILTIN_VIEW_ICON, useBuiltinViewLabel, useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { useT } from "../../i18n";
@@ -539,6 +540,7 @@ function SavedViewRow({
                 <Link2 className="size-3.5" />
                 {t(($) => $.panels.work.view_copy_link)}
               </DropdownMenuItem>
+              <ViewVisibilityMenuItems view={view} actions={actions} />
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => actions.sidebar.unstar(item.id)}>
                 <EyeOff className="size-3.5" />

@@ -194,10 +194,12 @@ type AgentTaskQueue struct {
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
 	// Squad UUID for usage attribution and unified execution avatar grouping. Separate from squad_id (which carries leader/worker routing authority). NULL for standalone non-squad runs.
-	UsageSquadID pgtype.UUID `json:"usage_squad_id"`
-	DocID        pgtype.UUID `json:"doc_id"`
-	DocThreadID  pgtype.UUID `json:"doc_thread_id"`
-	DocCommentID pgtype.UUID `json:"doc_comment_id"`
+	UsageSquadID       pgtype.UUID        `json:"usage_squad_id"`
+	DocID              pgtype.UUID        `json:"doc_id"`
+	DocThreadID        pgtype.UUID        `json:"doc_thread_id"`
+	DocCommentID       pgtype.UUID        `json:"doc_comment_id"`
+	TranscriptPurgedAt pgtype.Timestamptz `json:"transcript_purged_at"`
+	TranscriptPurgedBy pgtype.UUID        `json:"transcript_purged_by"`
 }
 
 type AgentToLabel struct {

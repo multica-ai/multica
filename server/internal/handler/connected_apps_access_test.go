@@ -37,6 +37,14 @@ func TestConnectedApps_GatewayRechecksAccess(t *testing.T) {
 				if _, err := f.h.revokeAndRemoveMember(ctx, member.WorkspaceID, member.UserID, member.ID, parseUUID(testUserID)); err != nil {
 					t.Fatal(err)
 				}
+				var status string
+				dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id=$1`, f.taskID).Scan(&status)
+				if status != "cancelled" {
+					t.Fatalf("task the departed member started = %s, want cancelled", status)
+				}
+				// The daemon may not have seen the cancellation yet; the
+				// gateway must refuse the still-running task on its own.
+				dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', completed_at=NULL WHERE id=$1`, f.taskID)
 			case "private":
 				dbfx.Exec(t, `UPDATE agent SET permission_mode='private' WHERE id=$1`, f.agentID)
 			case "archived":

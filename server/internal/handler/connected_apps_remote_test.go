@@ -101,7 +101,7 @@ type remoteAppsFixture struct {
 	up *remoteFakeUpstream
 }
 
-func newRemoteAppsFixture(t *testing.T) *remoteAppsFixture {
+func newRemoteAppsFixture(t *testing.T, opts ...func(*connectedapps.Config)) *remoteAppsFixture {
 	t.Helper()
 	f := newAppsFixture(t)
 	box, err := secretbox.New(bytes.Repeat([]byte{7}, secretbox.KeySize))
@@ -109,7 +109,7 @@ func newRemoteAppsFixture(t *testing.T) *remoteAppsFixture {
 		t.Fatal(err)
 	}
 	up := &remoteFakeUpstream{}
-	apps, err := connectedapps.New(connectedapps.Config{
+	cfg := connectedapps.Config{
 		Queries:        f.h.Queries,
 		Composio:       f.h.Composio,
 		TokenSecret:    connectedapps.DeriveTokenSecret([]byte("apps-test-secret")),
@@ -117,7 +117,11 @@ func newRemoteAppsFixture(t *testing.T) *remoteAppsFixture {
 		SecretBox:      box,
 		DB:             testPool,
 		RemoteUpstream: up,
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	apps, err := connectedapps.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

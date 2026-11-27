@@ -291,7 +291,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다.
+- `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다. `agent env get`과 `agent env set`은 값을 `****`로 가려서 출력하며, 다른 에이전트로 복사할 때처럼 실제 값이 필요하면 `--show-values`를 붙입니다.
 - `agent update --mcp-config null`은 MCP 설정을 지웁니다.
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
 - 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
@@ -484,10 +484,10 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 | 명령 | 하위 명령 | 용도 | 주요 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
+| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--blocked`(끝나지 않은 선행 작업이나 앞 단계를 기다리는 태스크만), `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
 | | `get <id>` | 태스크 하나 확인 | `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환) |
-| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
-| | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--description-base-revision`(`issue get`의 값; 설명이 변경되었으면 덮어쓰기 거부), `--position`, `--no-start`, `--duplicate-of` 추가 |
+| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--blocked-by`(반복 가능; 시작 전에 기다릴 태스크 키 또는 UUID), `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
+| | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--remove-blocked-by`(반복 가능; 수동 선행 작업 제거), `--description-base-revision`(`issue get`의 값; 설명이 변경되었으면 덮어쓰기 거부), `--position`, `--no-start`, `--duplicate-of` 추가 |
 | | `edit-description <id>` | 전체를 다시 쓰지 않고 태스크 설명의 정확한 텍스트를 부분 치환 | `--old` / `--old-file`(필수), `--new` / `--new-file`(필수), `--replace-all` |
 | | `batch update <id>...` | 여러 태스크에 같은 변경 적용 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 하나 이상의 태스크를 영구 삭제 | `--yes`로 확인 생략. 태스크 번호 또는 전체 UUID 사용; `--dry-run` |
@@ -532,7 +532,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
 | | `tasks <id>` | 에이전트 실행 확인 | |
 | | `avatar <id>` | 아바타 업로드 | |
-| | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(에이전트 소유자 또는 워크스페이스 owner/admin. 읽을 때마다 기록됨) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`. 전체를 교체하며 값이 `****`인 키는 기존 값 유지 |
+| | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(에이전트 소유자 또는 워크스페이스 owner/admin. 읽을 때마다 기록됨) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`. 전체를 교체하며 값이 `****`인 키는 기존 값 유지. 출력 값은 `--show-values`가 없으면 `****` |
 | | `skills list/set/add <agent-id>` | 연결된 스킬 관리 | `--skill-ids`(`set`은 전체 교체, `add`는 증분 추가) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 워크스페이스 MCP 서버를 이 에이전트에 할당 | server id는 `workspace mcp list`에서 확인. 라이브러리 항목은 여기서 추가하기 전까지 동작하지 않으며, `disable`은 할당을 유지한 채 전달만 중단합니다 |
 | `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--mode`(둘 다 필수), `--agent` / `--squad` / `--squad-id` 중 하나만(필수), `--description`, `--issue-title-template`, `--project`, `--subscriber`(반복 가능) |

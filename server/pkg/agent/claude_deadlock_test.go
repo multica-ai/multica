@@ -79,6 +79,9 @@ func TestMain(m *testing.M) {
 	case "background_control_request":
 		runFakeClaudeBackgroundControlRequest()
 		os.Exit(0)
+	case "resume_interrupted_turn":
+		runFakeClaudeResumeInterruptedTurn()
+		os.Exit(0)
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()
 		os.Exit(0)

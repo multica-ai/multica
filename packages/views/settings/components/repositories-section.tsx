@@ -121,8 +121,11 @@ export function repositoryIdentity(rawURL: string): string | null {
 }
 
 interface RepositoryDraft {
-  /** Index being edited, or null when adding. */
-  index: number | null;
+  /**
+   * Stored URL of the repository being edited, or null when adding. The server
+   * keeps URLs unique; a row index goes stale when the list changes elsewhere.
+   */
+  editingURL: string | null;
   url: string;
   description: string;
 }
@@ -144,7 +147,7 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
 
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
+  const [pendingRemovalURL, setPendingRemovalURL] = useState<string | null>(null);
   const {
     connecting: connectingGitHub,
     connect: connectGitHub,
@@ -369,8 +372,8 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
   const draftDuplicate =
     !!draftIdentity &&
     repositories.some(
-      (repository, index) =>
-        index !== draft?.index &&
+      (repository) =>
+        repository.url !== draft?.editingURL &&
         repositoryIdentity(repository.url) === draftIdentity,
     );
 
@@ -380,20 +383,19 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
       url: draft.url.trim(),
       ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
     };
-    const next =
-      draft.index === null
-        ? [...repositories, entry]
-        : repositories.map((repository, index) =>
-            index === draft.index ? entry : repository,
-          );
+    const next = repositories.some((repository) => repository.url === draft.editingURL)
+      ? repositories.map((repository) =>
+          repository.url === draft.editingURL ? entry : repository,
+        )
+      : [...repositories, entry];
     if (await persist(next)) setDraft(null);
   };
 
-  const removeRepository = async (index: number) => {
+  const removeRepository = async (url: string) => {
     const ok = await persist(
-      repositories.filter((_, repoIndex) => repoIndex !== index),
+      repositories.filter((repository) => repository.url !== url),
     );
-    if (ok) setPendingRemovalIndex(null);
+    if (ok) setPendingRemovalURL(null);
   };
 
   const openGitHubPicker = () => {
@@ -486,7 +488,7 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
                 </>
               ) : null}
               <DropdownMenuItem
-                onClick={() => setDraft({ index: null, url: "", description: "" })}
+                onClick={() => setDraft({ editingURL: null, url: "", description: "" })}
               >
                 <Pencil />
                 {t(($) => $.repositories.add_manually)}
@@ -553,7 +555,7 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
                       <DropdownMenuItem
                         onClick={() =>
                           setDraft({
-                            index,
+                            editingURL: repository.url,
                             url: repository.url,
                             description: repository.description ?? "",
                           })
@@ -564,7 +566,7 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
-                        onClick={() => setPendingRemovalIndex(index)}
+                        onClick={() => setPendingRemovalURL(repository.url)}
                       >
                         <Trash2 />
                         {t(($) => $.repositories.delete_confirm_action)}
@@ -587,7 +589,7 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {draft?.index === null
+              {draft?.editingURL === null
                 ? t(($) => $.repositories.add_title)
                 : t(($) => $.repositories.edit_title)}
             </DialogTitle>
@@ -842,9 +844,9 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
       </Dialog>
 
       <AlertDialog
-        open={pendingRemovalIndex !== null}
+        open={pendingRemovalURL !== null}
         onOpenChange={(open) => {
-          if (!open && !saving) setPendingRemovalIndex(null);
+          if (!open && !saving) setPendingRemovalURL(null);
         }}
       >
         <AlertDialogContent>
@@ -864,8 +866,8 @@ export function RepositoriesSection({ connection }: { connection: ReturnType<typ
               variant="destructive"
               disabled={saving}
               onClick={() => {
-                if (pendingRemovalIndex !== null) {
-                  void removeRepository(pendingRemovalIndex);
+                if (pendingRemovalURL !== null) {
+                  void removeRepository(pendingRemovalURL);
                 }
               }}
             >

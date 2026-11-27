@@ -34,12 +34,14 @@ import { useT } from "../../i18n";
 import { IssueDetail } from "./issue-detail";
 import {
   IssuePeekActionsContext,
+  IssuePeekColumnsContext,
   IssuePeekIdContext,
   IssuePeekPositionContext,
   PEEK_TARGET_ATTR,
   hasIssueInColumns,
   locateInColumns,
   useIssuePeekActions,
+  useIssuePeekColumns,
   useIssuePeekPosition,
   type IssuePeekActions,
   type IssuePeekColumns,
@@ -156,6 +158,7 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
     <IssuePeekActionsContext.Provider value={actions}>
       <IssuePeekIdContext.Provider value={openId}>
         <IssuePeekPositionContext.Provider value={position}>
+          <IssuePeekColumnsContext.Provider value={columns}>
           <div
             data-peek-open={openId ? "" : undefined}
             className="group/peek relative flex min-h-0 flex-1 flex-col [--issue-peek-width:520px]"
@@ -178,6 +181,7 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
               )}
             </AnimatePresence>
           </div>
+          </IssuePeekColumnsContext.Provider>
         </IssuePeekPositionContext.Provider>
       </IssuePeekIdContext.Provider>
     </IssuePeekActionsContext.Provider>
@@ -282,6 +286,9 @@ function IssuePeekFollow({
   // Read through a ref so the listener is bound once, not on every step.
   const positionRef = useRef(position);
   positionRef.current = position;
+  const columns = useIssuePeekColumns();
+  const columnCountRef = useRef(0);
+  columnCountRef.current = columns?.length ?? 0;
 
   useEffect(() => {
     // Whether the reader's last click landed in the panel. Clicking panel text
@@ -312,7 +319,12 @@ function IssuePeekFollow({
         step = ARROW_STEPS[event.key];
       }
       const target = step ? positionRef.current?.[step] : null;
-      if (!target) return;
+      if (!target) {
+        // Where H / L step across columns, the last column keeps them too:
+        // L there is not a cue to edit labels.
+        if ((step === "leftId" || step === "rightId") && columnCountRef.current > 1) event.preventDefault();
+        return;
+      }
       event.preventDefault();
       actions.open(target);
     };

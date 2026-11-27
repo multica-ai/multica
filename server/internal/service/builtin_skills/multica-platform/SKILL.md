@@ -21,7 +21,8 @@ Read the invariants below, then open the reference(s) your task actually needs
 |---|---|
 | `references/issues.md` | Issues: PR linking, reading a linked PR's state, saved views (reading, creating, changing), custom properties, status side effects, who else is running, wakeups (events, conditions, timers, check-ins), charts vs attached files in a comment |
 | `references/batch-changes.md` | Changing many issues at once (`issue batch update`, `issue delete <id>... --dry-run`): label and property operations, per-issue results, dry runs |
-| `references/sub-issues.md` | Sub-issues: whether to split an issue at all, `todo` vs `backlog` children, serial chains, stages and the parent wakeups they drive |
+| `references/dependencies.md` | Making one issue wait for another (`--blocked-by`, `--remove-blocked-by`), finding waiting work (`issue list --blocked`), blockers vs the `blocked` status |
+| `references/sub-issues.md` | Sub-issues: whether to split an issue at all, `todo` vs `backlog` children, ordering them with stages, and the parent wakeups stages drive |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; steering another agent's running turn (`comment add --steer`) |
 | `references/docs.md` | Docs (the workspace knowledge base): reading, searching, editing a doc people may be editing live, folders, review comment threads, version history and restore, which doc actions are human-only |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |

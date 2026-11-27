@@ -81,6 +81,7 @@
     "resolved": "已解决 {{count}}",
     "close": "关闭评论",
     "quote_missing": "原文已修改，找不到划线位置",
+    "quote_changed": "原文已修改",
     "reply_placeholder": "回复，或 @ 某人...",
     "new_placeholder": "写下评论，@ 提及某人...",
     "submit": "评论",
@@ -98,6 +99,6 @@
       "delete": "评论删除失败",
       "resolve": "无法更新评论状态"
     },
-    "run_waiting_runtime": "等待运行环境重新上线"
+    "run_waiting_retry": "等待重试"
   }
 }

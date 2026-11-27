@@ -38,6 +38,7 @@ import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import { useCommentCollapseStore, useResolvedExpandStore } from "@multica/core/issues/stores";
 import { useIsGuest } from "@multica/core/permissions";
 import { quickActionListOptions } from "@multica/core/quick-actions";
+import { useShortcut } from "@multica/core/shortcuts";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useIssueActions } from "../../issues/actions/use-issue-actions";
@@ -103,6 +104,13 @@ export function useIssueCommandGroup(
   const retryRun = useRetryIssueRun(singleId);
   const { canDelete } = useIssueDeletion(wsId);
   const deletable = !!target && (target.kind === "single" ? canDelete(target.issue) : target.issues.every(canDelete));
+  const statusShortcut = useShortcut("setIssueStatus");
+  const assigneeShortcut = useShortcut("assignIssue");
+  const priorityShortcut = useShortcut("setIssuePriority");
+  const labelsShortcut = useShortcut("setIssueLabels");
+  const dueDateShortcut = useShortcut("setIssueDueDate");
+  const projectShortcut = useShortcut("moveIssueToProject");
+  const quickActionShortcut = useShortcut("runIssueQuickAction");
 
   return useMemo(() => {
     if (!target) return null;
@@ -119,6 +127,7 @@ export function useIssueCommandGroup(
         keywords: ["status", "state", "状态"],
         page: { type: "issue-status", target },
         crumb,
+        shortcut: statusShortcut,
         primary: true,
       },
       {
@@ -128,6 +137,7 @@ export function useIssueCommandGroup(
         keywords: ["assign", "assignee", "owner", "agent", "指派", "负责人"],
         page: { type: "issue-assignee", target },
         crumb,
+        shortcut: assigneeShortcut,
         primary: true,
       },
       {
@@ -137,6 +147,7 @@ export function useIssueCommandGroup(
         keywords: ["priority", "urgent", "优先级"],
         page: { type: "issue-priority", target },
         crumb,
+        shortcut: priorityShortcut,
         primary: true,
       },
     ];
@@ -151,6 +162,7 @@ export function useIssueCommandGroup(
           hint: t(($) => $.issue.quick_actions_available, { count: activeQuickActions.length }),
           page: { type: "issue-quick-action", issue: single },
           crumb,
+          shortcut: quickActionShortcut,
           primary: true,
         });
       }
@@ -172,6 +184,7 @@ export function useIssueCommandGroup(
         keywords: ["label", "tag", "标签"],
         page: { type: "issue-labels", target },
         crumb,
+        shortcut: labelsShortcut,
       },
       {
         id: "issue-due-date",
@@ -180,6 +193,7 @@ export function useIssueCommandGroup(
         keywords: ["due", "date", "deadline", "截止"],
         page: { type: "issue-due-date", target },
         crumb,
+        shortcut: dueDateShortcut,
       },
       {
         id: "issue-project",
@@ -188,6 +202,7 @@ export function useIssueCommandGroup(
         keywords: ["project", "move", "项目"],
         page: { type: "issue-project", target },
         crumb,
+        shortcut: projectShortcut,
       },
     );
 
@@ -384,7 +399,14 @@ export function useIssueCommandGroup(
   }, [
     actions,
     activeQuickActions.length,
+    assigneeShortcut,
     deletable,
+    dueDateShortcut,
+    labelsShortcut,
+    priorityShortcut,
+    projectShortcut,
+    quickActionShortcut,
+    statusShortcut,
     guest,
     onDeletedFallbackPath,
     palette,

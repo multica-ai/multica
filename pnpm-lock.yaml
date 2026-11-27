@@ -231,6 +231,9 @@ patchedDependencies:
   expo-modules-core@57.0.21:
     hash: 52e0bb7a9afc2d62b773afaf938f3be85fde749ce4047635e71547c1ba8cde0e
     path: apps/mobile/patches/expo-modules-core@57.0.21.patch
+  micromark-extension-gfm-autolink-literal@2.1.0:
+    hash: 20676bd882c25278e01dfb34676096201fab3bc6682ec1a65f62c021d84889c6
+    path: patches/micromark-extension-gfm-autolink-literal@2.1.0.patch
 
 importers:
 
@@ -21761,7 +21764,7 @@ snapshots:
     optionalDependencies:
       micromark-util-types: 2.0.2
 
-  micromark-extension-gfm-autolink-literal@2.1.0:
+  micromark-extension-gfm-autolink-literal@2.1.0(patch_hash=20676bd882c25278e01dfb34676096201fab3bc6682ec1a65f62c021d84889c6):
     dependencies:
       micromark-util-character: 2.1.1
       micromark-util-sanitize-uri: 2.0.1
@@ -21818,7 +21821,7 @@ snapshots:
 
   micromark-extension-gfm@3.0.0:
     dependencies:
-      micromark-extension-gfm-autolink-literal: 2.1.0
+      micromark-extension-gfm-autolink-literal: 2.1.0(patch_hash=20676bd882c25278e01dfb34676096201fab3bc6682ec1a65f62c021d84889c6)
       micromark-extension-gfm-footnote: 2.1.0
       micromark-extension-gfm-strikethrough: 2.1.0
       micromark-extension-gfm-table: 2.1.1

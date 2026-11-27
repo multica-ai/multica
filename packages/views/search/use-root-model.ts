@@ -14,6 +14,7 @@ import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
 import { useIssueCommandGroup } from "./commands/issue-commands";
+import { withCursorLast } from "./issue-target";
 import { parseScope, scoreRow, scoreText, type SearchScope } from "./matching";
 import type { IssueTarget, PaletteCommand, PaletteCommandGroup } from "./types";
 import type { AgentEntry } from "./use-actor-directory";
@@ -157,9 +158,10 @@ function maxScore(entries: readonly { score: number }[]) {
 
 export function useRootModel(
   rawQuery: string,
-  contexts: readonly CommandBarContext[],
+  registeredContexts: readonly CommandBarContext[],
   options: { active: boolean },
 ): RootModel {
+  const contexts = useMemo(() => withCursorLast(registeredContexts), [registeredContexts]);
   const { t: tNav } = useT("layout");
   const { scope, text } = parseScope(rawQuery);
   const q = text.toLowerCase();

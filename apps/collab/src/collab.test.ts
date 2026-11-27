@@ -596,6 +596,29 @@ describe("issue descriptions", () => {
     ]);
   });
 
+  it("does not repeat a description written directly when an editor reconnects after the sync", async () => {
+    resetIssue("First\n\nSecond");
+    const a = await connect(ada, { name: ISSUE_NAME });
+    const epoch = a.document.getMap("meta").get("epoch") as string;
+
+    // The API writes a description that comes with other fields itself, then
+    // hands it to the open session.
+    const base = fakeIssue.content;
+    fakeIssue.content = "First (agent)\n\nSecond";
+    fakeIssue.revision += 1;
+    await internal("flush", {}, ISSUE_NAME);
+    await internal("write", { actor: agent, base_content: base, content: fakeIssue.content }, ISSUE_NAME);
+    await waitFor(() => markdown(a.document) === "First (agent)\n\nSecond");
+    expect(fakeIssue.stores).toEqual([]);
+
+    a.provider.destroy();
+    await waitFor(() => collab.server.hocuspocus.getDocumentsCount() === 0);
+    const again = await connect(ada, { document: a.document, epoch, name: ISSUE_NAME });
+    expect(markdown(again.document)).toBe("First (agent)\n\nSecond");
+    expect(again.document.getMap("meta").get("epoch")).toBe(epoch);
+    expect(fakeIssue.content).toBe("First (agent)\n\nSecond");
+  });
+
   it("reports an issue that no longer exists as gone", async () => {
     resetIssue("Anything");
     const result = await internal(

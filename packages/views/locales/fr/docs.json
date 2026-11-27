@@ -81,6 +81,7 @@
     "resolved": "Résolus {{count}}",
     "close": "Fermer les commentaires",
     "quote_missing": "Le texte commenté a été modifié",
+    "quote_changed": "Texte modifié",
     "reply_placeholder": "Répondre, ou mentionner avec @…",
     "new_placeholder": "Ajouter un commentaire, ou @ pour mentionner quelqu'un...",
     "submit": "Commenter",
@@ -99,6 +100,6 @@
       "delete": "Impossible de supprimer le commentaire",
       "resolve": "Impossible de mettre à jour le commentaire"
     },
-    "run_waiting_runtime": "En attente du retour en ligne du runtime"
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
   }
 }

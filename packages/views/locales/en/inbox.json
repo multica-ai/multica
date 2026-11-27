@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "Inbox",
-    "back": "Inbox"
+    "title": "Inbox"
   },
   "menu": {
     "mark_all_read": "Mark all as read",
@@ -153,6 +152,8 @@
   },
   "kept": {
     "archived": "Archived",
+    "undo_archive": "Undo archive",
+    "unsubscribed": "Unsubscribed",
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
     "changed_status": "Changed to {{status}}",

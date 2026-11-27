@@ -387,6 +387,9 @@
     "record_aria": "Change shortcut for {{action}}",
     "recording": "Press keys",
     "record_hint": "Esc cancels · Delete clears",
+    "record_sequence_hint": "Press a key, or two in a row for a sequence such as G then I · Esc cancels",
+    "record_then_hint": "Press the second key · ↵ keeps one key · Backspace starts over",
+    "then": "then",
     "unassigned": "Unassigned",
     "no_results": "No matching shortcut actions.",
     "conflict_error": "Already used by {{action}}.",
@@ -397,8 +400,10 @@
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",
+      "issue": "Issue",
       "navigation": "Navigation"
     },
+    "issue_scope": "Act on the issue in front of you: the one in a peek, the issues selected in a list, or the open issue.",
     "actions": {
       "openSearch": {
         "label": "Open search",
@@ -455,6 +460,42 @@
       "undoInboxAction": {
         "label": "Undo inbox action",
         "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
+      },
+      "setIssueStatus": {
+        "label": "Change status",
+        "description": "Open the status picker."
+      },
+      "assignIssue": {
+        "label": "Assign",
+        "description": "Open the assignee picker."
+      },
+      "setIssuePriority": {
+        "label": "Set priority",
+        "description": "Open the priority picker."
+      },
+      "setIssueLabels": {
+        "label": "Edit labels",
+        "description": "Open the label picker."
+      },
+      "setIssueDueDate": {
+        "label": "Set due date",
+        "description": "Open the due date picker."
+      },
+      "moveIssueToProject": {
+        "label": "Move to project",
+        "description": "Open the project picker."
+      },
+      "runIssueQuickAction": {
+        "label": "Run quick action",
+        "description": "Available on a single issue when quick actions are active."
+      },
+      "replyToIssue": {
+        "label": "Reply",
+        "description": "Focus the open issue's comment box."
+      },
+      "showShortcuts": {
+        "label": "Show keyboard shortcuts",
+        "description": "Open the list of shortcuts, with the current page's first."
       },
       "send": {
         "label": "Send",
@@ -532,6 +573,32 @@
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",
       "close_dialog": "Close dialog or menu"
+    },
+    "cheatsheet": {
+      "title": "Keyboard shortcuts",
+      "current_page": "current page",
+      "footer_prefix": "Shortcuts are saved on this device. Change them in ",
+      "footer_link": "Settings › Shortcuts",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Inbox",
+        "issue": "Issue",
+        "navigation": "Navigation",
+        "general": "General",
+        "list": "Lists and boards",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Move down / up",
+        "list_columns": "Move across board columns",
+        "list_open": "Open",
+        "list_peek": "Preview",
+        "list_select": "Select",
+        "list_extend": "Extend selection",
+        "list_select_all": "Select all",
+        "list_clear": "Clear selection",
+        "editor_leave": "Leave the field"
+      }
     }
   },
   "chat": {
@@ -921,7 +988,7 @@
       },
       "squad_handoffs": {
         "label": "Include squad handoffs",
-        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and statuses that need attention still arrive."
+        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and the report a squad finishes with still arrive."
       },
       "mentions": {
         "label": "Mentions",
@@ -1973,7 +2040,7 @@
       "title_member_ask": "{{name}} asked for a team {{app}} account",
       "waiting_for_admin": "Waiting for an admin",
       "team_note": "Every agent that acts as the team account can use it.",
-      "admins_notified": "Workspace admins were notified in Inbox.",
+      "admins_notified": "A workspace admin was notified in Inbox.",
       "connect_team": "Connect for the team"
     },
     "tools": {
@@ -2022,7 +2089,7 @@
       "personal": "Your account"
     },
     "account_row": {
-      "admins_notified": "admins notified",
+      "admins_notified": "admin notified",
       "withdraw": "Withdraw",
       "decline": "Decline",
       "toast_declined": "Requests declined. Waiting agents continue without it.",
@@ -2067,10 +2134,10 @@
       "no_matches": "No apps match your search.",
       "unavailable": "Apps aren't available on this server.",
       "retry": "Try again",
-      "category_all": "All",
+      "catalog": "Catalog",
+      "catalog_failed": "Couldn't load the app catalog.",
       "category_curated": "Featured",
       "categories_label": "Categories",
-      "categories_nav": "App categories",
       "connect_oauth": "Signs in with OAuth",
       "connect_key": "Uses an API key",
       "show_more": "Show more",

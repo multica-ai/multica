@@ -25,6 +25,7 @@
     "message": "智能体消息",
     "error": "错误",
     "waiting_result": "等待工具返回结果...",
+    "reply_pending_call": "仍在运行：等待 {{step}} 结束",
     "supplement_failure_turn_ended": "送达前运行已结束",
     "supplement_failure_turn_not_started": "智能体尚未就绪",
     "supplement_failure_provider_rejected": "智能体拒绝了该消息",
@@ -599,14 +600,20 @@
       "wakeups": "添加唤醒",
       "pull_requests": "添加 Pull Request",
       "environments": "添加环境",
-      "wakeups_pull_requests": "添加唤醒或 Pull Request",
-      "wakeups_environments": "添加唤醒或环境",
-      "pull_requests_environments": "添加 Pull Request 或环境",
-      "all": "添加唤醒、Pull Request 或环境",
+      "relations": "添加关系",
+      "pair": "添加{{first}}或{{second}}",
+      "many": "添加...",
+      "noun": {
+        "wakeups": "唤醒",
+        "pull_requests": "Pull Request",
+        "environments": "环境",
+        "relations": "关系"
+      },
       "menu": {
         "wakeups": "唤醒",
         "pull_requests": "Pull Request",
-        "environments": "环境"
+        "environments": "环境",
+        "relations": "关系"
       }
     },
     "footer": {
@@ -1076,7 +1083,8 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
-    "add_blocker": "添加前置任务...",
+    "add_blocker": "等待其他任务...",
+    "add_blocking": "阻塞其他任务...",
     "delete_issue": "删除任务",
     "mark_duplicate": "标记为重复...",
     "open_in_new_window": "在新窗口中打开"
@@ -1382,6 +1390,7 @@
       "cancel": "取消",
       "error": "无法创建唤醒，请检查设置后重试。",
       "capacity_error": "此任务或工作区开启的唤醒已达上限。",
+      "agent_error": "你无权运行这个智能体。请联系它的所有者开通权限，或选择其他智能体。",
       "missing_condition": "请选择条件。",
       "missing_agent": "请选择要唤醒的智能体。",
       "missing_events": "请至少选择一个事件。",
@@ -2058,16 +2067,26 @@
     "retry": "重试",
     "dismiss": "忽略"
   },
+  "relations": {
+    "title": "关系",
+    "add": "添加关系",
+    "wait_title": "等待其他任务",
+    "block_title": "阻塞其他任务",
+    "blocked_by": "被阻塞",
+    "blocking": "正在阻塞",
+    "stage_tag": "阶段",
+    "stage_tag_hint": "由父任务的阶段决定",
+    "add_blocker_hint": "它们结束后，本任务才开工",
+    "add_blocking_hint": "本任务结束后，它们才开工",
+    "mark_duplicate_hint": "本任务会被取消",
+    "blocking_picker_hint": "选择一个要等本任务结束才能开工的任务。"
+  },
   "waiting": {
-    "title": "等待",
-    "add": "添加前置任务",
     "remove": "移除 {{identifier}}",
     "count": "等待 {{count}} 个任务",
     "count_other": "等待 {{count}} 个任务",
-    "stage": "更早阶段 · {{finished}}/{{total}} 已结束",
     "hint": "全部结束后，负责人将自动开工或收到通知。",
-    "hint_backlog": "任务在待规划中，全部结束后不会自动开始，移出待规划后才会开始。",
-    "empty": "没有等待的任务",
+    "hint_backlog": "在待规划中，不会自动开始。",
     "picker_hint": "选择一个必须先结束的任务。",
     "restricted": "{{count}} 个无权查看的前置任务",
     "ended": "等待的任务已结束",

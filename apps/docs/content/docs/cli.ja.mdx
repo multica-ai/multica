@@ -291,7 +291,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- `--custom-env` 系のフラグは `agent create` にしかありません。後から変えるときは `agent env set` を使います。これは全体を置き換え、値を `****` にしたキーは元の値を保ちます。
+- `--custom-env` 系のフラグは `agent create` にしかありません。後から変えるときは `agent env set` を使います。これは全体を置き換え、値を `****` にしたキーは元の値を保ちます。`agent env get` と `agent env set` の出力では値が `****` で表示されます。別のエージェントへコピーするときなど、実際の値が必要なら `--show-values` を付けます。
 - `agent update --mcp-config null` で MCP 設定を消去します。
 - `--custom-args` は JSON 配列で、起動引数の最後に置かれます。モデルは `--model` で選んでください。カスタム引数の中の `--model` を受け付けないツールもあります。
 - エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。
@@ -484,10 +484,10 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 
 | コマンド | サブコマンド | 用途 | 主なフラグ |
 | --- | --- | --- | --- |
-| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
+| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--blocked`（未完了のブロック元または前ステージを待っているタスクのみ）、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
-| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
-| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--description-base-revision`（`issue get` の値；説明が更新済みなら上書きを拒否）、`--position`、`--no-start`、`--duplicate-of` |
+| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--blocked-by`（繰り返し可；開始前に待つタスクの番号または UUID）、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--remove-blocked-by`（繰り返し可；手動のブロック元を解除）、`--description-base-revision`（`issue get` の値；説明が更新済みなら上書きを拒否）、`--position`、`--no-start`、`--duplicate-of` |
 | | `edit-description <id>` | 全文を書き換えずにタスク説明の該当テキストを正確に置換 | `--old` / `--old-file`（必須）、`--new` / `--new-file`（必須）、`--replace-all` |
 | | `batch update <id>...` | 複数のタスクに同じ変更を適用 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |
@@ -532,7 +532,7 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
 | | `tasks <id>` | エージェントの実行を表示 | |
 | | `avatar <id>` | アバターをアップロード | |
-| | `env get/set <agent-id>` | カスタム環境変数の読み書き（エージェントの所有者、またはワークスペースの owner/admin。読み取りはすべて記録される） | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`。全体を置き換え、値が `****` のキーは元の値を保つ |
+| | `env get/set <agent-id>` | カスタム環境変数の読み書き（エージェントの所有者、またはワークスペースの owner/admin。読み取りはすべて記録される） | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`。全体を置き換え、値が `****` のキーは元の値を保つ。出力の値は `--show-values` を付けない限り `****` |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | ワークスペース MCP サーバーをこのエージェントに割り当て | server id は `workspace mcp list` から取得。ライブラリの項目はここで追加するまで機能しません。`disable` は割り当てを残したまま送信を停止します |
 | `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--mode`（どちらも必須）、`--agent` / `--squad` / `--squad-id` のいずれか1つ（必須）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（繰り返し可） |

@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -183,6 +185,7 @@ func (h *Handler) CreateChatTurnWakeup(w http.ResponseWriter, r *http.Request) {
 		chatWakeupError(w, err)
 		return
 	}
+	h.maybeRefreshPRForChatWakeup(r.Context(), created.WorkspaceID, created.Condition)
 	writeJSON(w, http.StatusCreated, chatWakeupToResponse(created))
 }
 
@@ -209,7 +212,41 @@ func (h *Handler) UpdateChatTurnWakeup(w http.ResponseWriter, r *http.Request) {
 		chatWakeupError(w, err)
 		return
 	}
+	h.maybeRefreshPRForChatWakeup(r.Context(), updated.WorkspaceID, updated.Condition)
 	writeJSON(w, http.StatusOK, chatWakeupToResponse(updated))
+}
+
+// maybeRefreshPRForChatWakeup kicks off a non-blocking snapshot refresh for an
+// open/draft GitHub PR when a chat wakeup watching its checks is saved and the
+// PR's snapshot is missing or stale.
+func (h *Handler) maybeRefreshPRForChatWakeup(ctx context.Context, workspaceID pgtype.UUID, rawCondition []byte) {
+	if !h.PRRefresh.Enabled() || len(rawCondition) == 0 {
+		return
+	}
+	var cond service.ChatWakeupCondition
+	if json.Unmarshal(rawCondition, &cond) != nil || cond.Type != "pull_request" || cond.Event != "checks_finished" {
+		return
+	}
+	owner, repo, ok := strings.Cut(cond.Repo, "/")
+	if !ok || owner == "" || repo == "" || cond.Number <= 0 {
+		return
+	}
+	row, err := h.Queries.GetGitHubPRForRefresh(ctx, db.GetGitHubPRForRefreshParams{
+		WorkspaceID: workspaceID,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		PrNumber:    cond.Number,
+	})
+	if err != nil || (row.State != "open" && row.State != "draft") {
+		return
+	}
+	h.PRRefresh.MaybeEnqueueOnView(
+		row.InstallationID, row.RepoOwner, row.RepoName, row.PrNumber,
+		row.SnapshotFetchedAt.Time,
+		row.SnapshotFetchedAt.Valid &&
+			row.SnapshotHeadSha != "" &&
+			row.SnapshotHeadSha == row.HeadSha,
+	)
 }
 
 func (h *Handler) CancelChatTurnWakeup(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +348,26 @@ func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, chatWakeupToResponse(ended))
+}
+
+// RescheduleChatSessionWakeup changes when an active wakeup runs: a reminder's
+// time, a check's interval or deadline, or a condition's deadline.
+func (h *Handler) RescheduleChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
+	if !ok {
+		return
+	}
+	var timing service.ChatWakeupTiming
+	if err := json.NewDecoder(r.Body).Decode(&timing); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.chatWakeups().Reschedule(r.Context(), sessionID, id, timing)
+	if err != nil {
+		chatWakeupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chatWakeupToResponse(updated))
 }
 
 // RetryChatSessionWakeup re-runs a wakeup whose report turn failed.

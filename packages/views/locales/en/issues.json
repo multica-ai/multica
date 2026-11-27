@@ -26,6 +26,7 @@
     "message": "Agent message",
     "error": "Error",
     "waiting_result": "Waiting for the tool result...",
+    "reply_pending_call": "Still running: waiting for {{step}} to finish",
     "supplement_failure_turn_ended": "the run ended before delivery",
     "supplement_failure_turn_not_started": "the agent was not ready",
     "supplement_failure_provider_rejected": "the agent rejected the message",
@@ -610,14 +611,20 @@
       "wakeups": "Add wakeup",
       "pull_requests": "Add pull request",
       "environments": "Add environment",
-      "wakeups_pull_requests": "Add wakeup or pull request",
-      "wakeups_environments": "Add wakeup or environment",
-      "pull_requests_environments": "Add pull request or environment",
-      "all": "Add wakeup, pull request, or environment",
+      "relations": "Add relation",
+      "pair": "Add {{first}} or {{second}}",
+      "many": "Add...",
+      "noun": {
+        "wakeups": "wakeup",
+        "pull_requests": "pull request",
+        "environments": "environment",
+        "relations": "relation"
+      },
       "menu": {
         "wakeups": "Wakeup",
         "pull_requests": "Pull request",
-        "environments": "Environment"
+        "environments": "Environment",
+        "relations": "Relations"
       }
     },
     "footer": {
@@ -1134,7 +1141,8 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
-    "add_blocker": "Add blocker...",
+    "add_blocker": "Wait for another task...",
+    "add_blocking": "Block another task...",
     "delete_issue": "Delete issue",
     "mark_duplicate": "Mark as duplicate...",
     "open_in_new_window": "Open in new window"
@@ -1441,6 +1449,7 @@
       "cancel": "Cancel",
       "error": "Could not create the wakeup. Check the settings and try again.",
       "capacity_error": "This issue or workspace already has the maximum number of enabled wakeups.",
+      "agent_error": "You can't run this agent. Ask its owner for access, or choose another agent.",
       "missing_condition": "Choose a condition.",
       "missing_agent": "Choose an agent to wake.",
       "missing_events": "Choose at least one event.",
@@ -2149,15 +2158,25 @@
     "retry": "Retry",
     "dismiss": "Dismiss"
   },
+  "relations": {
+    "title": "Relations",
+    "add": "Add relation",
+    "wait_title": "Wait for another task",
+    "block_title": "Block another task",
+    "blocked_by": "Blocked by",
+    "blocking": "Blocking",
+    "stage_tag": "Stage",
+    "stage_tag_hint": "Set by the parent issue's stages",
+    "add_blocker_hint": "This task starts after it ends",
+    "add_blocking_hint": "It starts after this task ends",
+    "mark_duplicate_hint": "Cancels this task",
+    "blocking_picker_hint": "Select a task that can't start until this one ends."
+  },
   "waiting": {
-    "title": "Waiting",
-    "add": "Add blocker",
     "remove": "Remove {{identifier}}",
     "count": "Waiting for {{count}} tasks",
-    "stage": "Earlier stages · {{finished}}/{{total}} ended",
     "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
-    "hint_backlog": "This task is in Backlog, so it won't start automatically when these tasks end. It starts once it leaves Backlog.",
-    "empty": "No tasks to wait for",
+    "hint_backlog": "Won't auto-start while in Backlog.",
     "picker_hint": "Select a task that must end before this one can start.",
     "restricted": "{{count}} restricted prerequisites",
     "ended": "Waiting tasks ended",

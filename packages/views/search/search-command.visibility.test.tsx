@@ -44,6 +44,7 @@ vi.mock("../navigation/context", () => {
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
 }));
+vi.mock("./issue-shortcuts", () => ({ IssueShortcuts: () => null }));
 
 function SidebarCount() {
   const count = useInboxUnreadCount("ws-1");

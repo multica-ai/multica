@@ -1,12 +1,12 @@
 ---
-title: Feishu Bot
-description: 에이전트를 Feishu에 연결해 DM이나 그룹 채팅에서 바로 작업을 요청합니다.
+title: "Feishu Bot: Feishu에서 @멘션으로 에이전트에게 작업 맡기기"
+description: Multica에 내장된 Feishu 연동입니다. Feishu 그룹에서 AI 코딩 에이전트를 @멘션하거나 DM을 보내 작업을 맡기고, /issue로 태스크를 만듭니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica 에이전트를 Feishu Bot으로 연결하면 팀 멤버가 Feishu에서 에이전트와 DM을 나누고 그룹에서 @멘션하거나 `/issue`로 태스크를 만들 수 있습니다. 대화와 실행 기록은 Multica 워크스페이스에 저장됩니다.
+Feishu 연동은 Multica에 내장된 기능이라 QR 코드를 스캔하면 바로 연결되며, Bot 코드를 직접 작성할 필요가 없습니다. Multica 에이전트를 Feishu Bot으로 연결하면 팀 멤버가 Feishu에서 에이전트와 DM을 나누고 그룹에서 @멘션하거나 `/issue`로 태스크를 만들 수 있습니다. 대화와 실행 기록은 Multica 워크스페이스에 저장됩니다.
 
 Bot 하나는 에이전트 하나에만 대응합니다. Feishu에서 여러 에이전트를 사용하려면 각 에이전트에 별도의 Bot을 연결하세요.
 
@@ -59,9 +59,9 @@ Multica는 이 연결로 메시지를 보낸 워크스페이스 멤버를 확인
 
 Bot에 바로 메시지를 보내면 됩니다. 연속된 메시지는 같은 Multica 대화에 유지되며 에이전트의 답변도 현재 대화로 돌아옵니다.
 
-### 그룹 채팅
+### Feishu 그룹에서 에이전트를 @멘션해 작업 맡기기
 
-먼저 Bot을 그룹 채팅에 추가한 뒤 `@Bot`과 요구 사항을 함께 작성합니다. Bot은 자신을 명시적으로 @멘션한 메시지에만 응답하며, 실행할 때 그룹의 최근 메시지 몇 개를 컨텍스트로 함께 가져갑니다.
+먼저 Bot을 그룹 채팅에 추가한 뒤 `@Bot`과 요구 사항을 함께 작성합니다. Bot은 자신을 명시적으로 @멘션한 메시지에만 응답하며, 실행할 때 그룹의 최근 메시지 몇 개를 컨텍스트로 함께 가져갑니다. 에이전트는 자신의 [런타임](/daemon-runtimes)에서 실행되고 결과를 원래 그룹이나 토픽에 답장합니다. 보드에서 추적할 작업은 아래의 `/issue`로 태스크를 만드세요.
 
 DM과 그룹 채팅 모두 각 실행의 프롬프트에는 응답 대상 메시지의 Feishu ID도 함께 나열됩니다. `chat_id`, `chat_type`, `message_id`, 메시지가 토픽 안에 있을 때의 토픽 `thread_id`, `sender_open_id`(보낸 사람의 `open_id`)입니다. 이는 Multica ID가 아닌 Feishu ID이므로, 자체 Feishu 접근 권한이 있는 에이전트는 이를 사용해 원본 메시지나 대화를 조회할 수 있습니다. `open_id`는 연결된 Bot의 앱 안에서만 유효합니다. Multica가 기록하지 않은 ID는 포함되지 않습니다.
 

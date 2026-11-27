@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -48,8 +49,8 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
-	// no-progress ceiling — the window a turn may stay completely silent after
-	// the app-server reports turn/started before the watchdog fails it. Zero
+	// no-progress ceiling — the window a turn may go without model progress
+	// after the app-server accepts turn/start before the watchdog fails it. Zero
 	// keeps the provider default and the existing behaviour where
 	// SemanticInactivityTimeout can only shrink that ceiling; a positive value
 	// sets it explicitly, upward included. This answers a different question than
@@ -208,6 +209,11 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 	return context.WithCancel(ctx)
 }
 
+// ErrSupplementTurnEnded is returned (wrapped) by a Session.Supplement whose
+// target turn finished before the provider accepted the message. The daemon
+// reports it as turn_ended rather than as a provider rejection.
+var ErrSupplementTurnEnded = errors.New("turn ended before the message was accepted")
+
 // Session represents a running agent execution.
 type Session struct {
 	// CleanupRequired means Result is also the acknowledgement that the
@@ -323,6 +329,9 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// NoToolCallsStarted is set only for a failed prompt whose complete native
+	// turn history was observed without a tool call. Missing evidence is false.
+	NoToolCallsStarted bool
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was permanently refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history

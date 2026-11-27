@@ -24,7 +24,8 @@
 //   verdict) — immediately, with no intent-window timer for a final event to
 //   hide behind — but never during an active touch or while the mouse is held
 //   down (text selection autoscroll must not be fought).
-// - Arriving back within the edge zone re-engages the follow.
+// - Arriving back within the edge zone re-engages a released follow. While
+//   still following, that arrival is usually our own pin and erases nothing.
 //
 // The state machine is direction-agnostic: callers feed it away-positive
 // input deltas and the current distance from THEIR live end (`scrollTop` for
@@ -42,6 +43,14 @@ export const FOLLOW_EDGE_THRESHOLD = 120;
 // in confirmed motion. DOM wiring normally clears unconfirmed input sooner,
 // after the next animation frame.
 const MOTION_SETTLE_WINDOW_MS = 300;
+
+// The surface snaps scroll offsets to device pixels, so its displacement can
+// differ from the input behind it by up to a pixel: fractional trackpad deltas,
+// or a list resting half a pixel short of its end. A system shift is pixels.
+// The slack is bounded by the claim it rounds: once the reader's input is
+// spent, even a 1px shift is the system's.
+const SCROLL_ROUNDING_PX = 1;
+const roundingSlack = (claim: number) => Math.min(SCROLL_ROUNDING_PX, claim);
 
 // WheelEvent.deltaMode 1 (lines) / 2 (pages) conversion.
 export const LINE_SCROLL_PX = 40;
@@ -110,11 +119,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const inputFresh = () => now() - lastInputAt < MOTION_SETTLE_WINDOW_MS;
   const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
 
-  // Carry is spent in fractional steps, so its running total drifts from the
-  // surface's own arithmetic by a few ulps. Scaled to the amount at hand, a
-  // gap this small is rounding — the system moving the viewport is pixels.
-  const withinCarry = (amount: number) =>
-    amount <= motionCarry + Math.max(1, motionCarry) * 1e-9;
+  const withinCarry = (amount: number) => amount <= motionCarry + roundingSlack(motionCarry);
 
   const pinVerdict = (distance: number): boolean =>
     following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
@@ -173,7 +178,9 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       scrollbarDrag = false;
     },
     onAtEdgeChange(atEdge: boolean) {
-      if (!active || !atEdge) return;
+      // Arriving while still following is the pin bringing the reader back,
+      // not the reader returning: keep what they have taken (see header).
+      if (!active || !atEdge || following) return;
       following = true;
       awayBudget = 0;
       towardBudget = 0;
@@ -237,7 +244,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         const attributed = Math.min(awayBudget, moved);
         awayBudget -= attributed;
         // Touch displacement need not match finger travel pixel-for-pixel.
-        if (touchHeld || attributed === moved) {
+        if (touchHeld || moved - attributed <= roundingSlack(attributed)) {
           awayTaken += moved;
           motionDirection = 1;
           motionSource = touchHeld ? "touch" : "input";
@@ -251,7 +258,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       } else if (moved < 0 && inputFresh() && towardBudget > 0) {
         const attributed = Math.min(towardBudget, -moved);
         towardBudget -= attributed;
-        if (touchHeld || attributed === -moved) {
+        if (touchHeld || -moved - attributed <= roundingSlack(attributed)) {
           awayTaken = Math.max(0, awayTaken + moved);
           motionDirection = -1;
           motionSource = touchHeld ? "touch" : "input";

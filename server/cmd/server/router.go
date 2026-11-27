@@ -2363,6 +2363,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.With(handler.RequireHumanActor).Delete("/api/tasks/{taskId}/messages", h.PurgeTaskTranscript)
 			r.Get("/api/tasks/{taskId}/context-receipt", h.GetTaskContextReceipt)
 			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
@@ -2805,6 +2806,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/draft-restores", h.ListChatDraftRestores)
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
 					r.Get("/wakeups", h.ListChatSessionWakeups)
+					r.Patch("/wakeups/{wakeupId}", h.RescheduleChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})

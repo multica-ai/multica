@@ -28,6 +28,7 @@ import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { CURSOR_ROW_CLASS, useIsIssueCursor } from "../surface/issue-cursor";
 import {
   PEEKED_ROW_CLASS,
   PEEK_TARGET_ATTR,
@@ -76,6 +77,7 @@ function ListRowContent({
   const locale = useLocale();
   const selection = useIssueSurfaceSelection();
   const peeked = useIsIssuePeeked(issue.id);
+  const cursor = useIsIssueCursor(issue.id);
   const peekLinkProps = useIssuePeekLinkProps(issue);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -111,13 +113,14 @@ function ListRowContent({
         data-selected={selected ? "true" : "false"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
+        data-cursor={cursor ? "" : undefined}
         style={containerStyle}
         {...containerProps}
         className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-[background-color,color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
           selected
             ? "bg-issue-row-selected hover:not-data-[popup-open]:bg-issue-row-selected data-[popup-open]:bg-issue-row-selected"
-            : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover"
-        } ${PEEKED_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
+            : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover data-[cursor]:bg-issue-row-hover"
+        } ${PEEKED_ROW_CLASS} ${CURSOR_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
       >
         <div
           className="relative flex shrink-0 items-center justify-center w-4 h-4"

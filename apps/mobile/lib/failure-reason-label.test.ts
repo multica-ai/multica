@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import chatEn from "../locales/en/chat.json";
@@ -27,6 +28,22 @@ describe("failureReasonKey", () => {
       "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
     );
     expect(runFailureBadgeLabel("runtime_access_revoked", tEn)).toBe("Access revoked");
+  });
+
+  // The server's reason list is a fixture the Go test
+  // TestClientFailureReasonFixture keeps current. Read from disk, not
+  // imported: mobile code does not depend on packages/views.
+  it("has a label for every reason the server taxonomy defines", () => {
+    const serverReasons: string[] = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../packages/views/agents/components/tabs/test-fixtures/server-failure-reasons.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    expect(serverReasons.filter((reason) => !REASONS.has(reason))).toEqual([]);
   });
 
   it("falls back to a user-friendly unknown reason", () => {

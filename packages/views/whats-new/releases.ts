@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Folder, FolderKanban, Gauge, Globe, History, Inbox, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Target, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Flag, Folder, FolderKanban, Gauge, Globe, History, Inbox, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Target, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, INBOX_TRIAGE_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, QUICK_SWITCH_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, INBOX_TRIAGE_HERO, ISSUE_RELATIONS_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, QUICK_SWITCH_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -51,6 +51,129 @@ export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
 };
 
 export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
+  {
+    version: "0.13.0",
+    date: "2026-11-25",
+    highlights: [
+      {
+        id: "issue-relations",
+        icon: Flag,
+        hero: ISSUE_RELATIONS_HERO,
+        copy: {
+          en: {
+            title: "Let an issue wait for others",
+            body: "In an issue's menu, choose Relations → Wait for another task, or add one under Relations in its sidebar. When those issues end, an agent assignee starts on its own and a person is notified.",
+          },
+          "zh-Hans": {
+            title: "让任务等其他任务完成再开始",
+            body: "在任务菜单中选择「关系 → 等待其他任务」，或在侧栏的「关系」里添加。这些任务结束后，负责的智能体会自动开始，负责的成员会收到通知。",
+          },
+          "zh-Hant": {
+            title: "讓任務等其他任務完成再開始",
+            body: "在任務選單中選擇「關係 → 等待其他任務」，或在側欄的「關係」裡新增。這些任務結束後，負責的 AI 代理會自動開始，負責的成員會收到通知。",
+          },
+          ja: {
+            title: "ほかのタスクが終わるまで待たせる",
+            body: "タスクのメニューで「関係 → 他のタスクを待つ」を選ぶか、サイドバーの「関係」から追加します。待っているタスクが終わると、担当のエージェントが自動で開始し、担当者が人なら通知が届きます。",
+          },
+          ko: {
+            title: "다른 태스크가 끝날 때까지 기다리게 하기",
+            body: "태스크 메뉴에서 '관계 → 다른 작업 기다리기'를 고르거나 사이드바의 '관계'에서 추가하세요. 기다리던 태스크가 끝나면 담당 에이전트가 자동으로 시작하고, 담당자가 사람이면 알림을 받습니다.",
+          },
+          fr: {
+            title: "Faites attendre une tâche",
+            body: "Dans le menu d'une tâche, choisissez Relations → Attendre une autre tâche, ou ajoutez-en une sous Relations dans sa barre latérale. Quand ces tâches se terminent, l'agent assigné démarre tout seul et une personne assignée est notifiée.",
+          },
+          es: {
+            title: "Haz que una tarea espere a otras",
+            body: "En el menú de una tarea, elige Relaciones → Esperar a otra tarea, o añade una en Relaciones de su barra lateral. Cuando esas tareas terminan, el agente asignado empieza solo y, si es una persona, recibe un aviso.",
+          },
+          ru: {
+            title: "Задача может ждать другие",
+            body: "В меню задачи выберите «Связи → Ждать другую задачу» или добавьте связь в разделе «Связи» на боковой панели. Когда эти задачи завершатся, назначенный агент начнёт работу сам, а назначенный человек получит уведомление.",
+          },
+        },
+      },
+      {
+        id: "squad-direct-handoff",
+        icon: Users,
+        action: { kind: "route", to: (p) => p.squads() },
+        copy: {
+          en: {
+            title: "Let squad members hand off directly",
+            body: "If you manage a squad, open it and set Collaboration to Members hand off directly. Members then pass the issue to each other, and the leader steps in only when a limit is reached or a run fails.",
+          },
+          "zh-Hans": {
+            title: "让小队成员直接交接",
+            body: "如果你管理一个小队，打开它，把「协作方式」设为「成员直接交接」。成员之间会直接传递任务，只有达到上限或运行失败时才交回队长。",
+          },
+          "zh-Hant": {
+            title: "讓小隊成員直接交接",
+            body: "如果你管理一個小隊，打開它，把「協作方式」設為「成員直接交接」。成員之間會直接傳遞任務，只有達到上限或執行失敗時才交回隊長。",
+          },
+          ja: {
+            title: "スクワッドのメンバー同士で直接引き継ぐ",
+            body: "スクワッドを管理している場合は、スクワッドを開いて「連携方法」を「メンバーが直接引き継ぐ」にします。メンバー同士でタスクを受け渡し、上限に達したときや実行が失敗したときだけリーダーが引き取ります。",
+          },
+          ko: {
+            title: "스쿼드 멤버끼리 바로 인계하기",
+            body: "스쿼드를 관리한다면 스쿼드를 열고 '협업 방식'을 '멤버가 직접 인계'로 바꾸세요. 멤버끼리 태스크를 넘기고, 한도에 도달하거나 실행이 실패할 때만 리더가 이어받습니다.",
+          },
+          fr: {
+            title: "Laissez les membres d'un squad se passer la main",
+            body: "Si vous gérez un squad, ouvrez-le et réglez Collaboration sur Les membres se passent la main. Les membres se transmettent alors la tâche, et le chef n'intervient que si une limite est atteinte ou qu'une exécution échoue.",
+          },
+          es: {
+            title: "Deja que los miembros del squad se pasen el trabajo",
+            body: "Si gestionas un squad, ábrelo y pon Colaboración en Los miembros se pasan el trabajo. Así los miembros se pasan la tarea entre ellos, y el líder solo interviene si se alcanza un límite o falla una ejecución.",
+          },
+          ru: {
+            title: "Участники команды передают работу напрямую",
+            body: "Если вы управляете командой, откройте её и в разделе «Совместная работа» выберите «Участники передают напрямую». Участники будут передавать задачу друг другу, а лидер подключится, только если достигнут лимит или запуск завершился ошибкой.",
+          },
+        },
+      },
+      {
+        id: "chat-wakeup-timing",
+        icon: AlarmClock,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Change when a wakeup checks back",
+            body: "In a chat, open Wakeups from the strip above the message box or the alarm clock in the header, then click the clock beside a wakeup to change its timing.",
+          },
+          "zh-Hans": {
+            title: "修改唤醒的时间",
+            body: "在聊天中，点输入框上方的提示条或页头的闹钟打开「唤醒」，再点某条唤醒旁的时钟即可修改时间。",
+          },
+          "zh-Hant": {
+            title: "修改喚醒的時間",
+            body: "在聊天中，點輸入框上方的提示列或頁首的鬧鐘開啟「喚醒」，再點某則喚醒旁的時鐘即可修改時間。",
+          },
+          ja: {
+            title: "ウェイクアップの時間を変更",
+            body: "チャットで入力欄の上のバーかヘッダーの目覚まし時計から「ウェイクアップ」を開き、ウェイクアップの横にある時計をクリックすると時間を変更できます。",
+          },
+          ko: {
+            title: "웨이크업 시간 바꾸기",
+            body: "채팅에서 입력창 위 막대나 헤더의 알람 시계로 '웨이크업'을 연 다음, 웨이크업 옆의 시계를 눌러 시간을 바꾸세요.",
+          },
+          fr: {
+            title: "Changez l'horaire d'un réveil",
+            body: "Dans une discussion, ouvrez Réveils depuis le bandeau au-dessus de la zone de saisie ou le réveil dans l'en-tête, puis cliquez sur l'horloge à côté d'un réveil pour modifier son horaire.",
+          },
+          es: {
+            title: "Cambia cuándo vuelve un recordatorio",
+            body: "En un chat, abre Recordatorios desde la barra sobre el cuadro de texto o el despertador del encabezado, y haz clic en el reloj junto a un recordatorio para cambiar su horario.",
+          },
+          ru: {
+            title: "Меняйте время напоминания",
+            body: "В чате откройте «Напоминания» с полосы над полем ввода или по значку будильника в заголовке, затем нажмите на часы рядом с напоминанием, чтобы изменить время.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.12.2",
     date: "2026-11-24",

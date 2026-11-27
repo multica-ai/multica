@@ -609,6 +609,45 @@ describe("TabBar overflow", () => {
   });
 });
 
+describe("TabBar reordering", () => {
+  it("lets a tab cross its neighbor and drop in the new position", async () => {
+    const { container, getByLabelText } = render(<TabBar />);
+    const tabStrip = container.querySelector("[data-tab-scroll-container]")!;
+    // jsdom has no layout. Give the strip and each tab's subtree the
+    // geometry of two adjacent tabs so dnd-kit's real collision logic runs.
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this === tabStrip) return new DOMRect(0, 0, 300, 40);
+        const tab = this.closest("[data-tab-id]");
+        if (tab) {
+          const left = tab.getAttribute("data-tab-id") === "tA" ? 0 : 146;
+          return new DOMRect(left, 0, 140, 40);
+        }
+        return new DOMRect();
+      });
+
+    try {
+      fireEvent.pointerDown(getByLabelText("Issues"), {
+        button: 0,
+        pointerType: "mouse",
+        isPrimary: true,
+        clientX: 45,
+        clientY: 20,
+      });
+      fireEvent.pointerMove(document, { clientX: 55, clientY: 20 });
+      fireEvent.pointerMove(document, { clientX: 191, clientY: 20 });
+      fireEvent.pointerUp(document, { clientX: 191, clientY: 20 });
+
+      expect(state.moveTab).toHaveBeenCalledWith(0, 1);
+    } finally {
+      rectSpy.mockRestore();
+      // dnd-kit keeps its document-level click blocker for 50ms after a drop.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  });
+});
+
 describe("TabBar click activation", () => {
   // electron/electron#55100: in macOS native full screen on a secondary
   // display, a press near the top of the window is followed by one pointermove

@@ -343,6 +343,9 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /** Set once an admin has cleared this run's log; absent otherwise. */
+  transcript_purged_at?: string | null;
+  transcript_purged_by?: string;
   result: unknown;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
@@ -546,6 +549,13 @@ export interface ContextReceipt {
   fresh_retry?: boolean;
   mcp_servers: string[];
   sources: ContextReceiptSource[];
+}
+
+/** What clearing a run's log leaves on the run. */
+export interface TaskTranscriptPurge {
+  transcript_purged_at: string | null;
+  transcript_purged_by: string;
+  messages_deleted: number;
 }
 
 export interface TaskContextReceiptResponse {

@@ -22,6 +22,7 @@ import {
 import {
   issuePullRequestsOptions,
   derivePullRequestVerdict,
+  formatPullRequestDiffCount,
   shouldShowPullRequestStats,
   stripIssueKeyFromTitle,
   useLinkIssuePullRequest,
@@ -450,13 +451,29 @@ function PullRequestRow({
               {stripIssueKeyFromTitle(pr.title, identifier)}
             </p>
             <div className="mt-1 flex items-center gap-2">
-              {/* The number and the pill never yield. Everything after the dot
-                  is one unit: short of room, it wraps whole onto the clipped
-                  second line instead of being cut mid-word. */}
+              {/* The number and the pill never yield. The diff and the trailing
+                  meta are each one unit: short of room, they wrap whole onto
+                  the clipped second line (the tooltip keeps them) instead of
+                  being cut mid-word or drawn over the number. The repo name
+                  takes no room of its own (zero basis), only what is left
+                  over, so it truncates before the diff wraps; its negative
+                  margin cancels the gap so it reads `repo#number`. */}
               <p className="flex h-lh min-w-0 flex-1 flex-wrap items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-caption text-muted-foreground tabular-nums">
-                <span className="min-w-0 truncate">
-                  {showRepo ? pr.repo_name : null}#{pr.number}
-                </span>
+                {showRepo ? (
+                  <span className="-me-1.5 min-w-0 max-w-fit grow basis-0 truncate">{pr.repo_name}</span>
+                ) : null}
+                <span className="shrink-0">#{pr.number}</span>
+                {showStats ? (
+                  <span data-testid="pull-request-diff" className="inline-flex shrink-0 items-center gap-1.5">
+                    <span aria-hidden="true" className="text-faint-foreground">
+                      ·
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="text-success">+{formatPullRequestDiffCount(pr.additions ?? 0)}</span>
+                      <span className="text-destructive">−{formatPullRequestDiffCount(pr.deletions ?? 0)}</span>
+                    </span>
+                  </span>
+                ) : null}
                 {meta ? (
                   <span className="inline-flex min-w-0 items-center gap-1.5">
                     <span aria-hidden="true" className="text-faint-foreground">
