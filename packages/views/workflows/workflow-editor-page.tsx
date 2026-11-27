@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { isImeComposing } from "@multica/core/utils";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { statusColumnKeys } from "@multica/core/issues";
 import {
@@ -585,6 +586,7 @@ export function WorkflowEditorPage({
                     placeholder={t(($) => $.workflows.columns.name_placeholder)}
                     onChange={(e) => setNewName(e.target.value)}
                     onKeyDown={(e) => {
+                      if (isImeComposing(e)) return;
                       if (e.key === "Enter") addNew();
                       if (e.key === "Escape") setNewName(null);
                     }}
