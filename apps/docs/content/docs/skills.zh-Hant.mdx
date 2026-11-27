@@ -102,6 +102,8 @@ AI 代理的 **Skills** 標籤頁可顯示連線電腦上已安裝的執行時�
 
 對於 Oh-My-Pi，繼承列表和從執行時複製的操作會遵循啟動命令選定的 profile 及生效的 skill 篩選配置。發現過程在空目錄中執行，讀取使用者級配置；專案配置和顯式分配的 Multica skill 單獨處理。如果 OMP 無法返回 skill 清單，重新整理會報錯。
 
+如果守護程序的 `XDG_CONFIG_HOME` 是絕對路徑，Multica 會在 `$XDG_CONFIG_HOME/opencode/skills` 中列出和匯入 OpenCode 的使用者級 skill。預設目錄為 `~/.config/opencode/skills`。
+
 ### 查看 skill 交付和工具呼叫 [#skill-execution]
 
 在任務的執行日誌中開啟執行記錄，點選 **上下文回執** 圖示。回執列出本次執行的工作區 skill。如果某個 skill 顯示檔案路徑及 **未驗證**，表示 Multica 已將完整的 skill 套件寫入該路徑，執行環境是否讀取或執行了該 skill 仍待確認。**未送達** 表示交付失敗。

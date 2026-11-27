@@ -706,6 +706,7 @@ func TestListRuntimeLocalSkills_CodexUsesSharedCODEXHOME(t *testing.T) {
 func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	root := filepath.Join(home, ".config", "opencode", "skills")
 
@@ -745,6 +746,7 @@ func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 func TestLoadRuntimeLocalSkillBundle_OpenCode(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	writeTestLocalSkill(t, filepath.Join(home, ".config", "opencode", "skills"), "release/reporter", map[string]string{
 		"SKILL.md":           "---\nname: Release Reporter\ndescription: Summarize release notes\n---\n# Release Reporter\n",
@@ -776,6 +778,43 @@ func TestLoadRuntimeLocalSkillBundle_OpenCode(t *testing.T) {
 	}
 	if bundle.SourcePath != "~/.config/opencode/skills/release/reporter" {
 		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
+func TestOpenCodeRuntimeSkillsUseXDGConfigHome(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	defaultRoot := filepath.Join(home, ".config", "opencode", "skills")
+	configuredRoot := filepath.Join(configHome, "opencode", "skills")
+	writeTestLocalSkill(t, defaultRoot, "old-only", map[string]string{"SKILL.md": "---\nname: Old only\n---\n"})
+	writeTestLocalSkill(t, defaultRoot, "release/reporter", map[string]string{"SKILL.md": "---\nname: Stale copy\n---\n"})
+	writeTestLocalSkill(t, configuredRoot, "release/reporter", map[string]string{
+		"SKILL.md": "---\nname: XDG Release Reporter\n---\n",
+		"notes.md": "supporting file from the selected config directory",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shared", map[string]string{
+		"SKILL.md": "---\nname: Shared skill\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("opencode")
+	if err != nil || !supported {
+		t.Fatalf("list runtime skills: supported=%v, err=%v", supported, err)
+	}
+	if len(skills) != 2 || skills[0].Key != "release/reporter" || skills[0].Name != "XDG Release Reporter" || skills[1].Key != "shared" {
+		t.Fatalf("unexpected runtime skills: %+v", skills)
+	}
+	bundle, supported, err := loadRuntimeLocalSkillBundle("opencode", "release/reporter")
+	if err != nil || !supported || bundle == nil {
+		t.Fatalf("load XDG skill: supported=%v, err=%v, bundle present=%v", supported, err, bundle != nil)
+	}
+	if bundle.Name != skills[0].Name || bundle.SourcePath != skills[0].SourcePath {
+		t.Fatalf("imported skill %q at %q differs from the listed copy", bundle.Name, bundle.SourcePath)
+	}
+	if len(bundle.Files) != 1 || bundle.Files[0].Path != "notes.md" || bundle.Files[0].Content != "supporting file from the selected config directory" {
+		t.Fatalf("unexpected supporting files: %+v", bundle.Files)
 	}
 }
 
