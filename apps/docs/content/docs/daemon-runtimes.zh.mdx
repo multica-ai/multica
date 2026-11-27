@@ -230,6 +230,10 @@ Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HE
 
 Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
 
+### Claude Code 会话名称 [#claude-session-names]
+
+使用内置 Claude Code 运行时（2.1.94 或更高版本）创建会话时，Multica 会将任务标题用作 Claude Code 历史记录中的会话名称。已有会话和显式配置的名称保持不变。
+
 ### Codex 原生记忆与子智能体 [#codex-memory]
 
 守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。

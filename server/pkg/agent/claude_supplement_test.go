@@ -522,3 +522,37 @@ func TestClaudeResultDrainsPendingControlReplies(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeSessionTitleFirstMainPromptOnly(t *testing.T) {
+	session := newClaudeSupplementSession(t.Context())
+	session.sessionTitle = "Fixture title"
+	for _, step := range []struct {
+		event, agentID, title string
+	}{
+		{event: "UserPromptSubmit", agentID: "child-agent"},
+		{event: "PreToolUse"},
+		{event: "UserPromptSubmit", title: "Fixture title"},
+		{event: "UserPromptSubmit"},
+	} {
+		var output bytes.Buffer
+		handled, err := session.handleHook(claudeSupplementHook(step.event, step.agentID), &output)
+		if err != nil || !handled {
+			t.Fatalf("hook %s handled=%t, err=%v", step.event, handled, err)
+		}
+		var frame struct {
+			Response struct {
+				Response struct {
+					HookSpecificOutput struct {
+						SessionTitle string `json:"sessionTitle"`
+					} `json:"hookSpecificOutput"`
+				} `json:"response"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal(output.Bytes(), &frame); err != nil {
+			t.Fatal(err)
+		}
+		if got := frame.Response.Response.HookSpecificOutput.SessionTitle; got != step.title {
+			t.Fatalf("hook %s title = %q, want %q", step.event, got, step.title)
+		}
+	}
+}

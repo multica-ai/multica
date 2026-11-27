@@ -230,6 +230,10 @@ Hermes 在任務和聊天中的執行會將會話持久目錄作為隔離的 `HE
 
 Multica 每次執行都會重新整理其中的 skill 和派生配置。模型服務認證會保留，託管執行的訊息平臺介面卡和 HTTP 入口會關閉。宿主的 Gateway 狀態、日誌、會話和定時任務各自隔離。執行結束時會停止本次執行的 Gateway，確保後續執行使用自己的執行環境。
 
+### Claude Code 工作階段名稱 [#claude-session-names]
+
+使用內建 Claude Code 執行環境（2.1.94 或更新版本）建立工作階段時，Multica 會將任務標題用作 Claude Code 歷史記錄中的工作階段名稱。既有工作階段和明確設定的名稱會保留。
+
 ### Codex 原生記憶與子 AI 代理 [#codex-memory]
 
 守護程序管理的 Codex 執行預設關閉 Codex 原生記憶，避免本機或前一次執行留下的記憶帶進別的工作區。設定只寫入這次執行專用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均為 `false`），不改你的 `~/.codex/config.toml`。需要保留原生記憶時，在守護程序的環境中設定 `MULTICA_CODEX_MEMORY=1`。
