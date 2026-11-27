@@ -32,6 +32,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("cursor-agent executable not found at %q: %w", execName, err)
 	}
 
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (cursor_warm.go); without the pool — or for per-task claims the
+	// ACP launch cannot carry (skills, steering, custom args) — every turn
+	// spawns and reaps its own stream-json process below.
+	if b.cfg.WarmPool != nil && cursorWarmEligible(opts) {
+		return b.executeWarmCursor(ctx, lookedUp, prompt, opts)
+	}
+
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
