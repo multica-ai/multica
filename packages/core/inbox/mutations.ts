@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
+import { archivedInboxCacheItems, inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
@@ -28,8 +28,7 @@ function cachedInboxIssueId(qc: QueryClient, wsId: string, id: string): string |
   if (active) return active.issue_id;
   for (const [, data] of qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) })) {
     if (!data) continue;
-    const items = Array.isArray(data) ? data : "pages" in data ? data.pages.flatMap((page) => page.items) : data.items;
-    const archived = items.find((item) => item.id === id);
+    const archived = archivedInboxCacheItems(data).find((item) => item.id === id);
     if (archived) return archived.issue_id;
   }
   return null;

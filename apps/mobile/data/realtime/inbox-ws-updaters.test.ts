@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { inboxKeys } from "@/data/queries/inbox";
 import {
   dropInboxItemsByIssue,
+  onInboxNew,
   patchInboxIssueStatus,
   refreshInboxList,
   refreshInboxUnreadSummary,
@@ -153,5 +154,71 @@ describe("refreshInboxList", () => {
     expect(cancel).not.toHaveBeenCalledWith({
       queryKey: inboxKeys.unreadSummary(),
     });
+  });
+});
+
+describe("onInboxNew", () => {
+  function pushed(id: string, issueId: string | null, workspaceId = wsId): InboxItem {
+    // inbox:new carries no issue_status unless the writer knew it.
+    const { issue_status: _status, ...rest } = item(id, issueId);
+    return { ...rest, workspace_id: workspaceId, created_at: "2026-09-01T09:00:00Z" } as InboxItem;
+  }
+
+  it("writes the row into the loaded list without re-reading it", async () => {
+    const qc = new QueryClient();
+    const listKey = inboxKeys.list(wsId);
+    qc.setQueryData<InboxItem[]>(listKey, [{ ...item("n1", "issue-a"), issue_status: "todo" }]);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    onInboxNew(qc, wsId, pushed("n2", "issue-a"));
+    onInboxNew(qc, wsId, pushed("n2", "issue-a"));
+
+    const list = qc.getQueryData<InboxItem[]>(listKey);
+    expect(list?.map((row) => [row.id, row.issue_status])).toEqual([
+      ["n2", "todo"],
+      ["n1", "todo"],
+    ]);
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: listKey });
+    // The badge count is the server's.
+    await vi.waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() }),
+    );
+  });
+
+  it("re-reads the list for an issue it holds no row of", async () => {
+    const qc = new QueryClient();
+    const listKey = inboxKeys.list(wsId);
+    qc.setQueryData<InboxItem[]>(listKey, [item("n1", "issue-a")]);
+
+    onInboxNew(qc, wsId, pushed("n2", "issue-new"));
+
+    await vi.waitFor(() => expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true));
+    expect(qc.getQueryData<InboxItem[]>(listKey)?.map((row) => row.id)).toEqual(["n1"]);
+  });
+
+  it.each([
+    ["an item that names no workspace", pushed("n2", "issue-a", "")],
+    ["a payload without an item", undefined],
+  ])("re-reads this workspace's list for %s", async (_label, payload) => {
+    const qc = new QueryClient();
+    const listKey = inboxKeys.list(wsId);
+    qc.setQueryData<InboxItem[]>(listKey, [item("n1", "issue-a")]);
+
+    onInboxNew(qc, wsId, payload);
+
+    await vi.waitFor(() => expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true));
+    expect(qc.getQueryData<InboxItem[]>(listKey)?.map((row) => row.id)).toEqual(["n1"]);
+  });
+
+  it("leaves this workspace's list alone for another workspace's notification", () => {
+    const qc = new QueryClient();
+    const listKey = inboxKeys.list(wsId);
+    const rows = [item("n1", "issue-a")];
+    qc.setQueryData<InboxItem[]>(listKey, rows);
+
+    onInboxNew(qc, wsId, pushed("n2", "issue-a", "workspace-2"));
+
+    expect(qc.getQueryData<InboxItem[]>(listKey)).toBe(rows);
+    expect(qc.getQueryState(listKey)?.isInvalidated).toBe(false);
   });
 });

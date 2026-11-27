@@ -16,6 +16,7 @@
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { InboxItem, IssueStatus } from "@multica/core/types";
+import { coalescedRefresh, inboxRowFromPush } from "@multica/core/inbox/incremental";
 import { inboxKeys } from "@/data/queries/inbox";
 
 export function patchInboxIssueStatus(
@@ -71,6 +72,34 @@ export async function refreshInboxList(qc: QueryClient, wsId: string) {
  */
 export async function refreshInboxUnreadSummary(qc: QueryClient) {
   await refreshInboxQuery(qc, inboxKeys.unreadSummary());
+}
+
+/**
+ * `inbox:new`: write the pushed row into the loaded list instead of re-reading
+ * it, as web does (`onInboxNew` in packages/core/inbox/ws-updaters.ts). The
+ * list is re-read instead while it is not loaded, owes a re-read or has a
+ * request out (a response already on the wire can predate the row and land
+ * on top of it), or when `inboxRowFromPush` cannot build the row the server
+ * would list. An item from another workspace leaves this list alone; one that
+ * names no workspace re-reads this one. The badge count is the server's, so
+ * the summary is re-read. Each re-read waits for a read already out and goes
+ * through a coalescing gate, so a burst keeps one read at a time.
+ */
+export function onInboxNew(qc: QueryClient, wsId: string, item: InboxItem | undefined) {
+  void coalescedRefresh(qc, inboxKeys.unreadSummary(), () => refreshInboxUnreadSummary(qc));
+  if (item?.workspace_id && item.workspace_id !== wsId) return;
+  const key = inboxKeys.list(wsId);
+  const list = qc.getQueryState<InboxItem[]>(key);
+  if (item && list?.data?.some((row) => row.id === item.id)) return;
+  const row =
+    item?.workspace_id && list?.data && !list.isInvalidated && list.fetchStatus === "idle"
+      ? inboxRowFromPush(item, list.data)
+      : null;
+  if (!row) {
+    void coalescedRefresh(qc, key, () => refreshInboxList(qc, wsId));
+    return;
+  }
+  qc.setQueryData<InboxItem[]>(key, (old) => (old ? [row, ...old] : old));
 }
 
 // Dropping unread rows changes the tab badge, which reads the server-side

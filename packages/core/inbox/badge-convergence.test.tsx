@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
@@ -15,9 +15,11 @@ import {
   inboxListOptions,
   useInboxUnreadCount,
 } from "./queries";
+import { INBOX_REFRESH_INTERVAL_MS } from "./incremental";
 import {
   onInboxInvalidate,
   onInboxNew,
+  onInboxNewSummaryInvalidate,
   onInboxSummaryInvalidate,
 } from "./ws-updaters";
 
@@ -37,13 +39,21 @@ import {
  */
 
 vi.mock("../hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-afterEach(cleanup);
+// `inbox:new` refreshes are coalesced over INBOX_REFRESH_INTERVAL_MS, so time
+// is a variable of the interleaving too: each step lets a random amount pass.
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const WS = "ws-1";
-// Deterministic, so the range is a fixed set of interleavings. Seeds 4, 16 and
-// 21 fail against the pre-fix code (a list refresh swallowed by the list's
-// first load) — the range keeps them so this guard has proven teeth, at a
-// fraction of the cost of a wider sweep. The mechanism itself is pinned
+// Deterministic, so the range is a fixed set of interleavings. Seeds 4 and 21
+// fail against the pre-fix code (a list refresh swallowed by the list's first
+// load) — the range keeps them so this guard has proven teeth, at a fraction
+// of the cost of a wider sweep. The mechanism itself is pinned
 // directly in ws-updaters.test.ts; this covers the interleavings around it.
 const SEEDS = 25;
 
@@ -117,9 +127,9 @@ class FakeServer {
   }
 }
 
-async function tick() {
+async function tick(ms = 0) {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.advanceTimersByTimeAsync(ms);
   });
 }
 
@@ -131,6 +141,8 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
   "badge converges on the listed unread rows (seed %i)",
   async (seed) => {
     const rand = mulberry32(seed);
+    // Its own sequence, so the steps each seed takes do not depend on time.
+    const elapse = mulberry32(seed + 1000);
     const server = new FakeServer();
     for (const issue of ["i1", "i2", "i3"]) server.notify(issue);
     server.markRead("n2");
@@ -181,9 +193,10 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
         const roll = rand();
         if (roll < 0.18) {
           const row = server.notify(`i${1 + Math.floor(rand() * 5)}`);
+          // What handleInboxNew does with it.
           events.push((c) => {
             void onInboxNew(c, WS, row);
-            void onInboxSummaryInvalidate(c);
+            void onInboxNewSummaryInvalidate(c);
           });
         } else if (roll < 0.34 && page) {
           // The user opens an unread row the list is showing.
@@ -211,7 +224,7 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
           const event = events.shift()!;
           await act(async () => event(qc));
         }
-        await tick();
+        await tick(Math.floor(elapse() * INBOX_REFRESH_INTERVAL_MS * 0.6));
       }
 
       // Drain: every event and response is eventually delivered, and the user
@@ -225,8 +238,10 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
           await act(async () => release!());
         }
         for (let i = 0; i < 4; i++) await tick();
+        // Let a coalesced refresh that waits out its interval start.
+        await tick(INBOX_REFRESH_INTERVAL_MS);
       }
-      for (let i = 0; i < 6; i++) await tick();
+      for (let i = 0; i < 6; i++) await tick(INBOX_REFRESH_INTERVAL_MS);
 
       const truth = server.unread();
       expect({

@@ -10,6 +10,7 @@ import { chatKeys } from "../chat/queries";
 import { inboxKeys } from "../inbox/queries";
 import { issueKeys } from "../issues/queries";
 import { notificationPreferenceKeys } from "../notification-preferences/queries";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { workspaceKeys } from "../workspace/queries";
 import type {
   ChatDonePayload,
@@ -839,6 +840,22 @@ describe("handleInboxNew", () => {
     expect(showNotification).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "workspace-a" }),
     );
+  });
+
+  it("re-reads the active workspace's inbox for an item that names no workspace", async () => {
+    const qc = createQueryClient();
+    setCurrentWorkspace("workspace-b", "ws-b");
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    try {
+      await handleInboxNew(qc, inboxItem({ workspace_id: "" }));
+
+      await vi.waitFor(() =>
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all("ws-b") }),
+      );
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
   });
 
   it("honors the SOURCE workspace's mute preference", async () => {
