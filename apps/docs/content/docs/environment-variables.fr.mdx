@@ -364,6 +364,19 @@ Le nettoyage vérifié des processus d'arrière-plan de Cursor nécessite Linux 
 
 Les processus d'arrière-plan de Cursor qui appartiennent à l'exécution sont aussi arrêtés lorsque celle-ci se termine normalement : un serveur d'arrière-plan lancé par cette exécution ne survit donc pas intentionnellement à la finalisation. macOS peut reconnaître des enfants tardifs grâce aux identités de parent d'origine conservées, mais ne peut pas prouver une chaîne dont les processus intermédiaires ont disparu avant d'être observés. De tels processus, le travail qui quitte le groupe suivi, ou des erreurs persistantes d'appartenance ou d'envoi de signaux peuvent laisser du travail d'arrière-plan derrière eux. Un nettoyage non confirmé est journalisé et n'ouvre jamais la fenêtre de récupération réservée aux nettoyages réussis ; les processus inconnus ne sont pas tués sur la seule base de leur PID numérique ou de leur groupe de processus.
 
+### Utilisation du navigateur par ZCode
+
+L'outil de navigateur de ZCode tourne dans un Chromium headless géré, que le daemon démarre dans Docker : un conteneur par exécution, supprimé à la fin de celle-ci. Tant qu'aucun répertoire de modules n'est configuré, l'usage du navigateur reste désactivé et rien n'est résolu ni démarré.
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_ZCODE_BROWSER` | `auto` | `auto`, `docker` ou `off`. `auto` et `docker` se comportent de la même façon : le navigateur est disponible dès que Docker, l'image et le répertoire de modules sont présents |
+| `MULTICA_ZCODE_BROWSER_MODULES` | vide | Répertoire dont le `node_modules` contient `playwright-core`. L'usage du navigateur reste désactivé tant qu'il n'est pas défini |
+| `MULTICA_ZCODE_BROWSER_IMAGE` | `mcr.microsoft.com/playwright:v1.62.1-noble` | Image Docker qui contient le runtime du navigateur. Elle doit déjà être présente : Multica ne la récupère jamais |
+| `MULTICA_ZCODE_BROWSER_DOCKER_BIN` | `docker` sur le `PATH` | CLI Docker à utiliser. Sans valeur, `docker` est cherché sur le `PATH`, puis aux emplacements d'installation habituels |
+
+Multica ne récupère aucune image et n'installe rien depuis npm : fournissez vous-même les deux, avec la version de `playwright-core` correspondant à l'image.
+
 ### Rendre persistante la configuration du daemon
 
 Les paramètres courants côté daemon peuvent aussi être écrits dans `~/.multica/config.json` au lieu de dépendre des variables d'environnement du shell ; les profils nommés conservent les leurs dans `~/.multica/profiles/<name>/config.json` :
