@@ -88,7 +88,9 @@ export function useArchiveProjects(): {
         action: {
           label: t(($) => $.archive.undo),
           onClick: () => {
-            for (const project of archived) restoreProject.mutate(project.id);
+            for (const project of archived) {
+              void restoreProject.mutateAsync(project.id).catch((err) => toast.error(errorMessage(err)));
+            }
           },
         },
       });
@@ -212,10 +214,10 @@ export function useRestoreProjects() {
   const restoreProject = useRestoreProject();
   return useCallback(
     (project: Project) => {
-      restoreProject.mutate(project.id, {
-        onSuccess: () => toast.success(t(($) => $.archive.toast_restored, { name: project.title })),
-        onError: (err) => toast.error(errorMessage(err)),
-      });
+      void restoreProject.mutateAsync(project.id).then(
+        () => toast.success(t(($) => $.archive.toast_restored, { name: project.title })),
+        (err) => toast.error(errorMessage(err)),
+      );
     },
     [restoreProject, t],
   );
