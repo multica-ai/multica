@@ -131,6 +131,13 @@
     "copy_code": "Copier le code",
     "fullscreen": "Plein écran"
   },
+  "alert": {
+    "note": "Remarque",
+    "tip": "Conseil",
+    "important": "Important",
+    "warning": "Avertissement",
+    "caution": "Attention"
+  },
   "dynamic_block": {
     "preview": "Aperçu",
     "source": "Source",
