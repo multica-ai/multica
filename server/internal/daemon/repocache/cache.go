@@ -1068,12 +1068,11 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
 
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
-		}
-
 		if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
 			return nil, fmt.Errorf("isolate checkout Git identity: %w", err)
+		}
+		if err := configureWorktreeExcludesContext(ctx, worktreePath); err != nil {
+			return nil, fmt.Errorf("configure checkout Git excludes: %w", err)
 		}
 
 		// Reconcile the Co-authored-by hook and the workspace's recorded
@@ -1098,13 +1097,11 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
-	// Exclude agent context files from git tracking.
-	for _, pattern := range agentGitExcludePatterns {
-		_ = excludeFromGitContext(ctx, worktreePath, pattern)
-	}
-
 	if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
 		return nil, fmt.Errorf("isolate checkout Git identity: %w", err)
+	}
+	if err := configureWorktreeExcludesContext(ctx, worktreePath); err != nil {
+		return nil, fmt.Errorf("configure checkout Git excludes: %w", err)
 	}
 
 	// Reconcile the Co-authored-by hook and the workspace's recorded setting.
