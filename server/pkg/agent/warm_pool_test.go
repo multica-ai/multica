@@ -515,7 +515,7 @@ func TestClaudeWarmPoolErrorResultClosesStdinImmediately(t *testing.T) {
 	fakeClaude := filepath.Join(dir, "claude")
 	// Emits an error result and keeps reading stdin until EOF, matching a live
 	// stream-json Claude process. Without closing stdin immediately, this would
-	// stall for the full 10s claudeErrorResultGrace() before returning.
+	// stall for the full 10s claudeResultExitGrace() before returning.
 	script := `#!/bin/sh
 while IFS= read -r line; do
   case "$line" in

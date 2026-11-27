@@ -49,6 +49,11 @@ type claudeProcess struct {
 
 	closed    atomic.Bool
 	closeOnce sync.Once
+
+	// resultStopDone closes when stopAfterResult returns. It is set by the
+	// stdout reader before procDone closes and read only after that.
+	resultStopDone     chan struct{}
+	stoppedAfterResult atomic.Bool
 }
 
 func (p *claudeProcess) Fingerprint() string { return p.fingerprint }
@@ -140,16 +145,28 @@ func (p *claudeProcess) terminate() {
 	}
 }
 
-// stopAfterErrorResult terminates a one-shot claude that outlives its error
+// stopAfterResult terminates a one-shot claude that outlives its terminal
 // result past the grace period, the same way cancellation does.
-func (p *claudeProcess) stopAfterErrorResult() {
+func (p *claudeProcess) stopAfterResult() {
+	defer close(p.resultStopDone)
+	timer := time.NewTimer(claudeResultExitGrace())
+	defer timer.Stop()
 	select {
 	case <-p.procDone:
 		return
-	case <-time.After(claudeErrorResultGrace()):
+	case <-timer.C:
 	}
-	p.logger.Warn("claude still running after an error result; terminating process group", "pid", p.cmd.Process.Pid)
+	p.stoppedAfterResult.Store(true)
+	p.logger.Warn("claude still running after terminal result; terminating owned process group", "pid", p.cmd.Process.Pid)
 	p.signalProcessTree()
+}
+
+// waitResultStop returns once a started stopAfterResult has finished. A
+// one-shot turn calls it after procDone; a pooled process never starts one.
+func (p *claudeProcess) waitResultStop() {
+	if !p.pooled && p.resultStopDone != nil {
+		<-p.resultStopDone
+	}
 }
 
 // signalProcessTree SIGTERMs the process group, escalates to SIGKILL unless
