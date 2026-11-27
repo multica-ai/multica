@@ -312,3 +312,71 @@ func TestConnectedApps_PendingVisibleAfterHistoricalRequests(t *testing.T) {
 		t.Fatalf("history pages carried %d decided requests, want 200", seen)
 	}
 }
+
+// A request waits on the issue or chat that asked for it. Deleting that issue
+// or chat withdraws the request: approving it afterwards must not run the
+// call for work that no longer exists.
+func TestConnectedApps_DeletingTheSourceWithdrawsPendingRequests(t *testing.T) {
+	approve := func(t *testing.T, f *appsFixture, id string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		f.h.ApproveAppRequest(w, withURLParam(appsReqAs(t, testUserID, http.MethodPost, "/api/app-requests/"+id+"/approve", nil), "id", id))
+		if n := len(f.sdk.executions()); n != 0 {
+			t.Fatalf("approving a request of a deleted source ran the call: HTTP %d executions=%d %s", w.Code, n, w.Body.String())
+		}
+	}
+
+	t.Run("issue", func(t *testing.T) {
+		f := newAppsFixture(t)
+		req := f.submitSend(t)
+
+		w := httptest.NewRecorder()
+		f.h.DeleteIssue(w, withURLParam(newRequest(http.MethodDelete, "/api/issues/"+f.issueID, nil), "id", f.issueID))
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("DeleteIssue: %d %s", w.Code, w.Body.String())
+		}
+		approve(t, f, req.ID)
+		if got := f.requestStatus(t, req.ID); got != "cancelled" {
+			t.Fatalf("request after its issue was deleted = %s, want cancelled", got)
+		}
+	})
+
+	t.Run("chat session", func(t *testing.T) {
+		f := newAppsFixture(t)
+		f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}})
+		ctx := context.Background()
+		var sessionID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+			VALUES ($1, $2, $3, 'apps request chat', 'active')
+			RETURNING id
+		`, testWorkspaceID, f.agentID, testUserID).Scan(&sessionID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+		req, err := f.h.Queries.CreateAppActionRequest(ctx, db.CreateAppActionRequestParams{
+			WorkspaceID: parseUUID(testWorkspaceID), Kind: "action",
+			TaskID: parseUUID(f.taskID), AgentID: parseUUID(f.agentID), ChatSessionID: parseUUID(sessionID),
+			ApproverUserID: parseUUID(testUserID), AccountScope: "personal", ToolkitSlug: "gmail",
+			ToolSlug: "GMAIL_SEND_EMAIL", ActionClass: "send", Arguments: []byte(`{"to":"x@example.com"}`),
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := uuidToString(req.ID)
+
+		del := httptest.NewRequest(http.MethodDelete, "/api/chat/sessions/"+sessionID, nil)
+		del.Header.Set("X-User-ID", testUserID)
+		del = withChatTestWorkspaceCtx(t, withURLParam(del, "sessionId", sessionID))
+		w := httptest.NewRecorder()
+		f.h.DeleteChatSession(w, del)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("DeleteChatSession: %d %s", w.Code, w.Body.String())
+		}
+		approve(t, f, id)
+		if got := f.requestStatus(t, id); got != "cancelled" {
+			t.Fatalf("request after its chat was deleted = %s, want cancelled", got)
+		}
+	})
+}

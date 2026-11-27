@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -4833,6 +4834,8 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	var cancelledAppRequests []db.AppActionRequest
+	var teamNoticeHolders connectedapps.TeamNoticeHolders
 	if len(issues) > 0 {
 		if err = qtx.LockIssueBlockerGraph(ctx, issues[0].WorkspaceID); err != nil {
 			return issueDeleteResult{}, err
@@ -4861,6 +4864,21 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		}
 		for _, duplicate := range cleared {
 			result.ClearedDuplicates = append(result.ClearedDuplicates, clearedDuplicate{Issue: duplicate, Original: issue})
+		}
+		// An app request outlives the run that made it, but not its issue:
+		// approving it later would run the call for work that is gone.
+		withdrawn, err := qtx.CancelPendingAppActionRequestsForIssue(ctx, db.CancelPendingAppActionRequestsForIssueParams{
+			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+		})
+		if err != nil {
+			return issueDeleteResult{}, fmt.Errorf("cancel issue app requests: %w", err)
+		}
+		cancelledAppRequests = append(cancelledAppRequests, withdrawn...)
+		if h.ConnectedApps != nil {
+			// Issue deletion also removes the inbox rows used to identify recipients.
+			if err := teamNoticeHolders.Capture(ctx, qtx, withdrawn); err != nil {
+				return issueDeleteResult{}, fmt.Errorf("capture team request notification holders: %w", err)
+			}
 		}
 		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
 		if err != nil {
@@ -4910,6 +4928,9 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return issueDeleteResult{}, fmt.Errorf("commit issue delete: %w", err)
+	}
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelledWithTeamNoticeHolders(ctx, &teamNoticeHolders, cancelledAppRequests...)
 	}
 	return result, nil
 }

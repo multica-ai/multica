@@ -182,6 +182,124 @@ func (q *Queries) CancelPendingAppActionRequestsForApprover(ctx context.Context,
 	return items, nil
 }
 
+const cancelPendingAppActionRequestsForChatSession = `-- name: CancelPendingAppActionRequestsForChatSession :many
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status = 'pending'
+RETURNING id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at
+`
+
+type CancelPendingAppActionRequestsForChatSessionParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+}
+
+// Deleting a chat withdraws what its runs are still waiting on.
+func (q *Queries) CancelPendingAppActionRequestsForChatSession(ctx context.Context, arg CancelPendingAppActionRequestsForChatSessionParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingAppActionRequestsForChatSession, arg.WorkspaceID, arg.ChatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const cancelPendingAppActionRequestsForIssue = `-- name: CancelPendingAppActionRequestsForIssue :many
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND issue_id = $2 AND status = 'pending'
+RETURNING id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at
+`
+
+type CancelPendingAppActionRequestsForIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Deleting an issue withdraws what its runs are still waiting on.
+func (q *Queries) CancelPendingAppActionRequestsForIssue(ctx context.Context, arg CancelPendingAppActionRequestsForIssueParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingAppActionRequestsForIssue, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelPendingTeamAppActionRequests = `-- name: CancelPendingTeamAppActionRequests :many
 UPDATE app_action_request
 SET status = 'cancelled', updated_at = now()

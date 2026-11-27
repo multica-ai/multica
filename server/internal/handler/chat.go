@@ -831,6 +831,15 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
 		return
 	}
+	// An app request outlives the run that made it, but not its chat:
+	// approving it later would run the call for a conversation that is gone.
+	cancelledAppRequests, err := qtx.CancelPendingAppActionRequestsForChatSession(r.Context(), db.CancelPendingAppActionRequestsForChatSessionParams{
+		WorkspaceID: session.WorkspaceID, ChatSessionID: session.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to cancel chat session app requests")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
@@ -861,6 +870,9 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// cancelled and returned before the delete, so they still carry its id, but
 	// the row they would be resolved through is gone by now.
 	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled, reactionTargets)
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelled(r.Context(), cancelledAppRequests...)
+	}
 
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{

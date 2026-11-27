@@ -180,6 +180,20 @@ SET status = 'cancelled', updated_at = now()
 WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
 RETURNING *;
 
+-- name: CancelPendingAppActionRequestsForIssue :many
+-- Deleting an issue withdraws what its runs are still waiting on.
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND issue_id = $2 AND status = 'pending'
+RETURNING *;
+
+-- name: CancelPendingAppActionRequestsForChatSession :many
+-- Deleting a chat withdraws what its runs are still waiting on.
+UPDATE app_action_request
+SET status = 'cancelled', updated_at = now()
+WHERE workspace_id = $1 AND chat_session_id = $2 AND status = 'pending'
+RETURNING *;
+
 -- name: ListPendingAppActionRequestsForApprover :many
 -- Requests waiting on the person, and for an admin also every request for a
 -- team account, which any admin answers.
