@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -220,5 +222,67 @@ func TestOneShotRejectsForeignResources(t *testing.T) {
 		{RuntimeID: runtimeID, UserPrompt: "Review", Skills: []string{foreignSkill}},
 	} {
 		testutil.Call(t, testHandler.CreateOneShotTask, newRequest("POST", "/api/tasks/oneshot", input)).Want(404)
+	}
+}
+
+func TestOneShotCommitFailureLeavesNoPartialRun(t *testing.T) {
+	runtimeID := oneShotRuntime(t)
+	h := *testHandler
+	h.TxStarter = rollbackOnCommitTxStarter{pool: testPool}
+	var problem map[string]string
+	testutil.Call(t, h.CreateOneShotTask, newRequest("POST", "/api/tasks/oneshot", service.OneShotRunInput{RuntimeID: runtimeID, UserPrompt: "Review"})).Want(500).JSON(&problem)
+	if problem["error"] != "failed to commit run" {
+		t.Fatalf("failure occurred before commit: %+v", problem)
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM agent WHERE runtime_id=$1 AND system_key LIKE 'oneshot:%'`, runtimeID); count != 0 {
+		t.Fatalf("orphan carriers: %d", count)
+	}
+	if count := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE runtime_id=$1`, runtimeID); count != 0 {
+		t.Fatalf("orphan tasks: %d", count)
+	}
+}
+
+func TestOneShotConcurrentSubmissionsKeepTheirConfiguration(t *testing.T) {
+	runtimeID := oneShotRuntime(t)
+	type outcome struct {
+		model    string
+		response *httptest.ResponseRecorder
+	}
+	results := make(chan outcome, 2)
+	for _, model := range []string{"first-model", "second-model"} {
+		go func() {
+			response := httptest.NewRecorder()
+			testHandler.CreateOneShotTask(response, newRequest("POST", "/api/tasks/oneshot", service.OneShotRunInput{RuntimeID: runtimeID, ModelID: model, SystemPrompt: []string{model}, UserPrompt: model}))
+			results <- outcome{model: model, response: response}
+		}()
+	}
+	carriers := map[string]bool{}
+	for range 2 {
+		result := <-results
+		if result.response.Code != 202 {
+			t.Fatalf("submit %s: %d %s", result.model, result.response.Code, result.response.Body.String())
+		}
+		var accepted struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(result.response.Body.Bytes(), &accepted); err != nil {
+			t.Fatal(err)
+		}
+		task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(accepted.TaskID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dbfx.Cleanup(t, "DELETE FROM agent WHERE id=$1", task.AgentID)
+		carrier, err := testHandler.Queries.GetAgent(t.Context(), task.AgentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if carrier.Model.String != result.model || carrier.Instructions != result.model || task.Status != "queued" {
+			t.Fatalf("configuration changed for %s: %+v", result.model, carrier)
+		}
+		carriers[uuidToString(carrier.ID)] = true
+	}
+	if len(carriers) != 2 {
+		t.Fatal("concurrent jobs share an execution carrier")
 	}
 }
