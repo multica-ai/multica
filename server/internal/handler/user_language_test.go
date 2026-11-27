@@ -11,6 +11,26 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
+func TestUpdateMeBrazilianPortugueseLanguageRoundTrip(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	userID := dbfx.User(t, "Brazilian Portuguese user", "lang-pt-br@multica.ai", testutil.Cols{"language": "en"})
+	var updated UserResponse
+	testutil.Call(t, testHandler.UpdateMe, newPatchMeRequest(userID, `{"language":"pt-BR"}`)).Want(http.StatusOK).JSON(&updated)
+	if updated.Language == nil || *updated.Language != "pt-BR" {
+		t.Fatalf("updated language = %v, want pt-BR", updated.Language)
+	}
+
+	get := newRequest(http.MethodGet, "/api/me", nil)
+	get.Header.Set("X-User-ID", userID)
+	var reloaded UserResponse
+	testutil.Call(t, testHandler.GetMe, get).Want(http.StatusOK).JSON(&reloaded)
+	if reloaded.Language == nil || *reloaded.Language != "pt-BR" {
+		t.Fatalf("reloaded language = %v, want pt-BR", reloaded.Language)
+	}
+}
+
 func TestUpdateMeRussianLanguageRoundTrip(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

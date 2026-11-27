@@ -153,6 +153,25 @@ const labels: Record<DialogLocale, QuitLabels> = {
     cancelQuit: "Отменить выход",
     ignoreAndQuit: "Игнорировать и выйти",
   },
+  "pt-BR": {
+    title: "Sair do Multica",
+    activeRuns: (count) =>
+      count === 1
+        ? "Há 1 execução ativa neste dispositivo."
+        : `Há ${count} execuções ativas neste dispositivo.`,
+    unknownRuns: "Não foi possível confirmar se há execuções ativas neste dispositivo.",
+    interruptRuns: "Parar o daemon agora interromperá as execuções ativas.",
+    interruptUnknownRuns: "Parar o daemon pode interromper execuções neste dispositivo.",
+    cancel: "Cancelar",
+    stopAndQuit: "Parar agora e sair",
+    failureTitle: "Não foi possível confirmar o encerramento",
+    daemonStopped: "O daemon foi parado, mas não foi possível confirmar se todas as execuções terminaram.",
+    shutdownUnknown: "Não foi possível confirmar se o daemon e suas execuções pararam.",
+    cancelAfterStop: "Se você cancelar, o Multica continua aberto e o daemon permanece parado. Execuções em segundo plano podem continuar.",
+    cancelUnconfirmed: "Se você cancelar, o Multica continua aberto com o reinício automático do daemon desativado. Execuções em segundo plano podem continuar.",
+    cancelQuit: "Cancelar saída",
+    ignoreAndQuit: "Ignorar e sair",
+  },
 };
 
 export function quitConfirmationOptions(

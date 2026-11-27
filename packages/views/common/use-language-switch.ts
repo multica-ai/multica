@@ -27,6 +27,7 @@ export function useLanguageSwitch() {
     { value: "fr", label: t(($) => $.preferences.language.french) },
     { value: "es", label: t(($) => $.preferences.language.spanish) },
     { value: "ru", label: t(($) => $.preferences.language.russian) },
+    { value: "pt-BR", label: t(($) => $.preferences.language.portuguese_brazil) },
   ];
 
   // Persist locally → sync to user.language → reload. Reload (vs in-place

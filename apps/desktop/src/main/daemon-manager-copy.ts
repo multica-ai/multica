@@ -101,6 +101,17 @@ const DAEMON_ERROR_COPY: Record<DialogLocale, DaemonErrorCopy> = {
     couldNotStopDaemon: "Не удалось остановить демон.",
     failedToRestartDaemon: "Не удалось перезапустить демон.",
   },
+  "pt-BR": {
+    updateInProgress: "Uma atualização está sendo instalada. Tente novamente em instantes.",
+    appQuitting: "O aplicativo está sendo encerrado.",
+    cliNotInstalled: "O Multica CLI não está instalado.",
+    waitingServiceAddress: "Aguardando o endereço do serviço.",
+    recoverySuperseded: "A recuperação do daemon foi substituída por uma nova operação.",
+    logFileNotFound: "Arquivo de log ainda não encontrado.",
+    cliNotAvailable: "O Multica CLI não está disponível.",
+    couldNotStopDaemon: "Não foi possível parar o daemon.",
+    failedToRestartDaemon: "Falha ao reiniciar o daemon.",
+  },
 };
 
 export function getDaemonErrorCopy(preferredLanguage: string): DaemonErrorCopy {

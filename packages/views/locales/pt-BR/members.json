@@ -1,0 +1,24 @@
+{
+  "role": {
+    "owner": "Proprietário",
+    "admin": "Administrador",
+    "member": "Membro"
+  },
+  "card": {
+    "unavailable": "Membro indisponível",
+    "agents_section": "Agentes ({{count}})",
+    "detail_link": "Detalhes →",
+    "more_agents_one": "e mais {{count}} agente",
+    "more_agents_other": "e mais {{count}} agentes"
+  },
+  "detail": {
+    "members_breadcrumb": "Membros",
+    "role": "Função",
+    "email": "E-mail",
+    "joined": "Entrou em",
+    "relation": "Relação",
+    "breadcrumb_fallback": "Membro",
+    "not_found_title": "Membro não encontrado",
+    "not_found_description": "Este membro pode ter saído do espaço de trabalho."
+  }
+}

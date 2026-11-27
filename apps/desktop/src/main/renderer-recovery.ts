@@ -252,6 +252,20 @@ const RELOAD_PROMPT_COPY: Record<
       "В macOS снимок процесса Multica Helper (Renderer) из «Мониторинга системы» поможет нам найти причину зависания.",
     diagnosticsHeading: "Диагностические сведения:",
   },
+  "pt-BR": {
+    reload: "Recarregar",
+    dismiss: "Fechar",
+    title: "O Multica precisa recarregar",
+    gone: "A janela do aplicativo parou inesperadamente.",
+    preload: "Não foi possível concluir a inicialização da janela do aplicativo.",
+    unresponsive: "A janela do aplicativo está sem responder há alguns segundos.",
+    guidanceRefresh: "Clique em Recarregar para atualizar esta janela e continuar usando o Multica.",
+    guidanceReport:
+      "Se isso continuar acontecendo, informe o que você estava fazendo logo antes desta mensagem e se recarregar resolveu o problema.",
+    guidanceMacSample:
+      "No macOS, uma amostra do processo Multica Helper (Renderer) no Monitor de Atividade ajuda a identificar o que travou o aplicativo.",
+    diagnosticsHeading: "Detalhes de diagnóstico:",
+  },
 };
 
 export function createElectronReloadPrompt(

@@ -44,4 +44,12 @@ describe("resolveDesktopEmergencyLocale", () => {
     } as typeof window.desktopAPI;
     expect(resolveDesktopEmergencyLocale()).toBe("en");
   });
+
+  it("resolves pt-BR and pt system locales to pt-BR", () => {
+    window.desktopAPI = {
+      ...(window.desktopAPI ?? {}),
+      systemLocale: "pt_BR",
+    } as typeof window.desktopAPI;
+    expect(resolveDesktopEmergencyLocale()).toBe("pt-BR");
+  });
 });

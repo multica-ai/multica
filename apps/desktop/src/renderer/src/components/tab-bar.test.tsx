@@ -811,6 +811,15 @@ describe("TabBar locale", () => {
       newTab: "Новая вкладка",
       pinned: "Issues (закреплено)",
     },
+    "pt-BR": {
+      pin: "Fixar aba",
+      unpin: "Desafixar aba",
+      close: "Fechar aba",
+      closeOthers: "Fechar outras abas",
+      openWindow: "Abrir em nova janela",
+      newTab: "Nova aba",
+      pinned: "Issues (fixada)",
+    },
   } as const satisfies Record<
     Exclude<SupportedLocale, "en">,
     {

@@ -7,6 +7,7 @@ import es from "./locales/es.json";
 import fr from "./locales/fr.json";
 import ja from "./locales/ja.json";
 import ko from "./locales/ko.json";
+import ptBR from "./locales/pt-BR.json";
 import ru from "./locales/ru.json";
 import zhHans from "./locales/zh-Hans.json";
 import zhHant from "./locales/zh-Hant.json";
@@ -21,6 +22,7 @@ export const FOLDER_LOCALES: Record<SupportedLocale, Record<FolderMessage, strin
   fr,
   ja,
   ko,
+  "pt-BR": ptBR,
   ru,
   "zh-Hans": zhHans,
   "zh-Hant": zhHant,

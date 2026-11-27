@@ -149,6 +149,7 @@
       "japanese": "日本語",
       "french": "Français",
       "russian": "Русский",
+      "portuguese_brazil": "Português (Brasil)",
       "spanish": "Español",
       "sync_failed": "Idioma guardado en este dispositivo, pero no se ha podido sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior."
     },

@@ -27,6 +27,9 @@ describe("resolveDialogLocale", () => {
     expect(resolveDialogLocale("fr-CA")).toBe("fr");
     expect(resolveDialogLocale("es-MX")).toBe("es");
     expect(resolveDialogLocale("ru-RU")).toBe("ru");
+    expect(resolveDialogLocale("pt")).toBe("pt-BR");
+    expect(resolveDialogLocale("pt-BR")).toBe("pt-BR");
+    expect(resolveDialogLocale("pt_BR")).toBe("pt-BR");
   });
 
   it("distinguishes Simplified and Traditional Chinese across hyphen and underscore separators", () => {

@@ -1,0 +1,174 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Novo squad",
+    "empty_no_match": "Nenhum squad corresponde aos seus filtros.",
+    "table": {
+      "name": "Squad",
+      "leader": "Líder",
+      "members": "Membros",
+      "creator": "Criado por",
+      "created": "Criado"
+    },
+    "no_matches": "Nenhum squad corresponde",
+    "row_menu": "Ações do squad",
+    "archive_action": "Arquivar"
+  },
+  "member_type": {
+    "agent": "Agente",
+    "member": "Membro"
+  },
+  "archive_dialog": {
+    "title": "Arquivar este squad?",
+    "description": "\"{{name}}\" será arquivado. As tarefas atualmente atribuídas a este squad serão transferidas para o líder dele. Isso não pode ser desfeito — crie um novo squad se precisar do roteamento novamente.",
+    "cancel": "Cancelar",
+    "confirm": "Arquivar",
+    "archiving": "Arquivando...",
+    "success": "Squad arquivado"
+  },
+  "name_editor": {
+    "placeholder": "Nome do squad"
+  },
+  "add_member_dialog": {
+    "title": "Adicionar membro",
+    "description": "Escolha membros do espaço de trabalho ou agentes.",
+    "label_member": "Membro",
+    "label_role": "Função",
+    "label_optional": "(opcional)",
+    "cancel": "Cancelar",
+    "select_target": "Selecione um membro ou agente",
+    "search_placeholder": "Buscar membros ou agentes...",
+    "members_section": "Membros",
+    "agents_section": "Agentes",
+    "role_placeholder": "ex.: Revisor, Líder de frontend",
+    "add": "Adicionar"
+  },
+  "role_editor": {
+    "empty": "Adicionar função...",
+    "placeholder": "Função (ex.: Revisor)"
+  },
+  "description_editor": {
+    "empty": "Adicionar uma descrição",
+    "placeholder": "Pelo que este squad é responsável?"
+  },
+  "members_tab": {
+    "section_title": "Membros",
+    "add_member_button": "Adicionar membro",
+    "empty_title": "Nenhum membro ainda",
+    "empty_description": "Adicione agentes ou membros para que recebam as tarefas atribuídas a este squad.",
+    "create_agent_button": "Criar agente",
+    "leader_chip": "Líder",
+    "view_agent_tooltip": "Abrir detalhes do agente",
+    "make_leader_tooltip": "Tornar líder do squad",
+    "remove_member_tooltip": "Remover do squad",
+    "status_working": "Trabalhando",
+    "status_idle": "Ocioso",
+    "status_offline": "Offline",
+    "status_unstable": "Instável",
+    "status_archived": "Arquivado",
+    "issue_status_blocked": "bloqueada",
+    "active_issue_more": "e mais {{count}}"
+  },
+  "detail": {
+    "assign_work": "Atribuir trabalho",
+    "copy_link": "Copiar link",
+    "link_copied": "Link copiado",
+    "not_found": "Squad não encontrado",
+    "not_found_description": "Ele pode ter sido excluído ou você pode não ter acesso.",
+    "back_to_list": "Todos os squads",
+    "instructions": "Instruções",
+    "edit": "Editar",
+    "cancel": "Cancelar",
+    "recent_work": "Trabalho recente",
+    "recent_work_empty": "Nenhuma tarefa foi atribuída a este squad ainda.",
+    "member_menu": "Ações para {{name}}",
+    "working_on": "Trabalhando em"
+  },
+  "details": {
+    "leader": "Líder",
+    "members": "Membros",
+    "created_by": "Criado por",
+    "created": "Criado",
+    "updated": "Atualizado",
+    "visibility": "Visibilidade",
+    "visibility_workspace": "Espaço de trabalho"
+  },
+  "handoff": {
+    "section_title": "Colaboração",
+    "mode_leader_title": "O líder atribui",
+    "mode_leader_description": "Cada etapa volta para o líder, {{leader}}, que escolhe a próxima. É o padrão para squads existentes.",
+    "mode_direct_title": "Repasse direto entre membros",
+    "mode_direct_description": "O líder atribui a primeira etapa e trata exceções. Os membros escolhem a próxima etapa por conta própria; repassar para revisão ou perguntar a uma pessoa não aciona mais o líder.",
+    "guard_rounds": "Idas e vindas: até {{limit}} rodadas",
+    "guard_daily": "Até {{limit}} repasses por tarefa por dia",
+    "guard_failed": "Execução falhou → volta para o líder",
+    "guard_no_next": "Sem próxima etapa → volta para o líder",
+    "saved": "Modo de colaboração atualizado",
+    "brief_title": "O que os membros recebem",
+    "brief_hint": "Adicionado a cada execução em uma tarefa atribuída a este squad",
+    "brief_empty": "Nenhum agente membro ainda"
+  },
+  "toasts": {
+    "member_added": "Membro adicionado",
+    "member_add_failed": "Falha ao adicionar membro",
+    "member_removed": "Membro removido",
+    "member_remove_failed": "Falha ao remover membro",
+    "role_updated": "Função atualizada",
+    "role_update_failed": "Falha ao atualizar função",
+    "leader_updated": "Líder atualizado",
+    "leader_update_failed": "Falha ao atualizar líder",
+    "archive_failed": "Falha ao arquivar squad",
+    "instructions_saved": "Instruções salvas",
+    "update_failed": "Falha ao salvar"
+  },
+  "profile_card": {
+    "unavailable": "Squad indisponível",
+    "detail_link": "Ver detalhes →",
+    "archived": "Arquivado",
+    "member_count_one": "{{count}} membro",
+    "member_count_other": "{{count}} membros",
+    "members_section": "Membros",
+    "more_members_one": "+{{count}} mais",
+    "more_members_other": "+{{count}} mais"
+  },
+  "instructions_tab": {
+    "description": "O líder e cada agente membro leem estas instruções sempre que trabalham em uma tarefa atribuída a este squad.",
+    "unsaved_changes": "Alterações não salvas",
+    "save_button": "Salvar",
+    "placeholder": "ex.: Comece sempre escrevendo um teste que falhe. Prefira commits pequenos e atômicos."
+  },
+  "scope": {
+    "mine": "Meus squads",
+    "all": "Todos os squads"
+  },
+  "intro": {
+    "title": "Reúna agentes em um squad para que trabalhem em equipe",
+    "description": "Atribua uma tarefa ao squad. O agente líder lê a tarefa, repassa cada etapa ao membro cuja função se encaixa e acompanha até o objetivo ser alcançado. Você lida com apenas um responsável.",
+    "slides": {
+      "route": {
+        "title": "Um responsável, roteado para você",
+        "description": "O líder lê a tarefa e menciona o membro mais adequado para a próxima etapa. Apenas esse membro começa a trabalhar."
+      },
+      "roles": {
+        "title": "Divida o trabalho por função",
+        "description": "As descrições de função informam ao líder no que cada membro é bom. Os membros podem ser agentes ou pessoas."
+      },
+      "progress": {
+        "title": "Acompanhe o progresso em um só lugar",
+        "description": "A página do squad mostra o trabalho recente e em que cada membro está trabalhando."
+      }
+    },
+    "art": {
+      "assignee": "Responsável",
+      "squad_name": "Squad de frontend",
+      "issue_dark_mode": "Adicionar alternador de modo escuro nas configurações",
+      "issue_board_columns": "Tornar as colunas do quadro redimensionáveis",
+      "issue_inbox_gestures": "Gestos de deslizar na caixa de entrada móvel",
+      "issue_paste_images": "Colar imagens nos comentários",
+      "delegating": "Escolhendo um membro pela função...",
+      "role_frontend": "Frontend",
+      "role_testing": "Testes",
+      "role_product": "Produto"
+    }
+  }
+}

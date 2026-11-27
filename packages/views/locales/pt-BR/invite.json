@@ -1,0 +1,60 @@
+{
+  "header": {
+    "back": "Voltar",
+    "log_out": "Sair"
+  },
+  "list": {
+    "title": "Você recebeu um convite",
+    "subtitle": "Ao entrar, esse espaço de trabalho será aberto. Os demais convites permanecerão pendentes.",
+    "workspace_fallback": "Espaço de trabalho",
+    "inviter_fallback": "Alguém",
+    "invited_admin": "{{inviter}} convidou você como administrador",
+    "invited_member": "{{inviter}} convidou você como membro",
+    "accept": "Entrar",
+    "joining": "Entrando...",
+    "decline": "Recusar",
+    "declining": "Recusando...",
+    "skip": "Pular e configurar meu próprio espaço de trabalho"
+  },
+  "empty": {
+    "title": "Nenhum convite pendente",
+    "hint": "Continue para configurar seu próprio espaço de trabalho.",
+    "continue": "Continuar para a configuração",
+    "go_to_dashboard": "Ir para o espaço de trabalho"
+  },
+  "linked": {
+    "not_found": "Este convite pode ter expirado, sido revogado ou não pertencer à sua conta.",
+    "accepted": "Este convite já foi aceito.",
+    "declined": "Este convite já foi recusado.",
+    "expired": "Este convite expirou."
+  },
+  "errors": {
+    "accept_failed": "Falha ao aceitar o convite",
+    "decline_failed": "Falha ao recusar o convite",
+    "member_limit_reached": "{{workspace}} está cheio. Fale com quem enviou o convite; você poderá entrar assim que o espaço de trabalho atualizar o plano."
+  },
+  "join": {
+    "no_code": "Nenhum código de convite encontrado. Use um link de compartilhamento válido.",
+    "invalid": "Este link de convite é inválido ou expirou.",
+    "joined_title": "Você entrou!",
+    "redirecting": "Redirecionando para o seu espaço de trabalho...",
+    "error_title": "Não foi possível abrir o convite",
+    "go_home": "Ir para o início",
+    "loading": "Carregando detalhes do convite...",
+    "title": "Você recebeu um convite para {{workspace}}",
+    "invited_by": "Convite de {{name}}",
+    "join_as": "Você entrará neste espaço de trabalho como",
+    "role_admin": "Administrador",
+    "role_member": "Membro",
+    "login_required": "Você precisa entrar na sua conta para participar deste espaço de trabalho.",
+    "join": "Entrar no espaço de trabalho",
+    "joining": "Entrando...",
+    "log_in_to_join": "Entrar para participar",
+    "join_failed": "Falha ao entrar no espaço de trabalho. O link pode ter expirado.",
+    "seats_full": "Todas as licenças de membro contratadas estão em uso. Peça a um administrador do espaço de trabalho para adicionar uma licença antes de tentar novamente.",
+    "seats_unavailable": "Não foi possível verificar a capacidade de membros. Tente novamente.",
+    "full_title": "{{workspace}} está cheio",
+    "full_description": "Fale com quem enviou o convite. Este link voltará a funcionar assim que o espaço de trabalho atualizar o plano.",
+    "retry": "Tentar novamente"
+  }
+}
