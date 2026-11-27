@@ -9,7 +9,7 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { qoderOptions, type QoderConnection } from "@multica/core/runtimes/qoder";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import type { AgentRuntime } from "@multica/core/types";
+import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import {
   agentListOptions,
   memberListOptions,
@@ -104,12 +104,14 @@ function renderPage({
   connection = qoder(),
   desktop = false,
   cloudRuntimeEnabled = false,
+  members = [],
 }: {
   /** `null` leaves the runtime list unseeded, so the page renders loading. */
   runtimes?: AgentRuntime[] | null;
   connection?: QoderConnection;
   desktop?: boolean;
   cloudRuntimeEnabled?: boolean;
+  members?: MemberWithUser[];
 } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -117,7 +119,7 @@ function renderPage({
   if (runtimes) qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
   qc.setQueryData(runtimeProfileListOptions(WS).queryKey, []);
   qc.setQueryData(agentListOptions(WS).queryKey, []);
-  qc.setQueryData(memberListOptions(WS).queryKey, []);
+  qc.setQueryData(memberListOptions(WS).queryKey, members);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
   qc.setQueryData(chatSessionsOptions(WS).queryKey, []);
   qc.setQueryData(qoderOptions(WS).queryKey, connection);
@@ -305,6 +307,84 @@ describe("RuntimesPage", () => {
     await user.click(await screen.findByRole("menuitemradio", { name: /All runtimes/ }));
     expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
     expect(screen.getByText("build-server")).toBeInTheDocument();
+  });
+
+  it("searches machines and cloud services by name", async () => {
+    const user = userEvent.setup();
+    renderPage({
+      runtimes: [
+        makeRuntime(),
+        makeRuntime({
+          id: "rt-codex",
+          daemon_id: "daemon-2",
+          name: "Codex (build-server)",
+          provider: "codex",
+          device_info: "build-server · codex 0.5.0",
+        }),
+      ],
+      connection: qoder({ configured: true, enabled: true, status: "online" }),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Search runtimes" }));
+    await user.type(screen.getByRole("textbox", { name: "Search runtimes" }), "build");
+    expect(screen.getByText("build-server")).toBeInTheDocument();
+    expect(screen.queryByText("dev-machine.local")).not.toBeInTheDocument();
+    expect(screen.queryByText("Qoder Cloud Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cursor Cloud Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cloud services")).not.toBeInTheDocument();
+
+    const field = screen.getByRole("textbox", { name: "Search runtimes" });
+    await user.clear(field);
+    await user.type(field, "cursor");
+    expect(screen.getByText("Cursor Cloud Agents")).toBeInTheDocument();
+    expect(screen.queryByText("build-server")).not.toBeInTheDocument();
+
+    await user.clear(field);
+    await user.type(field, "nothing-here");
+    const clearButtons = screen.getAllByRole("button", { name: "Clear search" });
+    expect(screen.getByText('No runtimes match "nothing-here".')).toBeInTheDocument();
+    await user.click(clearButtons[clearButtons.length - 1]!);
+    expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
+    expect(screen.getByText("build-server")).toBeInTheDocument();
+  });
+
+  it("finds a machine by its owner's name, including by pinyin", async () => {
+    const user = userEvent.setup();
+    const member = (userId: string, name: string): MemberWithUser => ({
+      id: `member-${userId}`,
+      workspace_id: WS,
+      user_id: userId,
+      role: "member",
+      created_at: new Date(NOW).toISOString(),
+      name,
+      email: `${userId}@example.com`,
+      avatar_url: null,
+    });
+    renderPage({
+      runtimes: [
+        makeRuntime({ owner_id: "user-2" }),
+        makeRuntime({
+          id: "rt-codex",
+          daemon_id: "daemon-2",
+          name: "Codex (build-server)",
+          provider: "codex",
+          device_info: "build-server · codex 0.5.0",
+          owner_id: "user-3",
+        }),
+      ],
+      members: [member("user-2", "张三"), member("user-3", "Alice Chen")],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Search runtimes" }));
+    const field = screen.getByRole("textbox", { name: "Search runtimes" });
+    await user.type(field, "alice");
+    expect(screen.getByText("build-server")).toBeInTheDocument();
+    expect(screen.queryByText("dev-machine.local")).not.toBeInTheDocument();
+
+    await user.clear(field);
+    await user.type(field, "zhangsan");
+    expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
+    expect(screen.queryByText("build-server")).not.toBeInTheDocument();
   });
 
   it("never lists the Qoder runtime as a machine", async () => {

@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "執行時",
+    "search": "搜尋執行時",
     "connect_remote": "新增機器",
     "scope_mine": "我的",
     "scope_all": "全部",

@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "ランタイム",
+    "search": "ランタイムを検索",
     "connect_remote": "マシンを追加",
     "scope_mine": "自分のもの",
     "scope_all": "すべて",
