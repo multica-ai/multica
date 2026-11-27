@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -544,6 +545,41 @@ func TestChunkMessageCountsUTF16Units(t *testing.T) {
 		if got := utf16Units(chunk); got > 3 {
 			t.Errorf("chunk %q uses %d UTF-16 units", chunk, got)
 		}
+	}
+}
+
+func TestChunkMessageCarriesOpenCodeFence(t *testing.T) {
+	code := strings.Repeat("x := *p * 2\n", 20)
+	text := "Here:\n```go\n" + code + "```\nDone **ok**"
+	chunks := chunkMessage(text, 150)
+	if len(chunks) < 2 {
+		t.Fatalf("want several chunks, got %d", len(chunks))
+	}
+	reCodeBlock := regexp.MustCompile(`(?s)<pre><code class="language-go">.*?</code></pre>`)
+	for i, chunk := range chunks {
+		if got := utf16Units(chunk); got > 150 {
+			t.Errorf("chunk %d uses %d UTF-16 units", i, got)
+		}
+		html := formatHTML(chunk)
+		if outside := reCodeBlock.ReplaceAllString(html, ""); strings.Contains(outside, "x :=") || strings.Contains(outside, "<pre>") {
+			t.Errorf("chunk %d renders code outside the go code block: %q", i, html)
+		}
+	}
+	if last := formatHTML(chunks[len(chunks)-1]); !strings.HasSuffix(last, "Done <b>ok</b>") {
+		t.Errorf("text after the code block should render as markdown: %q", last)
+	}
+}
+
+func TestChunkMessageDoesNotReopenAFenceThatCloses(t *testing.T) {
+	text := "```\n" + strings.Repeat("a", 95) + "\n```\n" + strings.Repeat("b", 60)
+	chunks := chunkMessage(text, 100)
+	for i, chunk := range chunks {
+		if html := formatHTML(chunk); strings.Contains(html, "<pre></pre>") {
+			t.Errorf("chunk %d has an empty code block: %q", i, html)
+		}
+	}
+	if got := formatHTML(chunks[len(chunks)-1]); got != strings.Repeat("b", 60) {
+		t.Errorf("last chunk = %q", got)
 	}
 }
 
