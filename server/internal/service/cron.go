@@ -136,5 +136,90 @@ func parseCronSchedule(cronExpr, timezone string) (cron.Schedule, *time.Location
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid timezone %q: %w", timezone, err)
 	}
-	return sched, loc, nil
+	spec, ok := sched.(*cron.SpecSchedule)
+	if !ok {
+		return sched, loc, nil
+	}
+	if spec.Location != time.Local {
+		// A TZ= prefix already overrides the timezone argument inside robfig.
+		// Evaluate in that zone directly so the DST handling below sees the
+		// zone the schedule actually runs in.
+		loc, spec.Location = spec.Location, time.Local
+	}
+	return wallClockSchedule{spec: spec, fixedTime: hasFixedTime(cronExpr)}, loc, nil
+}
+
+// wallClockSchedule gives a parsed spec cron(8) behaviour across daylight
+// saving changes. robfig steps through absolute time, so on its own a
+// fixed-time entry such as "30 1 * * *" fires twice when clocks go back over
+// 01:30 and not at all when they jump past 02:30. For entries whose minute
+// and hour fields are both fixed, a repeated wall time fires once (the first
+// time it occurs) and a skipped wall time fires at the moment clocks jump.
+// Entries with "*" in the minute or hour field follow elapsed time, as in
+// cron(8), so an hourly schedule still runs every real hour.
+type wallClockSchedule struct {
+	spec      *cron.SpecSchedule
+	fixedTime bool
+}
+
+func (s wallClockSchedule) Next(t time.Time) time.Time {
+	next := s.spec.Next(t)
+	if !s.fixedTime || next.IsZero() {
+		return next
+	}
+	if repeatEnd, ok := repeatedSpanEnd(next); ok {
+		// Resume at the end of the repeated span: robfig's Next starts at the
+		// following whole second, so back off by one.
+		next = s.spec.Next(repeatEnd.Add(-time.Second))
+	}
+	if jumped, ok := s.skippedWallTime(t, next); ok {
+		return jumped
+	}
+	return next
+}
+
+// repeatedSpanEnd reports whether t falls in the span clocks were set back
+// over, so its wall time already happened under the previous offset, and
+// returns the first instant after that span.
+func repeatedSpanEnd(t time.Time) (time.Time, bool) {
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return time.Time{}, false
+	}
+	_, before := start.Add(-time.Nanosecond).Zone()
+	_, after := start.Zone()
+	end := start.Add(time.Duration(before-after) * time.Second)
+	return end, t.Before(end)
+}
+
+// skippedWallTime returns the instant clocks jumped forward when a matching
+// wall time fell inside a jump after t and no later than next.
+func (s wallClockSchedule) skippedWallTime(t, next time.Time) (time.Time, bool) {
+	for cur := t; ; {
+		_, end := cur.ZoneBounds()
+		if end.IsZero() || next.IsZero() || end.After(next) {
+			return time.Time{}, false
+		}
+		_, before := end.Add(-time.Nanosecond).Zone()
+		_, after := end.Zone()
+		if jump := time.Duration(after-before) * time.Second; jump > 0 {
+			// The pre-jump offset still has the wall times the jump removed.
+			wall := end.In(time.FixedZone("", before))
+			if m := s.spec.Next(wall.Add(-time.Second)); !m.IsZero() && m.Before(wall.Add(jump)) {
+				return end, true
+			}
+		}
+		cur = end
+	}
+}
+
+// hasFixedTime reports whether neither the minute nor the hour field starts
+// with "*", the test cron(8) uses to tell fixed-time jobs from ones that
+// follow elapsed time.
+func hasFixedTime(cronExpr string) bool {
+	fields := strings.Fields(cronExpr)
+	if len(fields) > 0 && (strings.HasPrefix(fields[0], "TZ=") || strings.HasPrefix(fields[0], "CRON_TZ=")) {
+		fields = fields[1:]
+	}
+	return len(fields) >= 2 && !strings.HasPrefix(fields[0], "*") && !strings.HasPrefix(fields[1], "*")
 }
