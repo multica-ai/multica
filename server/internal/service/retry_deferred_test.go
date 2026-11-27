@@ -2,15 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
@@ -350,6 +353,85 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 			gotDeferred := childStatus == "deferred"
 			if gotDeferred != tc.wantDeferred {
 				t.Errorf("child status = %q, want deferred=%v", childStatus, tc.wantDeferred)
+			}
+		})
+	}
+}
+
+func TestFailTaskDefersUnstartedWorktreePrerequisiteRetry(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := t.Context()
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := &TaskService{Queries: db.New(pool), TxStarter: pool, Bus: events.New()}
+
+	for _, tc := range []struct {
+		name                 string
+		attempt, maxAttempts int32
+		started              bool
+		delay                time.Duration
+	}{
+		{name: "first retry", attempt: 1, maxAttempts: 2, delay: time.Minute},
+		{name: "second retry", attempt: 2, maxAttempts: 4, delay: 5 * time.Minute},
+		{name: "last retry", attempt: 3, maxAttempts: 4, delay: 15 * time.Minute},
+		{name: "exhausted", attempt: 4, maxAttempts: 4},
+		{name: "disabled", attempt: 1, maxAttempts: 1},
+		{name: "already started", attempt: 1, maxAttempts: 2, started: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var id pgtype.UUID
+			err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, started_at)
+				SELECT id, runtime_id, $2, 'dispatched', $3, $4, CASE WHEN $5 THEN now() END
+				FROM agent WHERE id = $1 RETURNING id`, agentID, issueID, tc.attempt, tc.maxAttempts, tc.started).Scan(&id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), "DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1", id)
+			})
+			before := time.Now()
+			reason := taskfailure.ReasonLocalWorktreePrerequisiteMissing.String()
+			if _, err := svc.FailTask(ctx, id, "no commit to branch from", "", "", "", reason, false, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			parent, err := svc.Queries.GetAgentTask(ctx, id)
+			if err != nil || parent.Status != "failed" || parent.FailureReason.String != reason {
+				t.Fatalf("parent status=%q reason=%q error=%v", parent.Status, parent.FailureReason.String, err)
+			}
+			var childID pgtype.UUID
+			var status string
+			var attempt, maxAttempts int32
+			var fireAt time.Time
+			err = pool.QueryRow(ctx, "SELECT id, status, attempt, max_attempts, fire_at FROM agent_task_queue WHERE parent_task_id=$1", id).
+				Scan(&childID, &status, &attempt, &maxAttempts, &fireAt)
+			if tc.delay == 0 {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("retry child must be absent, query result: %v", err)
+				}
+				return
+			}
+			if err != nil || status != "deferred" || attempt != tc.attempt+1 || maxAttempts != 4 {
+				t.Fatalf("retry status=%q attempt=%d max=%d error=%v", status, attempt, maxAttempts, err)
+			}
+			if fireAt.Before(before.Add(tc.delay-time.Second)) || fireAt.After(time.Now().Add(tc.delay+time.Second)) {
+				t.Fatalf("retry due at %v, want a delay of %v", fireAt, tc.delay)
+			}
+			if tc.attempt == 1 {
+				runtimeID := parent.RuntimeID
+				if _, err := pool.Exec(ctx, "UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1", runtimeID); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := svc.ClaimTaskForRuntime(ctx, runtimeID)
+				if err != nil || claimed != nil {
+					t.Fatalf("claim before retry is due: got %v, err=%v", claimed, err)
+				}
+				if _, err := pool.Exec(ctx, "UPDATE agent_task_queue SET fire_at=now()-interval '1 second' WHERE id=$1", childID); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err = svc.ClaimTaskForRuntime(ctx, runtimeID)
+				if err != nil || claimed == nil || claimed.ID != childID || claimed.ParentTaskID != id {
+					t.Fatalf("claim after retry is due: got %v, err=%v", claimed, err)
+				}
 			}
 		})
 	}

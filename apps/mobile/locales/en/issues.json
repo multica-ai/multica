@@ -301,6 +301,7 @@
       "skill_bundle_unavailable": "Skill download failed",
       "runtime_cli_timeout": "Runtime CLI timeout",
       "environment_prepare_failed": "Environment setup failed",
+      "local_worktree_prerequisite_missing": "Git setup required",
       "runtime_access_denied": "No runtime access",
       "local_directory_missing": "Folder missing",
       "agent_error_provider_auth_or_access": "Auth failed",

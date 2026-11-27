@@ -1027,6 +1027,7 @@
       "api_invalid_request": "Rechazada por la API del modelo",
       "skill_bundle_unavailable": "No se han podido descargar las skills del agente",
       "runtime_cli_timeout": "La CLI del runtime local agotó el tiempo",
+      "local_worktree_prerequisite_missing": "Faltan requisitos del árbol de trabajo local",
       "environment_prepare_failed": "No se ha podido preparar el entorno de ejecución",
       "runtime_access_denied": "Este agente no puede ejecutarse en su runtime privado, así que no pudo responder. Haz el runtime público, o reenlaza/copia el agente a un runtime que su propietario pueda usar.",
       "invalid_task_identity": "Discrepancia de identidad de la ejecución",

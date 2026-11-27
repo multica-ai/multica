@@ -30,6 +30,12 @@ describe("failureReasonKey", () => {
     expect(runFailureBadgeLabel("runtime_access_revoked", tEn)).toBe("Access revoked");
   });
 
+  it("explains a run stopped by missing local Git prerequisites", () => {
+    expect(failureReasonKey("local_worktree_prerequisite_missing")).toBe(
+      "failure_reason.local_worktree_prerequisite_missing",
+    );
+  });
+
   // The server's reason list is a fixture the Go test
   // TestClientFailureReasonFixture keeps current. Read from disk, not
   // imported: mobile code does not depend on packages/views.

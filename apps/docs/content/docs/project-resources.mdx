@@ -111,6 +111,8 @@ Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of y
 
 The directory must be a git repository with at least one commit; if it is not, runs fail with an explicit error rather than quietly falling back to serial execution.
 
+For eligible issue runs, Multica retries preparation up to three times after delays of 1, 5, and 15 minutes. The agent starts only after worktree preparation succeeds.
+
 The runtime on that machine must also implement the mode. It declares that when it connects, and Multica gates on the declaration rather than on a version number: a development build can carry a version string that looks new enough while having none of the implementation. The declaration is checked twice. Saving the resource is refused, with a hint to update the app on that machine, while its runtime does not declare the capability; and each run is checked again against the runtime that actually claims it, so a machine downgraded after the resource was saved has its runs cancelled with a reason instead of silently running them in place. Asking for `worktree` is asking for isolation; Multica never falls back to editing your working copy.
 
 What the agent sees, and what you get back:

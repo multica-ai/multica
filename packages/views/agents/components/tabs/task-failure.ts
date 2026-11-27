@@ -22,6 +22,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   skill_bundle_unavailable: "skill_bundle_unavailable",
   runtime_cli_timeout: "runtime_cli_timeout",
   environment_prepare_failed: "environment_prepare_failed",
+  local_worktree_prerequisite_missing: "local_worktree_prerequisite_missing",
   invalid_task_identity: "invalid_task_identity",
   runtime_access_denied: "runtime_access_denied",
 

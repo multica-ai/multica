@@ -121,6 +121,7 @@
     "skill_bundle_unavailable": "無法下載 AI 代理的 skill",
     "runtime_cli_timeout": "本機執行時 CLI 逾時",
     "environment_prepare_failed": "無法準備執行環境",
+    "local_worktree_prerequisite_missing": "執行在代理程式啟動前停止。請初始化本機 Git 儲存庫並建立第一次提交。",
     "runtime_access_denied": "無法存取該 AI 代理的私有執行時，暫時無法回覆。請將該執行時設為公開，或將 AI 代理綁定到可用的執行時。",
     "runtime_access_revoked": "執行時存取權限已被撤銷。再次執行前，請為 AI 代理綁定可用的執行時。",
     "invalid_task_identity": "執行身份不匹配",

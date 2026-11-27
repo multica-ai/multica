@@ -111,6 +111,8 @@ Chaque exécution obtient son propre [worktree git](https://git-scm.com/docs/git
 
 Le répertoire doit être un dépôt git contenant au moins un commit ; sinon, les exécutions échouent avec une erreur explicite au lieu de revenir silencieusement à une exécution en série.
 
+Pour les exécutions de tickets admissibles, Multica retente la préparation jusqu’à trois fois après des délais de 1, 5 et 15 minutes. L’agent démarre uniquement après la préparation du worktree.
+
 Le runtime de cette machine doit aussi implémenter ce mode. Il le déclare lorsqu'il se connecte, et Multica se fonde uniquement sur cette déclaration, pas sur le numéro de version : un build de développement peut afficher une version qui semble assez récente sans comporter l'implémentation. La déclaration est vérifiée deux fois. À l'enregistrement de la ressource, tant que le runtime de cette machine ne déclare pas cette capacité, l'enregistrement est refusé avec une invitation à mettre à jour l'application sur cette machine ; puis chaque exécution est vérifiée de nouveau auprès du runtime qui la prend réellement en charge, si bien que sur une machine rétrogradée après l'enregistrement, les exécutions sont annulées avec un motif au lieu de tourner silencieusement dans le répertoire d'origine. Demander `worktree`, c'est demander l'isolation : Multica ne se rabat jamais sur une modification directe de votre copie de travail.
 
 Ce que voit l'agent, et ce que vous récupérez :
