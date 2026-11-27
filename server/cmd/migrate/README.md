@@ -183,3 +183,12 @@ Confirm the statistics landed:
 ```sql
 SELECT count(*) FROM pg_statistic WHERE starelid = 'idx_issue_properties_bigm'::regclass;
 ```
+
+## Limit DDL lock waits
+
+Set `MULTICA_MIGRATION_LOCK_TIMEOUT` to a PostgreSQL duration such as `5s`
+to bound lock acquisition during migration SQL. The runner applies the setting
+after acquiring its advisory lock, so a second runner still waits for the
+first. Statements that explicitly set their own lock timeout keep that value.
+The default uses the existing database setting. On a lock timeout, release
+the conflicting transaction and rerun the migration.

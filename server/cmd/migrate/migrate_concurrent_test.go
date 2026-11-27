@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 )
@@ -530,5 +532,91 @@ func TestRunMigrationsRejectsInvalidDirection(t *testing.T) {
 		if !strings.Contains(err.Error(), "invalid direction") {
 			t.Errorf("direction %q: error %q does not mention 'invalid direction'", dir, err)
 		}
+	}
+}
+
+func TestMigrationDDLLockTimeoutAndRetry(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	table := pgx.Identifier{f.schema, "blocker"}.Sanitize()
+	if _, err := f.pool.Exec(ctx, "CREATE TABLE "+table+" (id integer)"); err != nil {
+		t.Fatal(err)
+	}
+	opts := f.opts()
+	opts.DDLLockTimeout = "80ms"
+	opts.Files = opts.Files[:1]
+	if err := os.WriteFile(opts.Files[0], []byte("ALTER TABLE "+table+" ADD COLUMN added integer"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, "LOCK TABLE "+table+" IN ACCESS SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	err = runMigrations(ctx, f.pool, opts)
+	var lockErr *pgconn.PgError
+	if !errors.As(err, &lockErr) || lockErr.Code != "55P03" {
+		t.Fatalf("expected lock_not_available, got %v", err)
+	}
+	var count int
+	if err = f.pool.QueryRow(ctx, "SELECT count(*) FROM "+f.tableFQN).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("tracking table: count %d, err %v", count, err)
+	}
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = runMigrations(ctx, f.pool, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.pool.QueryRow(ctx, "SELECT count(*) FROM "+f.tableFQN).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("after retry: count %d, err %v", count, err)
+	}
+}
+
+func TestDDLLimitDoesNotTimeoutAdvisoryLock(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	holder, err := pgx.Connect(ctx, testDatabaseURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(context.Background())
+	if _, err := holder.Exec(ctx, "SELECT pg_advisory_lock($1)", f.lockKey); err != nil {
+		t.Fatal(err)
+	}
+	opts := f.opts()
+	opts.DDLLockTimeout = "50ms"
+	done := make(chan error, 1)
+	go func() { done <- runMigrations(ctx, f.pool, opts) }()
+	// Wait for a PostgreSQL-confirmed lock waiter before measuring the interval.
+	for {
+		var waiting bool
+		if err := holder.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND (classid::bigint << 32 | objid::bigint)=$1)", f.lockKey).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("runner returned before advisory wait: %v", err)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("runner returned with advisory lock still held: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if _, err := holder.Exec(ctx, "SELECT pg_advisory_unlock($1)", f.lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
