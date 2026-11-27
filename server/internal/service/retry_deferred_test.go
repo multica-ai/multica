@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
@@ -350,6 +351,44 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 			gotDeferred := childStatus == "deferred"
 			if gotDeferred != tc.wantDeferred {
 				t.Errorf("child status = %q, want deferred=%v", childStatus, tc.wantDeferred)
+			}
+		})
+	}
+}
+
+func TestFailTaskRetriesUnavailableSkillBundleButNotRejection(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ws, user, agentID, _ := seedAttributionFixture(t, pool)
+	fx := testutil.New(pool, ws, user)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	var runtimeID string
+	fx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+
+	for _, tc := range []struct {
+		reason       taskfailure.Reason
+		message      string
+		wantChildren int
+	}{
+		{taskfailure.ReasonSkillBundleRejected, "skill bundle unavailable: server refused the download", 0},
+		{taskfailure.ReasonSkillBundleUnavailable, "skill bundle unavailable: context deadline exceeded", 1},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			issueID := fx.Issue(t, tc.reason.String())
+			id := fx.Task(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID, "issue_id": issueID, "status": "dispatched", "max_attempts": 2,
+			})
+			t.Cleanup(func() { fx.Exec(t, `DELETE FROM agent_task_queue WHERE parent_task_id = $1`, id) })
+			failed, _, err := svc.FailTaskWithTransition(t.Context(), util.MustParseUUID(id), protocol.TaskFailRequest{
+				Error: tc.message, FailureReason: tc.reason.String(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failed.Status != "failed" || failed.StartedAt.Valid || failed.FailureReason.String != tc.reason.String() {
+				t.Fatalf("parent status=%s started=%t reason=%s", failed.Status, failed.StartedAt.Valid, failed.FailureReason.String)
+			}
+			if got := fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, id); got != tc.wantChildren {
+				t.Fatalf("retry children = %d, want %d", got, tc.wantChildren)
 			}
 		})
 	}

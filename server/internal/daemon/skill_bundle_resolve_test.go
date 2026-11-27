@@ -404,13 +404,20 @@ func TestFormatBytes(t *testing.T) {
 func TestEnsureTaskSkillBundles_ServerErrorsKeepServerSemantics(t *testing.T) {
 	defer noSleepRetry(t)()
 
-	for _, status := range []int{
-		http.StatusMultipleChoices,
-		http.StatusUnauthorized,
-		http.StatusNotFound,
-		http.StatusConflict,
-		http.StatusInternalServerError,
+	for _, tc := range []struct {
+		status int
+		reason string
+	}{
+		{http.StatusMultipleChoices, "skill_bundle_rejected"},
+		{http.StatusUnauthorized, "skill_bundle_rejected"},
+		{http.StatusForbidden, "skill_bundle_rejected"},
+		{http.StatusNotFound, "skill_bundle_rejected"},
+		{http.StatusConflict, "skill_bundle_rejected"},
+		{http.StatusRequestTimeout, "skill_bundle_unavailable"},
+		{http.StatusTooManyRequests, "skill_bundle_unavailable"},
+		{http.StatusInternalServerError, "skill_bundle_unavailable"},
 	} {
+		status := tc.status
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -432,6 +439,9 @@ func TestEnsureTaskSkillBundles_ServerErrorsKeepServerSemantics(t *testing.T) {
 			}
 			if !errors.Is(err, errSkillBundleUnavailable) {
 				t.Errorf("sentinel must survive, got %v", err)
+			}
+			if reason := taskRunFailureReason(err); reason != tc.reason {
+				t.Errorf("failure reason = %q, want %q", reason, tc.reason)
 			}
 			var reqErr *requestError
 			if !errors.As(err, &reqErr) || reqErr.StatusCode != status {

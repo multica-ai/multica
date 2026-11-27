@@ -1157,6 +1157,7 @@ function FailureBubble({
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),
     skill_bundle_unavailable: t(($) => $.message_list.failure.skill_bundle_unavailable),
+    skill_bundle_rejected: t(($) => $.message_list.failure.skill_bundle_rejected),
     runtime_cli_timeout: t(($) => $.message_list.failure.runtime_cli_timeout),
     environment_prepare_failed: t(($) => $.message_list.failure.environment_prepare_failed),
     local_directory_missing: t(($) => $.message_list.failure.local_directory_missing),

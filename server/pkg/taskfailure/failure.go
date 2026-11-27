@@ -130,6 +130,10 @@ const (
 	// taskRunFailureReason in daemon/daemon.go.
 	ReasonSkillBundleUnavailable Reason = "skill_bundle_unavailable"
 
+	// ReasonSkillBundleRejected: the control plane rejected a skill download
+	// before the agent started. The HTTP response was not transient.
+	ReasonSkillBundleRejected Reason = "skill_bundle_rejected"
+
 	// ReasonRuntimeCLITimeout: a local runtime CLI the daemon must call
 	// during task preparation did not answer within its deadline — today
 	// that is OpenClaw config discovery (`openclaw config file`), which on
@@ -318,6 +322,7 @@ var allReasons = []Reason{
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
+	ReasonSkillBundleRejected,
 	ReasonRuntimeCLITimeout,
 	ReasonEnvironmentPrepareFailed,
 	ReasonLocalDirectoryMissing,

@@ -888,6 +888,7 @@
       "agent_blocked": "人による入力を待機中",
       "api_invalid_request": "モデル API に拒否されました",
       "skill_bundle_unavailable": "エージェントのスキルをダウンロードできませんでした",
+      "skill_bundle_rejected": "スキルのダウンロードが拒否されました",
       "runtime_cli_timeout": "ローカルランタイム CLI がタイムアウトしました",
       "environment_prepare_failed": "実行環境を準備できませんでした",
       "runtime_access_denied": "このエージェントはプライベートランタイムで実行できないため、返信できませんでした。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください。",

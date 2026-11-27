@@ -1029,6 +1029,7 @@
       "agent_blocked": "等待人工輸入",
       "api_invalid_request": "模型 API 拒絕了請求",
       "skill_bundle_unavailable": "無法下載 AI 代理的 skill",
+      "skill_bundle_rejected": "skill 下載遭拒絕",
       "runtime_cli_timeout": "本地執行時 CLI 超時",
       "environment_prepare_failed": "無法準備執行環境",
       "runtime_access_denied": "該 AI 代理無法在其私有執行時上執行，暫時無法回覆。請將該執行時設為公開，或將 AI 代理重新繫結/複製到其所有者可用的執行時。",

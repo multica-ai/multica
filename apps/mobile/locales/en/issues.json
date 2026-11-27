@@ -299,6 +299,7 @@
       "agent_blocked": "Needs input",
       "api_invalid_request": "Request rejected",
       "skill_bundle_unavailable": "Skill download failed",
+      "skill_bundle_rejected": "Skill download rejected",
       "runtime_cli_timeout": "Runtime CLI timeout",
       "environment_prepare_failed": "Environment setup failed",
       "runtime_access_denied": "No runtime access",

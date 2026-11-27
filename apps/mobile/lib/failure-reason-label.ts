@@ -35,6 +35,7 @@ export const REASONS = new Set([
   "agent_blocked",
   "api_invalid_request",
   "skill_bundle_unavailable",
+  "skill_bundle_rejected",
   "runtime_cli_timeout",
   "environment_prepare_failed",
   "invalid_task_identity",
