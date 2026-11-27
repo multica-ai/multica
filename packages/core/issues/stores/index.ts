@@ -76,6 +76,9 @@ export {
   clearIssueSurfaceViewState,
   pruneIssueSurfaceViewStates,
   getIssueSurfaceViewStateRegistrySnapshot,
+  setProjectDefaultSort,
+  getProjectDefaultSort,
+  type ProjectDefaultSort,
 } from "./surface-view-store";
 export { useSubIssuesCollapseStore } from "./sub-issues-collapse-store";
 export {

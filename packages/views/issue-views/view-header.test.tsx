@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
+import type { Project } from "@multica/core/types";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
@@ -45,7 +46,10 @@ vi.mock("../issues/components/filter-chips-bar", () => ({
   ChipSpan: () => null,
 }));
 vi.mock("../issues/components/issues-header", () => ({
-  IssueDisplayControls: () => null,
+  IssueDisplayControls: ({ onApplySortToAllProjects }: { onApplySortToAllProjects?: () => void }) =>
+    onApplySortToAllProjects ? (
+      <button type="button" onClick={onApplySortToAllProjects}>Set as default for all projects</button>
+    ) : null,
   IssueFilterMenu: ({ trigger, open }: { trigger: React.ReactNode; open?: boolean }) => (
     <>
       {trigger}
@@ -241,5 +245,43 @@ describe("IssueViewHeader edit from elsewhere", () => {
 
     expect(screen.queryByRole("menu", { name: "Filter menu" })).toBeNull();
     expect(useIssueViewEditStore.getState().viewId).toBe("view-2");
+  });
+});
+
+describe("IssueViewHeader sort for all projects", () => {
+  const project = { id: "p-1", title: "Roadmap", icon: null } as unknown as Project;
+
+  function renderProject() {
+    return renderWithI18n(
+      <NavigationProvider value={adapterFor("/acme/projects/p-1")}>
+        <ViewStoreProvider store={getIssueSurfaceViewStore("project:p-1")}>
+          <IssueViewHeader controller={controller} base={{ kind: "project", project }} />
+        </ViewStoreProvider>
+      </NavigationProvider>,
+    );
+  }
+
+  it("makes this project's sort the starting sort of projects without their own", async () => {
+    getIssueSurfaceViewStore("project:p-1").getState().setSortBy("position");
+    const configured = getIssueSurfaceViewStore("project:p-3");
+    configured.getState().setViewMode("list");
+    renderProject();
+
+    await userEvent.click(screen.getByRole("button", { name: "Set as default for all projects" }));
+
+    expect(getIssueSurfaceViewStore("project:p-2").getState().sortBy).toBe("position");
+    expect(configured.getState().sortBy).toBe("updated_at");
+    expect(getIssueSurfaceViewStore("workspace:all").getState().sortBy).toBe("updated_at");
+  });
+
+  it("is not offered while a saved view is open", () => {
+    active.view = savedView();
+    renderProject();
+    expect(screen.queryByRole("button", { name: "Set as default for all projects" })).toBeNull();
+  });
+
+  it("is not offered outside a project", () => {
+    renderHeader("workspace", "workspace:all");
+    expect(screen.queryByRole("button", { name: "Set as default for all projects" })).toBeNull();
   });
 });

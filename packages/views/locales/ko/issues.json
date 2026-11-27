@@ -282,6 +282,8 @@
     "button": "보기",
     "grouping_section": "그룹화",
     "ordering_section": "정렬",
+    "apply_sort_to_all_projects": "모든 프로젝트 기본값으로 설정",
+    "project_default_sort_saved": "프로젝트 기본 정렬을 저장했습니다",
     "card_properties_section": "카드 속성",
     "columns_section": "열",
     "columns_locked_by_filter": "열을 표시하거나 숨기려면 상태 필터를 해제하세요.",

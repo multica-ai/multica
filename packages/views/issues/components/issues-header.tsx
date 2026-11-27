@@ -1859,8 +1859,11 @@ export function IssueDisplayControls({
   viewBaseline,
   hideFilter = false,
   iconOnly = false,
+  onApplySortToAllProjects,
 }: {
   scopedIssues: Issue[];
+  /** Project surfaces offer to make the current sort every project's sort. */
+  onApplySortToAllProjects?: () => void;
   hideViewToggle?: boolean;
   /** The host renders its own filter trigger (the view header's chip row). */
   hideFilter?: boolean;
@@ -2323,6 +2326,18 @@ export function IssueDisplayControls({
                   </Select>
                 </div>
               </div>
+              {onApplySortToAllProjects && (
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-muted-foreground"
+                    onClick={onApplySortToAllProjects}
+                  >
+                    {t(($) => $.display.apply_sort_to_all_projects)}
+                  </Button>
+                </div>
+              )}
               <label className="flex cursor-pointer items-center justify-between gap-3">
                 <span className="text-caption font-medium text-muted-foreground">
                   {t(($) => $.display.show_sub_issues)}

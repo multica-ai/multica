@@ -74,6 +74,7 @@ import {
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
 import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
+import { setProjectDefaultSort } from "@multica/core/issues/stores/surface-view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import {
   countAdvancedConditions,
@@ -206,6 +207,11 @@ export function IssueViewHeader({
     ? modified!.filters || modified!.display
     : controller.hasActiveFilters;
   const canManage = activeView ? actions.canManage(activeView) : false;
+  const applySortToAllProjects = () => {
+    const { sortBy, sortDirection } = storeApi.getState();
+    setProjectDefaultSort({ sortBy, sortDirection });
+    toast.success(t(($) => $.display.project_default_sort_saved));
+  };
   // A view that saves nothing yet gets a setup bar under the header until it
   // does; its filter menu opens as soon as the view is named.
   const needsSetup = !!activeView && canManage && isIssueViewUndefined(activeView);
@@ -582,6 +588,9 @@ export function IssueViewHeader({
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
+            onApplySortToAllProjects={
+              base.kind === "project" && !activeView ? applySortToAllProjects : undefined
+            }
           />
           {!hideCreate && !guest && (
             <IconButton
