@@ -44,9 +44,11 @@ func run() error {
 
 	// No local default: a report against the wrong database would pass the
 	// verify gate for a deployment it never scanned.
-	// A blank value would let pgx fall back to PGHOST/PGDATABASE.
-	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	if dbURL == "" {
+	// A blank value would let pgx fall back to PGHOST/PGDATABASE. Only the
+	// check trims: a keyword/value DSN can end in an escaped space that is
+	// part of a value (dbname=rotate\ ).
+	dbURL := os.Getenv("DATABASE_URL")
+	if strings.TrimSpace(dbURL) == "" {
 		return fmt.Errorf("DATABASE_URL must be set to the target deployment's database")
 	}
 	targets, keyEnvs, err := secretrekey.Select(strings.Split(*integrations, ","))
