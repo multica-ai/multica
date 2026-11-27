@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { isImeComposing } from "@multica/core/utils";
 import { Check } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -132,6 +133,7 @@ export function IconOtherOptionCard({
           value={otherValue}
           onChange={(e) => onOtherChange(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && otherValue.trim()) {
               e.preventDefault();
               onConfirm();
