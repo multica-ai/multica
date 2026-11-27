@@ -32,7 +32,7 @@ import (
 // included, is open to its owner (the member who created it) and to workspace
 // owners/admins (MUL-8120). The Default workflow has no owner, so only
 // owners/admins change it. Which workflow a project uses is open to
-// owners/admins and to the project's lead.
+// owners/admins, the project's creator and its lead.
 
 func isWorkspaceAdmin(member db.Member) bool {
 	return roleAllowed(member.Role, "owner", "admin")
@@ -48,9 +48,12 @@ func canEditIssueWorkflow(member db.Member, workflow db.IssueWorkflow) bool {
 }
 
 // canManageProjectWorkflow reports whether member may change a project's own
-// workflow settings: owners and admins, and the member who leads the project.
+// workflow settings: owners and admins, and the members who created or lead it.
 func canManageProjectWorkflow(member db.Member, project db.Project) bool {
 	if isWorkspaceAdmin(member) {
+		return true
+	}
+	if project.CreatorType.Valid && project.CreatorType.String == "member" && project.CreatorID == member.UserID {
 		return true
 	}
 	return project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == member.UserID
@@ -934,7 +937,7 @@ func (h *Handler) loadProjectForWorkflowWrite(w http.ResponseWriter, r *http.Req
 		return db.Project{}, db.Member{}, "", false
 	}
 	if !canManageProjectWorkflow(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change this project's workflow")
+		writeError(w, http.StatusForbidden, "only workspace admins, the project creator and the project lead can change this project's workflow")
 		return db.Project{}, db.Member{}, "", false
 	}
 	return project, member, workspaceID, true
@@ -1202,14 +1205,17 @@ func (h *Handler) saveHandoffOnProjectCopy(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
+		return
+	}
 	if project.WorkflowID != source.ID {
 		writeErrorCode(w, http.StatusConflict, "invalid_handoff", "the project does not use this workflow")
 		return
 	}
 	// The copy switches the project's workflow, which only admins and the
-	// project's lead may do.
+	// project's creator or lead may do.
 	if !canManageProjectWorkflow(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change this project's workflow")
+		writeError(w, http.StatusForbidden, "only workspace admins, the project creator and the project lead can change this project's workflow")
 		return
 	}
 	existing, err := qtx.ListIssueWorkflows(ctx, source.WorkspaceID)

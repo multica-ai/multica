@@ -110,7 +110,7 @@ export function WorkflowHandoffForm({
   canEdit: boolean;
   /**
    * Whether saving for this project only is offered: the copy switches the
-   * project's workflow, which only admins and the project's lead may do.
+   * project's workflow, which only admins and the project's creator or lead may do.
    */
   canCopyForProject?: boolean;
   /** The project the form is opened from: the brief preview is for it. */
