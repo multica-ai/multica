@@ -4,8 +4,8 @@
 // --integrations names what to scan (comma-separated, or "all"); each named
 // integration's current key must be set. Without --apply it only reports,
 // and exits non-zero while any value is still sealed under a previous key or
-// opens under no key. Run it with the same key env as the servers, after
-// every server runs with both keys.
+// opens under no key. DATABASE_URL is required. Run it with the same key env
+// as the servers, after every server runs with both keys.
 package main
 
 import (
@@ -42,6 +42,12 @@ func run() error {
 	integrations := flag.String("integrations", "", "comma-separated integrations to scan, or all: "+integrationNames())
 	flag.Parse()
 
+	// No local default: a report against the wrong database would pass the
+	// verify gate for a deployment it never scanned.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return fmt.Errorf("DATABASE_URL must be set to the target deployment's database")
+	}
 	targets, keyEnvs, err := secretrekey.Select(strings.Split(*integrations, ","))
 	if err != nil {
 		return fmt.Errorf("--integrations: %w", err)
@@ -53,10 +59,6 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)

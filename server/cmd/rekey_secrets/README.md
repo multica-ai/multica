@@ -8,7 +8,8 @@ Connected Apps, and VCS. `MULTICA_PLUGIN_SECRET_KEY` is not covered.
 2. Deploy every server with the new value in `MULTICA_<NAME>_SECRET_KEY` and
    the old value in `MULTICA_<NAME>_SECRET_KEY_PREVIOUS`. Servers then seal
    with the new key and open values sealed under either key.
-3. From `server/`, with the same key env and `DATABASE_URL`, report what is
+3. From `server/`, with the same key env and an explicit `DATABASE_URL` for
+   the target deployment (the command has no default), report what is
    still under the old key, then re-seal it. `--integrations` names the
    integrations being rotated (`lark,slack,dingtalk,wecom,weixin,telegram,apps,vcs`
    or `all`); each one's current key must be set, or the command fails before
@@ -25,7 +26,8 @@ Connected Apps, and VCS. `MULTICA_PLUGIN_SECRET_KEY` is not covered.
    its row key and left untouched.
 4. Remove `MULTICA_<NAME>_SECRET_KEY_PREVIOUS` and redeploy only after the
    verify run exits 0 and at least 10 minutes have passed since the last
-   server running with only the old key stopped. Connected Apps OAuth state
-   travels in the browser, not the database, and stays valid for 10 minutes;
-   an authorization started on such a server fails its callback once the old
-   key is gone.
+   server whose current `MULTICA_APPS_SECRET_KEY` is the key being retired
+   stopped, whether or not it also had a previous key. Connected Apps OAuth
+   state is sealed with the current key, travels in the browser rather than
+   the database, and stays valid for 10 minutes; an authorization started on
+   such a server fails its callback once the retired key is gone.
