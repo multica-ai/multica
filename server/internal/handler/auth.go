@@ -360,6 +360,13 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 			return
 		}
+		// Service accounts are machine identities: there is no mailbox to
+		// receive a code, so refusing the send here (before any email call)
+		// keeps them out of the interactive login flow entirely.
+		if existingUser.Kind == auth.ServiceUserKind {
+			writeError(w, http.StatusForbidden, "service accounts cannot receive login codes")
+			return
+		}
 		isNewUser := false
 		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			// This should rarely happen, but handle it anyway
@@ -463,6 +470,14 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNew {
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+	}
+	// Service accounts never have interactive sessions: their only credential
+	// is the mul_ PAT minted by workspace owner/admin. A code could only be
+	// delivered to the account's generated, unreachable email, but refusing
+	// here makes that invariant server-side rather than incidental.
+	if user.Kind == auth.ServiceUserKind {
+		writeError(w, http.StatusForbidden, "service accounts cannot log in")
+		return
 	}
 
 	tokenString, err := h.issueJWT(user)

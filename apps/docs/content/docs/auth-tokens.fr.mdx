@@ -75,6 +75,16 @@ Dans les scripts, récupérez le jeton depuis un gestionnaire de secrets ou une 
 
 Si un jeton a pu fuiter, révoquez-le immédiatement dans **Paramètres → Jetons d'API**. Une fois révoqué, le PAT ne peut plus jamais être utilisé, et les autres machines et scripts qui l'avaient enregistré perdent également l'accès.
 
+## Comptes de service
+
+Un compte de service est une identité machine : un compte qui appartient à un seul espace de travail et est utilisé par l'infrastructure plutôt que par une personne — un démon, un exécutant CI ou un bot. Les administrateurs de l'espace de travail le créent et génèrent son identifiant, de sorte que l'accès de la machine ne repose jamais sur un compte personnel.
+
+```bash
+multica service-account create --name "ci-runner" <espace-de-travail>
+```
+
+L'identifiant brut n'est affiché qu'une seule fois. Générez des identifiants de remplacement avec `multica service-account token mint` et révoquez des identifiants individuels avec `multica service-account token revoke`. Un compte de service ne peut ni se connecter avec un code de vérification, ni générer ses propres identifiants ; seuls les administrateurs de l'espace de travail le peuvent.
+
 ## Jetons temporaires pour les exécutions d'agents
 
 Lorsque le daemon prend en charge une exécution, le serveur crée pour celle-ci un jeton temporaire préfixé par `mat_`. Il est lié à l'utilisateur, à l'espace de travail, à l'agent et à l'exécution en cours, reste valide 24 heures au maximum et est supprimé à la fin de l'exécution.
