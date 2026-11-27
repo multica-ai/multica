@@ -1,15 +1,18 @@
 export {
+  ACCESS_NOT_ALLOWED_CODE,
   ApiClient,
   ApiError,
   BatchOpsUnsupportedError,
   clientErrorMessage,
   dispatchReasonCode,
   errorCode,
+  isAccessNotAllowedError,
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "./client";
 export type {
   ApiClientOptions,
+  SessionEndReason,
   ClientRuntimeSnapshot,
   ClientUsageRequest,
 } from "./client";

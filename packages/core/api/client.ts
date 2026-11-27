@@ -664,9 +664,19 @@ export interface ApiClientIdentity {
   os?: string;
 }
 
+/**
+ * `code` the server sends with a 403 when the instance's access allowlist
+ * excludes the signed-in account. The credential is valid but will be
+ * refused on every request, so the session ends as it does on a 401.
+ */
+export const ACCESS_NOT_ALLOWED_CODE = "access_not_allowed";
+
+/** Why the server ended a session, when it is more than a dead credential. */
+export type SessionEndReason = typeof ACCESS_NOT_ALLOWED_CODE;
+
 export interface ApiClientOptions {
   logger?: Logger;
-  onUnauthorized?: () => void;
+  onUnauthorized?: (reason?: SessionEndReason) => void;
   /** Identifies the client to the server. Sent as X-Client-* headers. */
   identity?: ApiClientIdentity;
   /**
@@ -818,6 +828,15 @@ export class BatchOpsUnsupportedError extends Error {
     super("batch label and property changes are not supported by this server");
     this.name = "BatchOpsUnsupportedError";
   }
+}
+
+function isAccessNotAllowedBody(body: unknown): boolean {
+  return !!body && typeof body === "object" && (body as { code?: unknown }).code === ACCESS_NOT_ALLOWED_CODE;
+}
+
+/** The server refused this account under the instance's access allowlist. */
+export function isAccessNotAllowedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403 && errorCode(err) === ACCESS_NOT_ALLOWED_CODE;
 }
 
 export function errorCode(err: unknown): string | undefined {
@@ -1285,7 +1304,7 @@ export class ApiClient {
    * 401 may land after the user has signed in again (#10190). Cookie mode is
    * null on both sides, so its expiries still end the session.
    */
-  private handleUnauthorized(credentialUsed: string | null) {
+  private handleUnauthorized(credentialUsed: string | null, reason?: SessionEndReason) {
     if (this.getToken() !== credentialUsed) {
       this.logger.info("ignoring 401 for a credential that has since been replaced");
       return;
@@ -1295,7 +1314,7 @@ export class ApiClient {
     // (set by [workspaceSlug]/layout.tsx). On 401, the auth flow navigates
     // to /login which leaves the workspace route, and the next workspace
     // entry will overwrite the id. No clear needed here.
-    this.options.onUnauthorized?.();
+    this.options.onUnauthorized?.(reason);
   }
 
   private async parseErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -1403,8 +1422,11 @@ export class ApiClient {
     }
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized(credentialUsed);
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
+      if (res.status === 401) this.handleUnauthorized(credentialUsed);
+      else if (res.status === 403 && isAccessNotAllowedBody(body)) {
+        this.handleUnauthorized(credentialUsed, ACCESS_NOT_ALLOWED_CODE);
+      }
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       observer?.onEnd({ requestId: rid, status: res.status, error: message });

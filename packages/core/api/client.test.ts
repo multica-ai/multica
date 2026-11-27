@@ -3517,6 +3517,31 @@ describe("ApiClient shared credential across windows", () => {
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
+
+  // The access allowlist refuses a valid credential on every request, so it
+  // ends the session like a 401 would instead of leaving the shell up.
+  it("ends the session on a 403 for an account outside the access allowlist", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      error: "this account is not allowed to access this instance",
+      code: "access_not_allowed",
+    }, 403)));
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).toHaveBeenCalledExactlyOnceWith("access_not_allowed");
+  });
+
+  it("keeps the session on any other 403", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "not a member", code: "forbidden" }, 403)));
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
 });
 
 describe("ApiClient complete issue deliverables", () => {

@@ -709,7 +709,10 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 			return "", `{"error":"invalid token"}`
 		}
 		if auth.IsTemporarilyDisabledUserID(uid) {
-			return "", `{"error":"account disabled"}`
+			return "", wsAccountDisabledMessage
+		}
+		if msg := accessDeniedMessage(ctx, uid, ""); msg != "" {
+			return "", msg
 		}
 		return uid, ""
 	}
@@ -735,9 +738,44 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	}
 	email, _ := claims["email"].(string)
 	if auth.IsTemporarilyDisabledUser(uid, email) {
-		return "", `{"error":"account disabled"}`
+		return "", wsAccountDisabledMessage
+	}
+	if msg := accessDeniedMessage(ctx, uid, email); msg != "" {
+		return "", msg
 	}
 	return uid, ""
+}
+
+const (
+	wsAccountDisabledMessage   = `{"error":"account disabled"}`
+	wsAccessCheckFailedMessage = `{"error":"failed to verify account access"}`
+)
+
+// accessDeniedMessage applies ACCESS_ALLOWED_EMAILS to a WebSocket caller.
+func accessDeniedMessage(ctx context.Context, userID, email string) string {
+	err := auth.CheckUserAccess(ctx, userID, email)
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, auth.ErrAccessNotAllowed):
+		return auth.AccessNotAllowedBody
+	default:
+		slog.Error("realtime: access allowlist check failed", "user_id", userID, "error", err)
+		return wsAccessCheckFailedMessage
+	}
+}
+
+// handshakeAuthStatus maps an authenticateToken error to the HTTP status of
+// a cookie-authenticated handshake: a valid credential the instance refuses
+// is 403, a failed access check is retryable 503, anything else is 401.
+func handshakeAuthStatus(errMsg string) int {
+	switch errMsg {
+	case wsAccountDisabledMessage, auth.AccessNotAllowedBody:
+		return http.StatusForbidden
+	case wsAccessCheckFailedMessage:
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusUnauthorized
 }
 
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
@@ -816,11 +854,7 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
 		if errMsg != "" {
-			status := http.StatusUnauthorized
-			if errMsg == `{"error":"account disabled"}` {
-				status = http.StatusForbidden
-			}
-			http.Error(w, errMsg, status)
+			http.Error(w, errMsg, handshakeAuthStatus(errMsg))
 			return
 		}
 		member, lookupErr := checkMembership(mc, uid, workspaceID)

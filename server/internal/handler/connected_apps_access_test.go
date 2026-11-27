@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -62,6 +63,44 @@ func TestConnectedApps_GatewayRechecksAccess(t *testing.T) {
 				t.Fatalf("executions = %d, want only the initial authorized send", n)
 			}
 		})
+	}
+}
+
+// The gateway authenticates with its own run token, so it must apply
+// ACCESS_ALLOWED_EMAILS to the run's originator itself: a run started before
+// the originator was removed from the list stops reaching connected apps.
+func TestConnectedApps_GatewayAppliesAccessAllowlist(t *testing.T) {
+	f := newAppsFixture(t)
+	f.executionAccount(t, "team")
+	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	lookup := func(ctx context.Context, userID string) (string, error) {
+		user, err := f.h.Queries.GetUser(ctx, parseUUID(userID))
+		if err != nil {
+			return "", err
+		}
+		return user.Email, nil
+	}
+	setAllowlist := func(raw string) {
+		a, err := auth.ParseAccessAllowlist(raw, lookup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth.SetAccessAllowlist(a)
+	}
+	t.Cleanup(func() { auth.SetAccessAllowlist(nil) })
+
+	setAllowlist("*@multica.ai")
+	if code, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL"}); code != http.StatusOK || isErr {
+		t.Fatalf("listed originator: %d %s", code, response)
+	}
+	setAllowlist("*@allowed.example")
+	if code, response, _ := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL"}); code != http.StatusUnauthorized {
+		t.Fatalf("unlisted originator: %d %s", code, response)
+	}
+	if n := len(f.sdk.executions()); n != 1 {
+		t.Fatalf("executions = %d, want only the listed originator's send", n)
 	}
 }
 

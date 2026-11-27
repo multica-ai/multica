@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -148,6 +149,14 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 	// initiator loses access. Recheck on every gateway request, not at enqueue.
 	if !s.mayRun(ctx, task, agent) {
 		return nil, ErrNoLongerAllowed
+	}
+	// The gateway authenticates with its own run token, not through the API
+	// auth middleware, so ACCESS_ALLOWED_EMAILS is applied to the person the
+	// run acts for here.
+	if task.OriginatorUserID.Valid {
+		if err := auth.CheckUserAccess(ctx, util.UUIDToString(task.OriginatorUserID), ""); err != nil {
+			return nil, err
+		}
 	}
 	apps, err := s.q.ListAgentApps(ctx, agent.ID)
 	if err != nil {

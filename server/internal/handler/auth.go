@@ -204,6 +204,9 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
+	if !auth.IsEmailAccessAllowed(email) {
+		return db.User{}, false, ErrEmailNotAllowed
+	}
 
 	user, err = h.Queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
@@ -333,6 +336,10 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 		return
 	}
+	if !auth.IsEmailAccessAllowed(email) {
+		writeError(w, http.StatusForbidden, ErrEmailNotAllowed.Error())
+		return
+	}
 
 	// Check signup restrictions before sending magic link
 	existingUser, err := h.Queries.GetUserByEmail(r.Context(), email)
@@ -425,6 +432,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+		return
+	}
+	if !auth.IsEmailAccessAllowed(email) {
+		writeError(w, http.StatusForbidden, ErrEmailNotAllowed.Error())
 		return
 	}
 

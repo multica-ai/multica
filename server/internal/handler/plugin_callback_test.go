@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
@@ -298,5 +299,43 @@ func TestCallbackTokenWithoutAnIssueIsNotNarrowed(t *testing.T) {
 		"/v1/issues/"+issueID, nil, map[string]string{"issue_ref": issueID}))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("an unscoped grant must still reach the workspace: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// Plugin bearer tokens skip the API auth middleware. A callback acting for a
+// person outside ACCESS_ALLOWED_EMAILS is refused here instead; one acting as
+// the plugin itself has no person behind it and is unaffected.
+func TestCallbackForAMemberOutsideAccessAllowlistIsRefused(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installHookPlugin(t)
+	issueID := createTestIssue(t, "Callback access allowlist", "todo", "none")
+
+	allowlist, err := auth.ParseAccessAllowlist("*@allowed.example", func(context.Context, string) (string, error) {
+		return handlerTestEmail, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.SetAccessAllowlist(allowlist)
+	t.Cleanup(func() { auth.SetAccessAllowlist(nil) })
+
+	post := func(actor service.HookActor) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		testHandler.CreatePluginComment(recorder, callbackRequest(issueCallbackToken(t, installationID, actor), http.MethodPost,
+			"/v1/issues/"+issueID+"/comments",
+			map[string]any{"content": "posted by a hook"},
+			map[string]string{"issue_ref": issueID}))
+		return recorder
+	}
+	if recorder := post(service.HookActor{Type: "member", ID: parseUUID(testUserID)}); recorder.Code != http.StatusForbidden {
+		t.Fatalf("member outside the allowlist: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post(service.HookActor{Type: "plugin", ID: parseUUID(installationID)}); recorder.Code != http.StatusCreated {
+		t.Fatalf("plugin actor: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if comment := latestComment(t, issueID); comment.AuthorType != "plugin" {
+		t.Fatalf("only the plugin's comment may land, got author_type=%q", comment.AuthorType)
 	}
 }

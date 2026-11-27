@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -220,6 +222,17 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 	// person's membership TODAY. Re-checking here means revoking someone's
 	// access takes effect on a token already in flight.
 	if memberUserID.Valid {
+		// Plugin bearer tokens skip the API auth middleware, so the
+		// ACCESS_ALLOWED_EMAILS gate it applies is repeated here.
+		if err := auth.CheckUserAccess(r.Context(), uuidToString(memberUserID), ""); err != nil {
+			if errors.Is(err, auth.ErrAccessNotAllowed) {
+				publicapiv1.WriteProblem(w, r, http.StatusForbidden, auth.AccessNotAllowedCode, auth.AccessNotAllowedError)
+			} else {
+				slog.Error("plugin callback: access allowlist check failed", "user_id", uuidToString(memberUserID), "error", err)
+				publicapiv1.WriteProblem(w, r, http.StatusServiceUnavailable, "access_check_failed", "failed to verify account access")
+			}
+			return service.PluginActionCaller{}, pluginActor{}, false
+		}
 		member, err := h.getWorkspaceMember(r.Context(), uuidToString(memberUserID), uuidToString(caller.WorkspaceID))
 		if err != nil {
 			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "actor_membership_revoked", "the user this callback acts for is no longer a member")

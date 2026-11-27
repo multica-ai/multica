@@ -17,18 +17,39 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
-func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
-	if !auth.IsTemporarilyDisabledUser(userID, email) {
-		return false
+// rejectDeniedUser writes the response and returns true when the
+// authenticated user is temporarily disabled or outside
+// ACCESS_ALLOWED_EMAILS. email is the credential's own email claim when it
+// carries one; otherwise the allowlist resolves it from userID.
+func rejectDeniedUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
+	if auth.IsTemporarilyDisabledUser(userID, email) {
+		slog.Warn(
+			"auth: temporarily disabled user rejected",
+			"path", r.URL.Path,
+			"user_id", userID,
+			"auth_path", authPath,
+		)
+		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+		return true
 	}
-	slog.Warn(
-		"auth: temporarily disabled user rejected",
-		"path", r.URL.Path,
-		"user_id", userID,
-		"auth_path", authPath,
-	)
-	writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
-	return true
+	if err := auth.CheckUserAccess(r.Context(), userID, email); err != nil {
+		if errors.Is(err, auth.ErrAccessNotAllowed) {
+			slog.Warn(
+				"auth: user outside access allowlist rejected",
+				"path", r.URL.Path,
+				"user_id", userID,
+				"auth_path", authPath,
+			)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(auth.AccessNotAllowedBody))
+			return true
+		}
+		slog.Error("auth: access allowlist check failed", "path", r.URL.Path, "user_id", userID, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "failed to verify account access")
+		return true
+	}
+	return false
 }
 
 // Auth middleware validates JWT tokens or Personal Access Tokens.
@@ -120,7 +141,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				userID := uuidToString(tt.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", "task_token") {
+				if rejectDeniedUser(w, r, userID, "", "task_token") {
 					return
 				}
 				boundWorkspaceID := uuidToString(tt.WorkspaceID)
@@ -186,7 +207,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
 					return
 				}
-				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", "cloud_pat") {
+				if rejectDeniedUser(w, r, identity.OwnerID, "", "cloud_pat") {
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
@@ -215,7 +236,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// entry since. Skip the DB SELECT and the last_used_at
 				// UPDATE — last_used_at is bumped once per TTL window.
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", "pat_cache") {
+					if rejectDeniedUser(w, r, userID, "", "pat_cache") {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
@@ -235,7 +256,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
-				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
+				if rejectDeniedUser(w, r, userID, "", "pat") {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -285,7 +306,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				return
 			}
 			email, _ := claims["email"].(string)
-			if rejectTemporarilyDisabledUser(w, r, sub, email, "jwt") {
+			if rejectDeniedUser(w, r, sub, email, "jwt") {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)

@@ -564,4 +564,23 @@ describe("AuthInitializer recovery", () => {
     expect(storage.snapshot().multica_token).toBeUndefined();
     expect(onLogout).toHaveBeenCalledOnce();
   });
+
+  // The access allowlist refuses a valid session on every attempt; recovering
+  // would retry /api/me forever behind a loading screen.
+  it("ends a session the access allowlist refuses instead of retrying it", async () => {
+    const getMe = vi.fn().mockRejectedValue(new ApiError(
+      "this account is not allowed to access this instance",
+      403,
+      "Forbidden",
+      { error: "this account is not allowed to access this instance", code: "access_not_allowed" },
+    ));
+    const api = makeApi({ getMe, logout: vi.fn().mockResolvedValue(undefined) });
+    renderInitializer({ api, storage: makeStorage(), cookieAuth: true, platform: "web" });
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe("unauthenticated");
+    });
+    expect(useAuthStore.getState().accessNotAllowed).toBe(true);
+    expect(getMe).toHaveBeenCalledOnce();
+  });
 });
