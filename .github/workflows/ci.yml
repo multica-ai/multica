@@ -404,7 +404,7 @@ jobs:
       # Only the specs run in the image. Host networking reaches the API, the
       # web app and Postgres on localhost, and the checkout is mounted at its
       # own path because pnpm's bin shims hold absolute paths.
-      - name: Run the guest, Inbox header and rail labels specs
+      - name: Run browser interaction smoke specs
         env:
           IMAGE: ${{ steps.playwright.outputs.image }}
         run: >-
@@ -412,7 +412,7 @@ jobs:
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE"
           -e CI -e DATABASE_URL -e PORT -e FRONTEND_ORIGIN -e PLAYWRIGHT_BASE_URL
           "$IMAGE"
-          node_modules/.bin/playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts
+          node_modules/.bin/playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts e2e/issue-sidebar-settings.spec.ts
 
       - name: Upload logs and Playwright results
         if: ${{ failure() }}
