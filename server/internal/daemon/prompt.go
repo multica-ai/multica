@@ -913,24 +913,9 @@ func buildChatPromptWithOptions(task Task, opts promptOpts) string {
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
-	// Outbound attachments: how the agent puts an image/file INTO its reply.
-	// This is the DELIVERY layer of the channel policy, and it has three
-	// answers, not two (MUL-4899). `attachment upload` binds a file to the
-	// Multica chat reply on every surface; what differs is whether anything
-	// goes back for it. Web/mobile renders it as a card in the browser. A
-	// channel-backed chat gets the upload guidance only where the server said
-	// this deployment performs the last hop, and otherwise the upload reaches
-	// nobody and the agent must say so in words. The answer arrives on the
-	// claim; do not re-derive it from the channel type, do not collapse it back
-	// into "is there a channel at all", and do not collapse it into the HISTORY
-	// layer above, which is Slack-only and asks a different question.
-	//
-	// This is the ONLY place the verdict is stated. The brief's `## Output`
-	// section carries the web/mobile answer, which is fixed, and for a
-	// channel-backed chat points here instead of answering — the verdict flips
-	// under a resumed session, and the brief is the prompt-cache prefix
-	// (MUL-5377). So a channel chat learns how to deliver a file only from the
-	// line below, which means one must be emitted on every turn.
+	// Keep upload instructions in the turn prompt so they reach the agent
+	// even if the runtime brief could not be written. Channel delivery
+	// capabilities come from the current claim.
 	switch {
 	case task.ChatChannelType == "":
 		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")

@@ -99,10 +99,10 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 			mustHave: []string{"`--attachment <path>` to `multica issue comment add`", inlineBlocksRule},
 			mustNot:  []string{"multica attachment upload"},
 		},
-		// Direct chat: the upload binds to the reply and the browser renders a
-		// card, so the file can sit inline where the agent puts it.
+		// The brief explains rich text rendering in direct chat. The turn
+		// prompt provides the file upload instructions.
 		"chat_direct": {
-			mustHave: []string{"`multica attachment upload <local-path>`", inlineBlocksRule},
+			mustHave: []string{inlineBlocksRule},
 			mustNot:  []string{"text-only", "separate message"},
 		},
 		// A channel-backed chat names its platform, defers the verdict to the

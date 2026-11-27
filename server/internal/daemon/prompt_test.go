@@ -475,6 +475,25 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimePromptWebChatUploadGuidanceAppearsOnce(t *testing.T) {
+	const uploadCommand = "`multica attachment upload <local-path>`"
+	task := Task{ChatSessionID: "sess-1", PriorSessionID: "thread-1", ChatMessage: "Please share the report."}
+	brief, err := execenv.InjectRuntimeConfig(t.TempDir(), "codex", execenv.TaskContextForEnv{
+		ChatSessionID:       task.ChatSessionID,
+		PriorSessionResumed: true,
+	})
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	prompt, _ := buildRuntimePrompt(task, "codex", nil)
+	if strings.Contains(brief, uploadCommand) {
+		t.Error("runtime brief repeats the web chat upload command")
+	}
+	if got := strings.Count(prompt, uploadCommand); got != 1 {
+		t.Errorf("web chat upload command appears %d times in the turn prompt, want 1", got)
+	}
+}
+
 func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	t.Run("slack-backed prompt teaches both read commands", func(t *testing.T) {
 		out := buildChatPrompt(Task{
