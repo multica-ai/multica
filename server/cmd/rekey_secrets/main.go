@@ -1,9 +1,11 @@
 // rekey_secrets re-seals integration secrets stored under a replaced key
 // (MULTICA_*_SECRET_KEY_PREVIOUS) with the current MULTICA_*_SECRET_KEY.
 //
-// Without --apply it only reports, and exits non-zero while any value is
-// still sealed under a previous key or opens under no key. Run it with the
-// same key env as the servers, after every server runs with both keys.
+// --integrations names what to scan (comma-separated, or "all"); each named
+// integration's current key must be set. Without --apply it only reports,
+// and exits non-zero while any value is still sealed under a previous key or
+// opens under no key. Run it with the same key env as the servers, after
+// every server runs with both keys.
 package main
 
 import (
@@ -13,9 +15,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -35,9 +39,14 @@ func main() {
 
 func run() error {
 	apply := flag.Bool("apply", false, "re-seal values found under a previous key (default: report only)")
+	integrations := flag.String("integrations", "", "comma-separated integrations to scan, or all: "+integrationNames())
 	flag.Parse()
 
-	boxes, err := loadBoxes(secretrekey.Targets)
+	targets, keyEnvs, err := secretrekey.Select(strings.Split(*integrations, ","))
+	if err != nil {
+		return fmt.Errorf("--integrations: %w", err)
+	}
+	boxes, err := loadBoxes(keyEnvs)
 	if err != nil {
 		return err
 	}
@@ -54,11 +63,13 @@ func run() error {
 	}
 	defer pool.Close()
 
-	lockConn, err := pool.Acquire(ctx)
+	// The lock holds its own connection outside the pool, so the scan never
+	// waits on it even with pool_max_conns=1.
+	lockConn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
-		return fmt.Errorf("acquire advisory-lock connection: %w", err)
+		return fmt.Errorf("open advisory-lock connection: %w", err)
 	}
-	defer lockConn.Release()
+	defer func() { _ = lockConn.Close(context.Background()) }()
 	var locked bool
 	if err := lockConn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, advisoryLockName).Scan(&locked); err != nil {
 		return fmt.Errorf("acquire advisory lock: %w", err)
@@ -70,13 +81,14 @@ func run() error {
 		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, advisoryLockName)
 	}()
 
-	reports, runErr := secretrekey.Run(ctx, pool, secretrekey.Targets, boxes, *apply)
-	var previous, unreadable int
+	reports, runErr := secretrekey.Run(ctx, pool, targets, boxes, *apply)
+	var previous, unreadable, scanned int
 	for _, r := range reports {
 		if r.Skipped != "" {
 			slog.Info("skipped", "target", r.Target.Name(), "reason", r.Skipped)
 			continue
 		}
+		scanned++
 		previous += r.Previous
 		unreadable += r.Unreadable
 		attrs := []any{"target", r.Target.Name(), "current", r.Current, "unreadable", r.Unreadable}
@@ -93,6 +105,9 @@ func run() error {
 	if runErr != nil {
 		return runErr
 	}
+	if scanned == 0 {
+		return fmt.Errorf("no target was scanned")
+	}
 	if *apply {
 		slog.Info("rekey complete", "resealed", previous, "unreadable", unreadable)
 		previous = 0
@@ -105,19 +120,16 @@ func run() error {
 	return nil
 }
 
-// loadBoxes builds one Box per key env that is set. An unset env skips its
-// targets; a set but invalid current or previous key is an error.
-func loadBoxes(targets []secretrekey.Target) (map[string]*secretbox.Box, error) {
+// loadBoxes builds one Box per selected key env. A missing or invalid
+// current key, or an invalid previous key, is an error.
+func loadBoxes(keyEnvs []string) (map[string]*secretbox.Box, error) {
 	boxes := map[string]*secretbox.Box{}
-	for _, t := range targets {
-		if _, done := boxes[t.KeyEnv]; done || os.Getenv(t.KeyEnv) == "" {
-			continue
-		}
-		key, err := secretbox.LoadKey(t.KeyEnv)
+	for _, env := range keyEnvs {
+		key, err := secretbox.LoadKey(env)
 		if err != nil {
 			return nil, err
 		}
-		prev, err := secretbox.LoadPreviousKey(t.KeyEnv)
+		prev, err := secretbox.LoadPreviousKey(env)
 		if err != nil {
 			return nil, err
 		}
@@ -129,9 +141,18 @@ func loadBoxes(targets []secretrekey.Target) (map[string]*secretbox.Box, error) 
 		if err != nil {
 			return nil, err
 		}
-		boxes[t.KeyEnv] = box
+		boxes[env] = box
 	}
 	return boxes, nil
+}
+
+func integrationNames() string {
+	names := make([]string, 0, len(secretrekey.Integrations))
+	for name := range secretrekey.Integrations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }
 
 func formatKeys(keys [][]string) string {

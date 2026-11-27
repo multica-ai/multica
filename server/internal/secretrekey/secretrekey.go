@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -40,7 +41,8 @@ type Target struct {
 	// KeyEnv is the env var of the key that seals this value.
 	KeyEnv string
 	Table  string
-	// KeyColumns identify a row. They are compared as text.
+	// KeyColumns identify a row. They are listed as text and matched in their
+	// own type, so the lookup uses the key's index.
 	KeyColumns []string
 	Column     string
 	// JSONField, when set, names the string field inside the JSONB Column.
@@ -113,11 +115,62 @@ var Targets = []Target{
 	{KeyEnv: "MULTICA_VCS_SECRET_KEY", Table: "cloud_agent_connection", KeyColumns: []string{"workspace_id", "provider"}, Column: "journal_encrypted", Encoding: Base64},
 }
 
+// Integrations maps the --integrations names to their key env.
+var Integrations = map[string]string{
+	"lark":     "MULTICA_LARK_SECRET_KEY",
+	"slack":    "MULTICA_SLACK_SECRET_KEY",
+	"dingtalk": "MULTICA_DINGTALK_SECRET_KEY",
+	"wecom":    "MULTICA_WECOM_SECRET_KEY",
+	"weixin":   "MULTICA_WEIXIN_SECRET_KEY",
+	"telegram": "MULTICA_TELEGRAM_SECRET_KEY",
+	"apps":     "MULTICA_APPS_SECRET_KEY",
+	"vcs":      "MULTICA_VCS_SECRET_KEY",
+}
+
+// Select returns the targets of the named integrations ("all" selects every
+// integration) and their key envs. An empty or unknown name is an error, so
+// a run cannot silently cover nothing.
+func Select(names []string) ([]Target, []string, error) {
+	envs := map[string]bool{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if name == "all" {
+			for _, env := range Integrations {
+				envs[env] = true
+			}
+			continue
+		}
+		env, ok := Integrations[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("unknown integration %q", name)
+		}
+		envs[env] = true
+	}
+	if len(envs) == 0 {
+		return nil, nil, errors.New("no integration selected")
+	}
+	var targets []Target
+	for _, t := range Targets {
+		if envs[t.KeyEnv] {
+			targets = append(targets, t)
+		}
+	}
+	keyEnvs := make([]string, 0, len(envs))
+	for env := range envs {
+		keyEnvs = append(keyEnvs, env)
+	}
+	sort.Strings(keyEnvs)
+	return targets, keyEnvs, nil
+}
+
 // Report counts the non-empty values of one target.
 type Report struct {
 	Target Target
-	// Skipped explains why the target was not scanned (no key configured,
-	// table absent); counts are zero when set.
+	// Skipped explains why an Optional target was not scanned (table
+	// absent); counts are zero when set.
 	Skipped string
 	// Current values already open under the current key.
 	Current int
@@ -130,8 +183,8 @@ type Report struct {
 	UnreadableKeys [][]string
 }
 
-// Run scans every target whose key env is in boxes. With apply, values
-// sealed under a previous key are re-sealed under the current key.
+// Run scans every target; each target's KeyEnv must have a box. With apply,
+// values sealed under a previous key are re-sealed under the current key.
 func Run(ctx context.Context, pool *pgxpool.Pool, targets []Target, boxes map[string]*secretbox.Box, apply bool) ([]Report, error) {
 	reports := make([]Report, 0, len(targets))
 	for _, t := range targets {
@@ -147,8 +200,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, targets []Target, boxes map[st
 func runTarget(ctx context.Context, pool *pgxpool.Pool, t Target, box *secretbox.Box, apply bool) (Report, error) {
 	r := Report{Target: t}
 	if box == nil {
-		r.Skipped = t.KeyEnv + " not set"
-		return r, nil
+		return r, fmt.Errorf("%s is not set", t.KeyEnv)
 	}
 	var exists bool
 	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, t.Table).Scan(&exists); err != nil {
@@ -211,7 +263,7 @@ func (t Target) filter() string {
 func (t Target) keyMatch(offset int) string {
 	parts := make([]string, len(t.KeyColumns))
 	for i, c := range t.KeyColumns {
-		parts[i] = fmt.Sprintf("%s::text = $%d", pgx.Identifier{c}.Sanitize(), offset+i)
+		parts[i] = fmt.Sprintf("%s = $%d", pgx.Identifier{c}.Sanitize(), offset+i)
 	}
 	return strings.Join(parts, " AND ")
 }

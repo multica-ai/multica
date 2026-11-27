@@ -195,16 +195,11 @@ func TestRunReportsThenReseals(t *testing.T) {
 	}
 }
 
-func TestRunSkipsTargetsWithoutKey(t *testing.T) {
+func TestRunFailsWithoutKey(t *testing.T) {
 	f := setupRekey(t)
-	reports, err := Run(context.Background(), f.pool, targetsFor("UNSET_KEY"), map[string]*secretbox.Box{}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range reports {
-		if r.Skipped == "" {
-			t.Fatalf("%s scanned without a key", r.Target.Name())
-		}
+	_, err := Run(context.Background(), f.pool, targetsFor("UNSET_KEY"), map[string]*secretbox.Box{}, false)
+	if err == nil {
+		t.Fatal("Run without a key reported success")
 	}
 	if _, err := f.oldBox.Open(f.channelSecret(t)); err != nil {
 		t.Fatalf("value changed without a key: %v", err)
@@ -236,21 +231,55 @@ func assertOpens(t *testing.T, b *secretbox.Box, sealed []byte, want string) {
 }
 
 func TestTargetsReferenceKnownKeys(t *testing.T) {
-	known := map[string]bool{
-		"MULTICA_LARK_SECRET_KEY": true, "MULTICA_SLACK_SECRET_KEY": true, "MULTICA_DINGTALK_SECRET_KEY": true,
-		"MULTICA_WECOM_SECRET_KEY": true, "MULTICA_WEIXIN_SECRET_KEY": true, "MULTICA_TELEGRAM_SECRET_KEY": true,
-		"MULTICA_APPS_SECRET_KEY": true, "MULTICA_VCS_SECRET_KEY": true,
+	known := map[string]bool{}
+	for _, env := range Integrations {
+		known[env] = true
 	}
 	covered := map[string]bool{}
 	for _, tg := range Targets {
 		if !known[tg.KeyEnv] {
-			t.Errorf("%s uses unknown key env %s", tg.Name(), tg.KeyEnv)
+			t.Errorf("%s uses key env %s with no --integrations name", tg.Name(), tg.KeyEnv)
 		}
 		covered[tg.KeyEnv] = true
 	}
-	for env := range known {
+	for name, env := range Integrations {
 		if !covered[env] {
-			t.Errorf("no target re-seals values under %s", env)
+			t.Errorf("integration %s has no target", name)
 		}
+	}
+}
+
+func TestSelect(t *testing.T) {
+	for _, names := range [][]string{nil, {""}, {" "}} {
+		if _, _, err := Select(names); err == nil {
+			t.Errorf("Select(%q) selected nothing without an error", names)
+		}
+	}
+	if _, _, err := Select([]string{"lark", "plugin"}); err == nil {
+		t.Error("Select accepted an unknown integration")
+	}
+
+	targets, envs, err := Select([]string{"vcs", " slack"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(envs) != 2 || envs[0] != "MULTICA_SLACK_SECRET_KEY" || envs[1] != "MULTICA_VCS_SECRET_KEY" {
+		t.Fatalf("envs = %v", envs)
+	}
+	for _, tg := range targets {
+		if tg.KeyEnv != "MULTICA_SLACK_SECRET_KEY" && tg.KeyEnv != "MULTICA_VCS_SECRET_KEY" {
+			t.Fatalf("selected %s outside slack and vcs", tg.Name())
+		}
+	}
+	if len(targets) != 6 {
+		t.Fatalf("selected %d targets, want 6 (2 slack + 4 vcs)", len(targets))
+	}
+
+	all, envs, err := Select([]string{"all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != len(Targets) || len(envs) != len(Integrations) {
+		t.Fatalf("all selected %d targets / %d keys, want %d / %d", len(all), len(envs), len(Targets), len(Integrations))
 	}
 }
