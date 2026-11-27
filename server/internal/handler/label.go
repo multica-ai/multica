@@ -337,6 +337,11 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 		func() error { return qtx.DeleteIssueLabelAssignmentsByLabel(r.Context(), idUUID) },
 		func() error { return qtx.DeleteAgentLabelAssignmentsByLabel(r.Context(), idUUID) },
 		func() error { return qtx.DeleteSkillLabelAssignmentsByLabel(r.Context(), idUUID) },
+		func() error {
+			return qtx.RemoveLabelFromAutopilots(r.Context(), db.RemoveLabelFromAutopilotsParams{
+				LabelID: idUUID, WorkspaceID: wsUUID,
+			})
+		},
 	} {
 		if err := cleanup(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to remove label assignments")

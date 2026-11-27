@@ -145,6 +145,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().StringArray("label", nil, issueLabelFlagHelp+" to every issue this autopilot creates")
 	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -158,6 +159,8 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().StringArray("label", nil, "Replace the labels attached to created issues with this label, by name, UUID or UUID prefix (repeatable)")
+	autopilotUpdateCmd.Flags().Bool("clear-labels", false, "Stop attaching labels to created issues")
 	autopilotUpdateCmd.Flags().StringArray("subscriber", nil, "Replace subscribers with this member (name or user ID; repeatable)")
 	autopilotUpdateCmd.Flags().Bool("clear-subscribers", false, "Remove all autopilot subscribers")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -463,10 +466,21 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["subscribers"] = subscribers
 	}
+	labelRefs, _ := cmd.Flags().GetStringArray("label")
+	if len(labelRefs) > 0 {
+		labelIDs, err := resolveIssueLabelFlags(ctx, client, labelRefs)
+		if err != nil {
+			return err
+		}
+		body["label_ids"] = labelIDs
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
 		return autopilotWriteRequestError("create autopilot", err)
+	}
+	if err := requireAutopilotLabelSupport(body, result); err != nil {
+		return fmt.Errorf("autopilot %s was created without labels: %w", strVal(result, "id"), err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -551,6 +565,20 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["subscribers"] = subscribers
 	}
+	clearLabels, _ := cmd.Flags().GetBool("clear-labels")
+	labelRefs, _ := cmd.Flags().GetStringArray("label")
+	if clearLabels && len(labelRefs) > 0 {
+		return fmt.Errorf("--label and --clear-labels are mutually exclusive")
+	}
+	if clearLabels {
+		body["label_ids"] = []string{}
+	} else if len(labelRefs) > 0 {
+		labelIDs, err := resolveIssueLabelFlags(ctx, client, labelRefs)
+		if err != nil {
+			return err
+		}
+		body["label_ids"] = labelIDs
+	}
 
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --description, --agent, --status, --mode, etc.")
@@ -560,12 +588,27 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if err := client.PatchJSON(ctx, "/api/autopilots/"+autopilotRef.ID, body, &result); err != nil {
 		return autopilotWriteRequestError("update autopilot", err)
 	}
+	if err := requireAutopilotLabelSupport(body, result); err != nil {
+		return fmt.Errorf("autopilot %s was updated, but not its labels: %w", strVal(result, "id"), err)
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Autopilot updated: %s (%s)\n", strVal(result, "title"), strVal(result, "id"))
+	return nil
+}
+
+// requireAutopilotLabelSupport reports a server that predates autopilot
+// labels: it ignores label_ids and its response has no label_ids field.
+func requireAutopilotLabelSupport(body, result map[string]any) error {
+	if _, sent := body["label_ids"]; !sent {
+		return nil
+	}
+	if _, ok := result["label_ids"].([]any); !ok {
+		return errors.New("this server version does not support autopilot labels; update the server")
+	}
 	return nil
 }
 

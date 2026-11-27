@@ -76,6 +76,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { AutopilotLabelsProperty } from "./autopilot-labels";
 import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
 import { EditWebhookTriggerDialog } from "./edit-webhook-trigger-dialog";
 import { useRunAutopilotNow } from "./use-run-autopilot-now";
@@ -1011,6 +1012,15 @@ function AutopilotProperties({ autopilot, canWrite }: { autopilot: Autopilot; ca
         )}
       </ObjectProperty>
       {autopilot.execution_mode === "create_issue" && (
+        <ObjectProperty label={t(($) => $.detail.field_labels)}>
+          <AutopilotLabelsProperty
+            autopilot={autopilot}
+            canWrite={canWrite}
+            triggerClassName={PROPERTY_TRIGGER}
+          />
+        </ObjectProperty>
+      )}
+      {autopilot.execution_mode === "create_issue" && (
         <ObjectProperty label={t(($) => $.detail.field_subscribers)}>
           <SubscribersProperty autopilot={autopilot} canWrite={canWrite} />
         </ObjectProperty>
@@ -1369,6 +1379,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             title: autopilot.title,
             description: autopilot.description ?? "",
             project_id: autopilot.project_id ?? null,
+            label_ids: autopilot.label_ids ?? [],
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,

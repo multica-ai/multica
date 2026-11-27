@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -181,4 +182,79 @@ func printLabelTable(labels []any, fullID bool) {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+}
+
+const issueLabelFlagHelp = "Issue label to attach, by name (case-insensitive), UUID or UUID prefix (repeatable)"
+
+// resolveIssueLabelFlags turns repeated --label values into issue label ids,
+// de-duplicated in flag order. The label list is fetched at most once, and
+// only when a value is not already a full UUID.
+func resolveIssueLabelFlags(ctx context.Context, client *cli.APIClient, inputs []string) ([]string, error) {
+	var candidates []idCandidate
+	fetched := false
+	ids := make([]string, 0, len(inputs))
+	seen := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		trimmed := strings.TrimSpace(input)
+		if trimmed == "" {
+			return nil, fmt.Errorf("--label cannot be empty")
+		}
+		id := ""
+		if uuidRegexp.MatchString(trimmed) {
+			id = strings.ToLower(trimmed)
+		} else {
+			if !fetched {
+				var err error
+				if candidates, err = fetchLabelCandidates(ctx, client, "issue"); err != nil {
+					return nil, fmt.Errorf("list issue labels: %w", err)
+				}
+				fetched = true
+			}
+			resolved, err := matchIssueLabel(candidates, trimmed)
+			if err != nil {
+				return nil, err
+			}
+			id = resolved
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// matchIssueLabel prefers an exact (case-insensitive) name over an id prefix,
+// so a label named like a hex string still resolves by name.
+func matchIssueLabel(candidates []idCandidate, input string) (string, error) {
+	var byName []idCandidate
+	for _, c := range candidates {
+		if strings.EqualFold(c.Display, input) {
+			byName = append(byName, c)
+		}
+	}
+	if len(byName) == 1 {
+		return byName[0].ID, nil
+	}
+	if len(byName) > 1 {
+		return "", fmt.Errorf("label %q matches %d labels; pass its id instead", input, len(byName))
+	}
+	prefix, err := normalizeUUIDPrefix(input)
+	if err != nil {
+		return "", fmt.Errorf("no issue label named %q; run `multica label list` to see labels", input)
+	}
+	var byID []idCandidate
+	for _, c := range candidates {
+		if strings.HasPrefix(compactUUID(c.ID), prefix) {
+			byID = append(byID, c)
+		}
+	}
+	switch len(byID) {
+	case 1:
+		return byID[0].ID, nil
+	case 0:
+		return "", fmt.Errorf("no issue label named or with id prefix %q; run `multica label list` to see labels", input)
+	default:
+		return "", fmt.Errorf("label id prefix %q matches %d labels; use more characters", input, len(byID))
+	}
 }

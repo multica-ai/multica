@@ -46,6 +46,9 @@ type AutopilotResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	// LabelIDs are the issue labels attached to every issue this autopilot
+	// creates. Always non-nil.
+	LabelIDs []string `json:"label_ids"`
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
@@ -212,6 +215,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		ProjectID:          uuidToPtr(a.ProjectID),
+		LabelIDs:           autopilotLabelIDsToResponse(a.LabelIds),
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
@@ -225,6 +229,13 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		Subscribers:        subResp,
 	}
+}
+
+func autopilotLabelIDsToResponse(ids []pgtype.UUID) []string {
+	if out := uuidsToStrings(ids); out != nil {
+		return out
+	}
+	return []string{}
 }
 
 func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerResponse {
@@ -368,6 +379,8 @@ type CreateAutopilotRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	// LabelIDs are issue labels to attach to each created issue.
+	LabelIDs []string `json:"label_ids"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
 	AssigneeType       *string           `json:"assignee_type"`
@@ -378,14 +391,16 @@ type CreateAutopilotRequest struct {
 }
 
 type UpdateAutopilotRequest struct {
-	Title              *string `json:"title"`
-	Description        *string `json:"description"`
-	ProjectID          *string `json:"project_id"`
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         *string `json:"assignee_id"`
-	Status             *string `json:"status"`
-	ExecutionMode      *string `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	ProjectID   *string `json:"project_id"`
+	// Wholesale replacement when present; omit to leave labels untouched.
+	LabelIDs           []string `json:"label_ids"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	Status             *string  `json:"status"`
+	ExecutionMode      *string  `json:"execution_mode"`
+	IssueTitleTemplate *string  `json:"issue_title_template"`
 	// Wholesale replacement when present; omit to leave subscribers untouched.
 	Subscribers []SubscriberInput `json:"subscribers"`
 }
@@ -901,6 +916,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeProjectArchived(w)
 		return
 	}
+	labelIDs, ok := h.parseAutopilotLabelIDs(w, r, req.LabelIDs, wsUUID)
+	if !ok {
+		return
+	}
 
 	// Parse before insert so a malformed payload doesn't open a transaction.
 	subscribers, ok := parseAutopilotSubscribers(w, req.Subscribers)
@@ -944,6 +963,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
 		ProjectID:          projectID,
+		LabelIds:           labelIDs,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -1144,6 +1164,13 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	if _, ok := rawFields["label_ids"]; ok {
+		labelIDs, ok := h.parseAutopilotLabelIDs(w, r, req.LabelIDs, prev.WorkspaceID)
+		if !ok {
+			return
+		}
+		params.LabelIds = labelIDs
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -1365,6 +1392,35 @@ func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
 // version is atomic with the autopilot write.
 func (h *Handler) recordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
 	return service.RecordAutopilotRuleVersion(ctx, q, ap, publishedByType, publishedByID)
+}
+
+// parseAutopilotLabelIDs checks that every id is an issue label in the
+// workspace and returns them de-duplicated in request order. The result is
+// never nil, so an empty list clears the autopilot's labels on update.
+func (h *Handler) parseAutopilotLabelIDs(
+	w http.ResponseWriter,
+	r *http.Request,
+	raw []string,
+	workspaceID pgtype.UUID,
+) ([]pgtype.UUID, bool) {
+	ids, ok := parseUUIDSliceOrBadRequest(w, raw, "label_ids")
+	if !ok {
+		return nil, false
+	}
+	labels, err := service.ValidateIssueLabels(r.Context(), h.Queries, workspaceID, ids)
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusBadRequest, "label_ids must reference issue labels in this workspace")
+		return nil, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate labels")
+		return nil, false
+	}
+	out := make([]pgtype.UUID, len(labels))
+	for i, label := range labels {
+		out[i] = label.ID
+	}
+	return out, true
 }
 
 func (h *Handler) parseAutopilotProjectID(

@@ -1,0 +1,1 @@
+ALTER TABLE autopilot DROP COLUMN IF EXISTS label_ids;
