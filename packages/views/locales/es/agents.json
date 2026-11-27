@@ -882,6 +882,7 @@
     "copy_filtered": "Copiar lo filtrado",
     "copied": "Copiado",
     "waiting_events": "Esperando eventos...",
+    "openclaw_live_unavailable": "OpenClaw no proporciona registros en tiempo real. La respuesta aparece cuando termina la ejecución.",
     "no_data": "No se registraron datos de ejecución.",
     "sort_chronological": "Más antiguos primero",
     "sort_newest_first": "Más recientes primero",
