@@ -1278,6 +1278,65 @@ describe("tool output completeness", () => {
   });
 });
 
+describe("restricted tool details", () => {
+  const hiddenRun: TimelineItem[] = [
+    { seq: 1, type: "thinking", content: "Checking the deploy config" },
+    { seq: 2, type: "tool_use", tool: "Bash", detailsHidden: true },
+    { seq: 3, type: "tool_result", tool: "Bash", detailsHidden: true },
+    { seq: 4, type: "text", content: "Deploy config looks right." },
+  ];
+
+  afterEach(() => {
+    vi.mocked(api.getAgent).mockResolvedValue(null as never);
+  });
+
+  it("shows a withheld call as hidden, keeping its name and the reasoning around it", () => {
+    renderDialog(hiddenRun);
+
+    const row = screen.getByRole("button", { name: /Bash/ });
+    expect(row).toHaveTextContent("Hidden");
+    expect(screen.getByText("Tool details hidden")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Checking the deploy config/ })).toBeInTheDocument();
+  });
+
+  it("explains in the inspector why a withheld call has nothing to show", () => {
+    renderDialog(hiddenRun);
+    fireEvent.click(screen.getByRole("button", { name: /Bash/ }));
+
+    expect(screen.getByText("Tool input and output are hidden")).toBeInTheDocument();
+    expect(screen.getByText("Only this agent's owner and workspace admins can see them.")).toBeInTheDocument();
+    expect(screen.queryByText("Input")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy this step" })).not.toBeInTheDocument();
+  });
+
+  it("marks a folded group of withheld calls as hidden", () => {
+    renderDialog(
+      [1, 3, 5].flatMap((seq): TimelineItem[] => [
+        { seq, type: "tool_use", tool: "Grep", detailsHidden: true },
+        { seq: seq + 1, type: "tool_result", tool: "Grep", detailsHidden: true },
+      ]),
+    );
+
+    const group = screen.getByRole("button", { name: /Grep/, expanded: false });
+    expect(group).toHaveTextContent("Hidden");
+  });
+
+  it("tells someone allowed the details that others cannot see them", async () => {
+    vi.mocked(api.getAgent).mockResolvedValue({ id: "agent-1", tool_details_visibility: "restricted" } as never);
+    renderDialog(items, { task: { ...baseTask, agent_id: "agent-1" } });
+
+    expect(await screen.findByText("Tool details visible to owner and admins only")).toBeInTheDocument();
+    expect(screen.queryByText("Hidden")).not.toBeInTheDocument();
+  });
+
+  it("says nothing for an agent that does not restrict its tool details", () => {
+    renderDialog(items);
+
+    expect(screen.queryByText("Tool details hidden")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tool details visible to owner and admins only")).not.toBeInTheDocument();
+  });
+});
+
 describe("clearing a run's log", () => {
   it("lets an admin clear a finished run after confirming", async () => {
     memberRole.current = "admin";

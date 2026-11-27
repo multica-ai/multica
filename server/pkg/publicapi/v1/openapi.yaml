@@ -435,6 +435,12 @@ components:
         output: { type: string }
         output_truncated: { type: boolean }
         created_at: { type: string, format: date-time }
+        details_hidden:
+          type: boolean
+          description: >-
+            The agent restricts the inputs and outputs of its tool calls to its
+            owner and workspace admins, so input, output and content were
+            removed from this tool_use or tool_result.
     TaskMessageListResponse:
       type: object
       required: [messages]

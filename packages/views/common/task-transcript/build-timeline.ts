@@ -18,6 +18,8 @@ export interface TimelineItem {
    */
   output_truncated?: boolean;
   created_at?: string;
+  /** The server withheld this tool call's input and output from the viewer. */
+  detailsHidden?: boolean;
 }
 
 function canMergeStreamingText(prev: TimelineItem, next: TimelineItem): boolean {
@@ -81,8 +83,8 @@ export function isOutputTruncated(item: TimelineItem): boolean {
  * what they had been on the previous pass (MUL-7227).
  *
  * A message is immutable once it lands — the realtime merge appends unseen seqs
- * and keeps the objects it already holds — so identity is a sound proof that a
- * body has not changed. Each entry records the exact messages it was built
+ * and keeps the objects it already holds, replacing one only with a new object
+ * — so identity is a sound proof that a body has not changed. Each entry records the exact messages it was built
  * from, and is reused only when that list still matches: a coalescing run that
  * gained a fragment is rebuilt, which is what keeps redaction applied to merged
  * text rather than to the pieces.
@@ -120,6 +122,7 @@ function mergeRun(run: readonly TaskMessagePayload[]): TimelineItem {
     output: first.output,
     output_truncated: first.output_truncated,
     created_at: createdAt,
+    ...(first.details_hidden ? { detailsHidden: true } : {}),
   };
 }
 

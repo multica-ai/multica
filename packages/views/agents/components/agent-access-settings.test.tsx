@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
@@ -40,11 +40,22 @@ function agent(overrides: Partial<Agent>): Agent {
   } as Agent;
 }
 
-function renderSettings(value: Agent) {
+type UpdateAgent = (id: string, data: Record<string, unknown>) => Promise<void>;
+
+function renderSettings(
+  value: Agent,
+  { canEdit = true, onUpdate = vi.fn<UpdateAgent>() }: { canEdit?: boolean; onUpdate?: UpdateAgent } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
     <QueryClientProvider client={qc}>
-      <AgentAccessSettings agent={value} members={MEMBERS} currentUserId="owner" onUpdate={vi.fn()} />
+      <AgentAccessSettings
+        agent={value}
+        members={MEMBERS}
+        currentUserId="owner"
+        canEdit={canEdit}
+        onUpdate={onUpdate}
+      />
     </QueryClientProvider>,
   );
 }
@@ -77,5 +88,48 @@ describe("AgentAccessSettings plan access", () => {
     expect(await screen.findByText("Read-only. Upgrade to edit.")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Alice/i })).toBeChecked();
     expect(screen.queryByRole("checkbox", { name: /Bob/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentAccessSettings run logs", () => {
+  beforeEach(() => {
+    setApiInstance({
+      getWorkspaceFeatures: vi.fn(async () => ({ features: { agent_invocation_members: "available" } })),
+    } as unknown as ApiClient);
+  });
+  afterEach(cleanup);
+
+  it("restricts tool details when switched on", async () => {
+    const onUpdate = vi.fn(async () => {});
+    renderSettings(agent({}), { onUpdate });
+    const toggle = screen.getByRole("switch", { name: "Restrict tool details" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+
+    expect(onUpdate).toHaveBeenCalledWith("a1", { tool_details_visibility: "restricted" });
+  });
+
+  it("lifts the restriction when switched off", () => {
+    const onUpdate = vi.fn(async () => {});
+    renderSettings(agent({ tool_details_visibility: "restricted" }), { onUpdate });
+    const toggle = screen.getByRole("switch", { name: "Restrict tool details" });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+
+    expect(onUpdate).toHaveBeenCalledWith("a1", { tool_details_visibility: "everyone" });
+  });
+
+  it("is read-only for someone who cannot manage the agent", () => {
+    const onUpdate = vi.fn(async () => {});
+    renderSettings(agent({ tool_details_visibility: "restricted" }), { canEdit: false, onUpdate });
+    const toggle = screen.getByRole("switch", { name: "Restrict tool details" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toHaveAttribute("data-disabled");
+
+    fireEvent.click(toggle);
+
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

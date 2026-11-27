@@ -29,6 +29,7 @@ import {
   Coins,
   GitBranch,
   Trash2,
+  Lock,
 } from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -606,6 +607,10 @@ export function AgentTranscriptDialog({
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
   const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
+  // Hidden: the server withheld some of this run's tool details from the
+  // viewer. Restricted alone: the viewer is one of the people allowed them.
+  const toolDetailsHidden = useMemo(() => items.some((item) => item.detailsHidden), [items]);
+  const toolDetailsRestricted = agentInfo?.tool_details_visibility === "restricted";
 
   const selectedStep = useMemo(() => {
     if (selectedSeq === null) return null;
@@ -1207,7 +1212,9 @@ export function AgentTranscriptDialog({
         <RunTriggerRow task={task} />
 
         {/* ── What the run produced ──────────────────────────────────── */}
-        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+        {/* Read off the tool inputs, so it has nothing true to say when those
+            were withheld. */}
+        {!toolDetailsHidden && <RunOutcomeRow outcome={outcome} branch={task.branch_name} />}
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (
@@ -1238,7 +1245,21 @@ export function AgentTranscriptDialog({
               className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
             />
           </label>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+          {(toolDetailsHidden || toolDetailsRestricted) && (
+            <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-caption text-muted-foreground">
+              <Lock aria-hidden className="h-3 w-3" />
+              {toolDetailsHidden
+                ? t(($) => $.transcript.tool_details_hidden_toolbar)
+                : t(($) => $.transcript.tool_details_restricted_toolbar)}
+              <span aria-hidden className="text-faint-foreground">·</span>
+            </span>
+          )}
+          <span
+            className={cn(
+              "shrink-0 whitespace-nowrap text-caption text-muted-foreground",
+              !(toolDetailsHidden || toolDetailsRestricted) && "ml-auto",
+            )}
+          >
             {activeFilterKeys.length > 0 || trimmedQuery.length > 0
               ? t(($) => $.transcript.steps_filtered, {
                   shown: filteredSteps.length,
@@ -1811,7 +1832,7 @@ function StepRow({
             call && "font-mono",
           )}
         >
-          {summary}
+          {call && callDetailsHidden(call) ? <HiddenDetails /> : summary}
         </span>
       </span>
       <DurationCell ms={call?.durationMs} pending={pending} />
@@ -1862,7 +1883,7 @@ function GroupRow({
           {/* Name the first thing it touched, not just how many: "Read · 4
               calls" hides the one detail that makes a folded group scannable. */}
           <span className="truncate font-mono text-micro text-muted-foreground">
-            {callSummary(row.steps[0]!, summaryLabels)}
+            {callDetailsHidden(row.steps[0]!) ? <HiddenDetails /> : callSummary(row.steps[0]!, summaryLabels)}
           </span>
           <span className="shrink-0 text-micro text-faint-foreground">
             {t(($) => $.transcript.group_calls, { count: row.steps.length })}
@@ -1887,7 +1908,7 @@ function GroupRow({
                 )}
               >
                 <span className="truncate font-mono text-muted-foreground">
-                  {callSummary(step, summaryLabels) || step.tool}
+                  {callDetailsHidden(step) ? <HiddenDetails /> : callSummary(step, summaryLabels) || step.tool}
                 </span>
                 {step.durationMs === undefined ? (
                   <span className="ml-auto shrink-0" />
@@ -1928,6 +1949,22 @@ function firstLineOf(value: string | undefined): string {
   return value?.split("\n").find((line) => line.trim().length > 0) ?? "";
 }
 
+/** The agent restricts its tool details and the server withheld this call's. */
+function callDetailsHidden(step: TraceCallStep): boolean {
+  return step.call?.detailsHidden === true || step.result?.detailsHidden === true;
+}
+
+/** Stands in for a call's argument when the viewer may not read it. */
+function HiddenDetails() {
+  const { t } = useT("agents");
+  return (
+    <span className="inline-flex items-center gap-1 font-sans text-faint-foreground">
+      <Lock aria-hidden className="h-3 w-3" />
+      {t(($) => $.transcript.tool_details_hidden_value)}
+    </span>
+  );
+}
+
 // ─── Inspector ──────────────────────────────────────────────────────────────
 
 /**
@@ -1954,6 +1991,7 @@ function StepInspector({
 
   const call = isCallStep(step) ? step : null;
   const message = call ? null : (step as TraceMessageStep);
+  const detailsHidden = call !== null && callDetailsHidden(call);
 
   const handleCopy = useCallback(() => {
     const parts: string[] = [];
@@ -1999,16 +2037,18 @@ function StepInspector({
             </>
           )}
         </span>
-        <IconButton
-          variant="ghost"
-          size="icon-sm"
-          onClick={handleCopy}
-          label={t(($) => $.transcript.copy_step)}
-          tooltipSide="bottom"
-          className="shrink-0 text-muted-foreground"
-        >
-          <CopyCheckIcon copied={copied} />
-        </IconButton>
+        {!detailsHidden && (
+          <IconButton
+            variant="ghost"
+            size="icon-sm"
+            onClick={handleCopy}
+            label={t(($) => $.transcript.copy_step)}
+            tooltipSide="bottom"
+            className="shrink-0 text-muted-foreground"
+          >
+            <CopyCheckIcon copied={copied} />
+          </IconButton>
+        )}
         <IconButton
           variant="ghost"
           size="icon-sm"
@@ -2027,7 +2067,17 @@ function StepInspector({
           animate={{ opacity: 1 }}
           transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
         >
-          {call ? (
+          {detailsHidden ? (
+            <div className="flex flex-col items-center gap-1.5 px-6 py-12 text-center">
+              <Lock aria-hidden className="mb-1 h-4 w-4 text-faint-foreground" />
+              <p className="text-caption font-medium text-foreground">
+                {t(($) => $.transcript.tool_details_hidden_title)}
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.transcript.tool_details_hidden_body)}
+              </p>
+            </div>
+          ) : call ? (
             <>
               {call.call && (
                 <InspectorSection label={t(($) => $.transcript.step_input)}>

@@ -135,7 +135,11 @@ type AgentResponse struct {
 	// mirroring the existing mcp_config redaction contract.
 	ComposioToolkitAllowlist         []string               `json:"composio_toolkit_allowlist,omitempty"`
 	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
-	OwnerID                          *string                `json:"owner_id"`
+	// ToolDetailsVisibility is who can read the inputs and outputs of the
+	// agent's tool calls in its run logs: "everyone" who can see the run, or
+	// "restricted" to the agent's owner and workspace owners/admins.
+	ToolDetailsVisibility string              `json:"tool_details_visibility"`
+	OwnerID               *string             `json:"owner_id"`
 	Skills                           []AgentSkillSummary    `json:"skills"`
 	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
 	CreatedAt                        string                 `json:"created_at"`
@@ -236,6 +240,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
 		ComposioToolkitAllowlist: composioAllowlist,
+		ToolDetailsVisibility:    a.ToolDetailsVisibility,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
 		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
@@ -1896,6 +1901,10 @@ type UpdateAgentRequest struct {
 	// null" (a *[]string can't, because a nil pointer is the same wire
 	// representation as both). MUL-3869.
 	ComposioToolkitAllowlist *[]string `json:"composio_toolkit_allowlist"`
+	// ToolDetailsVisibility is "everyone" or "restricted". Only a person may
+	// change it: it decides who reads the agent's tool calls, so neither the
+	// agent itself nor any other machine credential gets to widen that.
+	ToolDetailsVisibility *string `json:"tool_details_visibility"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -2106,6 +2115,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
+	}
+	if req.ToolDetailsVisibility != nil {
+		if !validToolDetailsVisibility(*req.ToolDetailsVisibility) {
+			writeError(w, http.StatusBadRequest, `tool_details_visibility must be "everyone" or "restricted"`)
+			return
+		}
+		if actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID)); isMachineCredentialActor(r) || actorType != "member" {
+			writeError(w, http.StatusForbidden, "only a person can change who sees this agent's tool details")
+			return
+		}
+		params.ToolDetailsVisibility = pgtype.Text{String: *req.ToolDetailsVisibility, Valid: true}
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}

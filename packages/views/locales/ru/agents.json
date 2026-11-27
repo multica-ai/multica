@@ -927,7 +927,10 @@
     "trigger_members_count_one": "{{count}} участник",
     "trigger_members_count_few": "{{count}} участников",
     "trigger_members_count_many": "{{count}} участников",
-    "trigger_members_count_other": "{{count}} участников"
+    "trigger_members_count_other": "{{count}} участников",
+    "run_logs_title": "Журналы запусков",
+    "restrict_tool_details_label": "Ограничить сведения об инструментах",
+    "restrict_tool_details_desc": "Входные и выходные данные инструментов в запусках агента видят только его владелец и администраторы рабочего пространства. Остальные видят, какие инструменты запускались и сколько это заняло."
   },
   "profile_card": {
     "unavailable": "Агент недоступен",
@@ -1093,7 +1096,12 @@
     "context_receipt_package": "Пакет",
     "context_receipt_instruction_file_bytes": "Файлы инструкций: {{size}}",
     "context_receipt_skill_package_bytes": "Пакеты навыков: {{size}}",
-    "context_receipt_other_file_bytes": "Другие файлы: {{size}}"
+    "context_receipt_other_file_bytes": "Другие файлы: {{size}}",
+    "tool_details_hidden_value": "Скрыто",
+    "tool_details_hidden_title": "Входные и выходные данные инструмента скрыты",
+    "tool_details_hidden_body": "Их видят только владелец этого агента и администраторы рабочего пространства.",
+    "tool_details_hidden_toolbar": "Сведения об инструментах скрыты",
+    "tool_details_restricted_toolbar": "Сведения об инструментах видны только владельцу и администраторам"
   },
   "task_failure": {
     "cancelled_by_system": "Отменено системой",

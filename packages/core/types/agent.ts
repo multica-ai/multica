@@ -7,6 +7,13 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+/**
+ * Who can read the inputs and outputs of an agent's tool calls in its run
+ * logs: everyone who can see the run, or only the agent's owner and workspace
+ * owners/admins.
+ */
+export type AgentToolDetailsVisibility = "everyone" | "restricted";
+
 // Agent invocation permissions (MUL-3963)
 //
 // `permission_mode` + `invocation_targets` are the AUTHORITATIVE gate for who
@@ -666,6 +673,12 @@ export interface Agent {
    * field; treat `undefined` as false.
    */
   composio_toolkit_allowlist_redacted?: boolean;
+  /**
+   * Who can read the inputs and outputs of the agent's tool calls in its run
+   * logs. Older backends omit it; anything but "restricted" means everyone
+   * who can see the run.
+   */
+  tool_details_visibility?: AgentToolDetailsVisibility;
   visibility: AgentVisibility;
   /**
    * Authoritative invocation permission mode (MUL-3963). The `visibility`
@@ -851,6 +864,8 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  /** Agent owner or workspace owner/admin only. See `Agent.tool_details_visibility`. */
+  tool_details_visibility?: AgentToolDetailsVisibility;
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;

@@ -106,6 +106,28 @@ describe("mergeTaskMessagesBySeq", () => {
     expect(mergeTaskMessagesBySeq(existing, [])).toBe(existing);
     expect(mergeTaskMessagesBySeq(existing, [msg(1), msg(2)])).toBe(existing);
   });
+
+  // A restricted agent's tool call reaches a reader twice: stripped through
+  // the workspace, whole through their own scope, in either order.
+  describe("a tool call sent both with and without its details", () => {
+    const hidden: TaskMessagePayload = { ...msg(2), type: "tool_use", tool: "Bash", content: undefined, details_hidden: true };
+    const whole: TaskMessagePayload = { ...msg(2), type: "tool_use", tool: "Bash", content: undefined, input: { command: "env" } };
+
+    it("keeps the whole call when it arrives second", () => {
+      const merged = mergeTaskMessagesBySeq([msg(1), hidden], [whole]);
+      expect(merged.find((m) => m.seq === 2)).toBe(whole);
+    });
+
+    it("keeps the whole call when the stripped one arrives second", () => {
+      const existing = [msg(1), whole];
+      expect(mergeTaskMessagesBySeq(existing, [hidden])).toBe(existing);
+    });
+
+    it("keeps the whole call when both land in one batch", () => {
+      expect(mergeTaskMessagesBySeq([msg(1)], [whole, hidden]).find((m) => m.seq === 2)).toBe(whole);
+      expect(mergeTaskMessagesBySeq([msg(1)], [hidden, whole]).find((m) => m.seq === 2)).toBe(whole);
+    });
+  });
 });
 
 describe("sortChatSessions", () => {

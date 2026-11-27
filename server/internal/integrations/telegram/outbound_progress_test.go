@@ -415,6 +415,23 @@ func TestStepForShowsArgumentsByModeAndChat(t *testing.T) {
 	}
 }
 
+// An agent that restricts its tool details shows a chat which tools ran and
+// nothing they were given, even in the private chat that would show more.
+func TestOutboundStepsOmitRestrictedToolDetails(t *testing.T) {
+	h := newProgressHarness(t, channel.ChatTypeP2P)
+	h.text("I will check the deploy config.")
+
+	h.openEditSlot()
+	frame := toolFrame(h.taskID, "exec_command", map[string]any{"command": "cat ~/.ssh/config"})
+	frame.ToolDetailsRestricted = true
+	h.o.handleTaskMessage(frame)
+
+	want := "I will check the deploy config.\n\n<blockquote>💻 Running a command</blockquote>"
+	if got := h.last(2); clockless(got.text) != want {
+		t.Fatalf("step = %q\nwant %q", got.text, want)
+	}
+}
+
 // A long command keeps both ends: what it is, and what it is aimed at.
 func TestStepForClipsALongCommandInTheMiddle(t *testing.T) {
 	command := "go test -race -count=1 " + strings.Repeat("-tags=integration ", 5) + "./internal/integrations/telegram/..."

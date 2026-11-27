@@ -711,7 +711,10 @@
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
     "composio_switch_hint": "注意: このエージェントでは連携アプリが有効になっています。共有すると、アクセス権を持つメンバーがこのエージェント経由でそれらのアプリを利用できるようになります。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "run_logs_title": "実行ログ",
+    "restrict_tool_details_label": "ツールの詳細を制限",
+    "restrict_tool_details_desc": "実行中のツールの入力と出力は、エージェントのオーナーとワークスペース管理者のみが閲覧できます。他のメンバーには、実行されたツールと所要時間のみが表示されます。"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",
@@ -862,7 +865,12 @@
     "context_receipt_package": "パッケージ",
     "context_receipt_instruction_file_bytes": "指示ファイル：{{size}}",
     "context_receipt_skill_package_bytes": "スキルパッケージ：{{size}}",
-    "context_receipt_other_file_bytes": "その他のファイル：{{size}}"
+    "context_receipt_other_file_bytes": "その他のファイル：{{size}}",
+    "tool_details_hidden_value": "非表示",
+    "tool_details_hidden_title": "ツールの入力と出力は非表示です",
+    "tool_details_hidden_body": "このエージェントのオーナーとワークスペース管理者のみが閲覧できます。",
+    "tool_details_hidden_toolbar": "ツールの詳細は非表示",
+    "tool_details_restricted_toolbar": "ツールの詳細はオーナーと管理者のみに表示"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

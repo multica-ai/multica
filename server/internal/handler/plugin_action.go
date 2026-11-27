@@ -537,6 +537,13 @@ func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request)
 		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list task messages")
 		return
 	}
+	// A plugin is code, not one of the people an agent's tool details are
+	// restricted to, even when it acts for one of them.
+	audience, err := h.loadToolDetailsAudience(r.Context(), task.AgentID)
+	if err != nil && !isNotFound(err) {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list task messages")
+		return
+	}
 
 	includeThinking := r.URL.Query().Get("include") != "thinking=false"
 	issueID := ""
@@ -548,7 +555,7 @@ func (h *Handler) ListPluginTaskMessages(w http.ResponseWriter, r *http.Request)
 		if !includeThinking && m.Type == "thinking" {
 			continue
 		}
-		resp = append(resp, taskMessageToPayload(m, taskID, issueID))
+		resp = append(resp, audience.payloadFor("", taskMessageToPayload(m, taskID, issueID)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": resp})
 }

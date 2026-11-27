@@ -6138,6 +6138,12 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if task.ChatSessionID.Valid {
 			chatSessionID = uuidToString(task.ChatSessionID)
 		}
+		// One indexed read per batch. A failed read restricts the batch to
+		// nobody rather than guessing the agent allows everyone.
+		audience, err := h.loadToolDetailsAudience(r.Context(), task.AgentID)
+		if err != nil && !isNotFound(err) {
+			slog.Warn("load tool details audience failed", "task_id", taskID, "error", err)
+		}
 		for _, m := range created {
 			// The ordered CTE makes sqlc name the row type after the query
 			// rather than reusing the table model; the columns are the table's,
@@ -6149,8 +6155,10 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 				ActorType:          "system",
 				TaskID:             taskID,
 				ChatSessionID:      chatSessionID,
-				ChatSessionOwnerID: scope.ChatSessionOwnerID,
-				Payload:            taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)),
+				ChatSessionOwnerID:    scope.ChatSessionOwnerID,
+				Payload:               taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)),
+				ToolDetailsRestricted: audience.restricted,
+				ToolDetailReaders:     audience.readers,
 			})
 		}
 	}
@@ -6926,12 +6934,21 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")
 		return
 	}
+	audience, err := h.loadToolDetailsAudience(r.Context(), task.AgentID)
+	if err != nil && !isNotFound(err) {
+		writeError(w, http.StatusInternalServerError, "failed to list task messages")
+		return
+	}
+	reader := ""
+	if audience.restricted {
+		reader = h.toolDetailsReader(r, middleware.WorkspaceIDFromContext(r.Context()))
+	}
 
 	issueID := uuidToString(task.IssueID)
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		resp[i] = taskMessageToPayload(m, taskID, issueID)
+		resp[i] = audience.payloadFor(reader, taskMessageToPayload(m, taskID, issueID))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
