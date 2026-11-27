@@ -49,6 +49,7 @@
     "dingtalk-bot-integration",
     "telegram-bot-integration",
     "weixin-bot-integration",
+    "sharecrm-bot-integration",
     "github-integration",
     "vcs-integration",
     "---Applications---",

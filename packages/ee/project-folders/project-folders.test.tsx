@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { EMPTY_PROJECT } from "@multica/core/api/schemas";
@@ -17,6 +18,7 @@ import type { ProjectFolderList } from "./data";
 import { useFolderDialogStore, useProjectFoldersState } from "./state";
 
 const ws = vi.hoisted(() => ({ handlers: new Map<string, () => void>() }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/realtime", () => ({
   useWSEvent: (event: string, handler: () => void) => ws.handlers.set(event, handler),
@@ -70,6 +72,8 @@ beforeEach(() => {
   });
   setApiInstance({ request } as unknown as ApiClient);
   useFolderDialogStore.getState().close();
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
 });
 afterEach(() => {
   qc.clear();
@@ -154,6 +158,60 @@ it("creates a folder from the add menu", async () => {
       body: JSON.stringify({ name: "Partners" }),
     }),
   );
+});
+
+it("shows the move toast after the menu unmounts", async () => {
+  let finish!: () => void;
+  request.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path === "/api/project-folders/file") {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return undefined;
+    }
+    if (path === "/api/project-folders" && !init) return list;
+    return undefined;
+  });
+  function MenuThenGone() {
+    const [shown, setShown] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setShown(false)}>
+          Hide menu
+        </button>
+        {shown ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger>Open</DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <ProjectMenuItems project={project} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <span>Menu gone</span>
+        )}
+      </>
+    );
+  }
+  renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <MenuThenGone />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Move to folder" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Sales" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith("/api/project-folders/file", {
+      method: "POST",
+      body: JSON.stringify({ project_id: "p1", folder_id: "f2" }),
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Hide menu" }));
+  expect(screen.getByText("Menu gone")).toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalled();
+
+  act(() => finish());
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Moved to Sales"));
 });
 
 it("moves a project out of its folder", async () => {
@@ -242,6 +300,10 @@ it("refetches folders when another member changes them", async () => {
   const calls = request.mock.calls.length;
   act(() => ws.handlers.get("project_folder:filed")!());
   await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(calls));
+
+  const afterFiled = request.mock.calls.length;
+  act(() => ws.handlers.get("project:members_changed")!());
+  await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(afterFiled));
 });
 
 it("registers the folder extension in the app", () => {

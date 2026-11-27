@@ -50,6 +50,7 @@ import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
 import { wecomKeys } from "../wecom/queries";
 import { telegramKeys } from "../telegram/queries";
+import { sharecrmKeys } from "../sharecrm/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -1083,6 +1084,10 @@ export function useRealtimeSync(
       dingtalk_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
+      },
+      sharecrm_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: sharecrmKeys.installations(wsId) });
       },
       vcs_connection: () => {
         const wsId = getCurrentWsId();

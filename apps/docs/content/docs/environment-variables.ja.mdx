@@ -193,8 +193,11 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 新規接続で installation の管理権限確認に必須。PR カードとリポジトリ一覧にも使用 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
+| DingTalk | `MULTICA_DINGTALK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー。空だと DingTalk は無効 |
+| WeCom | `MULTICA_WECOM_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー。空だと WeCom は無効 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat の認証情報と QR 状態を暗号化する Base64 エンコードの 32 バイトキー |
+| ShareCRM | `MULTICA_SHARECRM_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー。空だと ShareCRM は無効 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | ストリーミング返信に表示するツールのステップ。`auto`（既定。DM では詳細、グループでは作業の種類のみ）、`off`、`summary`、`detail` |
 | セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
 | セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
@@ -202,7 +205,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージ時のステータス変更は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
-設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)、[Telegram Bot](/telegram-bot-integration#管理とセルフホスティング)を参照してください。
+設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)、[DingTalk Bot](/dingtalk-bot-integration#セルフホスト設定)、[Telegram Bot](/telegram-bot-integration#管理とセルフホスティング)、[ShareCRM Bot](/sharecrm-bot-integration#セルフホスト設定)、[チャット連携](/channels#セルフホスト)を参照してください。
 
 ## サーバーサイド LLM
 

@@ -125,12 +125,16 @@ function useWakeupText() {
 
 function useCancel(sessionId: string) {
   const { t } = useT("chat");
-  const cancel = useCancelChatWakeup();
-  return (wakeupId: string) =>
-    cancel.mutate(
-      { sessionId, wakeupId },
-      { onError: () => toast.error(t(($) => $.wakeup.cancel_failed)) },
-    );
+  const { mutateAsync } = useCancelChatWakeup();
+  // The optimistic status change moves the row out of the active list, and
+  // cancelling the only active wakeup unmounts the strip. Per-call mutate
+  // callbacks are dropped with that observer, so the failure toast follows
+  // the request promise.
+  return (wakeupId: string) => {
+    mutateAsync({ sessionId, wakeupId }).catch(() => {
+      toast.error(t(($) => $.wakeup.cancel_failed));
+    });
+  };
 }
 
 function useRetry(sessionId: string) {
@@ -138,11 +142,11 @@ function useRetry(sessionId: string) {
   const retry = useRetryChatWakeup();
   return {
     pending: retry.isPending,
-    run: (wakeupId: string) =>
-      retry.mutate(
-        { sessionId, wakeupId },
-        { onError: () => toast.error(t(($) => $.wakeup.retry_failed)) },
-      ),
+    run: (wakeupId: string) => {
+      retry.mutateAsync({ sessionId, wakeupId }).catch(() => {
+        toast.error(t(($) => $.wakeup.retry_failed));
+      });
+    },
   };
 }
 

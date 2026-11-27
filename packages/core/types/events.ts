@@ -79,6 +79,7 @@ export type WSEventType =
   | "project:created"
   | "project:updated"
   | "project:deleted"
+  | "project:members_changed"
   | "squad:created"
   | "squad:updated"
   | "squad:deleted"
@@ -631,6 +632,10 @@ export interface ProjectDeletedPayload {
   project_id: string;
 }
 
+export interface ProjectMembersChangedPayload {
+  project_id: string;
+}
+
 export interface InvitationCreatedPayload {
   invitation: Invitation;
   workspace_name?: string;
@@ -745,6 +750,7 @@ export interface WSEventPayloadMap {
   "project:created": ProjectCreatedPayload;
   "project:updated": ProjectUpdatedPayload;
   "project:deleted": ProjectDeletedPayload;
+  "project:members_changed": ProjectMembersChangedPayload;
   "invitation:created": InvitationCreatedPayload;
   "invitation:accepted": InvitationAcceptedPayload;
   "invitation:declined": InvitationDeclinedPayload;

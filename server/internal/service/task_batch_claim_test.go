@@ -288,7 +288,12 @@ func TestClaimTasksForRuntimes_EmptyReclaimDefersHintForRetry(t *testing.T) {
 		t.Fatalf("read deferred hint: %v", err)
 	}
 	retryAt := time.UnixMilli(int64(score))
-	if retryAt.Before(now.Add(ReclaimCheckRetryInterval)) || retryAt.After(time.Now().Add(ReclaimCheckRetryInterval+time.Second)) {
+	// Redis stores the score with UnixMilli, which truncates sub-millisecond
+	// time. A nanosecond lower bound in the same millisecond is later than the
+	// stored hint and makes Before report a false miss.
+	lowerMillis := now.Add(ReclaimCheckRetryInterval).UnixMilli()
+	upperMillis := time.Now().Add(ReclaimCheckRetryInterval + time.Second).UnixMilli()
+	if got := int64(score); got < lowerMillis || got > upperMillis {
 		t.Fatalf("retry hint = %v, want approximately one retry interval after the check", retryAt)
 	}
 	if due := svc.ReclaimCheck.DueRuntimeIDs(ctx, []string{rt1}, retryAt.Add(-time.Millisecond)); len(due) != 0 {
