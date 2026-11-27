@@ -756,6 +756,7 @@ func codexStaticModels() []Model {
 	}
 	return []Model{
 		{ID: "gpt-6-astra", Label: "GPT-6 Astra", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-6.2-astra", Label: "GPT-6.2 Astra", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-6.1-sol", Label: "GPT-6.1 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-6.1-terra", Label: "GPT-6.1 Terra", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-6-sol", Label: "GPT-6 Sol", Provider: "openai", Thinking: standardThinking("medium", true, true)},

@@ -59,12 +59,15 @@ func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 }
 
 func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
-	// OpenAI's standard short-context rates: cache read = 0.1x input (90%
-	// cached-input discount; 0.05x on GPT-6.1), cache write = 1.25x input.
+	// OpenAI's standard short-context rates include 30-minute cache writes.
 	cases := []struct {
 		model string
 		want  ModelPrice
 	}{
+		{
+			model: "openai:gpt-6.2-astra[1m]",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.2-astra", InputPerM: 8, CacheReadPerM: 0.4, CacheWritePerM: 10, OutputPerM: 40},
+		},
 		{
 			model: "gpt-6-astra",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-6-astra", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50},
@@ -137,6 +140,8 @@ func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 	// slug is always dotted and the frontend does not dash-normalize, so both
 	// sides surface these as unmapped instead of silently pricing them.
 	for _, model := range []string{
+		"gpt-6-2-astra",
+		"gpt-6.2-astra-pro",
 		"gpt-6-astra-pro",
 		"gpt-6.1-sol-pro",
 		"gpt-6-1-sol",

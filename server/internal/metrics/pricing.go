@@ -33,7 +33,8 @@ var modelPrices = map[string]ModelPrice{
 	// the collector normalizes those into mutually exclusive billing buckets.
 	"openai:gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	// Standard short-context rates from developers.openai.com/api/docs/models/.
-	// GPT-6.1 Sol and Terra cache at 0.05x input, not GPT-6 Sol's 0.1x.
+	// Cache reads for GPT-6.2 Astra and GPT-6.1 Sol/Terra cost 5% of input.
+	"openai:gpt-6.2-astra": {Provider: "openai", Model: "gpt-6.2-astra", InputPerM: 8.00, CacheReadPerM: 0.40, CacheWritePerM: 10.00, OutputPerM: 40.00},
 	"openai:gpt-6.1-sol":   {Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2.00, CacheReadPerM: 0.10, CacheWritePerM: 2.50, OutputPerM: 10.00},
 	"openai:gpt-6.1-terra": {Provider: "openai", Model: "gpt-6.1-terra", InputPerM: 1.00, CacheReadPerM: 0.05, CacheWritePerM: 1.25, OutputPerM: 5.00},
 	"openai:gpt-6-sol":     {Provider: "openai", Model: "gpt-6-sol", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
@@ -213,6 +214,7 @@ var modelAliasRules = []struct {
 	// slug is always dotted (`gpt-5.6-luna`), and the frontend resolver in
 	// utils.ts does NOT dash-normalize, so a dashed `gpt-5-6-luna` must surface
 	// as unmapped on both sides rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)gpt-6\.2-astra$`), "openai:gpt-6.2-astra"},
 	{regexp.MustCompile(`(^|/|:)gpt-6-astra$`), "openai:gpt-6-astra"},
 	{regexp.MustCompile(`(^|/|:)gpt-6\.1-sol$`), "openai:gpt-6.1-sol"},
 	{regexp.MustCompile(`(^|/|:)gpt-6\.1-terra$`), "openai:gpt-6.1-terra"},
