@@ -167,6 +167,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 託管 Redis 禁止 `CLIENT SETNAME` 時設為 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 單 IP 每分鐘傳送驗證碼或發起 Google 登入的次數 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 單 IP 每分鐘驗證驗證碼的次數 |
+| `RATE_LIMIT_DEVICE_START` | `30` | 單 IP 每分鐘發起裝置登入（`multica login --device`）的次數 |
+| `RATE_LIMIT_DEVICE_POLL` | `600` | 單 IP 每分鐘輪詢裝置登入權杖的次數（CLI 每 5 秒輪詢一次） |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 每位邀請人在 10 分鐘滑動視窗內可建立的工作區邀請數；設為 `0` 可關閉此項限流 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 同一工作區內所有管理員在 24 小時滑動視窗內可建立的邀請總數；設為 `0` 可關閉此項限流 |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 同一規範化收件信箱跨工作區在 24 小時滑動視窗內可收到的邀請數；設為 `0` 可關閉此項限流 |

@@ -171,6 +171,8 @@ Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Définissez `true` lorsqu'un Redis managé bloque `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Requêtes par minute et par IP pour envoyer un code de vérification ou lancer la connexion avec Google |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Vérifications de code par minute et par IP |
+| `RATE_LIMIT_DEVICE_START` | `30` | Démarrages de connexion d'appareil (`multica login --device`) par minute et par IP |
+| `RATE_LIMIT_DEVICE_POLL` | `600` | Interrogations du jeton de connexion d'appareil par minute et par IP (le CLI interroge toutes les 5 secondes) |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Invitations à l'espace de travail que chaque personne qui invite peut créer par fenêtre glissante de 10 minutes ; `0` désactive cette limite |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Invitations que l'ensemble des administrateurs peuvent créer par espace de travail et par fenêtre glissante de 24 heures ; `0` désactive cette limite |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations qu'une même adresse e-mail destinataire normalisée peut recevoir, tous espaces de travail confondus, par fenêtre glissante de 24 heures ; `0` désactive cette limite |

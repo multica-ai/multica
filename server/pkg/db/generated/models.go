@@ -859,6 +859,21 @@ type DashboardRangeView struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DeviceAuthorization struct {
+	ID              pgtype.UUID        `json:"id"`
+	DeviceCodeHash  string             `json:"device_code_hash"`
+	UserCodeHash    string             `json:"user_code_hash"`
+	ClientName      string             `json:"client_name"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	Status          string             `json:"status"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	IntervalSeconds int32              `json:"interval_seconds"`
+	LastPolledAt    pgtype.Timestamptz `json:"last_polled_at"`
+	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type DingtalkBotIdentity struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   pgtype.UUID        `json:"installation_id"`

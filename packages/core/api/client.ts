@@ -336,6 +336,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { DeviceApprovalSchema, DeviceAuthorizationSchema } from "./device-auth-schema";
 import { getApiRequestObserver } from "./request-observer";
 import {
   RuntimeProfileSchema,
@@ -1486,6 +1487,33 @@ export class ApiClient {
       EMPTY_REFRESH_SESSION_RESPONSE,
       { endpoint: "POST /api/auth/refresh" },
     );
+  }
+
+  // Device authorization flow (`multica login --device`): approve the short
+  // code shown in the CLI from the current signed-in session.
+  async approveDeviceAuthorization(userCode: string): Promise<void> {
+    const raw = await this.fetch<unknown>("/api/device/approve", {
+      method: "POST",
+      body: JSON.stringify({ user_code: userCode }),
+    });
+    const result = parseWithFallback<{ status: "approved" } | null>(raw, DeviceApprovalSchema, null, {
+      endpoint: "POST /api/device/approve",
+    });
+    if (!result) throw new Error("Invalid device approval response");
+  }
+
+  // Look up the machine behind a pending code so the user can confirm it
+  // before approving. Does not change the code's state.
+  async inspectDeviceAuthorization(userCode: string): Promise<{ client_name: string }> {
+    const raw = await this.fetch<unknown>("/api/device/inspect", {
+      method: "POST",
+      body: JSON.stringify({ user_code: userCode }),
+    });
+    const result = parseWithFallback<{ client_name: string } | null>(raw, DeviceAuthorizationSchema, null, {
+      endpoint: "POST /api/device/inspect",
+    });
+    if (!result) throw new Error("Invalid device details response");
+    return result;
   }
 
   async getMe(): Promise<User> {

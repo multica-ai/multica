@@ -171,6 +171,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
 | `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |
+| `RATE_LIMIT_DEVICE_START` | `30` | IP당 1분에 기기 로그인(`multica login --device`) 시작 허용 횟수 |
+| `RATE_LIMIT_DEVICE_POLL` | `600` | IP당 1분에 기기 로그인 토큰 확인 허용 횟수 (CLI는 5초마다 확인) |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 초대자별 10분 슬라이딩 윈도 내 워크스페이스 초대 생성 횟수. `0`이면 이 제한을 비활성화 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 워크스페이스의 모든 관리자가 24시간 슬라이딩 윈도 내 생성할 수 있는 총 초대 수. `0`이면 이 제한을 비활성화 |
 | `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 정규화된 동일 수신 이메일이 워크스페이스 전체에서 24시간 슬라이딩 윈도 내 받을 수 있는 초대 수. `0`이면 이 제한을 비활성화 |
