@@ -350,29 +350,20 @@ function AppRequestCard({
         return;
       }
     }
-    decide.mutate(
-      { id: request.id, decision: "approve", arguments: args },
-      {
-        onSuccess: () => toast.success(t(($) => $.connected_apps.request.toast_approved)),
-        onError: (e) => toast.error(approveErrorMessage(e, t)),
-      },
+    void decide.mutateAsync({ id: request.id, decision: "approve", arguments: args }).then(
+      () => toast.success(t(($) => $.connected_apps.request.toast_approved)),
+      (e) => toast.error(approveErrorMessage(e, t)),
     );
   };
   const reject = () =>
-    decide.mutate(
-      { id: request.id, decision: "reject", reason: reason.trim() || undefined },
-      {
-        onSuccess: () => toast.success(t(($) => $.connected_apps.request.toast_rejected)),
-        onError: () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
-      },
+    void decide.mutateAsync({ id: request.id, decision: "reject", reason: reason.trim() || undefined }).then(
+      () => toast.success(t(($) => $.connected_apps.request.toast_rejected)),
+      () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
     );
   const withdraw = () =>
-    decide.mutate(
-      { id: request.id, decision: "reject" },
-      {
-        onSuccess: () => toast.success(t(($) => $.connected_apps.account_row.toast_withdrawn)),
-        onError: () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
-      },
+    void decide.mutateAsync({ id: request.id, decision: "reject" }).then(
+      () => toast.success(t(($) => $.connected_apps.account_row.toast_withdrawn)),
+      () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
     );
   const statusLabel = (status: string) => {
     switch (status) {
