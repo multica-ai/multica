@@ -106,3 +106,96 @@ func TestLoadKey(t *testing.T) {
 		}
 	})
 }
+
+func randomKey(t *testing.T) []byte {
+	t.Helper()
+	key := make([]byte, KeySize)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	return key
+}
+
+func TestPreviousKeyOpensOldCiphertext(t *testing.T) {
+	oldKey, newKey := randomKey(t), randomKey(t)
+	oldBox, err := New(oldKey)
+	if err != nil {
+		t.Fatalf("New(old): %v", err)
+	}
+	legacy, err := oldBox.Seal([]byte("legacy secret"))
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	rotated, err := New(newKey, oldKey)
+	if err != nil {
+		t.Fatalf("New(new, old): %v", err)
+	}
+	opened, err := rotated.Open(legacy)
+	if err != nil {
+		t.Fatalf("Open legacy: %v", err)
+	}
+	if string(opened) != "legacy secret" {
+		t.Fatalf("Open legacy = %q", opened)
+	}
+	if rotated.SealedWithCurrent(legacy) {
+		t.Fatal("legacy ciphertext reported as sealed with current key")
+	}
+
+	fresh, err := rotated.Seal([]byte("fresh secret"))
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if !rotated.SealedWithCurrent(fresh) {
+		t.Fatal("fresh ciphertext not reported as sealed with current key")
+	}
+	if _, err := oldBox.Open(fresh); err == nil {
+		t.Fatal("old key opened ciphertext sealed after rotation")
+	}
+
+	// Once the previous key is dropped, only re-encrypted rows still open.
+	newOnly, err := New(newKey)
+	if err != nil {
+		t.Fatalf("New(new): %v", err)
+	}
+	if _, err := newOnly.Open(legacy); err == nil {
+		t.Fatal("new key alone opened legacy ciphertext")
+	}
+	if _, err := newOnly.Open(fresh); err != nil {
+		t.Fatalf("Open fresh with new key: %v", err)
+	}
+}
+
+func TestNewRejectsBadPreviousKey(t *testing.T) {
+	if _, err := New(randomKey(t), []byte("short")); err != ErrInvalidKey {
+		t.Fatalf("New with short previous key: err = %v, want ErrInvalidKey", err)
+	}
+}
+
+func TestLoadPreviousKey(t *testing.T) {
+	const envVar = "MULTICA_TEST_SECRETBOX_ROTATION_KEY"
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv(envVar+PreviousKeySuffix, "")
+		key, err := LoadPreviousKey(envVar)
+		if err != nil || key != nil {
+			t.Fatalf("LoadPreviousKey = %v, %v; want nil, nil", key, err)
+		}
+	})
+	t.Run("invalid", func(t *testing.T) {
+		t.Setenv(envVar+PreviousKeySuffix, "not!base64!")
+		if _, err := LoadPreviousKey(envVar); err == nil {
+			t.Fatal("LoadPreviousKey accepted invalid base64")
+		}
+	})
+	t.Run("valid", func(t *testing.T) {
+		want := randomKey(t)
+		t.Setenv(envVar+PreviousKeySuffix, base64.StdEncoding.EncodeToString(want))
+		got, err := LoadPreviousKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadPreviousKey: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatal("LoadPreviousKey returned a different key")
+		}
+	})
+}
