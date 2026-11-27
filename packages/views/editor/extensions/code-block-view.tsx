@@ -10,6 +10,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { useDebouncedValue } from "../../common/use-debounced-value";
 import { useT } from "../../i18n";
 import type { DynamicBlockEditing, DynamicBlockView } from "../dynamic-block";
+import { DrawioBlock, useDrawioViewerUrl } from "../drawio-preview";
 import { HtmlBlockPreview } from "../html-block-preview";
 import { MermaidBlock } from "../mermaid-block";
 import { parseFenceTitle, withFenceTitle } from "../utils/fence-title";
@@ -25,20 +26,31 @@ import { OPEN_BLOCK_SOURCE_META, isDynamicBlockLanguage } from "./code-block";
 const PREVIEW_DEBOUNCE_MS = 200;
 
 function CodeBlockView(props: NodeViewProps) {
-  return isDynamicBlockLanguage(props.node.attrs.language) ? (
-    <DynamicCodeBlockView {...props} />
+  // Subscribed here so a block re-renders when the viewer config arrives.
+  const drawioViewerUrl = useDrawioViewerUrl();
+  const language = props.node.attrs.language;
+  const dynamic = language === "drawio" ? drawioViewerUrl != null : isDynamicBlockLanguage(language);
+  return dynamic ? (
+    <DynamicCodeBlockView {...props} drawioViewerUrl={drawioViewerUrl} />
   ) : (
     <PlainCodeBlockView {...props} />
   );
 }
 
 /**
- * ```html and ```mermaid in the editor: the same dynamic block the read-only
- * renderers draw (MUL-9760) — title bar, content height, collapse past 480px —
- * with ProseMirror's editable `<pre>` as its source view and a title that
- * renames in place.
+ * ```html, ```mermaid and (with a viewer configured) ```drawio in the editor:
+ * the same dynamic block the read-only renderers draw (MUL-9760) — title bar,
+ * content height, collapse past 480px — with ProseMirror's editable `<pre>` as
+ * its source view and a title that renames in place.
  */
-function DynamicCodeBlockView({ node, editor, getPos, selected, updateAttributes }: NodeViewProps) {
+function DynamicCodeBlockView({
+  node,
+  editor,
+  getPos,
+  selected,
+  updateAttributes,
+  drawioViewerUrl,
+}: NodeViewProps & { drawioViewerUrl: string | null }) {
   const text = node.textContent;
   // A new, empty block has nothing to preview; it opens where it is written.
   const [view, setView] = useState<DynamicBlockView>(() => (text.trim() ? "preview" : "source"));
@@ -112,6 +124,8 @@ function DynamicCodeBlockView({ node, editor, getPos, selected, updateAttributes
     <NodeViewWrapper className="my-5 !block" data-dynamic-code-block="">
       {node.attrs.language === "mermaid" ? (
         <MermaidBlock chart={debounced} title={title} editing={editing} />
+      ) : node.attrs.language === "drawio" && drawioViewerUrl ? (
+        <DrawioBlock xml={debounced} title={title} viewerUrl={drawioViewerUrl} editing={editing} />
       ) : (
         <HtmlBlockPreview html={debounced} title={title} editing={editing} />
       )}
