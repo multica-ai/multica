@@ -217,26 +217,23 @@ export function IssueInboxBar({
     const store = useInboxSelectionStore.getState();
     if (item.read === true) {
       store.markManualUnread(wsId, item.id);
-      markUnread.mutate(item.id, {
-        onError: (err) => {
-          store.clearManualUnread(wsId, item.id);
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.errors.mark_unread_failed),
-          );
-        },
+      void markUnread.mutateAsync(item.id).catch((err) => {
+        store.clearManualUnread(wsId, item.id);
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_unread_failed),
+        );
       });
     } else {
       store.clearManualUnread(wsId, item.id);
-      markRead.mutate(item.id, {
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.errors.mark_read_failed),
-          ),
-      });
+      void markRead.mutateAsync(item.id).catch((err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_read_failed),
+        ),
+      );
     }
   };
 

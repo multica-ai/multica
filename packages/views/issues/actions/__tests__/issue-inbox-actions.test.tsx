@@ -31,9 +31,10 @@ const state = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "member-1" } }),
-}));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "member-1" } };
+  return { useAuthStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), { getState: () => state }) };
+});
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -44,8 +45,6 @@ vi.mock("@multica/core/inbox/mutations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/inbox/mutations")>()),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
   undoUnsubscribeArchiveInbox: vi.fn(),
-  useMarkInboxRead: () => ({ mutate: state.markRead }),
-  useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
   useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
   cachedInboxSnoozedUntil: () => null,
@@ -104,6 +103,8 @@ function setup({
     getShareableUrl: (path) => path,
   };
   setApiInstance({
+    markInboxRead: state.markRead,
+    markInboxUnread: state.markUnread,
     archiveInbox: state.archiveInbox,
     unarchiveInbox: state.unarchiveInbox,
     listInbox: async () => rows,
@@ -163,10 +164,13 @@ function pendingArchive() {
 beforeEach(() => {
   vi.clearAllMocks();
   state.archiveInbox.mockImplementation(async (id: string) => item({ id, archived: true }));
+  state.markRead.mockImplementation(async (id: string) => item({ id, read: true }));
+  state.markUnread.mockImplementation(async (id: string) => item({ id, read: false }));
   useInboxSelectionStore.setState({
     heldRows: {},
     leftRowKeyByWorkspace: {},
     lastClearedByWorkspace: {},
+    manualUnreadIdByWorkspace: {},
   });
   useInboxFilterStore.getState().clearFilters("ws");
 });
@@ -177,6 +181,23 @@ afterEach(() => {
 });
 
 describe("IssueInboxBar", () => {
+  it.each([
+    { read: true, action: "Mark as unread", method: "markUnread" as const },
+    { read: false, action: "Mark as read", method: "markRead" as const },
+  ])("reports $action failure after the header unmounts", async ({ read, action, method }) => {
+    let reject!: (error: Error) => void;
+    state[method].mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const nav = setup({ rows: [{ ...ROWS[0]!, read }, ROWS[1]!] });
+    fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^${action}`) }));
+    await waitFor(() => expect(state[method]).toHaveBeenCalledWith("n-1"));
+    nav.leave();
+    expect(nav.qc.isMutating()).toBe(1);
+    await act(async () => reject(new Error("Read state could not be saved")));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith("Read state could not be saved");
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBeUndefined();
+  });
+
   it("keeps the last row on a later side-effect archive after snooze fails", async () => {
     state.snooze.mockRejectedValueOnce(new Error("snooze failed"));
     const nav = setup({ rows: [ROWS[0]!] });
@@ -324,14 +345,14 @@ describe("IssueInboxBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Mark as unread/ }));
-    expect(state.markUnread).toHaveBeenCalledWith("n-1", expect.any(Object));
+    await waitFor(() => expect(state.markUnread).toHaveBeenCalledWith("n-1"));
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBe("n-1");
     cleanup();
 
     setup({ rows: [{ ...ROWS[0]!, read: false }, ROWS[1]!] });
     fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Mark as read/ }));
-    expect(state.markRead).toHaveBeenCalledWith("n-1", expect.any(Object));
+    await waitFor(() => expect(state.markRead).toHaveBeenCalledWith("n-1"));
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace.ws).toBeUndefined();
   });
 

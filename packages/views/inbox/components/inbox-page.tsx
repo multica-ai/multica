@@ -506,7 +506,7 @@ export function InboxPage() {
   // user triggered it from the Inbox bar, the Work panel sidebar, a shortcut,
   // or the command bar.
   const openedItemIdRef = useRef<string | null>(null);
-  const markReadMutate = markReadMutation.mutate;
+  const markReadMutate = markReadMutation.mutateAsync;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
   useEffect(() => {
@@ -528,14 +528,13 @@ export function InboxPage() {
         });
       }
     }
-    markReadMutate(selectedId, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_read_failed),
-        ),
-    });
+    void markReadMutate(selectedId).catch((err) =>
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.errors.mark_read_failed),
+      ),
+    );
   }, [selectedId, selectedRead, selectedKey, selected, filters.unreadOnly, isArchivedView, queryClient, wsId, lookupFilters, markReadMutate, t]);
 
   // Release the guards as soon as the selection moves off their row.
@@ -624,14 +623,13 @@ export function InboxPage() {
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
     useInboxSelectionStore.getState().clearManualUnread(wsId, id);
-    markReadMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_read_failed),
-        ),
-    });
+    void markReadMutation.mutateAsync(id).catch((err) =>
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.errors.mark_read_failed),
+      ),
+    );
   };
 
   const handleMarkUnread = (id: string) => {
@@ -639,15 +637,13 @@ export function InboxPage() {
     // the others, and arming it for a background row would suppress the very
     // first open of that row later.
     if (selected?.id === id) useInboxSelectionStore.getState().markManualUnread(wsId, id);
-    markUnreadMutation.mutate(id, {
-      onError: (err) => {
-        useInboxSelectionStore.getState().clearManualUnread(wsId, id);
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_unread_failed),
-        );
-      },
+    void markUnreadMutation.mutateAsync(id).catch((err) => {
+      useInboxSelectionStore.getState().clearManualUnread(wsId, id);
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.errors.mark_unread_failed),
+      );
     });
   };
 
@@ -806,14 +802,13 @@ export function InboxPage() {
 
   // Batch operations
   const handleMarkAllRead = () => {
-    markAllReadMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.mark_all_read_failed),
-        ),
-    });
+    void markAllReadMutation.mutateAsync().catch((err) =>
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.errors.mark_all_read_failed),
+      ),
+    );
   };
 
   const handleArchiveAll = () =>
