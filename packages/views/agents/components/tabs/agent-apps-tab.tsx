@@ -88,7 +88,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   }, [apps, overview.data]);
 
   const save = (next: AgentApp[]) => {
-    update.mutate(
+    void update.mutateAsync(
       {
         apps: next.map((a) => ({
           toolkit_slug: a.toolkit_slug,
@@ -96,13 +96,10 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
           level: a.level,
         })),
       },
-      {
-        onError: (e) => {
-          refreshFeaturesOnLockedError(qc, wsId, e);
-          toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.tab_body.connected_apps.save_failed_toast)));
-        },
-      },
-    );
+    ).catch((e) => {
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.tab_body.connected_apps.save_failed_toast)));
+    });
   };
   const patch = (slug: string, change: Partial<AgentApp>) =>
     save(apps.map((a) => (a.toolkit_slug === slug ? { ...a, ...change } : a)));
