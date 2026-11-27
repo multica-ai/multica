@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -44,9 +45,11 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--local":         blockedStandalone, // local mode for daemon execution
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
-	"--message":       blockedWithValue,  // prompt is set by daemon
-	"--model":         blockedWithValue,  // managed by OpenclawModelOverride; never accept an untracked duplicate from custom_args
-	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
+	"--message-file":  blockedWithValue,
+	"-m":              blockedWithValue,
+	"--message":       blockedWithValue, // prompt is set by daemon
+	"--model":         blockedWithValue, // managed by OpenclawModelOverride; never accept an untracked duplicate from custom_args
+	"--system-prompt": blockedWithValue, // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
@@ -65,7 +68,8 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
-	if err := checkOpenclawVersion(ctx, b.cfg.commandAt(execPath)); err != nil {
+	version, err := checkOpenclawVersion(ctx, b.cfg.commandAt(execPath))
+	if err != nil {
 		return nil, err
 	}
 
@@ -77,6 +81,17 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		sessionID = fmt.Sprintf("multica-%d", time.Now().UnixNano())
 	}
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
+	args, cleanupPrompt, err := prepareOpenclawPromptFile(args, runtime.GOOS, version)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			cleanupPrompt()
+		}
+	}()
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
@@ -131,7 +146,9 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		_ = stdout.Close()
 	}()
 
+	started = true
 	go func() {
+		defer cleanupPrompt()
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
@@ -222,6 +239,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			usage = map[string]TokenUsage{model: u}
 		}
 
+		cleanupPrompt()
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
@@ -364,11 +382,11 @@ func openclawUsageModel(reportedModel, modelOverride string) string {
 }
 
 // checkOpenclawVersion runs `<execPath> --version` and returns a
-// user-facing error when the installed openclaw is older than
+// detected version, or a user-facing error when the installed openclaw is older than
 // minOpenclawVersion. The returned error becomes the task's failure
 // comment, so the message intentionally names the detected version
 // and the upgrade command.
-func checkOpenclawVersion(ctx context.Context, runtimeCmd Command) error {
+func checkOpenclawVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	// This runs synchronously before Execute creates the provider session, so a
 	// pipe-holding descendant here would otherwise leave a task marked running
 	// with no backend and no inactivity watchdog to stop it. ctx is the task's
@@ -404,16 +422,16 @@ func checkOpenclawVersion(ctx context.Context, runtimeCmd Command) error {
 			// ExplainExecError by hand: detectCLIVersion applies it on the daemon's
 			// probe path, and this is the other gate that has to name an ENOEXEC
 			// shim rather than report an opaque exec failure (MUL-6164).
-			return fmt.Errorf("openclaw --version failed: %w", ExplainExecError(err))
+			return "", fmt.Errorf("openclaw --version failed: %w", ExplainExecError(err))
 		}
 	}
 	if !parsed {
-		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(out))
+		return "", fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(out))
 	}
 	if compareOpenclawVersion(detected, minOpenclawVersion) < 0 {
-		return fmt.Errorf("openclaw %s is below the minimum supported version %s. Run `openclaw update` to upgrade and try again.", detected, minOpenclawVersion)
+		return "", fmt.Errorf("openclaw %s is below the minimum supported version %s. Run `openclaw update` to upgrade and try again.", detected, minOpenclawVersion)
 	}
-	return nil
+	return detected, nil
 }
 
 // parseOpenclawVersion extracts the first three-segment dotted version
