@@ -22,7 +22,8 @@ func TestIssueRunOutcomeNote(t *testing.T) {
 		{name: "pending run covers it", outcome: &issueRunOutcome{Status: "coalesced", ReasonCode: "coalesced"}, want: "no new run started: a pending run on this issue already covers it"},
 		{name: "active run covers it", outcome: &issueRunOutcome{Status: "deferred", ReasonCode: "already_active"}, want: "no new run started: the assignee's active run on this issue covers it"},
 		{name: "backlog", outcome: &issueRunOutcome{Status: "deferred", ReasonCode: "deferred"}, want: "no run started: the issue is in backlog and runs once it moves to an active status"},
-		{name: "caller asked for no run", outcome: &issueRunOutcome{Status: "deferred", ReasonCode: "deferred"}, noStart: true, want: ""},
+		{name: "no-start over a run on the table", outcome: &issueRunOutcome{Status: "deferred", ReasonCode: "deferred"}, noStart: true, want: "no run started (--no-start): the assignee's agent will not pick this up on its own — a step handoff needs a plain status change"},
+		{name: "no-start without a run on the table", outcome: &issueRunOutcome{Status: "queued", ReasonCode: "queued"}, noStart: true, want: ""},
 		{name: "blocked", outcome: &issueRunOutcome{Status: "blocked", ReasonCode: "issue_in_triage"}, want: "no run started: the issue is in Triage; accept it first (issue_in_triage)"},
 		{name: "blocked for a newer reason", outcome: &issueRunOutcome{Status: "blocked", ReasonCode: "quota_exceeded"}, want: "no run started: quota_exceeded"},
 	} {
