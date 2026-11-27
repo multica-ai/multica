@@ -76,6 +76,14 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 자체 호스팅 배포에서는 `FRONTEND_ORIGIN`을 설정해야 합니다. 없으면 초대 링크, cookie 보안 속성, WebSocket origin 검증이 실제 도메인과 맞지 않을 수 있습니다.
 </Callout>
 
+## 스킬 레지스트리 가져오기
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_SKILL_REGISTRY_HOSTS` | 비어 있음 | ClawHub 호환 skill 가져오기 및 새로 고침 소스로 추가 허용할 레지스트리 호스트 이름(정확히 일치, `:port` 선택)을 쉼표로 구분해 지정합니다. 예: `registry.example.com`. 호스트별로 API 오리진을 지정할 수도 있습니다: `registry.example.com=http://registry.example.com`. API 프로세스에 설정하세요. |
+
+URL에서 가져오기는 `https://registry.example.com/skill`, `https://registry.example.com/owner/skill`, 또는 `https://registry.example.com/space/team/skill` 같은 레지스트리 웹 URL을 지원합니다. 웹 URL은 정규 slug `team--skill`에 대응하고, `/space/global/skill`은 `skill`에 대응합니다. 새로 고침 소스로는 붙여 넣은 원래 URL이 그대로 사용됩니다. API 오리진을 지정하지 않으면 URL의 스킴으로 요청합니다. 생략하면 HTTPS를 사용하고, `http://`를 명시했을 때만 HTTP를 사용합니다(신뢰할 수 있는 사설 네트워크의 레지스트리에만 사용). 오리진을 지정하면 검색, API 호출, 동일 오리진 리디렉션 확인에 그 오리진을 사용합니다. HTTP는 신뢰할 수 있는 사설 네트워크에서만 사용하세요. 서버는 `/.well-known/clawhub.json`에서 상대 경로 `apiBase`를 읽고, 검색에 실패하면 `/api/v1`을 사용합니다. 파일 단위 읽기를 지원하지 않는 레지스트리는 `/download?slug=...`로 ZIP 아카이브를 제공할 수 있으며, 리디렉션은 선택한 API 오리진 안에 머물러야 합니다. 기존 ClawHub, Skills.sh, GitHub 가져오기는 바뀌지 않습니다. 신뢰할 수 있는 호스트만 추가하세요. 가져온 skill의 지침은 에이전트 워크플로에서 실행됩니다.
+
 ## 이메일과 로그인
 
 ### Resend

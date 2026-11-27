@@ -76,6 +76,14 @@ primary とレプリカの接続上限は独立しています。全 API プロ�
 セルフホストのデプロイでは `FRONTEND_ORIGIN` の設定が必須です。設定しないと、招待リンク、cookie のセキュリティ属性、WebSocket の origin 検証が実際のドメインと食い違うおそれがあります。
 </Callout>
 
+## スキルレジストリからのインポート
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_SKILL_REGISTRY_HOSTS` | 空 | ClawHub 互換の skill インポート・更新元として追加で許可するレジストリのホスト名（完全一致、`:port` は任意）をカンマ区切りで指定します。例：`registry.example.com`。ホストごとに API オリジンを指定することもできます：`registry.example.com=http://registry.example.com`。API プロセスに設定してください。 |
+
+「URL からインポート」では `https://registry.example.com/skill`、`https://registry.example.com/owner/skill`、または `https://registry.example.com/space/team/skill` のようなレジストリの Web URL を使えます。Web URL は正規の slug `team--skill` に対応し、`/space/global/skill` は `skill` に対応します。更新元には貼り付けた元の URL がそのまま使われます。API オリジンを指定しない場合は URL のスキームでリクエストします。省略時は HTTPS、`http://` を明示したときだけ HTTP を使います（信頼できるプライベートネットワーク上のレジストリに限ります）。オリジンを指定すると、検出・API 呼び出し・同一オリジンのリダイレクト確認にそのオリジンを使います。HTTP は信頼できるプライベートネットワークでのみ使ってください。サーバーは `/.well-known/clawhub.json` から相対パスの `apiBase` を取得し、検出に失敗した場合は `/api/v1` を使います。ファイル単位の読み取りに対応していないレジストリは、`/download?slug=...` で ZIP アーカイブを返すこともできます。リダイレクトは選択した API オリジン内にとどまる必要があります。既存の ClawHub、Skills.sh、GitHub からのインポートは変わりません。信頼できるホストだけを追加してください。インポートした skill の指示はエージェントのワークフローで実行されます。
+
 ## メールとログイン
 
 ### Resend
