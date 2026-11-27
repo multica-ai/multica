@@ -81,7 +81,7 @@ type fakeSender struct {
 	result      channel.SendResult
 }
 
-func (f *fakeSender) SendWithMetadata(_ context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
+func (f *fakeSender) SendMarkdownWithMetadata(_ context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
 	f.called++
 	f.got = out
 	f.gotMetadata = metadata
@@ -104,7 +104,7 @@ func slackInstallConfigJSON() []byte {
 
 func newTestOutbound(q outboundQueries, fs *fakeSender) *Outbound {
 	o := NewOutbound(q, nil, nil)
-	o.newSender = func(credentials) replySender { return fs }
+	o.newSender = func(credentials) markdownReplySender { return fs }
 	return o
 }
 

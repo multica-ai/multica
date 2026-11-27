@@ -31,10 +31,17 @@ type outboundQueries interface {
 	RecordChannelOutboundMessage(ctx context.Context, arg db.RecordChannelOutboundMessageParams) error
 }
 
-// replySender posts one reply. Satisfied by *slackSender, so the outbound path
-// reuses Send's Markdown->mrkdwn conversion, chunking, and threading.
+// replySender posts one plain-mrkdwn reply. Used by OutboundReplier for
+// control and issue acknowledgements that rely on Slack mrkdwn entities.
 type replySender interface {
 	SendWithMetadata(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error)
+}
+
+// markdownReplySender posts one agent reply using Block Kit markdown blocks,
+// structural chunking, and threading while keeping plain-text mrkdwn as the
+// notification fallback. Satisfied by *slackSender.
+type markdownReplySender interface {
+	SendMarkdownWithMetadata(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error)
 }
 
 // Outbound delivers an agent's chat reply back to Slack — the outbound half of
@@ -47,7 +54,7 @@ type Outbound struct {
 	q         outboundQueries
 	decrypt   Decrypter
 	logger    *slog.Logger
-	newSender func(creds credentials) replySender
+	newSender func(creds credentials) markdownReplySender
 }
 
 // NewOutbound builds the Slack outbound subscriber over the generated queries
@@ -57,7 +64,7 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, logger *slog.Logger) *Out
 		logger = slog.Default()
 	}
 	o := &Outbound{q: q, decrypt: decrypt, logger: logger}
-	o.newSender = func(c credentials) replySender {
+	o.newSender = func(c credentials) markdownReplySender {
 		// Only the bot token is needed to post; inbound Socket Mode uses the
 		// installation's separate app-level token (see slack_channel.go).
 		return newSlackSender(c, slack.New(c.BotToken), logger)
@@ -140,7 +147,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("decode slack credentials: %w", err)
 	}
 	channelID, threadTS := outboundTarget(binding)
-	result, err := o.newSender(creds).SendWithMetadata(ctx, channel.OutboundMessage{
+	result, err := o.newSender(creds).SendMarkdownWithMetadata(ctx, channel.OutboundMessage{
 		ChatID:   channelID,
 		Text:     content,
 		ThreadID: threadTS,
