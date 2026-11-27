@@ -39,17 +39,13 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     },
     ref,
   ) {
-    const { push, openInNewTab, getShareableUrl, prefetch } = useNavigation();
+    const { push, openInNewTab, getShareableUrl, resolveHref, prefetch } = useNavigation();
     const prefetchData = useRouteDataPrefetch();
-    // A packaged Electron renderer runs at file://.../index.html. Keeping a
-    // route-relative href there makes native affordances such as right-click
-    // "Copy Link Address" expose (or reject) a local file URL. Desktop is
-    // identified by its tab adapter; render the connected environment's web
-    // URL in the DOM while click handlers continue routing with the original
-    // in-app path. Web stays route-relative, preserving SSR hydration and the
-    // browser's native navigation semantics.
-    const anchorHref =
-      openInNewTab && href.startsWith("/") ? getShareableUrl(href) : href;
+    // Native affordances (Cmd+Click, middle click, "Copy Link Address") read the
+    // DOM href and bypass the router, so it must carry the web basePath; the
+    // file:// desktop renderer has no resolveHref and needs the full web URL.
+    const hrefResolver = resolveHref ?? (openInNewTab ? getShareableUrl : undefined);
+    const anchorHref = href.startsWith("/") && hrefResolver ? hrefResolver(href) : href;
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
       // Caller's onClick runs BEFORE any navigation, on every path, so:

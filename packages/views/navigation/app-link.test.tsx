@@ -43,9 +43,50 @@ describe("AppLink", () => {
     );
   });
 
-  it("keeps web anchors route-relative for SSR and native browser navigation", () => {
+  it("includes basePath in anchor href via resolveHref on web", () => {
     const adapter = makeAdapter({
+      resolveHref: (path) => `/multica${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "/multica/acme/issues/MUL-7",
+    );
+  });
+
+  it("uses resolveHref when provided (web), falling back to getShareableUrl when it is not (desktop)", () => {
+    const adapter = makeAdapter({
+      resolveHref: (path) => `/web${path}`,
       getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "/web/acme/issues/MUL-7",
+    );
+  });
+
+  it("falls back to getShareableUrl when resolveHref is not provided (desktop)", () => {
+    const adapter = makeAdapter({
+      openInNewTab: vi.fn(),
+      getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "https://app.example/acme/issues/MUL-7",
+    );
+  });
+
+  it("keeps href unchanged on web without basePath (resolveHref is identity)", () => {
+    const adapter = makeAdapter({
+      resolveHref: (path) => path,
     });
 
     renderLink(adapter, { href: "/acme/issues/MUL-7" });
