@@ -16,12 +16,13 @@ import (
 )
 
 // OutcomeReplier reacts to the Dispatcher's verdict by posting the
-// appropriate Lark-side reply card. This is the outbound half of the
+// appropriate Lark-side reply. This is the outbound half of the
 // `EventEmitter` contract in hub.go: NeedsBinding sends the binding
 // prompt to the sender's open_id, AgentOffline / AgentArchived send
-// a status notice into the chat, and FreshPending / IssueUsage send
-// command guidance. OutcomeIngested is owned by the Patcher (task
-// lifecycle); OutcomeDropped is silent.
+// a status notice into the chat, InvokeDenied explains how to get
+// access, and FreshPending / IssueUsage send command guidance.
+// OutcomeIngested is owned by the Patcher (task lifecycle);
+// OutcomeDropped is silent.
 //
 // Reply is best-effort by design: a transient Lark outage MUST NOT
 // fail the inbound pipeline. Any command state or chat message is already
@@ -54,7 +55,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, Outcome(engine.OutcomeHelp), OutcomeIssueUsage:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeFreshPending, OutcomeChatStarted, Outcome(engine.OutcomeHelp), OutcomeIssueUsage, Outcome(engine.OutcomeInvokeDenied):
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -181,6 +182,20 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"err", err.Error(),
 			)
 		}
+	case Outcome(engine.OutcomeInvokeDenied):
+		text := "当前无法运行此智能体。需要使用时，请联系智能体所有者获取权限。"
+		if RegionOrDefault(inst.Region) == RegionLark {
+			text = "The bot couldn't start this request. To get access, ask the agent's owner."
+		}
+		if err := r.sendReplyText(ctx, inst, msg, text); err != nil {
+			r.log.Warn("lark outcome replier: invoke denied notice failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"event_id", msg.EventID,
+				"message_id", msg.MessageID,
+				"err", err.Error(),
+			)
+		}
 	case OutcomeFreshPending:
 		if err := r.sendChatNotice(ctx, inst, msg, freshPendingCopy); err != nil {
 			r.log.Warn("lark outcome replier: fresh-start confirmation failed",
@@ -272,6 +287,14 @@ func isBindingPromptUnavailable(err error) bool {
 // sendIssueOutcome posts either the created confirmation or active-duplicate
 // conflict as plain text, with a link to the relevant issue when configured.
 func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
+	text := issueCreatedText(res, r.appURL)
+	if res.IssueDuplicate {
+		text = issueDuplicateText(res, r.appURL)
+	}
+	return r.sendReplyText(ctx, inst, msg, text)
+}
+
+func (r *LarkOutcomeReplier) sendReplyText(ctx context.Context, inst Installation, msg InboundMessage, text string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -279,16 +302,7 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	if err != nil {
 		return err
 	}
-	text := issueCreatedText(res, r.appURL)
-	if res.IssueDuplicate {
-		text = issueDuplicateText(res, r.appURL)
-	}
-	// Share the Patcher's classified fallback: a thread reply that
-	// fails because the topic cannot receive it (recalled trigger,
-	// topics disabled, aggregated message) falls back to a chat-level
-	// send so the product result is not lost; transport/5xx/rate-limit
-	// failures stay failures rather than leaking into the group chat.
-	return sendWithReplyFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithReplyFallback(r.log, "send text reply", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
