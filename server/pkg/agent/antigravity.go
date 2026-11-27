@@ -436,7 +436,8 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		prompt = opts.SkillInvocation.antigravityPrompt(supportsAntigravitySlashSkills(runCtx, b.cfg, execPath, opts))
 	}
 
-	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
+	allowSettings := supportsAntigravitySessionSettings(runCtx, b.cfg, execPath, opts)
+	args := buildAntigravityArgs(prompt, logPath, timeout, opts, allowSettings, b.cfg.Logger)
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
@@ -1046,7 +1047,19 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
 	"--log-file":                     blockedWithValue,  // daemon needs it for session capture
-	"--settings":                     blockedWithValue,  // Claude Code-only flag; agy rejects it
+	"--settings":                     blockedWithValue,  // daemon-wide settings may use another provider's schema
+}
+
+var antigravitySettingsFlagRe = regexp.MustCompile(`(?m)^\s*--settings(?:[ =\t]|$)`)
+
+func supportsAntigravitySessionSettings(ctx context.Context, cfg Config, executable string, opts ExecOptions) bool {
+	for _, arg := range opts.CustomArgs {
+		flag, _, _ := strings.Cut(unshellQuoteArg(arg), "=")
+		if flag == "--settings" {
+			return antigravitySettingsFlagRe.MatchString(antigravityHelp(ctx, cfg, executable, opts))
+		}
+	}
+	return false
 }
 
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
@@ -1069,7 +1082,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // and rejects an unrecognised value up front (see antigravityModelError) —
 // by the time we build argv the value is either empty or known-good. When
 // opts.Model is empty we omit the flag and agy resolves its own default.
-func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts ExecOptions, logger *slog.Logger) []string {
+func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts ExecOptions, allowSettings bool, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
 		"--dangerously-skip-permissions",
@@ -1094,7 +1107,12 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 		args = append(args, "--add-dir", filepath.Clean(opts.Cwd))
 	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger)...)
+	customBlocked := antigravityBlockedArgs
+	if allowSettings {
+		customBlocked = maps.Clone(antigravityBlockedArgs)
+		delete(customBlocked, "--settings")
+	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, customBlocked, logger)...)
 	return args
 }
 

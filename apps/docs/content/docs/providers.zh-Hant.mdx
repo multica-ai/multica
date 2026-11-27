@@ -120,6 +120,8 @@ QwenPaw、MiniMax Code 和 ZeroClaw 例外：它們不接受在 Multica 側選�
 
 Antigravity 會把 `agy models` 中的推理變體顯示為獨立模型。在模型選擇框中選用完整的變體名稱，包括後綴。Multica 不為 Antigravity 提供單獨的**思考**設定。如果在自定義參數中傳入 `--effort`，Antigravity 會檢查它能否與所選模型同時使用。
 
+智能體的自定義參數也可以透過 `--settings` 為本次執行傳入內聯 JSON 或設定檔路徑。只有所選命令的 `--help` 明確列出 `--settings` 時，Multica 才會轉發該參數；如果探測失敗或沒有此選項，則繼續過濾。daemon 全域附加參數仍不能注入設定，協定關鍵參數仍由 Multica 管理。
+
 DeepSeek Harness 的模型目錄由執行時自身提供（`dsh --profile multica --list-models`）。它的模型 id 採用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），請從列表中選擇完整 id。
 
 <Callout type="info">

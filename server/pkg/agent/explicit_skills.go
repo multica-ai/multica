@@ -175,6 +175,10 @@ func supportsAntigravitySlashSkills(ctx context.Context, cfg Config, executable 
 	if slashCommandsDisabled(cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs) {
 		return false
 	}
+	return strings.Contains(antigravityHelp(ctx, cfg, executable, opts), "--disable-slash-commands")
+}
+
+func antigravityHelp(ctx context.Context, cfg Config, executable string, opts ExecOptions) string {
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := cfg.commandAt(executable).exec(probeCtx, "--help")
@@ -184,7 +188,7 @@ func supportsAntigravitySlashSkills(ctx context.Context, cfg Config, executable 
 	output := &tailBuffer{max: 128 << 10}
 	cmd.Stdout, cmd.Stderr = output, output
 	if runOwned(cmd, cfg.Logger) != nil {
-		return false
+		return ""
 	}
-	return strings.Contains(string(output.Bytes()), "--disable-slash-commands")
+	return string(output.Bytes())
 }
