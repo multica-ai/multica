@@ -3,6 +3,7 @@ import {
   queryOptions,
   useQuery,
   type InfiniteData,
+  type InvalidateOptions,
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
@@ -10,6 +11,7 @@ import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
   ChatMessagesPage,
+  ChatPendingTask,
   ChatQuickActionsFailureState,
   ChatQuickActionsPendingState,
   ChatSession,
@@ -171,17 +173,52 @@ export function chatMessagesPageOptions(sessionId: string, limit = 50) {
   });
 }
 
-/**
- * Pending task for a chat session — the "is something still running?" signal.
- * Refetched via WS invalidation in useRealtimeSync when chat:message / chat:done
- * / task:completed / task:failed arrive.
- */
+export function invalidateChatMessageQueries(
+  client: QueryClient,
+  sessionId: string,
+  ...options: [options?: InvalidateOptions]
+) {
+  return Promise.all([
+    client.invalidateQueries({ queryKey: chatKeys.messages(sessionId) }, ...options),
+    client.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) }, ...options),
+  ]);
+}
+
+const PENDING_CHAT_POLL_INTERVAL_MS = 10_000;
+
+function trackedTaskId(task: ChatPendingTask | undefined) {
+  return task?.task_id ?? task?.queued_tasks?.[0]?.task_id;
+}
+
+/** Realtime normally advances the queue. Check in-flight chats for missed completion events. */
 export function pendingChatTaskOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTask(sessionId),
-    queryFn: () => api.getPendingChatTask(sessionId),
+    queryFn: async ({ client, queryKey, signal }) => {
+      const readPending = () => client.getQueryData<ChatPendingTask>(queryKey);
+      const previous = readPending();
+      const previousTaskId = trackedTaskId(previous);
+      const pending = await api.getPendingChatTask(sessionId);
+      signal.throwIfAborted();
+
+      if (
+        readPending() === previous &&
+        previousTaskId &&
+        pending.task_id !== previousTaskId &&
+        !pending.queued_tasks?.some(({ task_id }) => task_id === previousTaskId)
+      ) {
+        // Fetch the saved outcome before removing the live turn. If history
+        // fails to load, keep the pending snapshot so the next check can retry.
+        await invalidateChatMessageQueries(client, sessionId, { throwOnError: true });
+      }
+      // A send or realtime handler may have advanced the queue while we fetched.
+      const current = readPending();
+      return current !== previous ? current ?? pending : pending;
+    },
     enabled: !!sessionId,
     staleTime: Infinity,
+    refetchInterval: (query) =>
+      trackedTaskId(query.state.data) ? PENDING_CHAT_POLL_INTERVAL_MS : false,
   });
 }
 

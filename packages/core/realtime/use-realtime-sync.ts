@@ -86,6 +86,7 @@ import type { Workspace } from "../types/workspace";
 import type { AgentTask } from "../types/agent";
 import {
   chatKeys,
+  invalidateChatMessageQueries,
   isTaskMessageTimelineHeld,
   mergeTaskMessagesBySeq,
   sortChatSessions,
@@ -169,14 +170,6 @@ const chatWsLogger = createLogger("chat.ws");
 const TASK_MESSAGE_FLUSH_MS = 100;
 
 const logger = createLogger("realtime-sync");
-
-export function invalidateChatMessageQueries(
-  qc: QueryClient,
-  sessionId: string,
-) {
-  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-}
 
 // refetchPendingChatAggregate marks the current user's cross-session pending
 // aggregate stale so it is refetched from the permission-filtering endpoint
