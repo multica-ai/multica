@@ -308,6 +308,8 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+如果本機程序仍持有設定檔鎖定，但健康檢查端點無法使用，`daemon status` 會回報此狀態。JSON 輸出會新增 `profile_lock_held: true`，並保留指令碼使用的原有 `status` 值。
+
 ```bash
 multica daemon autostart enable
 multica runtime usage <runtime-id> --days 30

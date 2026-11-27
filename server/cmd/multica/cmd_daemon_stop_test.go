@@ -289,3 +289,114 @@ func TestDaemonStopForceReportsFailureIfProfileRemainsLocked(t *testing.T) {
 		t.Fatalf("incomplete stop was reported as success: %v", err)
 	}
 }
+
+func TestDaemonStopReportsHeldLockWithoutHealth(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "stop-no-health-test"
+	mkProfiles(t, profile)
+	child, release := startStopLockHolder(t, profile, false)
+	serveHealthAs(t, profile, map[string]any{"status": "stopped"})
+
+	err := runDaemonStop(daemonStatusCmdFor(t, profile, ""), nil)
+	if err == nil || !strings.Contains(err.Error(), "profile lock") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("stop returned %v, want an unresponsive daemon diagnostic", err)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatalf("plain stop unexpectedly terminated the lock holder: %v", err)
+	}
+	if err := runDaemonStop(daemonStatusCmdFor(t, profile, ""), nil); err != nil {
+		t.Fatalf("stop with no health and no lock holder: %v", err)
+	}
+}
+
+func TestDaemonStopWaitsForProfileCleanupAfterHealthCloses(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "plain-stop-cleanup-test"
+	mkProfiles(t, profile)
+	child, release := startStopLockHolder(t, profile, false)
+	var stopping atomic.Bool
+	var cleanupPolls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/shutdown" {
+			stopping.Store(true)
+			return
+		}
+		if stopping.Load() {
+			if cleanupPolls.Add(1) == 2 {
+				if err := os.WriteFile(release, nil, 0o600); err != nil {
+					t.Errorf("release profile lock: %v", err)
+				}
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "running", "profile": profile, "pid": child.Process.Pid,
+		})
+	}))
+	t.Cleanup(server.Close)
+	if err := publishDaemonPort(profile, daemonPortRecord{
+		Port: server.Listener.Addr().(*net.TCPAddr).Port, PID: child.Process.Pid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runDaemonStop(daemonStatusCmdFor(t, profile, ""), nil); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := daemonStopComplete(profile)
+	if err != nil || !stopped {
+		t.Fatalf("stop returned before the profile lock was released: %v", err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatalf("graceful daemon was killed: %v", err)
+	}
+}
+
+func TestDaemonStatusReportsHeldLockWithoutHealth(t *testing.T) {
+	clearDaemonTaskEnv(t)
+	const profile = "status-no-health-test"
+	mkProfiles(t, profile)
+	child, release := startStopLockHolder(t, profile, false)
+	serveHealthAs(t, profile, map[string]any{"status": "stopped"})
+
+	status := func(output string) string {
+		t.Helper()
+		out, err := captureStdout(t, func() error {
+			return runDaemonStatus(daemonStatusCmdFor(t, profile, output), nil)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	out := status("")
+	if !strings.Contains(out, "health unavailable") || !strings.Contains(out, "profile lock held") || strings.Contains(out, ": stopped") {
+		t.Errorf("status with held lock = %q, want health unavailable and profile lock held", out)
+	}
+	var held map[string]any
+	if err := json.Unmarshal([]byte(status("json")), &held); err != nil {
+		t.Fatal(err)
+	}
+	if held["status"] != "stopped" || held["profile_lock_held"] != true {
+		t.Errorf("status JSON with held lock = %v, want stopped and the held-lock diagnostic", held)
+	}
+
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var idle map[string]any
+	if err := json.Unmarshal([]byte(status("json")), &idle); err != nil {
+		t.Fatal(err)
+	}
+	if idle["status"] != "stopped" || idle["profile_lock_held"] != nil {
+		t.Errorf("status JSON after lock release = %v, want stopped without the held-lock diagnostic", idle)
+	}
+}

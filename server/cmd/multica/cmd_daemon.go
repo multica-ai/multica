@@ -1430,6 +1430,13 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		if profile != "" {
 			label = fmt.Sprintf("Daemon [%s]", profile)
 		}
+		stopped, err := daemonStopComplete(profile)
+		if err != nil {
+			return fmt.Errorf("check daemon profile lock: %w", err)
+		}
+		if !stopped {
+			return fmt.Errorf("%s is not responding to health checks and its profile lock is held. Try multica daemon stop --force for this profile", label)
+		}
 		fmt.Fprintf(os.Stderr, "%s is not running.\n", label)
 		return nil
 	}
@@ -1471,9 +1478,15 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
 		cancel2()
 		if !daemonAlive(h) {
-			os.Remove(daemonPIDPathForProfile(profile))
-			fmt.Fprintln(os.Stderr, "Daemon stopped.")
-			return nil
+			stopped, err := daemonStopComplete(profile)
+			if err != nil {
+				return fmt.Errorf("check daemon profile lock: %w", err)
+			}
+			if stopped {
+				os.Remove(daemonPIDPathForProfile(profile))
+				fmt.Fprintln(os.Stderr, "Daemon stopped.")
+				return nil
+			}
 		}
 	}
 
@@ -1532,29 +1545,31 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 
-	// A daemon belonging to another profile answered on our port. Reporting it
-	// as ours would be the same lie in a new place: this profile's daemon is
-	// not running, and the port is simply occupied. Say exactly that, and keep
-	// the top-level verdict "stopped" so scripts reading it stay correct.
-	//
-	// Only outside a daemon-managed task. There the port comes from the host
-	// daemon's own injection rather than a profile hash, so no collision is
-	// possible — and the task's profile is necessarily empty (--profile is
-	// rejected) while the host may run a named one, which would make every
-	// named-profile host look like a conflict and break the standing contract
-	// that `daemon status` in a task reports on the daemon hosting it. A dev-env
-	// profile's port is profile-derived like any other, so it keeps the check.
+	// In a daemon-managed task, the injected port identifies its host daemon.
+	// A local profile lock does not describe that host. Dev-env profiles use
+	// their own local lock and keep the usual identity check.
+	canInspectProfile := !inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd)
 	var conflict *daemonProfileMismatchError
-	if daemonAlive(health) && (!inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd)) {
+	if canInspectProfile && daemonAlive(health) {
 		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
+	}
+	lockHeld := false
+	if canInspectProfile && (!daemonAlive(health) || conflict != nil) {
+		stopped, err := daemonStopComplete(profile)
+		lockHeld = err == nil && !stopped
 	}
 
 	if output == "json" {
 		if conflict != nil {
-			return cli.PrintJSON(os.Stdout, map[string]any{
+			health = map[string]any{
 				"status":        "stopped",
 				"port_conflict": conflict.statusJSON(),
-			})
+			}
+		}
+		if lockHeld {
+			// Keep the existing health verdict for scripts and expose the
+			// independently observed profile lock.
+			health["profile_lock_held"] = true
 		}
 		return cli.PrintJSON(os.Stdout, health)
 	}
@@ -1564,9 +1579,15 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		label = fmt.Sprintf("Daemon [%s]", profile)
 	}
 
-	if conflict != nil {
-		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
-		fmt.Fprintln(os.Stdout, conflict.statusNote())
+	if lockHeld || conflict != nil {
+		if lockHeld {
+			fmt.Fprintf(os.Stdout, "%s: health unavailable (profile lock held)\n", label)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
+		}
+		if conflict != nil {
+			fmt.Fprintln(os.Stdout, conflict.statusNote())
+		}
 		return nil
 	}
 

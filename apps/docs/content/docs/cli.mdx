@@ -326,6 +326,8 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+If the health endpoint is unavailable while a local process holds the profile lock, `daemon status` reports that condition. JSON output adds `profile_lock_held: true` and keeps the existing `status` value for scripts.
+
 ```bash
 multica daemon autostart enable
 multica runtime usage <runtime-id> --days 30

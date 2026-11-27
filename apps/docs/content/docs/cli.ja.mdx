@@ -317,6 +317,8 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+ローカルプロセスがプロファイルロックを保持したままヘルスエンドポイントにアクセスできない場合、`daemon status` にその状態が表示されます。JSON 出力には `profile_lock_held: true` が追加され、スクリプト向けの `status` の値は従来どおりです。
+
 ```bash
 multica daemon autostart enable
 multica runtime usage <runtime-id> --days 30
