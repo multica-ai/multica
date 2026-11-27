@@ -14,7 +14,8 @@ const REDACTED = "[redacted]";
 // URL's host isn't itself shredded.
 const PATTERNS: Array<[RegExp, string]> = [
   // Emails.
-  [/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, REDACTED],
+  // Start once per local-part run, including when a long word has no @.
+  [/(?<![a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, REDACTED],
   // URL query/fragment (may carry tokens / PII) — keep scheme+host+path.
   [/((?:https?|file|multica):\/\/[^\s?#]*)[?#]\S*/gi, `$1?${REDACTED}`],
   // Long opaque tokens: JWTs, API keys, UUIDs, session ids (24+ chars).
