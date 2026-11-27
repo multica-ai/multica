@@ -22,6 +22,10 @@ import (
 // invoked with a real agent CLI's argv: TestMain runs before the testing
 // package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv("MULTICA_OPENCLAW_PROMPT_TEST_HELPER") == "1" {
+		runFakeOpenclawPromptFile()
+		os.Exit(0)
+	}
 	if testutil.RunPiCleanupFixture() {
 		os.Exit(0)
 	}

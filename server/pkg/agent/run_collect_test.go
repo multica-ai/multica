@@ -75,7 +75,7 @@ func TestCheckOpenclawVersionReapsPipeHoldingGrandchild(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
+	if _, err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
 		t.Fatalf("checkOpenclawVersion: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestCheckOpenclawVersionAcceptsStderrOnlyVersion(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
+	if _, err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
 		t.Fatalf("checkOpenclawVersion with the version on stderr: %v", err)
 	}
 }

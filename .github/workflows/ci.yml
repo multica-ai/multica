@@ -794,6 +794,10 @@ jobs:
         # that stops matching) is visible in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestQwenExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation|TestPlatformQwenInvocation)' -count=1 -timeout=5m
 
+      - name: Test Windows OpenClaw prompt file transport
+        working-directory: server
+        run: go test ./pkg/agent -v -run '^TestOpenclawWindowsPromptFile$' -count=1 -timeout=5m
+
       - name: Test Windows OpenCode oversized prompt reaches stdin
         working-directory: server
         # #6538: the daemon inlined the whole task prompt as an argv element,
