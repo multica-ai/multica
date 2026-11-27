@@ -9507,6 +9507,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 		WarmPoolBriefHash:      agent.HashWarmBrief(runtimeBrief),
 	}
+	if env.CodexHome != "" && runtimeBriefWritten {
+		execOpts.CodexInstructionsPath = filepath.Join(env.WorkDir, "AGENTS.md")
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -9709,6 +9712,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			runtimeBrief = freshBrief
 			runtimeBriefWritten = true
+			if env.CodexHome != "" {
+				execOpts.CodexInstructionsPath = filepath.Join(env.WorkDir, "AGENTS.md")
+			}
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
 			}

@@ -229,6 +229,14 @@ Hermes의 태스크 및 채팅 실행은 대화의 영구 디렉터리를 격리
 
 Multica는 실행마다 홈의 스킬과 파생 설정을 갱신합니다. 모델 제공업체의 인증은 유지하고, 관리되는 실행의 메시징 어댑터와 HTTP 수신 기능은 비활성화합니다. 호스트의 Gateway 상태, 로그, 세션, cron 작업은 격리됩니다. 실행이 끝나면 해당 실행의 Gateway를 중지하여 다음 실행이 자체 실행 환경을 사용하도록 합니다.
 
+### Codex 프로젝트 지침 제한 [#codex-instructions]
+
+Codex 실행을 시작하거나 재개하기 전에 데몬은 생성한 `AGENTS.md`가 선택되고 `project_doc_max_bytes` 안에서 전부 읽힐 수 있는지 확인합니다. 기본 제한은 32 KiB이며 프로젝트의 지침 파일 전체가 공유합니다. 다른 파일이 우선하거나 남은 제한을 초과하는 경우, 또는 유효한 설정을 확인할 수 없는 경우에는 모델 턴이 시작되기 전에 실행이 중지됩니다. 진단에는 파일과 제한이 표시되며 지침 내용은 출력되지 않습니다.
+
+Codex에서 현재 프로젝트를 신뢰하지 않도록 설정했거나, 비활성화된 프로젝트 설정이 스레드 시작 시 지침 로딩을 바꿀 수 있으면 데몬이 중지되고 Codex에서 프로젝트 신뢰 설정을 확인하도록 안내합니다. Multica는 신뢰를 자동으로 부여하지 않습니다.
+
+에이전트나 저장소 지침을 줄이거나 `AGENTS.override.md`가 우선하는지 확인하세요. Codex 설정이나 에이전트의 사용자 지정 인수에서 `-c project_doc_max_bytes=65536`처럼 제한을 명시적으로 높일 수도 있습니다. Multica는 설정한 제한과 저장소 파일을 보존합니다. [Codex 지침 검색](https://learn.chatgpt.com/docs/agent-configuration/agents-md)을 참고하세요.
+
 ### Codex 기본 메모리와 하위 에이전트 [#codex-memory]
 
 데몬이 관리하는 Codex 실행에서는 Codex 기본 메모리가 기본적으로 꺼집니다. 이 컴퓨터나 이전 실행의 메모리가 다른 워크스페이스로 넘어가지 않게 하기 위해서입니다. 설정은 해당 실행 전용 `CODEX_HOME/config.toml`에만 기록되고(`features.memories`, `memories.generate_memories`, `memories.use_memories` 모두 `false`), `~/.codex/config.toml`은 바뀌지 않습니다. 기본 메모리를 유지하려면 데몬 환경에 `MULTICA_CODEX_MEMORY=1`을 설정하세요.

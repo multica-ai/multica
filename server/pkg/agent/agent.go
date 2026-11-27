@@ -31,7 +31,11 @@ type ExecOptions struct {
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool
 	Cwd                  string
-	Model                string
+	// CodexInstructionsPath is the daemon-owned project instruction file whose
+	// complete delivery must be checked before Codex starts or resumes a thread.
+	// Empty keeps unmanaged backend calls unchanged.
+	CodexInstructionsPath string
+	Model                 string
 	// PiSkillPaths contains only the SKILL.md files written for this task by
 	// the daemon. Pi loads them explicitly without trusting other project files.
 	PiSkillPaths []string

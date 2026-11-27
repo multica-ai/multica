@@ -1908,6 +1908,9 @@ func codexThreadConfig() map[string]any {
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	if err := c.checkManagedInstructions(ctx, opts); err != nil {
+		return "", false, err
+	}
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
@@ -2631,7 +2634,7 @@ func (e *codexHandshakeTimeoutError) Unwrap() error {
 
 func isCodexHandshakeRPC(method string) bool {
 	switch method {
-	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+	case "initialize", "config/read", "thread/start", "thread/resume", "thread/name/set", "turn/start":
 		return true
 	default:
 		return false
