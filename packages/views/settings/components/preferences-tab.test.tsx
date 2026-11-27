@@ -321,7 +321,7 @@ describe("PreferencesTab — Comments & chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
-    useCommentComposerStore.setState({ runningAgentReply: "steer", sticky: true });
+    useCommentComposerStore.setState({ runningAgentReply: "steer", sticky: true, stickyOnSmallScreens: false });
     chatState.floatingChatEnabled = true;
   });
 
@@ -356,6 +356,29 @@ describe("PreferencesTab — Comments & chat", () => {
     await user.click(screen.getByRole("switch", { name: enSettings.chat.floating_label }));
     expect(chatState.setFloatingChatEnabled).toHaveBeenCalledWith(false);
     expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("opts small screens into the pinned comment bar, off by default", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const smallScreens = screen.getByRole("switch", { name: enSettings.preferences.sticky_comment_bar.small_screens });
+    expect(smallScreens).toHaveAttribute("aria-checked", "false");
+    await user.click(smallScreens);
+    expect(useCommentComposerStore.getState().stickyOnSmallScreens).toBe(true);
+    expect(smallScreens).toHaveAttribute("aria-checked", "true");
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  // Small screens only pin when the comment bar is pinned at all, so the
+  // opt-in has nothing to act on while the main switch is off.
+  it("disables the small-screen opt-in while the comment bar is not pinned", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: "Pin comment bar to bottom" }));
+
+    expect(screen.getByRole("switch", { name: enSettings.preferences.sticky_comment_bar.small_screens })).toHaveAttribute("aria-disabled", "true");
   });
 });
 

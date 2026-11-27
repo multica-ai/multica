@@ -151,6 +151,11 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "sticky-comment-bar-small-screens",
+        title: t(($) => $.preferences.sticky_comment_bar.small_screens),
+      },
+      {
+        tab: "preferences",
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),

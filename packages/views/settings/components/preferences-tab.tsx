@@ -86,6 +86,7 @@ export function PreferencesTab() {
       >
         <SettingsCard>
           <StickyCommentBarRow />
+          <StickyCommentBarSmallScreensRow />
           <RunningAgentReplyRow />
           <CommentImageLayoutRow />
           <FloatingChatRow />
@@ -171,6 +172,29 @@ function StickyCommentBarRow() {
         checked={sticky}
         onCheckedChange={() => toggleSticky()}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
+      />
+    </SettingsRow>
+  );
+}
+
+/**
+ * Below `md` the comment bar is only pinned when this is on as well (see
+ * `useStickyComposer`), so it is inert while the main pin is off.
+ */
+function StickyCommentBarSmallScreensRow() {
+  const { t } = useT("settings");
+  const sticky = useCommentComposerStore((s) => s.sticky);
+  const value = useCommentComposerStore((s) => s.stickyOnSmallScreens);
+  const setValue = useCommentComposerStore((s) => s.setStickyOnSmallScreens);
+  const label = t(($) => $.preferences.sticky_comment_bar.small_screens);
+
+  return (
+    <SettingsRow anchor="sticky-comment-bar-small-screens" label={label}>
+      <Switch
+        checked={value}
+        disabled={!sticky}
+        onCheckedChange={(checked) => setValue(checked)}
+        aria-label={label}
       />
     </SettingsRow>
   );

@@ -160,7 +160,8 @@
       "empty": "没有匹配的时区"
     },
     "sticky_comment_bar": {
-      "title": "固定底部评论栏"
+      "title": "固定底部评论栏",
+      "small_screens": "小屏幕上也固定"
     },
     "running_agent_reply": {
       "title": "回复正在运行的智能体时",

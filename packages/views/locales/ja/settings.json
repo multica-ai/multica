@@ -160,7 +160,8 @@
       "empty": "一致するタイムゾーンはありません"
     },
     "sticky_comment_bar": {
-      "title": "コメント欄を下部に固定"
+      "title": "コメント欄を下部に固定",
+      "small_screens": "小さい画面でも固定"
     },
     "running_agent_reply": {
       "title": "実行中のエージェントに返信するとき",

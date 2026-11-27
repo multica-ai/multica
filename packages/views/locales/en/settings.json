@@ -161,7 +161,8 @@
       "empty": "No matching time zone"
     },
     "sticky_comment_bar": {
-      "title": "Pin comment bar to bottom"
+      "title": "Pin comment bar to bottom",
+      "small_screens": "Also pin on small screens"
     },
     "running_agent_reply": {
       "title": "When replying to a running agent",

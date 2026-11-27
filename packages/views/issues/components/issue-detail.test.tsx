@@ -483,11 +483,11 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ),
   useCommentComposerStore: Object.assign(
     (selector?: any) => {
-      const state = { sticky: true, runningAgentReply: "steer", toggleSticky: () => {} };
+      const state = { sticky: true, stickyOnSmallScreens: false, runningAgentReply: "steer", toggleSticky: () => {} };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ sticky: true, runningAgentReply: "steer", toggleSticky: () => {} }),
+      getState: () => ({ sticky: true, stickyOnSmallScreens: false, runningAgentReply: "steer", toggleSticky: () => {} }),
     },
   ),
 }));

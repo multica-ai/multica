@@ -14,12 +14,12 @@ function setViewportWidth(width: number) {
 
 describe("useStickyComposer", () => {
   beforeEach(() => {
-    useCommentComposerStore.setState({ sticky: true });
+    useCommentComposerStore.setState({ sticky: true, stickyOnSmallScreens: false });
     setViewportWidth(DESKTOP_WIDTH);
   });
 
   afterEach(() => {
-    useCommentComposerStore.setState({ sticky: true });
+    useCommentComposerStore.setState({ sticky: true, stickyOnSmallScreens: false });
     setViewportWidth(DESKTOP_WIDTH);
   });
 
@@ -44,6 +44,25 @@ describe("useStickyComposer", () => {
 
     expect(result.current).toBe(false);
   });
+
+  it.each([
+    // [sticky, stickyOnSmallScreens, desktop, small screen]
+    [true, true, true, true],
+    [true, false, true, false],
+    [false, true, false, false],
+    [false, false, false, false],
+  ])(
+    "sticky=%s, stickyOnSmallScreens=%s pins on desktop: %s, below the breakpoint: %s",
+    (sticky, stickyOnSmallScreens, onDesktop, onSmallScreen) => {
+      useCommentComposerStore.setState({ sticky, stickyOnSmallScreens });
+
+      setViewportWidth(DESKTOP_WIDTH);
+      expect(renderHook(() => useStickyComposer()).result.current).toBe(onDesktop);
+
+      setViewportWidth(PHONE_WIDTH);
+      expect(renderHook(() => useStickyComposer()).result.current).toBe(onSmallScreen);
+    },
+  );
 
   it("still pins at exactly the breakpoint — 768px is not a phone", () => {
     setViewportWidth(768);

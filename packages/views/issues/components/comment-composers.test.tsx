@@ -328,7 +328,7 @@ beforeEach(() => {
   insertPlaceholderSpy.mockReset();
   insertMarkdownBehavior.succeed = true;
   localStorage.clear();
-  useCommentComposerStore.setState({ sticky: true, runningAgentReply: "steer" });
+  useCommentComposerStore.setState({ sticky: true, stickyOnSmallScreens: false, runningAgentReply: "steer" });
   // The composer's pinning (and the height cap that follows it) is viewport
   // dependent, so a narrow-viewport test must not leak into the next one.
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
@@ -1501,14 +1501,24 @@ describe("sticky composer preference", () => {
 
   // The cap only earns its keep while the composer is pinned: it stops a long
   // draft from swallowing the timeline it floats over. Below the mobile
-  // breakpoint nothing is pinned (see `useStickyComposer`), so a capped
-  // composer would just be a scroll-inside-a-scroll for no reason.
-  it("lets the editor grow below the mobile breakpoint, where nothing is pinned", () => {
+  // breakpoint the composer is only pinned when the user opted in (see
+  // `useStickyComposer`); otherwise a capped composer would just be a
+  // scroll-inside-a-scroll for no reason.
+  it("lets the editor grow below the mobile breakpoint unless small screens opted in", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     renderCommentInput();
 
     activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+
+  it("caps the editor below the mobile breakpoint when small screens opted in", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    useCommentComposerStore.setState({ stickyOnSmallScreens: true });
+    renderCommentInput();
+
+    activateComposer("comment-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
   });
 });
 
