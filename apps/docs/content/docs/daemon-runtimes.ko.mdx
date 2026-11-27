@@ -229,6 +229,20 @@ Hermes의 태스크 및 채팅 실행은 대화의 영구 디렉터리를 격리
 
 Multica는 실행마다 홈의 스킬과 파생 설정을 갱신합니다. 모델 제공업체의 인증은 유지하고, 관리되는 실행의 메시징 어댑터와 HTTP 수신 기능은 비활성화합니다. 호스트의 Gateway 상태, 로그, 세션, cron 작업은 격리됩니다. 실행이 끝나면 해당 실행의 Gateway를 중지하여 다음 실행이 자체 실행 환경을 사용하도록 합니다.
 
+### 상주 Hermes Gateway(선택)
+
+셀프 호스팅 런타임은 컨테이너마다 오래 실행되는 `hermes gateway run`을 하나 유지하여 Hermes의 세션, 메모리, 스스로 학습한 스킬을 실행 간에 보존할 수 있습니다. 이때 실행마다 시작되는 `hermes acp`는 연결해서 보기만 합니다. 데몬 환경에 `MULTICA_HERMES_RESIDENT_GATEWAY=1`을, 상주 Gateway 프로세스 환경에 `MULTICA_RESIDENT_OWNER=1`을 설정하세요. Gateway는 직접 시작하고 관리해야 하며, 이 모드에서 데몬은 실행별 Gateway를 시작하거나 중지하지 않습니다.
+
+격리 디렉터리는 상주 Gateway의 Gateway 기록, 로그, 세션, cron 상태를 격리하지 않고 심볼릭 링크로 이어받습니다. 대화의 영구 디렉터리는 `HERMES_HOME`으로 쓰이지 않으며, 디렉터리가 비어 있어도 세션 재개를 막지 않습니다. 상주 Gateway에 원래 세션이 더 이상 없으면 백엔드는 새 세션으로 다시 시도합니다.
+
+Hermes 실행을 시작하기 전에 데몬은 실행 환경 루트에 권한이 `0600`인 `.multica_resident_task.json`을 원자적으로 기록합니다. 이 파일에는 실행, 에이전트, 워크스페이스, 선택적 채팅 세션, 해당 실행 전용 `mat_` 토큰이 들어 있으며 실행이 끝나면 삭제됩니다. 상주 Gateway가 호출하는 Multica CLI 도구는 현재 디렉터리에서 위로 올라가며 가장 가까운 컨텍스트 파일을 찾고, 자체 환경에 명시적인 실행 ID가 없을 때만 그 자격 증명과 ID를 사용합니다. 명시적으로 전달된 `MULTICA_TASK_ID`나 `mat_` 토큰이 우선합니다.
+
+알려진 제한:
+
+- 상주 Gateway는 실행 전용 Hermes 디렉터리에 준비된 바인딩 스킬을 읽지 않습니다.
+- 실행별 `custom_env`는 상주 Gateway의 도구에 전달되지 않습니다.
+- 같은 Gateway의 도구는 하나의 OS 사용자를 공유합니다. 권한이 `0600`이어도 같은 UID의 프로세스는 진행 중인 다른 실행의 컨텍스트 파일을 읽을 수 있습니다. 런타임의 모든 에이전트가 서로 신뢰할 때만 이 모드를 사용하세요.
+
 ### Codex 기본 메모리와 하위 에이전트 [#codex-memory]
 
 데몬이 관리하는 Codex 실행에서는 Codex 기본 메모리가 기본적으로 꺼집니다. 이 컴퓨터나 이전 실행의 메모리가 다른 워크스페이스로 넘어가지 않게 하기 위해서입니다. 설정은 해당 실행 전용 `CODEX_HOME/config.toml`에만 기록되고(`features.memories`, `memories.generate_memories`, `memories.use_memories` 모두 `false`), `~/.codex/config.toml`은 바뀌지 않습니다. 기본 메모리를 유지하려면 데몬 환경에 `MULTICA_CODEX_MEMORY=1`을 설정하세요.

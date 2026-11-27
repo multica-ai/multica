@@ -7388,6 +7388,11 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 	if provider != "hermes" {
 		return true
 	}
+	// Transcripts live with the resident owner, not in the empty overlay store.
+	// The backend still retries fresh when a resumed session is no longer found.
+	if execenv.ResidentHermesGatewayEnabled() {
+		return true
+	}
 	if env.HermesSessionStore != "" {
 		return env.HermesSessionHistoryPresent
 	}
@@ -8732,7 +8737,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// tasks of one conversation are serial, so the shard has a single
 		// writer, while two issues never share a database. Guarded from the GC
 		// for the whole task, as the stores above and below.
-		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
+		// Resident viewers must see the owner's gateway records, not a conversation home.
+		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" && !execenv.ResidentHermesGatewayEnabled() {
 			hermesSessionStore = store
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
@@ -9222,6 +9228,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	agentEnv := taskMulticaEnvironment(task, provider, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
+	cleanupResident, err := writeResidentTaskContext(env.RootDir, provider, task, agentToken)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("write resident task context: %w", err)
+	}
+	defer cleanupResident()
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -9331,6 +9342,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// custom arg), which per-region stripping cannot see.
 	var hermesOverlayCustomArgs []string
 	hermesOverlayActive := provider == "hermes" && env != nil && env.HermesHome != ""
+	// Mirrored gateway records belong to the resident owner; it is not ours to retire.
+	hermesTaskGatewayOwned := hermesOverlayActive && !execenv.ResidentHermesGatewayEnabled()
 	if hermesOverlayActive {
 		var rawCustomArgs []string
 		if task.Agent != nil {
@@ -9357,7 +9370,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		BuiltinRuntime: !usesCustomProfileCommand,
 		WarmPool:       taskWarmPool,
 	}
-	if hermesOverlayActive {
+	if hermesTaskGatewayOwned {
 		// Retire an owner left by a crashed/interrupted daemon before it can
 		// execute tools with the preceding task's frozen environment.
 		if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {

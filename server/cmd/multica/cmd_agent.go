@@ -261,6 +261,10 @@ func resolveProfile(cmd *cobra.Command) string {
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
+	resident := residentTaskCredentialFromCwd(token)
+	if resident != nil {
+		token = resident.Token
+	}
 	if taskContext && !strings.HasPrefix(token, "mat_") {
 		if hint := replacedTaskTokenHint(token); hint != "" {
 			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
@@ -289,6 +293,13 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
 		client.TaskID = taskID
+	}
+	if resident != nil {
+		client.AgentID = resident.AgentID
+		client.TaskID = resident.TaskID
+		if resident.WorkspaceID != "" {
+			client.WorkspaceID = resident.WorkspaceID
+		}
 	}
 	return client, nil
 }
