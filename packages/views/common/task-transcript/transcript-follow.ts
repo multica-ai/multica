@@ -47,7 +47,10 @@ const MOTION_SETTLE_WINDOW_MS = 300;
 // The surface snaps scroll offsets to device pixels, so its displacement can
 // differ from the input behind it by up to a pixel: fractional trackpad deltas,
 // or a list resting half a pixel short of its end. A system shift is pixels.
+// The slack is bounded by the claim it rounds: once the reader's input is
+// spent, even a 1px shift is the system's.
 const SCROLL_ROUNDING_PX = 1;
+const roundingSlack = (claim: number) => Math.min(SCROLL_ROUNDING_PX, claim);
 
 // WheelEvent.deltaMode 1 (lines) / 2 (pages) conversion.
 export const LINE_SCROLL_PX = 40;
@@ -116,7 +119,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const inputFresh = () => now() - lastInputAt < MOTION_SETTLE_WINDOW_MS;
   const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
 
-  const withinCarry = (amount: number) => amount <= motionCarry + SCROLL_ROUNDING_PX;
+  const withinCarry = (amount: number) => amount <= motionCarry + roundingSlack(motionCarry);
 
   const pinVerdict = (distance: number): boolean =>
     following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
@@ -241,7 +244,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         const attributed = Math.min(awayBudget, moved);
         awayBudget -= attributed;
         // Touch displacement need not match finger travel pixel-for-pixel.
-        if (touchHeld || moved - attributed <= SCROLL_ROUNDING_PX) {
+        if (touchHeld || moved - attributed <= roundingSlack(attributed)) {
           awayTaken += moved;
           motionDirection = 1;
           motionSource = touchHeld ? "touch" : "input";
@@ -255,7 +258,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       } else if (moved < 0 && inputFresh() && towardBudget > 0) {
         const attributed = Math.min(towardBudget, -moved);
         towardBudget -= attributed;
-        if (touchHeld || -moved - attributed <= SCROLL_ROUNDING_PX) {
+        if (touchHeld || -moved - attributed <= roundingSlack(attributed)) {
           awayTaken = Math.max(0, awayTaken + moved);
           motionDirection = -1;
           motionSource = touchHeld ? "touch" : "input";

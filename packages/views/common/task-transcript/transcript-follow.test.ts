@@ -225,6 +225,21 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
+  it("rounding slack never outlives the reader's claim", () => {
+    // The reader has taken exactly the threshold and their claim is spent. A
+    // 1px system shift inside the motion window is not theirs: crediting it
+    // would release the follow and leave the next reply growth off screen.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(FOLLOW_EDGE_THRESHOLD);
+    expect(follow.onScroll(FOLLOW_EDGE_THRESHOLD)).toBe(false);
+    follow.endInputFrame();
+    tick(100);
+    expect(follow.onScroll(FOLLOW_EDGE_THRESHOLD + 1)).toBe(true);
+    expect(follow.isFollowing()).toBe(true);
+    expect(follow.onResize(FOLLOW_EDGE_THRESHOLD + 181)).toBe(true);
+  });
+
   it("pins displacement that lands inside the intent window", () => {
     // The final chunk of a reply has a whole window to land in after any
     // small nudge; the pin decision must not hide behind a timer, because
