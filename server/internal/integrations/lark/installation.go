@@ -88,6 +88,11 @@ func (s *InstallationService) Revoke(ctx context.Context, id pgtype.UUID) error 
 	})
 }
 
+// SealAppSecret seals a plaintext app secret under the current key.
+func (s *InstallationService) SealAppSecret(secret string) ([]byte, error) {
+	return s.box.Seal([]byte(secret))
+}
+
 // DecryptAppSecret returns the plaintext app_secret for the supplied
 // installation row. Used by the WebSocket hub when it needs to
 // authenticate against the Lark API on behalf of an installation; do

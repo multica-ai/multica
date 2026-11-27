@@ -126,6 +126,21 @@ func logSecretboxGateDisabled(label, envVar string, err error) {
 	slog.Info(label + " disabled (" + envVar + " not set)")
 }
 
+// newSecretBox seals with key and also opens ciphertext sealed under the
+// optional envVar+"_PREVIOUS" key, so a key can be replaced while existing
+// rows are re-encrypted.
+func newSecretBox(envVar string, key []byte) (*secretbox.Box, error) {
+	previous, err := secretbox.LoadPreviousKey(envVar)
+	if err != nil {
+		return nil, err
+	}
+	if previous == nil {
+		return secretbox.New(key)
+	}
+	slog.Info("secretbox: previous key configured; opening ciphertext sealed under either key", "env", envVar+secretbox.PreviousKeySuffix)
+	return secretbox.New(key, previous)
+}
+
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
 	r.Get(publicapiv1.PathContext, h.GetPluginContext)
 	r.Get(publicapiv1.PathIssue, h.GetPluginIssue)
@@ -622,7 +637,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// in to Lark are unaffected. Feishu registers its Factory + ResolverSet
 	// into the channel engine above.
 	if larkKey, err := secretbox.LoadKey("MULTICA_LARK_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(larkKey)
+		box, err := newSecretBox("MULTICA_LARK_SECRET_KEY", larkKey)
 		if err != nil {
 			slog.Error("lark: secretbox.New failed; lark integration disabled", "error", err)
 		} else {
@@ -840,7 +855,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// app-level token, so a per-installation Slack Factory is registered and the
 	// Supervisor drives one Socket Mode connection per installation (like Feishu).
 	if slackKey, err := secretbox.LoadKey("MULTICA_SLACK_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(slackKey)
+		box, err := newSecretBox("MULTICA_SLACK_SECRET_KEY", slackKey)
 		if err != nil {
 			slog.Error("slack: secretbox.New failed; slack integration disabled", "error", err)
 		} else {
@@ -928,7 +943,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// AppSecret is encrypted at rest and the integration is inert unless its
 	// dedicated deployment key is configured.
 	if dingtalkKey, err := secretbox.LoadKey("MULTICA_DINGTALK_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(dingtalkKey)
+		box, err := newSecretBox("MULTICA_DINGTALK_SECRET_KEY", dingtalkKey)
 		if err != nil {
 			slog.Error("dingtalk: secretbox.New failed; integration disabled", "error", err)
 		} else {
@@ -985,7 +1000,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// are unaffected. The smart-bot flow does NOT require any public HTTP
 	// callback, so nothing else needs to be exposed to the internet.
 	if wecomKey, err := secretbox.LoadKey("MULTICA_WECOM_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(wecomKey)
+		box, err := newSecretBox("MULTICA_WECOM_SECRET_KEY", wecomKey)
 		if err != nil {
 			slog.Error("wecom: secretbox.New failed; wecom integration disabled", "error", err)
 		} else {
@@ -1287,7 +1302,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// WeChat iLink needs only an at-rest key; users authorize their bot by QR.
 	if key, err := secretbox.LoadKey("MULTICA_WEIXIN_SECRET_KEY"); err == nil {
-		box, boxErr := secretbox.New(key)
+		box, boxErr := newSecretBox("MULTICA_WEIXIN_SECRET_KEY", key)
 		if boxErr != nil {
 			slog.Error("weixin: encryption setup failed", "error", boxErr)
 		} else if install, installErr := weixin.NewInstallService(queries, pool, box); installErr != nil {
@@ -1318,7 +1333,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// encryption key); when unset the handlers return 503 and no Factory is
 	// registered.
 	if telegramKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(telegramKey)
+		box, err := newSecretBox("MULTICA_TELEGRAM_SECRET_KEY", telegramKey)
 		if err != nil {
 			slog.Error("telegram: secretbox.New failed; telegram integration disabled", "error", err)
 		} else {
@@ -1447,7 +1462,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// they need their own at-rest key; without it they
 						// stay off and Composio apps work as before.
 						if appsKey, kerr := secretbox.LoadKey("MULTICA_APPS_SECRET_KEY"); kerr == nil {
-							if box, berr := secretbox.New(appsKey); berr == nil {
+							if box, berr := newSecretBox("MULTICA_APPS_SECRET_KEY", appsKey); berr == nil {
 								appsCfg.SecretBox, appsCfg.DB = box, pool
 							} else {
 								slog.Error("connected apps: secretbox.New failed; remote MCP apps disabled", "error", berr)
@@ -1488,7 +1503,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Without it, connect/webhook handlers return 503 (so a misconfigured
 	// self-host never stores plaintext secrets).
 	if vcsKey, err := secretbox.LoadKey("MULTICA_VCS_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(vcsKey)
+		box, err := newSecretBox("MULTICA_VCS_SECRET_KEY", vcsKey)
 		if err != nil {
 			slog.Error("vcs: secretbox.New failed; vcs integration disabled", "error", err)
 		} else {
