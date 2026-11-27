@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // forgejoProvider implements Provider for Forgejo and its upstream Gitea, which
@@ -226,8 +225,6 @@ func (p forgejoProvider) ValidateToken(ctx context.Context, instanceURL, token s
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────
-
-var httpClient = &http.Client{Timeout: 15 * time.Second}
 
 // NormalizeInstanceURL trims whitespace and any trailing slash so stored
 // instance URLs and derived webhook URLs are stable regardless of input.

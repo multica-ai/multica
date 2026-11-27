@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+func TestMain(m *testing.M) {
+	// Provider tests talk to httptest servers on loopback. The production
+	// client refuses that address (GH #9439), so the package-level client is
+	// swapped for the duration of this test binary only.
+	httpClient = &http.Client{Timeout: instanceRequestTimeout}
+	os.Exit(m.Run())
+}
+
 func TestRegistry(t *testing.T) {
 	for _, k := range []string{"forgejo", "gitea", "gitlab"} {
 		if _, ok := For(k); !ok {
