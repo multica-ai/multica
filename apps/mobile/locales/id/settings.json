@@ -73,7 +73,7 @@
     "comments": "Komentar",
     "comments_description": "Komentar baru pada tugas yang Anda ikuti.",
     "squad_handoffs": "Sertakan serah terima squad",
-    "squad_handoffs_description": "Komentar yang digunakan leader dan agent squad untuk saling menyerahkan pekerjaan. @mention untuk Anda, eksekusi agent yang gagal, dan status yang perlu perhatian tetap diterima.",
+    "squad_handoffs_description": "Komentar yang dipakai leader dan agent squad untuk saling menyerahkan pekerjaan. @mention untuk Anda, run agent yang gagal, dan laporan akhir squad tetap diterima.",
     "mentions": "Sebutan",
     "mentions_description": "Saat seseorang men-@mention Anda, termasuk @all dan @squad.",
     "reactions": "Reaksi",

@@ -81,6 +81,7 @@
     "resolved": "Selesai {{count}}",
     "close": "Tutup komentar",
     "quote_missing": "Teks yang dikomentari telah diubah",
+    "quote_changed": "Teks berubah",
     "reply_placeholder": "Balas, atau @ seseorang...",
     "new_placeholder": "Tambahkan komentar, atau @ seseorang...",
     "submit": "Komentar",
@@ -98,6 +99,6 @@
       "delete": "Tidak dapat menghapus komentar",
       "resolve": "Tidak dapat memperbarui komentar"
     },
-    "run_waiting_runtime": "Menunggu runtime kembali online"
+    "run_waiting_retry": "Menunggu percobaan ulang"
   }
 }

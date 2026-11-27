@@ -113,6 +113,8 @@
     "runtime_reconnect_timeout": "Daemon tidak tersambung ulang tepat waktu",
     "runtime_recovery": "Daemon dimulai ulang",
     "timeout": "Eksekusi melebihi batas waktu",
+    "cleanup_unconfirmed": "Tidak dapat memastikan proses agent telah berhenti",
+    "cleanup_blocked": "Run sebelumnya mungkin masih aktif. Setelah memastikan run itu berhenti, ulangi run issue yang gagal untuk agent ini di web atau desktop jika tersedia.",
     "iteration_limit": "Mencapai batas iterasi",
     "agent_blocked": "Menunggu input manusia",
     "api_invalid_request": "Ditolak oleh API model",

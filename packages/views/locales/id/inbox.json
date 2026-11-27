@@ -1,7 +1,6 @@
 {
   "page": {
-    "title": "Kotak Masuk",
-    "back": "Kotak Masuk"
+    "title": "Kotak Masuk"
   },
   "menu": {
     "mark_all_read": "Tandai semua sudah dibaca",
@@ -150,6 +149,8 @@
   },
   "kept": {
     "archived": "Diarsipkan",
+    "undo_archive": "Batalkan arsip",
+    "unsubscribed": "Berhenti berlangganan",
     "leaves": "Keluar dari Kotak Masuk saat Anda beralih",
     "filtered": "Tidak lagi cocok dengan filter Anda",
     "changed_status": "Diubah menjadi {{status}}",

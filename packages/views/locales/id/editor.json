@@ -255,5 +255,9 @@
     "turn_into": "Ubah menjadi",
     "duplicate": "Duplikat",
     "delete": "Hapus"
+  },
+  "plain_text": {
+    "notice": "Terlalu panjang untuk diformat, ditampilkan sebagai teks biasa.",
+    "download": "Unduh sebagai .txt"
   }
 }

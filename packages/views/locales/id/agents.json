@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "Batalkan semua eksekusi",
     "archive_dialog_title": "Arsipkan \"{{name}}\"?",
     "archive_dialog_description": "Agent tidak akan bisa diberi tugas atau disebut, dan semua eksekusi aktif akan dibatalkan. Semua riwayat tetap tersimpan dan Anda dapat memulihkannya nanti.",
+    "archive_dialog_mika_note": " Prompt \"Mulai dengan Mika\" tidak akan muncul lagi sampai Mika dipulihkan.",
     "archive_dialog_cancel": "Batal",
     "archive_dialog_confirm": "Arsipkan",
     "set_access_applies_to_other": "Berlaku untuk {{count}} agent."
@@ -936,6 +937,14 @@
     "search_placeholder": "Cari dalam eksekusi ini…",
     "no_matches": "Tidak ada langkah yang cocok dengan pencarian ini.",
     "more_actions": "Lainnya",
+    "purge_log": "Hapus log run",
+    "purge_confirm_title": "Hapus log run ini?",
+    "purge_confirm_body": "Setiap langkah, input dan output alat, serta output akhir agent dihapus untuk semua orang. Status, waktu, dan penggunaan run tetap ada. Tindakan ini tidak dapat dibatalkan.",
+    "purge_confirm_action": "Hapus log",
+    "purge_cancel": "Batal",
+    "purge_done": "Log run dihapus",
+    "purge_failed": "Tidak dapat menghapus log run",
+    "purged_by": "Log run dihapus oleh {{name}} · {{time}}",
     "kind_text": "Agent",
     "kind_tool": "Tool",
     "kind_thinking": "Pemikiran",
@@ -1006,6 +1015,8 @@
       "runtime_recovery": "Daemon dimulai ulang",
       "runtime_access_revoked": "Akses runtime dicabut",
       "timeout": "Eksekusi melewati batas waktu",
+      "cleanup_unconfirmed": "Tidak dapat memastikan proses agent telah berhenti",
+      "cleanup_blocked": "Run sebelumnya mungkin masih aktif; jalankan ulang secara manual",
       "iteration_limit": "Mencapai batas iterasi",
       "agent_blocked": "Menunggu input manusia",
       "api_invalid_request": "Ditolak oleh API model",
@@ -1105,5 +1116,9 @@
     "new_app": "Aplikasi baru untuk agent ini",
     "adds_app_note": "Menjawab akan menambahkan {{app}} ke {{agent}} untuk eksekusi berikutnya.",
     "add_to_agent": "Tambahkan {{app}} ke {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Zona berbahaya",
+    "restore_label": "Pulihkan agent"
   }
 }

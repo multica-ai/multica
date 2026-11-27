@@ -25,6 +25,7 @@
     "message": "Pesan agent",
     "error": "Error",
     "waiting_result": "Menunggu hasil tool...",
+    "reply_pending_call": "Masih berjalan: menunggu {{step}} selesai",
     "supplement_failure_turn_ended": "eksekusi berakhir sebelum terkirim",
     "supplement_failure_turn_not_started": "agent belum siap",
     "supplement_failure_provider_rejected": "agent menolak pesan",
@@ -599,14 +600,20 @@
       "wakeups": "Tambah wakeup",
       "pull_requests": "Tambah pull request",
       "environments": "Tambah environment",
-      "wakeups_pull_requests": "Tambah wakeup atau pull request",
-      "wakeups_environments": "Tambah wakeup atau environment",
-      "pull_requests_environments": "Tambah pull request atau environment",
-      "all": "Tambah wakeup, pull request, atau environment",
+      "relations": "Tambah relasi",
+      "pair": "Tambah {{first}} atau {{second}}",
+      "many": "Tambah...",
+      "noun": {
+        "wakeups": "wakeup",
+        "pull_requests": "pull request",
+        "environments": "environment",
+        "relations": "relasi"
+      },
       "menu": {
         "wakeups": "Wakeup",
         "pull_requests": "Pull request",
-        "environments": "Environment"
+        "environments": "Environment",
+        "relations": "Relasi"
       }
     },
     "footer": {
@@ -1076,7 +1083,8 @@
     "remove_parent_issue": "Hapus tugas induk",
     "remove_parent_issue_success": "Tugas induk dihapus",
     "add_sub_issue": "Tambah sub-tugas...",
-    "add_blocker": "Tambah pemblokir...",
+    "add_blocker": "Tunggu tugas lain...",
+    "add_blocking": "Blokir tugas lain...",
     "delete_issue": "Hapus tugas",
     "mark_duplicate": "Tandai sebagai duplikat...",
     "open_in_new_window": "Buka di jendela baru"
@@ -1382,6 +1390,7 @@
       "cancel": "Batal",
       "error": "Tidak dapat membuat wakeup. Periksa pengaturan dan coba lagi.",
       "capacity_error": "Tugas atau ruang kerja ini sudah memiliki jumlah maksimum wakeup aktif.",
+      "agent_error": "Anda tidak dapat menjalankan agent ini. Minta akses ke pemiliknya, atau pilih agent lain.",
       "missing_condition": "Pilih kondisi.",
       "missing_agent": "Pilih agent untuk dibangunkan.",
       "missing_events": "Pilih setidaknya satu peristiwa.",
@@ -2058,15 +2067,25 @@
     "retry": "Coba lagi",
     "dismiss": "Tutup"
   },
+  "relations": {
+    "title": "Relasi",
+    "add": "Tambah relasi",
+    "wait_title": "Tunggu tugas lain",
+    "block_title": "Blokir tugas lain",
+    "blocked_by": "Diblokir oleh",
+    "blocking": "Memblokir",
+    "stage_tag": "Tahap",
+    "stage_tag_hint": "Ditetapkan oleh tahap issue induk",
+    "add_blocker_hint": "Tugas ini dimulai setelah tugas tersebut selesai",
+    "add_blocking_hint": "Tugas tersebut dimulai setelah tugas ini selesai",
+    "mark_duplicate_hint": "Membatalkan tugas ini",
+    "blocking_picker_hint": "Pilih tugas yang tidak dapat dimulai sampai tugas ini selesai."
+  },
   "waiting": {
-    "title": "Menunggu",
-    "add": "Tambah pemblokir",
     "remove": "Hapus {{identifier}}",
     "count": "Menunggu {{count}} tugas",
-    "stage": "Tahap sebelumnya · {{finished}}/{{total}} selesai",
     "hint": "Setelah tugas-tugas ini selesai, penerima tugas dimulai otomatis atau menerima notifikasi.",
-    "hint_backlog": "Tugas ini ada di Backlog, sehingga tidak dimulai otomatis saat tugas-tugas ini selesai. Tugas baru dimulai setelah keluar dari Backlog.",
-    "empty": "Tidak ada tugas yang ditunggu",
+    "hint_backlog": "Tidak dimulai otomatis selama di Backlog.",
     "picker_hint": "Pilih tugas yang harus selesai sebelum tugas ini dapat dimulai.",
     "restricted": "{{count}} prasyarat dengan akses terbatas",
     "ended": "Tugas yang ditunggu selesai",

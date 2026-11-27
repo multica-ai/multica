@@ -92,6 +92,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Задача может ждать другие",
             body: "В меню задачи выберите «Связи → Ждать другую задачу» или добавьте связь в разделе «Связи» на боковой панели. Когда эти задачи завершатся, назначенный агент начнёт работу сам, а назначенный человек получит уведомление.",
           },
+          id: {
+            title: "Biarkan tugas menunggu tugas lain",
+            body: "Di menu tugas, pilih Relasi → Tunggu tugas lain, atau tambahkan di Relasi pada sidebarnya. Saat tugas-tugas itu selesai, agent penerima tugas dimulai otomatis dan penerima tugas manusia diberi tahu.",
+          },
         },
       },
       {
@@ -131,6 +135,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Участники команды передают работу напрямую",
             body: "Если вы управляете командой, откройте её и в разделе «Совместная работа» выберите «Участники передают напрямую». Участники будут передавать задачу друг другу, а лидер подключится, только если достигнут лимит или запуск завершился ошибкой.",
           },
+          id: {
+            title: "Biarkan anggota squad serah terima langsung",
+            body: "Jika Anda mengelola squad, buka squad itu dan atur Kolaborasi ke Anggota serah terima langsung. Anggota lalu menyerahkan issue satu sama lain, dan leader baru turun tangan saat batas tercapai atau run gagal.",
+          },
         },
       },
       {
@@ -169,6 +177,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Меняйте время напоминания",
             body: "В чате откройте «Напоминания» с полосы над полем ввода или по значку будильника в заголовке, затем нажмите на часы рядом с напоминанием, чтобы изменить время.",
+          },
+          id: {
+            title: "Ubah kapan wakeup memeriksa lagi",
+            body: "Di chat, buka Wakeup dari strip di atas kotak pesan atau ikon jam alarm di header, lalu klik jam di samping wakeup untuk mengubah waktunya.",
           },
         },
       },

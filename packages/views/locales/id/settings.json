@@ -381,6 +381,9 @@
     "record_aria": "Ubah pintasan untuk {{action}}",
     "recording": "Tekan tombol",
     "record_hint": "Esc membatalkan · Delete menghapus",
+    "record_sequence_hint": "Tekan satu tombol, atau dua tombol berurutan untuk urutan seperti G lalu I · Esc membatalkan",
+    "record_then_hint": "Tekan tombol kedua · ↵ mempertahankan satu tombol · Backspace mengulang",
+    "then": "lalu",
     "unassigned": "Belum ditetapkan",
     "no_results": "Tidak ada tindakan pintasan yang cocok.",
     "conflict_error": "Sudah digunakan oleh {{action}}.",
@@ -391,8 +394,10 @@
     "send_enter_hint": "Shift+Enter menyisipkan paragraf, melanjutkan daftar, atau menambahkan baris baru dalam code block.",
     "categories": {
       "general": "Umum",
+      "issue": "Issue",
       "navigation": "Navigasi"
     },
+    "issue_scope": "Bertindak pada issue di depan Anda: yang ada di pratinjau, issue yang dipilih di daftar, atau issue yang terbuka.",
     "actions": {
       "openSearch": {
         "label": "Buka pencarian",
@@ -449,6 +454,42 @@
       "undoInboxAction": {
         "label": "Urungkan aksi kotak masuk",
         "description": "Urungkan tindakan arsip, tunda, atau berhenti berlangganan terakhir selama toast masih ditampilkan. Setelah toast hilang, pulihkan notifikasi yang terbuka jika sudah diarsipkan, atau item yang disebutkan dalam pemberitahuan bahwa Kotak Masuk telah dibersihkan."
+      },
+      "setIssueStatus": {
+        "label": "Ubah status",
+        "description": "Buka pemilih status."
+      },
+      "assignIssue": {
+        "label": "Tugaskan",
+        "description": "Buka pemilih penerima tugas."
+      },
+      "setIssuePriority": {
+        "label": "Atur prioritas",
+        "description": "Buka pemilih prioritas."
+      },
+      "setIssueLabels": {
+        "label": "Edit label",
+        "description": "Buka pemilih label."
+      },
+      "setIssueDueDate": {
+        "label": "Atur tenggat",
+        "description": "Buka pemilih tenggat."
+      },
+      "moveIssueToProject": {
+        "label": "Pindahkan ke proyek",
+        "description": "Buka pemilih proyek."
+      },
+      "runIssueQuickAction": {
+        "label": "Jalankan aksi cepat",
+        "description": "Tersedia pada satu issue saat aksi cepat aktif."
+      },
+      "replyToIssue": {
+        "label": "Balas",
+        "description": "Fokus ke kotak komentar issue yang terbuka."
+      },
+      "showShortcuts": {
+        "label": "Tampilkan pintasan keyboard",
+        "description": "Buka daftar pintasan, dengan halaman saat ini di urutan pertama."
       },
       "send": {
         "label": "Kirim",
@@ -526,6 +567,32 @@
       "zoom_out": "Perkecil",
       "reset_zoom": "Reset zoom",
       "close_dialog": "Tutup dialog atau menu"
+    },
+    "cheatsheet": {
+      "title": "Pintasan keyboard",
+      "current_page": "halaman saat ini",
+      "footer_prefix": "Pintasan disimpan di perangkat ini. Ubah di ",
+      "footer_link": "Pengaturan › Pintasan",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Inbox",
+        "issue": "Issue",
+        "navigation": "Navigasi",
+        "general": "Umum",
+        "list": "Daftar dan board",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Pindah ke bawah / atas",
+        "list_columns": "Pindah antar kolom board",
+        "list_open": "Buka",
+        "list_peek": "Pratinjau",
+        "list_select": "Pilih",
+        "list_extend": "Perluas pilihan",
+        "list_select_all": "Pilih semua",
+        "list_clear": "Hapus pilihan",
+        "editor_leave": "Keluar dari kolom"
+      }
     }
   },
   "chat": {
@@ -911,7 +978,7 @@
       },
       "squad_handoffs": {
         "label": "Sertakan serah terima squad",
-        "description": "Komentar yang digunakan leader squad dan agent untuk saling menyerahkan pekerjaan. @mention untuk Anda, eksekusi agent yang gagal, dan status yang perlu perhatian tetap diterima."
+        "description": "Komentar yang dipakai leader dan agent squad untuk saling menyerahkan pekerjaan. @mention untuk Anda, run agent yang gagal, dan laporan akhir squad tetap diterima."
       },
       "mentions": {
         "label": "Mention",
@@ -1954,7 +2021,7 @@
       "title_member_ask": "{{name}} meminta akun {{app}} tim",
       "waiting_for_admin": "Menunggu admin",
       "team_note": "Setiap agent yang bertindak sebagai akun tim dapat menggunakannya.",
-      "admins_notified": "Admin ruang kerja telah diberi tahu di Kotak Masuk.",
+      "admins_notified": "Admin workspace telah diberi tahu di Inbox.",
       "connect_team": "Hubungkan untuk tim"
     },
     "tools": {
@@ -2045,10 +2112,10 @@
       "no_matches": "Tidak ada aplikasi yang cocok dengan pencarian Anda.",
       "unavailable": "Aplikasi tidak tersedia di server ini.",
       "retry": "Coba lagi",
-      "category_all": "Semua",
+      "catalog": "Katalog",
+      "catalog_failed": "Tidak dapat memuat katalog aplikasi.",
       "category_curated": "Pilihan unggulan",
       "categories_label": "Kategori",
-      "categories_nav": "Kategori aplikasi",
       "connect_oauth": "Masuk dengan OAuth",
       "connect_key": "Menggunakan API key",
       "show_more": "Tampilkan lebih banyak",
