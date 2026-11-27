@@ -29,6 +29,12 @@ describe("failureReasonKey", () => {
     expect(runFailureBadgeLabel("runtime_access_revoked", tEn)).toBe("Access revoked");
   });
 
+  it("explains a run stopped by missing local Git prerequisites", () => {
+    expect(failureReasonKey("local_worktree_prerequisite_missing")).toBe(
+      "failure_reason.local_worktree_prerequisite_missing",
+    );
+  });
+
   it("falls back to a user-friendly unknown reason", () => {
     expect(failureReasonKey("not_known_yet")).toBe(
       "failure_reason.default",

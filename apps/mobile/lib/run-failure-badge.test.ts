@@ -33,6 +33,12 @@ describe("runFailureBadgeLabel", () => {
     );
   });
 
+  it("identifies missing Git prerequisites in every supported language", () => {
+    expect(runFailureBadgeLabel("local_worktree_prerequisite_missing", tEn)).toBe("Git setup required");
+    expect(runFailureBadgeLabel("local_worktree_prerequisite_missing", tZhHans)).toBe("Git 仓库未就绪");
+    expect(runFailureBadgeLabel("local_worktree_prerequisite_missing", tZhHant)).toBe("Git 儲存庫未就緒");
+  });
+
   it("names the reason in the reader's language", () => {
     expect(runFailureBadgeLabel("local_directory_missing", tEn)).toBe(
       "Folder missing",

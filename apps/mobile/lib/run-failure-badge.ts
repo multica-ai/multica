@@ -33,6 +33,7 @@ export const FAILURE_BADGE_REASONS = new Set([
   "skill_bundle_unavailable",
   "runtime_cli_timeout",
   "environment_prepare_failed",
+  "local_worktree_prerequisite_missing",
   "runtime_access_denied",
   "local_directory_missing",
 

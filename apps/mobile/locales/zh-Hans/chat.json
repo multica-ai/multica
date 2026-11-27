@@ -119,6 +119,7 @@
     "skill_bundle_unavailable": "无法下载智能体的技能包",
     "runtime_cli_timeout": "本地运行时 CLI 超时",
     "environment_prepare_failed": "无法准备执行环境",
+    "local_worktree_prerequisite_missing": "运行在智能体启动前停止。请初始化本地 Git 仓库并创建首次提交。",
     "runtime_access_denied": "无法访问该智能体的私有运行时，暂时无法回复。请将该运行时设为公开，或将智能体绑定到可用的运行时。",
     "runtime_access_revoked": "运行时访问权限已被撤销。再次运行前，请为智能体绑定可用的运行时。",
     "invalid_task_identity": "运行身份不匹配",

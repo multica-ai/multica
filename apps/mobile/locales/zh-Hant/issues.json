@@ -297,6 +297,7 @@
       "skill_bundle_unavailable": "skill 下載失敗",
       "runtime_cli_timeout": "執行時 CLI 超時",
       "environment_prepare_failed": "環境準備失敗",
+      "local_worktree_prerequisite_missing": "Git 儲存庫未就緒",
       "runtime_access_denied": "無執行時權限",
       "local_directory_missing": "資料夾不存在",
       "agent_error_provider_auth_or_access": "認證失敗",
