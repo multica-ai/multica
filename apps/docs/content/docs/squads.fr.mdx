@@ -64,7 +64,7 @@ Le réglage **Collaboration** de la page de détail du squad décide qui choisit
 
 | Mode | Effet |
 |---|---|
-| **Le chef attribue** (par défaut) | Chaque réponse d'un membre revient au chef, qui choisit l'étape suivante. Les squads existants conservent ce mode. |
+| **Le chef attribue** (par défaut) | La réponse d'un membre revient au chef, qui choisit l'étape suivante, sauf si elle mentionne explicitement un agent ou un squad avec `@`, auquel cas cette cible s'exécute à la place. Les squads existants conservent ce mode. |
 | **Les membres se passent la main** | Le chef attribue la première étape et gère les exceptions. Un membre mentionne le membre suivant avec `@`, qui s'exécute sans réveiller le chef. Un membre qui mentionne une personne attend sa réponse plutôt que le chef. |
 
 Avec **Les membres se passent la main**, la tâche revient au chef lorsque :
@@ -94,7 +94,7 @@ Après la première répartition, le chef est automatiquement réveillé par **l
 La déduplication s'ajoute à ces règles : si le chef a déjà une exécution `queued` ou `dispatched` sur cette tâche, un nouveau déclencheur ne met pas de doublon en file.
 
 <Callout type="info">
-Un commentaire `@membre` / `@all` rédigé par un membre humain ne fait que notifier des personnes. Le résultat d'un agent worker portant les mêmes mentions revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation. Une mention explicite `@agent` / `@squad` ne route que vers les cibles nommées, quel que soit l'auteur du commentaire.
+Un commentaire `@membre` / `@all` rédigé par un membre humain ne fait que notifier des personnes. Le résultat d'un agent worker portant les mêmes mentions revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation — sauf lorsqu'un membre d'un squad en mode **Les membres se passent la main** mentionne une personne sur la tâche de ce squad, auquel cas personne n'est réveillé. Une mention explicite `@agent` / `@squad` ne route que vers les cibles nommées, quel que soit l'auteur du commentaire.
 </Callout>
 
 ## Assigner ou @mentionner un squad

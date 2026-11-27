@@ -537,8 +537,9 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `mcp list/add/enable/disable/remove <agent-id>` | ワークスペース MCP サーバーをこのエージェントに割り当て | server id は `workspace mcp list` から取得。ライブラリの項目はここで追加するまで機能しません。`disable` は割り当てを残したまま送信を停止します |
 | `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--mode`（どちらも必須）、`--agent` / `--squad` / `--squad-id` のいずれか1つ（必須）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（繰り返し可） |
 | | `trigger <id>` | 手動で 1 回トリガー | |
-| | `runs <id>` | 実行履歴を表示 | |
-| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | `trigger-add`: `--kind`（`schedule` または `webhook`）、`--cron`、`--timezone`（既定は UTC）、`--label` |
+| | `runs <id>` | 実行履歴を表示 | `--limit`、`--offset`、`--output` |
+| | `deliveries <id>` | webhook の配信履歴を表示（無視またはスキップされて実行を作成しなかったものを含む） | `--limit`（既定 20、最大 100）、`--offset`、`--output` |
+| | `trigger-list/trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | `trigger-add`: `--kind`（`schedule` または `webhook`）、`--cron`、`--timezone`（既定は UTC）、`--label`、`--event-filters-file`；`trigger-update`: `--clear-event-filters` |
 | `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定。エージェントの実行では `list` は自身のワークスペースのみ | `create`: `--name`、`--slug`（いずれも必須）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` は slug 以外の同じ項目を変更 |
 | | `mcp list/add/update/remove` | ワークスペースの MCP サーバーライブラリを管理 | 書き込みは owner/admin のみ。ここに追加したサーバーはどのエージェントにも割り当てられません — `multica agent mcp add` で割り当てます。`list` は名前と transport のみを表示し、保存されたエントリは書き込み専用でどのロールにも返りません。`--server-config-file` / `--server-config-stdin` はトークンをシェル履歴から守ります |
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |

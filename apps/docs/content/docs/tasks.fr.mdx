@@ -69,6 +69,7 @@ Dans le journal d'exécution, vous pouvez :
 - Cliquer sur **Voir la transcription** sur une ligne pour voir les messages de l'agent, les appels d'outils et la sortie d'erreur. Pour une exécution encore en cours, la transcription continue de s'afficher en direct tant que la boîte de dialogue reste ouverte, et un bouton **Plus récents d'abord** inverse l'ordre des événements.
 - Arrêter les exécutions en file d'attente, en démarrage, en attente d'un répertoire local ou au travail.
 - Relancer une exécution en échec ou annulée.
+- Effacer le journal d'une exécution terminée. Les `owner` et `admin` de l'espace de travail peuvent ouvrir la transcription d'une exécution terminée, en échec ou annulée et choisir **Plus → Effacer le journal de l'exécution**. L'effacement supprime définitivement toutes les étapes, les entrées et sorties d'outils ainsi que la sortie finale de l'agent pour tout le monde, tout en conservant la ligne d'exécution elle-même (statut, durée et consommation) et en indiquant qui l'a effacé et quand. Les formats de secrets reconnus — y compris les secrets encodés en Base64 — sont masqués automatiquement avant l'enregistrement des journaux ; **Effacer le journal de l'exécution** permet aux administrateurs de retirer ce qui aurait échappé au masquage.
 
 Le schéma ci-dessous présente chaque transition du cycle de vie d'une exécution, y compris la relance après échec et l'annulation en file ou en cours. Cliquez sur un état pour inspecter ses transitions.
 
