@@ -31,6 +31,10 @@ vi.mock("../../auth", () => ({
   useLogout: () => mockLogout,
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: null }) => unknown) => selector({ user: null }),
+}));
+
 vi.mock("@multica/core/config", () => ({
   useConfigStore: (selector: (state: MockConfigState) => unknown) =>
     mockUseConfigStore(selector),

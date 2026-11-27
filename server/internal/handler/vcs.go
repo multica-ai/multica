@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -52,7 +53,10 @@ const vcsWebhookPathPrefix = "/api/webhooks/vcs/"
 // is independent of isVCSConfigured (whether the encryption key is set): the
 // managed cloud leaves it off, so connect/rotate/webhook reject and the UI
 // hides the section rather than surfacing an operator-only "missing key" hint.
-func (h *Handler) isVCSAvailable() bool { return h.cfg.VCSIntegrationEnabled }
+func (h *Handler) isVCSAvailable(ctx context.Context) bool {
+	settings, err := h.loadPlatformSettings(ctx)
+	return err == nil && settingValue(settings, settingVCSIntegration, h.cfg.VCSIntegrationEnabled)
+}
 
 func (h *Handler) isVCSConfigured() bool { return h.VCSSecretBox != nil }
 
@@ -120,7 +124,7 @@ func (h *Handler) ListVCSConnections(w http.ResponseWriter, r *http.Request) {
 	// available=false and nothing else, so the UI hides the whole section
 	// instead of showing an operator-only "missing key" hint. No connections
 	// can exist there anyway (connect is rejected), so skip the query.
-	if !h.isVCSAvailable() {
+	if !h.isVCSAvailable(r.Context()) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"connections": []VCSConnectionResponse{},
 			"available":   false,
@@ -163,7 +167,7 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.isVCSAvailable() {
+	if !h.isVCSAvailable(r.Context()) {
 		writeError(w, http.StatusNotFound, "vcs integration is not available on this deployment")
 		return
 	}
@@ -312,7 +316,7 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if !h.isVCSAvailable() {
+	if !h.isVCSAvailable(r.Context()) {
 		writeError(w, http.StatusNotFound, "vcs integration is not available on this deployment")
 		return
 	}

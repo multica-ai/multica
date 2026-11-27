@@ -160,6 +160,8 @@ ALLOWED_EMAILS=partner@example.net
 Les deux listes d'autorisation fonctionnent aussi comme une liste d'exceptions explicite lorsque `ALLOW_SIGNUP=false`.
 </Callout>
 
+Une adresse vérifiée figurant dans `MULTICA_PLATFORM_ADMIN_EMAILS` peut aussi s’inscrire pour configurer [l’administration de la plateforme](/environment-variables#platform-administration).
+
 ## Invitations et restrictions d'inscription
 
 Une invitation à un espace de travail en attente et non expirée permet à son adresse e-mail de créer un compte même lorsque `ALLOW_SIGNUP=false` ou que l'adresse ne correspond ni à `ALLOWED_EMAILS` ni à `ALLOWED_EMAIL_DOMAINS`. Cette exception s'applique aussi lorsque `ALLOW_SIGNUP=true` avec une liste d'autorisation configurée : les listes d'autorisation ne constituent pas une barrière stricte contre les utilisateurs invités.

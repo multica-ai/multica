@@ -242,7 +242,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 [DEV] Verification code for you@example.com: 123456
 ```
 
-コードを入力して、最初のワークスペースを作成します。Resend または SMTP を設定すると認証コードはメールで送信され、メンバーがコンテナログを読む必要はなくなります。詳しくは[ログインとサインアップ設定](/auth-setup)を参照してください。
+コードを入力して、最初のワークスペースを作成します。ユーザーによる作成が無効な場合は、[プラットフォーム管理](/environment-variables#platform-administration)からの割り当てを待ちます。Resend または SMTP を設定すると認証コードはメールで送信され、メンバーがコンテナログを読む必要はなくなります。詳しくは[ログインとサインアップ設定](/auth-setup)を参照してください。
 
 <Callout type="warning">
 セルフホストのデプロイはデフォルトで `APP_ENV=production` を使い、固定の認証コードは有効になりません。公開インスタンスで `MULTICA_DEV_VERIFICATION_CODE` を設定しないでください。

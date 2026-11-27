@@ -34,5 +34,6 @@
     "empty": "No pinned items yet.",
     "unavailable_issue": "This pinned issue is unavailable.",
     "unavailable_project": "This pinned project is unavailable."
-  }
+  },
+  "waiting_for_assignment": "Waiting for administrator assignment"
 }

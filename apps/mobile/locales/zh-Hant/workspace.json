@@ -34,5 +34,6 @@
     "empty": "還沒有固定項。",
     "unavailable_issue": "該固定任務不可用。",
     "unavailable_project": "該固定專案不可用。"
-  }
+  },
+  "waiting_for_assignment": "等待管理員指派"
 }

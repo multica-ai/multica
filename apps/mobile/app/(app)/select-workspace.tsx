@@ -15,7 +15,11 @@ export default function SelectWorkspace() {
   const logout = useAuthStore((s) => s.logout);
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
   const { t } = useT("workspace");
-  const { data, isLoading, error, refetch } = useQuery(workspaceListOptions());
+  const awaitingAssignment = user?.can_create_workspace === false;
+  const { data, isLoading, error, refetch } = useQuery({
+    ...workspaceListOptions(),
+    refetchInterval: (query) => awaitingAssignment && query.state.data?.length === 0 ? 5000 : false,
+  });
 
   const onSelect = async (id: string, slug: string) => {
     await setCurrentWorkspace(id, slug);
@@ -55,7 +59,7 @@ export default function SelectWorkspace() {
             </View>
           ) : !data || data.length === 0 ? (
             <Text className="text-sm text-muted-foreground">
-              {t("empty")}
+              {awaitingAssignment ? t("waiting_for_assignment") : t("empty")}
             </Text>
           ) : (
             <View className="gap-3">

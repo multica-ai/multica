@@ -160,6 +160,8 @@ ALLOWED_EMAILS=partner@example.net
 `ALLOW_SIGNUP=false`일 때도 두 allowlist를 명시적인 예외 목록으로 사용할 수 있습니다.
 </Callout>
 
+`MULTICA_PLATFORM_ADMIN_EMAILS`에 등록된 인증된 이메일은 [플랫폼 관리](/environment-variables#platform-administration)를 설정하기 위해 가입할 수 있습니다.
+
 ## 초대와 가입 제한
 
 대기 중이며 만료되지 않은 워크스페이스 초대가 있으면 `ALLOW_SIGNUP=false`이거나 이메일이 `ALLOWED_EMAILS` 또는 `ALLOWED_EMAIL_DOMAINS`와 일치하지 않아도 계정을 만들 수 있습니다. 이 예외는 `ALLOW_SIGNUP=true`이고 allowlist가 설정된 경우에도 적용됩니다. allowlist는 유효한 초대를 받은 사용자를 차단하는 절대적인 경계가 아닙니다.

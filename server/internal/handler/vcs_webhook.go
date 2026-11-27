@@ -95,7 +95,7 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 	// Where the integration is off (the managed cloud) the endpoint behaves as
 	// if it does not exist — a bare 404 that reveals nothing about config, the
 	// same response a genuinely unknown connection id gets below.
-	if !h.isVCSAvailable() {
+	if !h.isVCSAvailable(r.Context()) {
 		writeError(w, http.StatusNotFound, "unknown connection")
 		return
 	}

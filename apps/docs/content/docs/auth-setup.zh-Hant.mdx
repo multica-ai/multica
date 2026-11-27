@@ -160,6 +160,8 @@ ALLOWED_EMAILS=partner@example.net
 兩個白名單在 `ALLOW_SIGNUP=false` 時也可以作為明確的例外名單。
 </Callout>
 
+列在 `MULTICA_PLATFORM_ADMIN_EMAILS` 中的電子郵件完成驗證後也可註冊，用於初始化[平台管理](/environment-variables#platform-administration)。
+
 ## 邀請與註冊限制
 
 待接受且未過期的工作區邀請允許該信箱建立帳號，即使 `ALLOW_SIGNUP=false`，或信箱未命中 `ALLOWED_EMAILS` 和 `ALLOWED_EMAIL_DOMAINS`。此例外也適用於 `ALLOW_SIGNUP=true` 且配置了白名單的情況：白名單不會攔截持有有效邀請的使用者。

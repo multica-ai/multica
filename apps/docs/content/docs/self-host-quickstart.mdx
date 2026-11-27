@@ -243,7 +243,7 @@ The logs contain a line like:
 [DEV] Verification code for you@example.com: 123456
 ```
 
-Enter the code and create your first workspace. Once Resend or SMTP is configured, codes are sent by email and members no longer need to read container logs — see [Auth setup](/auth-setup).
+Enter the code and create your first workspace. If self-service creation is disabled, a platform administrator can assign a workspace from [Platform administration](/environment-variables#platform-administration). Once Resend or SMTP is configured, codes are sent by email and members no longer need to read container logs — see [Auth setup](/auth-setup).
 
 <Callout type="warning">
 Self-hosted deployments default to `APP_ENV=production`, which disables fixed verification codes. Do not set `MULTICA_DEV_VERIFICATION_CODE` on a public instance.

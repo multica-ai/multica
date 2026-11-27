@@ -3325,6 +3325,8 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
 // breaking older backends that don't return the column yet.
 
 export const UserSchema = z.object({
+  platform_admin: z.boolean().optional().catch(undefined),
+  can_create_workspace: z.boolean().optional().catch(undefined),
   id: z.string(),
   name: z.string().default(""),
   email: z.string().default(""),

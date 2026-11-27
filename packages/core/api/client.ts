@@ -1,3 +1,11 @@
+import {
+  PlatformSettingsSchema,
+  PlatformUserPageSchema,
+  PlatformWorkspaceMembersSchema,
+  PlatformWorkspacePageSchema,
+  PlatformWorkspaceSchema,
+  type PlatformSettingValue,
+} from "../platform-admin/schema";
 import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
 import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
 import {
@@ -28,7 +36,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
-import type { ZodType } from "zod";
+import type { infer as Infer, ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -3792,9 +3800,52 @@ export class ApiClient {
     return res.blob();
   }
 
+  // Platform administration
+  async getPlatformSettings(signal?: AbortSignal): Promise<Infer<typeof PlatformSettingsSchema>> {
+    const endpoint = "/api/admin/settings";
+    return parseWithFallback(await this.fetch<unknown>(endpoint, { signal }), PlatformSettingsSchema, [], { endpoint });
+  }
+
+  async updatePlatformSetting(key: string, value: PlatformSettingValue | null) {
+    await this.fetch<unknown>(`/api/admin/settings/${encodeURIComponent(key)}`, {
+      method: "PATCH", body: JSON.stringify({ value }),
+    });
+  }
+
+  async listPlatformWorkspaces(q: string, after: string, signal?: AbortSignal): Promise<Infer<typeof PlatformWorkspacePageSchema>> {
+    const endpoint = "/api/admin/workspaces";
+    const query = new URLSearchParams({ q, after });
+    return parseWithFallback(await this.fetch<unknown>(`${endpoint}?${query}`, { signal }),
+      PlatformWorkspacePageSchema, { items: [], next: "" }, { endpoint });
+  }
+
+  async listPlatformUsers(q: string, after: string, signal?: AbortSignal): Promise<Infer<typeof PlatformUserPageSchema>> {
+    const endpoint = "/api/admin/users";
+    const query = new URLSearchParams({ q, after });
+    return parseWithFallback(await this.fetch<unknown>(`${endpoint}?${query}`, { signal }),
+      PlatformUserPageSchema, { items: [], next: "" }, { endpoint });
+  }
+
+  async createPlatformWorkspace(input: { name: string; slug: string; owner_email: string }) {
+    const endpoint = "/api/admin/workspaces";
+    const raw = await this.fetch<unknown>(endpoint, { method: "POST", body: JSON.stringify(input) });
+    return parseWithFallback(raw, PlatformWorkspaceSchema, { id: "", name: "", slug: "" }, { endpoint });
+  }
+
+  async listPlatformWorkspaceMembers(id: string, signal?: AbortSignal): Promise<Infer<typeof PlatformWorkspaceMembersSchema>> {
+    const endpoint = `/api/admin/workspaces/${encodeURIComponent(id)}/members`;
+    return parseWithFallback(await this.fetch<unknown>(endpoint, { signal }), PlatformWorkspaceMembersSchema, [], { endpoint });
+  }
+
+  async assignPlatformWorkspaceMember(id: string, email: string) {
+    await this.fetch<unknown>(`/api/admin/workspaces/${encodeURIComponent(id)}/members`, {
+      method: "PUT", body: JSON.stringify({ email }),
+    });
+  }
+
   // Workspaces
-  async listWorkspaces(): Promise<Workspace[]> {
-    const raw = await this.fetch<unknown>("/api/workspaces");
+  async listWorkspaces(signal?: AbortSignal): Promise<Workspace[]> {
+    const raw = await this.fetch<unknown>("/api/workspaces", { signal });
     return parseWithFallback(raw, WorkspaceListItemSchema.array(), [] as Workspace[], {
       endpoint: "GET /api/workspaces",
     }) as Workspace[];

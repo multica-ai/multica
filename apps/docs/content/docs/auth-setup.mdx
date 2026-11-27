@@ -160,6 +160,8 @@ ALLOWED_EMAILS=partner@example.net
 Both allowlists also work as an explicit exception list when `ALLOW_SIGNUP=false`.
 </Callout>
 
+A verified email listed in `MULTICA_PLATFORM_ADMIN_EMAILS` may also register to bootstrap [platform administration](/environment-variables#platform-administration).
+
 ## Invitations and signup restrictions
 
 A pending, unexpired workspace invitation allows its email address to create an account even when `ALLOW_SIGNUP=false` or the address does not match `ALLOWED_EMAILS` or `ALLOWED_EMAIL_DOMAINS`. This exception also applies when `ALLOW_SIGNUP=true` with an allowlist configured: allowlists are not a hard boundary against invited users.

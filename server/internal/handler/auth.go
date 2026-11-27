@@ -65,11 +65,13 @@ var supportedLanguages = map[string]struct{}{
 }
 
 type UserResponse struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Email     string  `json:"email"`
-	AvatarURL *string `json:"avatar_url"`
-	Language  *string `json:"language"`
+	PlatformAdmin      bool    `json:"platform_admin,omitempty"`
+	CanCreateWorkspace bool    `json:"can_create_workspace"`
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	Email              string  `json:"email"`
+	AvatarURL          *string `json:"avatar_url"`
+	Language           *string `json:"language"`
 	// Pinned IANA tz; nil = no preference (use browser-detected tz).
 	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
@@ -93,7 +95,8 @@ type UserResponse struct {
 // doesn't move the needle on prompt cost.
 const MaxProfileDescriptionLen = 2000
 
-func (h *Handler) userToResponse(u db.User) UserResponse {
+func (h *Handler) userToResponse(ctx context.Context, u db.User) UserResponse {
+	settings, err := h.loadPlatformSettings(ctx)
 	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
 	// level. Defensive coalesce just in case a future ALTER makes the column
 	// nullable and some row comes back with no default applied.
@@ -102,6 +105,8 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		q = []byte("{}")
 	}
 	return UserResponse{
+		PlatformAdmin:           h.isPlatformAdmin(u.Email),
+		CanCreateWorkspace:      err == nil && h.canCreateWorkspace(settings, u.Email),
 		ID:                      uuidToString(u.ID),
 		Name:                    u.Name,
 		Email:                   u.Email,
@@ -214,25 +219,50 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
-	if err := h.checkSignupAllowed(ctx, email, isNew); err != nil {
-		return db.User{}, false, err
-	}
-
 	if !isNew {
 		return user, false, nil
+	}
+	settings, err := h.loadPlatformSettings(ctx)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	if err := h.checkNewSignupAllowed(ctx, settings, email); err != nil {
+		return db.User{}, false, err
 	}
 
 	name := email
 	if at := strings.Index(email, "@"); at > 0 {
 		name = email[:at]
 	}
-	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
-		Name:  name,
-		Email: email,
-	})
+	params := db.CreateUserParams{Name: name, Email: email}
+	if !settingValue(settings, settingAutoCreateWorkspace, false) {
+		created, err := h.Queries.CreateUser(ctx, params)
+		return created, err == nil, err
+	}
+
+	// Provision in the account transaction so another login can't observe a
+	// new user before their automatic workspace and owner membership exist.
+	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.User{}, false, err
 	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	created, err := qtx.CreateUser(ctx, params)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	slug := "personal-" + uuidToString(created.ID)
+	workspace, err := insertWorkspaceWithOwner(ctx, qtx, db.CreateWorkspaceParams{
+		Name: name, Slug: slug, IssuePrefix: defaultIssuePrefixFromSlug(slug),
+	}, created.ID)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.User{}, false, err
+	}
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.WorkspaceCreated(uuidToString(created.ID), uuidToString(workspace.ID)))
 	return created, true, nil
 }
 
@@ -270,6 +300,21 @@ func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUse
 		return nil // existing users always allowed to log in
 	}
 
+	settings, err := h.loadPlatformSettings(ctx)
+	if err != nil {
+		return err
+	}
+	return h.checkNewSignupAllowed(ctx, settings, email)
+}
+
+func (h *Handler) checkNewSignupAllowed(ctx context.Context, settings platformSettings, email string) error {
+	if h.isPlatformAdmin(email) {
+		return nil
+	}
+	allowedEmails := settingValue(settings, settingSignupEmails, h.cfg.AllowedEmails)
+	allowedDomains := settingValue(settings, settingSignupDomains, h.cfg.AllowedEmailDomains)
+	allowSignup := settingValue(settings, settingAllowSignup, h.cfg.AllowSignup)
+
 	email = strings.ToLower(email)
 	domain := ""
 	if at := strings.Index(email, "@"); at > 0 {
@@ -277,17 +322,17 @@ func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUse
 	}
 
 	// 1. explicit email allowlist always wins
-	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
+	if len(allowedEmails) > 0 && contains(allowedEmails, email) {
 		return nil
 	}
 
 	// 2. domain allowlist always wins
-	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
+	if len(allowedDomains) > 0 && contains(allowedDomains, domain) {
 		return nil
 	}
 
 	// 3. unrestricted signup needs no invitation lookup.
-	if h.cfg.AllowSignup && len(h.cfg.AllowedEmailDomains) == 0 && len(h.cfg.AllowedEmails) == 0 {
+	if allowSignup && len(allowedDomains) == 0 && len(allowedEmails) == 0 {
 		return nil
 	}
 
@@ -302,7 +347,7 @@ func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUse
 		return nil
 	}
 
-	if !h.cfg.AllowSignup {
+	if !allowSignup {
 		return ErrSignupProhibited
 	}
 	return ErrEmailNotAllowed
@@ -491,7 +536,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
-		User:  h.userToResponse(user),
+		User:  h.userToResponse(r.Context(), user),
 	})
 }
 
@@ -513,7 +558,7 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.userToResponse(user))
+	writeJSON(w, http.StatusOK, h.userToResponse(r.Context(), user))
 }
 
 type UpdateMeRequest struct {
@@ -765,7 +810,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
-		User:  h.userToResponse(user),
+		User:  h.userToResponse(r.Context(), user),
 	})
 }
 
@@ -889,5 +934,5 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.userToResponse(updatedUser))
+	writeJSON(w, http.StatusOK, h.userToResponse(r.Context(), updatedUser))
 }

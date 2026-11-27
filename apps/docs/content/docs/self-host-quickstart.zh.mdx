@@ -242,7 +242,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 [DEV] Verification code for you@example.com: 123456
 ```
 
-输入验证码并创建第一个工作区。配置 Resend 或 SMTP 后，验证码通过邮件发送，成员无需读取容器日志，具体见[登录与注册配置](/auth-setup)。
+输入验证码并创建第一个工作区。如果关闭了自行创建工作区，请等待管理员在[平台管理](/environment-variables#platform-administration)中分配。配置 Resend 或 SMTP 后，验证码通过邮件发送，成员无需读取容器日志，具体见[登录与注册配置](/auth-setup)。
 
 <Callout type="warning">
 自托管部署默认使用 `APP_ENV=production`，不会启用固定验证码。不要在公网实例上设置 `MULTICA_DEV_VERIFICATION_CODE`。

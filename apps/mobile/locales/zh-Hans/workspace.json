@@ -34,5 +34,6 @@
     "empty": "还没有固定项。",
     "unavailable_issue": "该固定任务不可用。",
     "unavailable_project": "该固定项目不可用。"
-  }
+  },
+  "waiting_for_assignment": "等待管理员分配"
 }

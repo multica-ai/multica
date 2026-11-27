@@ -6,7 +6,7 @@ import { AppWindow, Check, Link2, Mail, Pin, PinOff, Plus, Settings, UserPlus } 
 import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { api } from "@multica/core/api";
-import { useConfigStore } from "@multica/core/config";
+import { useCanCreateWorkspace } from "../platform-admin/workspace-assignment";
 import {
   inboxUnreadSummaryEnabled,
   inboxUnreadSummaryOptions,
@@ -134,7 +134,9 @@ export function RailWorkspaces() {
   const { t } = useT("layout");
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id;
-  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const workspaceCreationDisabled = !useCanCreateWorkspace();
+  const platformAdmin = useAuthStore((s) => s.user?.platform_admin === true);
+  const { t: tWorkspace } = useT("workspace");
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: invitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   // One cross-workspace cache entry; gated on an active workspace since the
@@ -246,6 +248,15 @@ export function RailWorkspaces() {
                   <UnreadDot />
                 </DropdownMenuItem>
               </DropdownMenuGroup>
+            </>
+          )}
+          {platformAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem render={<AppLink href={paths.admin()} />}>
+                <Settings />
+                {tWorkspace(($) => $.platform_admin.title)}
+              </DropdownMenuItem>
             </>
           )}
           {!workspaceCreationDisabled && (

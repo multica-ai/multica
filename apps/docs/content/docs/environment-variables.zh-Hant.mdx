@@ -115,11 +115,20 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `ALLOW_SIGNUP` | `true` | 未配置任何白名單時是否允許建立新帳號 |
 | `ALLOWED_EMAILS` | 空 | 允許註冊的完整信箱，逗號分隔 |
 | `ALLOWED_EMAIL_DOMAINS` | 空 | 允許註冊的信箱網域，逗號分隔 |
-| `DISABLE_WORKSPACE_CREATION` | `false` | 禁止所有使用者新建工作區；沒有 owner/admin 例外 |
-| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 空 | 允許新建工作區的完整信箱地址，逗號分隔。設定後其他使用者新建會返回 403。`DISABLE_WORKSPACE_CREATION=true` 優先。不授予訪問其他工作區的權限 |
+| `MULTICA_PLATFORM_ADMIN_EMAILS` | — | 可使用自架執行個體「平台管理」的登入帳號電子郵件，以逗號分隔 |
+| `DISABLE_WORKSPACE_CREATION` | `false` | 使用者自行建立工作區的預設原則。平台管理員仍可從管理頁面建立工作區 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | — | 工作區建立電子郵件允許清單的預設值。自行建立開關優先 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 非 production 環境使用的固定 6 位測試驗證碼 |
 
 白名單的準確判斷順序見[登入與註冊](/auth-setup#註冊範圍控制)。
+
+### 平台管理 [#platform-administration]
+
+使用 `MULTICA_PLATFORM_ADMIN_EMAILS` 中的地址登入後，可在 `/admin` 開啟「平台管理」。平台管理員可調整平台設定與指派工作區，存取工作區內容仍需要成員資格。關閉公開註冊後，清單中的地址仍可註冊。
+
+管理頁顯示設定值及其來源。已儲存的值優先於部署環境、功能開關規則與內建預設值。使用「恢復部署值」移除覆寫值。整合憑證與基礎設施設定由部署環境管理。
+
+兩個工作區建立開關都關閉時，沒有工作區的使用者會看到「等待管理員指派」。建立工作區時，選擇已註冊使用者作為負責人，再指派其他已註冊的成員。自動建立預設關閉，啟用後新註冊時會建立個人工作區。
 
 ## 附件儲存
 

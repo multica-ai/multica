@@ -243,7 +243,7 @@ Les journaux contiennent une ligne comme celle-ci :
 [DEV] Verification code for you@example.com: 123456
 ```
 
-Saisissez le code et créez votre premier espace de travail. Une fois Resend ou SMTP configuré, les codes sont envoyés par e-mail et les membres n'ont plus besoin de lire les journaux des conteneurs ; consultez [Configuration de l'authentification](/auth-setup).
+Saisissez le code et créez votre premier espace de travail. Si la création par les utilisateurs est désactivée, attendez l’affectation d’un espace depuis [l’administration de la plateforme](/environment-variables#platform-administration). Une fois Resend ou SMTP configuré, les codes sont envoyés par e-mail et les membres n'ont plus besoin de lire les journaux des conteneurs ; consultez [Configuration de l'authentification](/auth-setup).
 
 <Callout type="warning">
 Les déploiements auto-hébergés utilisent par défaut `APP_ENV=production`, qui désactive les codes de vérification fixes. Ne définissez pas `MULTICA_DEV_VERIFICATION_CODE` sur une instance publique.

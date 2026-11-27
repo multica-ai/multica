@@ -52,5 +52,5 @@ func (h *Handler) MarkWhatsNewSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.userToResponse(user))
+	writeJSON(w, http.StatusOK, h.userToResponse(r.Context(), user))
 }
