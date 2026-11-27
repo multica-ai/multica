@@ -1620,6 +1620,8 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			name: "delete plugin data",
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
+		{name: "recent agent selections", run: func() error { return qtx.DeleteRecentAgentSelectionsByWorkspace(ctx, requester.WorkspaceID) }},
+		{name: "personal agent runtime configs", run: func() error { return qtx.DeleteAgentUserRuntimeConfigsByWorkspace(ctx, requester.WorkspaceID) }},
 		{
 			name: "delete agents",
 			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },

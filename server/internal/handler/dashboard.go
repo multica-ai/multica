@@ -21,10 +21,12 @@ import (
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
 // All of them accept ?days=N (defaults to 30, at most 371 so a 365-day weekly
-// chart can round up to whole weeks) and an optional ?project_id=<uuid> to
-// scope the rollup to a single project. With no project_id the data spans the
-// whole workspace. The workspace's plan may cut the window shorter; see
-// dashboard_history.go.
+// chart can round up to whole weeks), an optional ?project_id=<uuid> to
+// scope the rollup to a single project, and an optional
+// ?originator_user_id=<uuid> to keep only runs triggered by that member.
+// With no project_id the data spans the whole workspace; with no
+// originator_user_id it spans every caller. The workspace's plan may cut
+// the window shorter; see dashboard_history.go.
 //
 // Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
 // (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
@@ -172,6 +174,22 @@ func parseSquadScopeParam(w http.ResponseWriter, r *http.Request) (string, pgtyp
 	return "squad", u, true
 }
 
+// parseOriginatorUserIDParam reads ?originator_user_id=<uuid> off the URL.
+// Same NULL-when-absent contract as parseProjectIDParam: a missing param
+// means "every caller". A malformed UUID is a 400.
+func parseOriginatorUserIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
+	raw := r.URL.Query().Get("originator_user_id")
+	if raw == "" {
+		return pgtype.UUID{}, true
+	}
+	u, err := util.ParseUUID(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid originator_user_id")
+		return pgtype.UUID{}, false
+	}
+	return u, true
+}
+
 // dashboardProjectVisible guards the project_id filter: a private project
 // (MUL-8472) the request may not see is answered like one that does not exist,
 // with an empty rollup, and false.
@@ -225,6 +243,8 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -235,7 +255,7 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
 	since := window.since
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, squadScope, squadID)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, squadScope, squadID, originatorUserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -251,7 +271,41 @@ func (h *Handler) listDashboardUsageDaily(
 	projectID pgtype.UUID,
 	squadScope string,
 	squadID pgtype.UUID,
+	originatorUserID pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
+	// The hourly rollup has no originator dimension, so a caller filter reads
+	// raw task_usage joined to the queue; same row shape either way.
+	if originatorUserID.Valid {
+		rows, err := h.Queries.ListDashboardUsageDailyByOriginator(ctx, db.ListDashboardUsageDailyByOriginatorParams{
+			WorkspaceID:      workspaceID,
+			Tz:               tz,
+			Since:            since,
+			ProjectID:        projectID,
+			OriginatorUserID: originatorUserID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		resp := make([]DashboardUsageDailyResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = DashboardUsageDailyResponse{
+				Date:                     row.Date.Time.Format("2006-01-02"),
+				Provider:                 row.Provider,
+				Model:                    row.Model,
+				InputTokens:              row.InputTokens,
+				OutputTokens:             row.OutputTokens,
+				CacheReadTokens:          row.CacheReadTokens,
+				CacheWriteTokens:         row.CacheWriteTokens,
+				CostUSDTicks:             row.CostUsdTicks,
+				UncostedInputTokens:      row.UncostedInputTokens,
+				UncostedOutputTokens:     row.UncostedOutputTokens,
+				UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+				UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+				TaskCount:                row.TaskCount,
+			}
+		}
+		return resp, nil
+	}
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
 		WorkspaceID: workspaceID,
 		Tz:          tz,
@@ -322,6 +376,8 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -344,7 +400,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
 	since := window.since
 
-	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, squadScope, squadID)
+	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, squadScope, squadID, originatorUserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
@@ -398,7 +454,38 @@ func (h *Handler) listDashboardUsageByAgent(
 	projectID pgtype.UUID,
 	squadScope string,
 	squadID pgtype.UUID,
+	originatorUserID pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
+	if originatorUserID.Valid {
+		rows, err := h.Queries.ListDashboardUsageByAgentByOriginator(ctx, db.ListDashboardUsageByAgentByOriginatorParams{
+			WorkspaceID:      workspaceID,
+			Since:            since,
+			ProjectID:        projectID,
+			OriginatorUserID: originatorUserID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		resp := make([]DashboardUsageByAgentResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = DashboardUsageByAgentResponse{
+				AgentID:                  uuidToString(row.AgentID),
+				Provider:                 row.Provider,
+				Model:                    row.Model,
+				InputTokens:              row.InputTokens,
+				OutputTokens:             row.OutputTokens,
+				CacheReadTokens:          row.CacheReadTokens,
+				CacheWriteTokens:         row.CacheWriteTokens,
+				CostUSDTicks:             row.CostUsdTicks,
+				UncostedInputTokens:      row.UncostedInputTokens,
+				UncostedOutputTokens:     row.UncostedOutputTokens,
+				UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+				UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+				TaskCount:                row.TaskCount,
+			}
+		}
+		return resp, nil
+	}
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
 		WorkspaceID: workspaceID,
 		Since:       since,
@@ -572,6 +659,8 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -594,11 +683,12 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	since := window.since
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Since:       since,
-		ProjectID:   projectID,
-		SquadScope:  squadScope,
-		SquadID:     squadID,
+		WorkspaceID:      parseUUID(workspaceID),
+		Since:            since,
+		ProjectID:        projectID,
+		SquadScope:       squadScope,
+		SquadID:          squadID,
+		OriginatorUserID: originatorUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent runtime")
@@ -760,6 +850,8 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -773,12 +865,13 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	since := window.since
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Tz:          tz,
-		Since:       since,
-		ProjectID:   projectID,
-		SquadScope:  squadScope,
-		SquadID:     squadID,
+		WorkspaceID:      parseUUID(workspaceID),
+		Tz:               tz,
+		Since:            since,
+		ProjectID:        projectID,
+		SquadScope:       squadScope,
+		SquadID:          squadID,
+		OriginatorUserID: originatorUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")
@@ -835,6 +928,8 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -848,12 +943,13 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Tz:          tz,
-		Since:       since,
-		ProjectID:   projectID,
-		SquadScope:  squadScope,
-		SquadID:     squadID,
+		WorkspaceID:      parseUUID(workspaceID),
+		Tz:               tz,
+		Since:            since,
+		ProjectID:        projectID,
+		SquadScope:       squadScope,
+		SquadID:          squadID,
+		OriginatorUserID: originatorUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily failures")
@@ -893,6 +989,8 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 		return
 	}
 	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	originatorUserID, ok := parseOriginatorUserIDParam(w, r)
+
 	if !ok {
 		return
 	}
@@ -914,11 +1012,12 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Since:       since,
-		ProjectID:   projectID,
-		SquadScope:  squadScope,
-		SquadID:     squadID,
+		WorkspaceID:      parseUUID(workspaceID),
+		Since:            since,
+		ProjectID:        projectID,
+		SquadScope:       squadScope,
+		SquadID:          squadID,
+		OriginatorUserID: originatorUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list failures by agent")

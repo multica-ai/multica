@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1439,11 +1440,17 @@ func keepRootConnected(byID map[string]db.Comment) []db.Comment {
 }
 
 type CreateCommentRequest struct {
-	Content          string   `json:"content"`
-	Type             string   `json:"type"`
-	ParentID         *string  `json:"parent_id"`
-	AttachmentIDs    []string `json:"attachment_ids"`
-	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	RuntimeOriginatorMode     string   `json:"runtime_originator_mode"`
+	RuntimeOriginatorAgentIDs []string `json:"runtime_originator_agent_ids"`
+	// RuntimeSourceTaskIDs pins a sticky "current task" continuation to the
+	// run the member picked in the popover (agent id → that run's task id).
+	// Sticky-only: an explicit requester override ignores it.
+	RuntimeSourceTaskIDs map[string]string `json:"runtime_source_task_ids"`
+	Content              string            `json:"content"`
+	Type                 string            `json:"type"`
+	ParentID             *string           `json:"parent_id"`
+	AttachmentIDs        []string          `json:"attachment_ids"`
+	SuppressAgentIDs     []string          `json:"suppress_agent_ids"`
 	// SteerTaskIDs are the running turns the author chose to add this comment
 	// to, instead of starting a follow-up run for their agents. A turn that
 	// has ended, or cannot take additional input, is never swapped for another
@@ -1488,10 +1495,12 @@ const (
 )
 
 type commentAgentTrigger struct {
-	Agent          db.Agent
-	Source         commentAgentTriggerSource
-	Squad          *db.Squad
-	AlreadyPending bool
+	RuntimeRequester    pgtype.UUID
+	RuntimeSourceTaskID pgtype.UUID
+	Agent               db.Agent
+	Source              commentAgentTriggerSource
+	Squad               *db.Squad
+	AlreadyPending      bool
 	// NonLeaderAgentReply marks an agent comment routed back to a squad leader
 	// from worker context. The worker need not be a squad member. Completion may
 	// replay it only if creation recorded it as a planned input.
@@ -1738,6 +1747,21 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	if h.refuseGuestMention(w, r, uuidToString(issue.WorkspaceID), userID, authorType, req.Content) {
 		return
+	}
+
+	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, authorType, authorID)
+	if !ok {
+		return
+	}
+	sourceTasks, ok := parseRuntimeSourceTaskIDs(w, req.RuntimeSourceTaskIDs, authorType)
+	if !ok {
+		return
+	}
+	// Picks are per-agent: a comment may pin one agent's continuation to its
+	// current task while routing another agent through the member's own
+	// runtime. Each map applies only to the agents it names.
+	if len(sourceTasks) > 0 {
+		routing.sourceTasks = sourceTasks
 	}
 
 	// A running turn receives text only, so a comment that carries files is
@@ -1987,7 +2011,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steer)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steer, routing)
 	if !steer.empty() {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
@@ -2034,7 +2058,7 @@ func isNoteComment(content string) bool {
 //
 // steer names the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, steer commentSteerRequest) []CommentTriggerOutcome {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, steer commentSteerRequest, routing ...commentRuntimeRouting) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -2046,6 +2070,17 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		handoffPlan:             handoffPlan,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
+	if len(routing) > 0 {
+		for i := range triggers {
+			id := triggers[i].Agent.ID
+			if !triggers[i].Agent.ShareRuntime && (len(routing[0].agents) == 0 || routing[0].agents[id]) {
+				triggers[i].RuntimeRequester = routing[0].user
+			}
+			if sourceTaskID, ok := routing[0].sourceTasks[id]; ok && !triggers[i].Agent.ShareRuntime {
+				triggers[i].RuntimeSourceTaskID = sourceTaskID
+			}
+		}
+	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, actorID, originatorUserID, triggers, steer)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
@@ -2120,6 +2155,10 @@ type commentEnqueueResult struct {
 	reason      DispatchReasonCode
 	execSquadID string
 }
+
+// ReasonStaleRuntimePick mirrors dispatch.ReasonStaleRuntimePick: the picked
+// run is stale, and the client asks for a re-selection.
+const ReasonStaleRuntimePick = dispatch.ReasonStaleRuntimePick
 
 // enqueueCommentAgentTriggers enqueues each resolved trigger (already deduped by
 // executing agent) and returns the result keyed by executing agent id
@@ -2221,7 +2260,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			}
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
-			if !lostRace && !trigger.NonLeaderAgentReply {
+			if !lostRace && !trigger.NonLeaderAgentReply && !trigger.RuntimeRequester.Valid {
 				// (b) AlreadyPending path: this comment arrived AFTER its task, so
 				// it is newer than the task and completion reconcile covers it by
 				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
@@ -2241,7 +2280,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
 				// — it must fold through the atomic merge above), turning the drop
 				// into a bounded follow-up (#5914, Elon round 2).
-				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
+				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, trigger.RuntimeRequester, trigger.RuntimeSourceTaskID, getHeadSha())
 				if err != nil {
 					slog.Warn("register planned comment failed",
 						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
@@ -2348,6 +2387,12 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if errors.Is(err, service.ErrStickySourceUnavailable) {
+		return ReasonStaleRuntimePick
+	}
+	if reason, ok := service.RuntimeConfigDispatchReason(err); ok {
+		return reason
+	}
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}
@@ -2494,7 +2539,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	if trigger.Squad != nil {
 		leaderSquadID = trigger.Squad.ID
 	}
-	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+	params := db.MergeCommentIntoPendingTaskParams{
 		NewLeaderSquadID:        leaderSquadID,
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
@@ -2510,7 +2555,63 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		NewRuntimeMcpOverlay:    overlay,
 		NewRuntimeConnectedApps: connectedApps,
 		HeadSha:                 headSha,
-	})
+	}
+	queries := h.Queries
+	if !trigger.Agent.ShareRuntime {
+		tx, beginErr := h.TxStarter.Begin(ctx)
+		if beginErr != nil {
+			return commentMergeError
+		}
+		defer tx.Rollback(ctx)
+		queries = h.Queries.WithTx(tx)
+		current, readErr := queries.GetAgentForClaimUpdate(ctx, trigger.Agent.ID)
+		if readErr != nil || current.ArchivedAt.Valid || current.WorkspaceID != issue.WorkspaceID || current.ShareRuntime {
+			return commentMergeError
+		}
+		if !trigger.RuntimeRequester.Valid {
+			// Continuing an authorized task keeps its machine, catalog snapshot,
+			// and execution attribution. An explicit personal selection may move it.
+			params.KeepExecutionSnapshot = true
+			row, mergeErr := queries.MergeCommentIntoPendingTask(ctx, params)
+			if errors.Is(mergeErr, pgx.ErrNoRows) {
+				return commentMergeNoPendingTask
+			}
+			if mergeErr != nil || tx.Commit(ctx) != nil {
+				return commentMergeError
+			}
+			h.TaskService.BroadcastTaskCoalesced(ctx, row)
+			return commentMergeSucceeded
+		}
+		if attr.UserID != trigger.RuntimeRequester {
+			return commentMergeAttributionBlocked
+		}
+		effective, resolveErr := service.ResolveEffectiveRuntimeConfig(ctx, queries, current, trigger.RuntimeRequester, h.liveRuntimeModels())
+		if resolveErr != nil {
+			if status, _, ok := service.RuntimeConfigResolutionFromError(resolveErr); !ok || status != service.RuntimeConfigResolutionRuntimeOffline || !effective.RuntimeID.Valid {
+				return commentMergeError
+			}
+		}
+		params.NewRuntimeID = effective.RuntimeID
+		params.EffectiveModel = service.TaskEffectiveModel(effective)
+		params.EffectiveThinkingLevel = service.TaskEffectiveThinkingLevel(effective)
+		params.EffectiveServiceTier = service.TaskEffectiveServiceTier(effective)
+		params.EffectiveRuntimeConfig = effective.RuntimeConfig
+		params.EffectiveMaxConcurrentTasks = service.TaskEffectiveMaxConcurrentTasks(effective)
+		params.RuntimeConfigSource = service.TaskRuntimeConfigSource(effective)
+		params.RuntimeConfigHint = service.RuntimeConfigHintJSON(effective.Hint)
+		row, mergeErr := queries.MergeCommentIntoPendingTask(ctx, params)
+		if errors.Is(mergeErr, pgx.ErrNoRows) {
+			return commentMergeNoPendingTask
+		}
+		if mergeErr != nil || tx.Commit(ctx) != nil {
+			return commentMergeError
+		}
+		h.TaskService.RecordHumanDelegation(ctx, attr)
+		h.TaskService.BroadcastTaskCoalesced(ctx, row)
+		h.TaskService.NotifyRuntimeMayHaveWork(effective.RuntimeID)
+		return commentMergeSucceeded
+	}
+	row, err := queries.MergeCommentIntoPendingTask(ctx, params)
 	if err != nil {
 		if isNotFound(err) {
 			// No pre-claim (queued/deferred) task to merge into. The caller
@@ -2550,12 +2651,14 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 // the task just terminated), so the caller falls back to the active-task
 // decision. Delivered ids are untouched, so completion reconcile replays the
 // comment as a single bounded follow-up (#5914). See the query doc.
-func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID, headSha pgtype.Text) (bool, error) {
+func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID, runtimeOriginatorOverride, runtimeSourceTaskID pgtype.UUID, headSha pgtype.Text) (bool, error) {
 	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
-		CommentID: commentID,
-		IssueID:   issue.ID,
-		AgentID:   agentID,
-		HeadSha:   headSha,
+		CommentID:               commentID,
+		IssueID:                 issue.ID,
+		AgentID:                 agentID,
+		RuntimeOriginatorUserID: runtimeOriginatorOverride,
+		RuntimeSourceTaskID:     runtimeSourceTaskID,
+		HeadSha:                 headSha,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -2607,10 +2710,10 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 // different-head QUEUED blocker); the caller logs that loudly — it is the one
 // shape today's schema has no safe place to park, and closing it needs a durable
 // obligation record rather than an in-request hand-off.
-func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, headSha pgtype.Text) bool {
+func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID, runtimeOriginatorOverride, runtimeSourceTaskID pgtype.UUID, headSha pgtype.Text) bool {
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, pgtype.Text{})
+		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, runtimeOriginatorOverride, runtimeSourceTaskID, pgtype.Text{})
 		if err != nil {
 			slog.Warn("propagate comment obligation: register on active task failed",
 				"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),
@@ -2655,6 +2758,33 @@ func logCommentEnqueueFailure(msg string, err error, attrs ...any) {
 // enqueue error (nil on success) so the caller can surface a
 // trigger_outcome (MUL-4525 §2).
 func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger) error {
+	if trigger.RuntimeRequester.Valid {
+		origin := service.OriginNamed
+		if trigger.Source == commentTriggerSourceIssueAssignee {
+			origin = service.OriginDerived
+		}
+		var squadID pgtype.UUID
+		if trigger.Squad != nil {
+			squadID = trigger.Squad.ID
+		}
+		_, err := h.TaskService.EnqueueCommentTaskForRequester(ctx, issue, trigger.Agent.ID, squadID, triggerCommentID, trigger.RuntimeRequester, trigger.Source == commentTriggerSourceIssueAssignee, origin)
+		return err
+	}
+	if trigger.RuntimeSourceTaskID.Valid {
+		// An explicit "current task" pick: continue THAT run, even when a newer
+		// run of the same agent has since taken over the recovery slot.
+		origin := service.OriginNamed
+		if trigger.Source == commentTriggerSourceIssueAssignee {
+			origin = service.OriginDerived
+		}
+		var squadID pgtype.UUID
+		if trigger.Squad != nil {
+			squadID = trigger.Squad.ID
+		}
+		_, err := h.TaskService.EnqueueCommentTaskWithStickySource(ctx, issue, trigger.Agent.ID, squadID, triggerCommentID, trigger.RuntimeSourceTaskID, origin)
+		return err
+	}
+
 	switch trigger.Source {
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
@@ -2867,7 +2997,7 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 		ID:          parent.AuthorID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.AgentHasRuntimeBinding(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
@@ -3066,7 +3196,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 		ID:          agentID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.AgentHasRuntimeBinding(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID)) {
@@ -3157,7 +3287,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		ID:          squad.LeaderID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || !service.AgentHasRuntimeBinding(agent) || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
@@ -3515,16 +3645,34 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content          string    `json:"content"`
-		ContentBase      *string   `json:"content_base,omitempty"`
-		AttachmentIDs    *[]string `json:"attachment_ids"`
-		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
-		ExpectedRevision *int64    `json:"expected_revision,omitempty"`
+		RuntimeOriginatorMode     string            `json:"runtime_originator_mode"`
+		RuntimeOriginatorAgentIDs []string          `json:"runtime_originator_agent_ids"`
+		RuntimeSourceTaskIDs      map[string]string `json:"runtime_source_task_ids"`
+		Content                   string            `json:"content"`
+		ContentBase               *string           `json:"content_base,omitempty"`
+		AttachmentIDs             *[]string         `json:"attachment_ids"`
+		SuppressAgentIDs          []string          `json:"suppress_agent_ids"`
+		ExpectedRevision          *int64            `json:"expected_revision,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, actorType, actorID)
+	if !ok {
+		return
+	}
+	sourceTasks, ok := parseRuntimeSourceTaskIDs(w, req.RuntimeSourceTaskIDs, actorType)
+	if !ok {
+		return
+	}
+	// Picks are per-agent: a comment may pin one agent's continuation to its
+	// current task while routing another agent through the member's own
+	// runtime. Each map applies only to the agents it names.
+	if len(sourceTasks) > 0 {
+		routing.sourceTasks = sourceTasks
+	}
+
 	// See CreateComment: strip NUL / invalid-UTF-8 bytes PostgreSQL's TEXT column
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
@@ -3781,7 +3929,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, commentSteerRequest{})
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, commentSteerRequest{}, routing)
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -4407,4 +4555,67 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// A requester override can only name the authenticated human. Agent IDs scope
+// which of the already authorized triggers use that override.
+type commentRuntimeRouting struct {
+	user   pgtype.UUID
+	agents map[pgtype.UUID]bool
+	// sourceTasks pins a sticky continuation to the run the member picked
+	// (agent id → that run's task id). Only consulted in sticky mode.
+	sourceTasks map[pgtype.UUID]pgtype.UUID
+}
+
+// parseRuntimeSourceTaskIDs validates the pick map: every key and value must
+// be a UUID, and human members only — machine credentials have no popover.
+func parseRuntimeSourceTaskIDs(w http.ResponseWriter, raw map[string]string, actorType string) (map[pgtype.UUID]pgtype.UUID, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	if actorType != "member" {
+		writeError(w, http.StatusForbidden, "runtime_source_task_ids requires a human member")
+		return nil, false
+	}
+	out := make(map[pgtype.UUID]pgtype.UUID, len(raw))
+	for agentRaw, taskRaw := range raw {
+		agentID, ok := parseUUIDOrBadRequest(w, agentRaw, "runtime_source_task_ids agent id")
+		if !ok {
+			return nil, false
+		}
+		taskID, ok := parseUUIDOrBadRequest(w, taskRaw, "runtime_source_task_ids task id")
+		if !ok {
+			return nil, false
+		}
+		out[agentID] = taskID
+	}
+	return out, true
+}
+
+func parseCommentRuntimeRouting(w http.ResponseWriter, r *http.Request, mode string, rawIDs []string, actorType, actorID string) (commentRuntimeRouting, bool) {
+	ids, ok := parseUUIDSliceOrBadRequest(w, rawIDs, "runtime_originator_agent_ids")
+	if !ok {
+		return commentRuntimeRouting{}, false
+	}
+	switch strings.TrimSpace(mode) {
+	case "", "sticky":
+		return commentRuntimeRouting{}, true
+	case "requester":
+		if actorType != "member" || isMachineCredentialActor(r) {
+			writeError(w, http.StatusForbidden, "requester runtime routing requires a human member")
+			return commentRuntimeRouting{}, false
+		}
+		user, ok := parseUUIDOrBadRequest(w, actorID, "requester")
+		if !ok {
+			return commentRuntimeRouting{}, false
+		}
+		routing := commentRuntimeRouting{user: user, agents: make(map[pgtype.UUID]bool, len(ids))}
+		for _, id := range ids {
+			routing.agents[id] = true
+		}
+		return routing, true
+	default:
+		writeError(w, http.StatusBadRequest, "runtime_originator_mode must be sticky or requester")
+		return commentRuntimeRouting{}, false
+	}
 }

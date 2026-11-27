@@ -55,6 +55,8 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
 	ToolDetailsVisibility string      `json:"tool_details_visibility"`
+	ShareRuntime          bool        `json:"share_runtime"`
+	RecommendedCli        string      `json:"recommended_cli"`
 }
 
 type AgentApp struct {
@@ -195,18 +197,39 @@ type AgentTaskQueue struct {
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
 	// Squad UUID for usage attribution and unified execution avatar grouping. Separate from squad_id (which carries leader/worker routing authority). NULL for standalone non-squad runs.
-	UsageSquadID       pgtype.UUID        `json:"usage_squad_id"`
-	DocID              pgtype.UUID        `json:"doc_id"`
-	DocThreadID        pgtype.UUID        `json:"doc_thread_id"`
-	DocCommentID       pgtype.UUID        `json:"doc_comment_id"`
-	TranscriptPurgedAt pgtype.Timestamptz `json:"transcript_purged_at"`
-	TranscriptPurgedBy pgtype.UUID        `json:"transcript_purged_by"`
+	UsageSquadID                pgtype.UUID        `json:"usage_squad_id"`
+	DocID                       pgtype.UUID        `json:"doc_id"`
+	DocThreadID                 pgtype.UUID        `json:"doc_thread_id"`
+	DocCommentID                pgtype.UUID        `json:"doc_comment_id"`
+	TranscriptPurgedAt          pgtype.Timestamptz `json:"transcript_purged_at"`
+	TranscriptPurgedBy          pgtype.UUID        `json:"transcript_purged_by"`
+	EffectiveModel              pgtype.Text        `json:"effective_model"`
+	EffectiveThinkingLevel      pgtype.Text        `json:"effective_thinking_level"`
+	EffectiveRuntimeConfig      []byte             `json:"effective_runtime_config"`
+	EffectiveMaxConcurrentTasks pgtype.Int4        `json:"effective_max_concurrent_tasks"`
+	RuntimeConfigSource         pgtype.Text        `json:"runtime_config_source"`
+	RuntimeConfigHint           []byte             `json:"runtime_config_hint"`
+	EffectiveServiceTier        pgtype.Text        `json:"effective_service_tier"`
 }
 
 type AgentToLabel struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentUserRuntimeConfig struct {
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	Model              string             `json:"model"`
+	ThinkingLevel      string             `json:"thinking_level"`
+	RuntimeConfig      []byte             `json:"runtime_config"`
+	MaxConcurrentTasks int32              `json:"max_concurrent_tasks"`
+	NoticeSeenAt       pgtype.Timestamptz `json:"notice_seen_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ServiceTier        string             `json:"service_tier"`
 }
 
 type AppActionRequest struct {
@@ -1845,6 +1868,13 @@ type QuickAction struct {
 	CreatedByID   pgtype.UUID        `json:"created_by_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RecentAgentSelection struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RemoteAppConnection struct {

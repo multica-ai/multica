@@ -284,6 +284,9 @@ const (
 	// RuntimeLookupSourceTask covers task analytics context and the usage
 	// provider backfill.
 	RuntimeLookupSourceTask = "task"
+	// RuntimeLookupSourceWakeup covers wakeup create/update admission and the
+	// dispatch-time re-resolution a scheduled wakeup performs.
+	RuntimeLookupSourceWakeup = "wakeup"
 	// RuntimeLookupSourceOther is the catch-all for an unclassified call site.
 	RuntimeLookupSourceOther = "other"
 )
@@ -317,6 +320,7 @@ func AllRuntimeLookupSources() []string {
 		RuntimeLookupSourceAutopilot,
 		RuntimeLookupSourceSourceContext,
 		RuntimeLookupSourceTask,
+		RuntimeLookupSourceWakeup,
 		RuntimeLookupSourceOther,
 	}
 }

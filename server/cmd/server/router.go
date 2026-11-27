@@ -2607,6 +2607,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.Post("/", h.CreateAgent)
+				r.With(handler.RequireHumanActor).Get("/recent", h.ListRecentAgents)
+				r.With(handler.RequireHumanActor).Post("/recent", h.SelectRecentAgent)
 				// The workspace's built-in Chief of Staff. Server-owned: the
 				// caller supplies only a runtime and a language, so a client
 				// cannot mint an agent carrying `system_key` and thereby claim
@@ -2615,6 +2617,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.With(handler.RequireHumanActor).Get("/runtime-config/current", h.GetAgentRuntimeCurrentConfig)
+					r.With(handler.RequireHumanActor).Put("/runtime-config/current", h.UpdateAgentRuntimeCurrentConfig)
+					r.With(handler.RequireHumanActor).Post("/runtime-config/notice-seen", h.MarkAgentRuntimeConfigNoticeSeen)
 					r.Get("/apps", h.ListAgentApps)
 					r.With(handler.RequireHumanActor).Put("/apps", h.UpdateAgentApps)
 					r.Post("/archive", h.ArchiveAgent)
@@ -2703,6 +2708,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
 				r.Route("/{runtimeId}", func(r chi.Router) {
+					r.With(handler.RequireHumanActor).Post("/migrate-agents", h.MigrateAgentsToRuntime)
 					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)

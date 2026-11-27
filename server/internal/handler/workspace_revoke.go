@@ -375,6 +375,12 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
+	if err := qtx.DeleteRecentAgentSelectionForMember(ctx, db.DeleteRecentAgentSelectionForMemberParams{WorkspaceID: workspaceID, UserID: userID}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteAgentUserRuntimeConfigsForMember(ctx, db.DeleteAgentUserRuntimeConfigsForMemberParams{WorkspaceID: workspaceID, UserID: userID}); err != nil {
+		return empty, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err

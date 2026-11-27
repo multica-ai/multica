@@ -643,6 +643,13 @@ ORDER BY t.id;
 -- When no version/publisher resolves on the non-manual path, the caller passes NULL
 -- accountable + originator_source='unattributed' so the row is still not a
 -- NULL-source bypass (MUL-4302 §2).
+-- The effective_* / runtime_config_* columns carry the resolved smart-runtime
+-- personal config of the run's originator (the "run now" member, or the rule
+-- owner's config for schedule/webhook dispatch), the same stamp the other
+-- enqueue paths write. The daemon claim handler keys its model selection on
+-- runtime_config_source: with the stamp present it uses effective_model (empty
+-- = the CLI's default model); with it NULL it falls back to the agent's
+-- template model.
 WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
     FROM agent a
@@ -654,6 +661,8 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     id
 )
 SELECT
@@ -664,6 +673,13 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING *;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -137,6 +138,19 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 			Detail:       "agent is archived",
 		}, nil
 	}
+	if !agent.ShareRuntime {
+		// Smart agents are not bound to a machine. Empty runtime_id is the
+		// recommended-CLI template, not "no runtime". Callers that need a
+		// concrete machine use EffectiveAgentReadiness with an originator.
+		if !AgentHasRuntimeBinding(agent) {
+			return AgentVerdict{
+				Availability: AgentBlocked,
+				Reason:       dispatch.ReasonAgentRuntimeRequired,
+				Detail:       "agent has no runtime bound",
+			}, nil
+		}
+		return AgentVerdict{Availability: AgentAvailable}, nil
+	}
 	if !agent.RuntimeID.Valid {
 		return AgentVerdict{
 			Availability: AgentBlocked,
@@ -144,16 +158,70 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 			Detail:       "agent has no runtime bound",
 		}, nil
 	}
-	rt, err := lookup.Get(ctx, agent.RuntimeID)
+	rt, err := lookup.GetForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+		ID:          agent.RuntimeID,
+		WorkspaceID: agent.WorkspaceID,
+	})
 	if err != nil {
 		return AgentVerdict{}, err
 	}
 	return runtimeVerdict(rt, agent), nil
 }
 
+// EffectiveAgentReadiness applies the readiness decision to the runtime the
+// requester will actually use. This is the admission counterpart of task
+// enqueue for smart-runtime agents; the template runtime is only a CLI +
+// model recommendation and must never become the execution machine.
+func EffectiveAgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent, requesterID pgtype.UUID, catalogs ...LiveRuntimeModels) (AgentVerdict, error) {
+	if agent.ArchivedAt.Valid {
+		return AgentVerdict{Availability: AgentBlocked, Reason: dispatch.ReasonTargetUnavailable, Detail: "agent is archived"}, nil
+	}
+	effective, err := ResolveEffectiveRuntimeConfig(ctx, lookup.Queries, agent, requesterID, catalogs...)
+	if err == nil {
+		runtime, runtimeErr := lookup.GetForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+			ID:          effective.RuntimeID,
+			WorkspaceID: agent.WorkspaceID,
+		})
+		if runtimeErr != nil {
+			return AgentVerdict{}, runtimeErr
+		}
+		return effectiveRuntimeVerdict(runtime, agent), nil
+	}
+	status, _, ok := RuntimeConfigResolutionFromError(err)
+	if !ok {
+		return AgentVerdict{}, err
+	}
+	reason, _ := RuntimeConfigDispatchReason(err)
+	if status == RuntimeConfigResolutionRuntimeOffline && effective.RuntimeID.Valid {
+		runtime, runtimeErr := lookup.GetForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+			ID:          effective.RuntimeID,
+			WorkspaceID: agent.WorkspaceID,
+		})
+		if runtimeErr != nil {
+			return AgentVerdict{}, runtimeErr
+		}
+		return effectiveRuntimeVerdict(runtime, agent), nil
+	}
+	switch status {
+	case RuntimeConfigResolutionNoUserRuntime, RuntimeConfigResolutionRuntimeUnavailable:
+		return AgentVerdict{Availability: AgentBlocked, Reason: reason, Detail: "agent has no usable runtime bound"}, nil
+	case RuntimeConfigResolutionModelUnavailable:
+		return AgentVerdict{Availability: AgentBlocked, Reason: reason, Detail: "agent runtime model is unavailable"}, nil
+	default:
+		return AgentVerdict{Availability: AgentBlocked, Reason: reason}, nil
+	}
+}
+
 // runtimeVerdict combines runtime health with the ownership binding that
 // determines whether this agent can execute there.
 func runtimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
+	// MUL-6813 applies to fixed agents: they cannot execute on someone else's
+	// private machine. Smart agents resolve the requester's own machine via
+	// EffectiveAgentReadiness; owner mismatch vs the agent template is expected
+	// and already fenced by originator / personal-config claim binding. Applying
+	// the fixed-agent check here would skip an Autopilot collaborator "Run now"
+	// as runtime_access_denied before a task is even enqueued.
+	// RuntimeAllowsUser admits SharedWith recipients (upstream runtime sharing).
 	if rt.Visibility == "private" && rt.OwnerID.Valid && !RuntimeAllowsUser(rt, agent.OwnerID) {
 		return AgentVerdict{
 			Availability: AgentBlocked,
@@ -161,6 +229,18 @@ func runtimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
 			Detail:       "agent owner does not have access to the private runtime",
 		}
 	}
+	return RuntimeReadiness(rt)
+}
+
+func effectiveRuntimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
+	if agent.ShareRuntime {
+		return runtimeVerdict(rt, agent)
+	}
+	return RuntimeReadiness(rt)
+}
+
+// RuntimeReadiness evaluates health after the caller has checked runtime access.
+func RuntimeReadiness(rt db.AgentRuntime) AgentVerdict {
 	if rt.Status == "online" {
 		return AgentVerdict{Availability: AgentAvailable}
 	}

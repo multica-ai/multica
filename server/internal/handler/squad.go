@@ -714,7 +714,20 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rows, err := h.Queries.ListSquadMemberStatusRows(r.Context(), squad.ID)
+	// Smart-runtime members have no template runtime; resolve their health
+	// through the caller's personal configuration, the same per-viewer
+	// resolution the agent detail page uses.
+	// An absent caller id (internal probes) resolves NULL: the personal
+	// config join misses and smart members read from the template binding,
+	// exactly like the pre-smart behavior.
+	viewerUserID := pgtype.UUID{}
+	if raw := requestUserID(r); raw != "" {
+		viewerUserID = parseUUID(raw)
+	}
+	rows, err := h.Queries.ListSquadMemberStatusRows(r.Context(), db.ListSquadMemberStatusRowsParams{
+		SquadID:      squad.ID,
+		ViewerUserID: viewerUserID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list squad member status")
 		return
@@ -744,6 +757,13 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	// Group rows by member_id while preserving the SQL ORDER BY (squad_member
 	// insertion order). One member may appear in multiple rows when they have
 	// more than one active task.
+	// Smart members whose rows carry no runtime health (no template binding,
+	// no persisted personal config) still have the full resolution chain —
+	// recommended match, personal machine fallback. Collect them and resolve
+	// once per member before deriving statuses, so a ready recommendation
+	// with no persisted row does not read offline.
+	unresolvedSmart := make(map[pgtype.UUID]pgtype.UUID)
+
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
 		archived       bool
@@ -777,6 +797,10 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
+		if !entry.runtimeStatus.Valid && !entry.archived {
+			unresolvedSmart[row.MemberID] = row.MemberID
+		}
+
 		// Keep waiting_local_directory rows available for issue visibility,
 		// but only dispatched/running work drives the `working` bucket. A
 		// working task may have no issue (chat / quick-create), so decide the
@@ -806,6 +830,30 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				row.TaskDispatchedAt.Time.After(entry.latestActiveAt.Time)) {
 				entry.latestActiveAt = row.TaskDispatchedAt
 			}
+		}
+	}
+
+	// Run the effective-config chain for unresolved smart members: the
+	// resolved runtime's own heartbeat decides idle/unstable/offline.
+	for _, memberUUID := range unresolvedSmart {
+		agent, err := h.Queries.GetAgent(r.Context(), memberUUID)
+		if err != nil {
+			continue
+		}
+		effective, err := service.ResolveEffectiveRuntimeConfig(r.Context(), h.Queries, agent, viewerUserID)
+		if err != nil || !effective.RuntimeID.Valid {
+			continue
+		}
+		rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          effective.RuntimeID,
+			WorkspaceID: squad.WorkspaceID,
+		})
+		if err != nil {
+			continue
+		}
+		if entry := acc[uuidToString(memberUUID)]; entry != nil {
+			entry.runtimeStatus = pgtype.Text{String: rt.Status, Valid: true}
+			entry.runtimeSeenAt = rt.LastSeenAt
 		}
 	}
 

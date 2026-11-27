@@ -377,16 +377,18 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 
 const createChatTask = `-- name: CreateChatTask :one
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $17::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, $24::uuid) AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $17::uuid))
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $24::uuid))
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     fire_at, channel_context_revision, id, context
 )
 SELECT
@@ -401,32 +403,46 @@ SELECT
     $11,
     $12,
     $13,
+    $14,
+    $15,
+    $16,
+    $17,
+    $18,
+    $19,
+    $20,
     $2::timestamptz,
-    $14::bigint,
-    COALESCE($15::uuid, gen_random_uuid()),
-    $16::jsonb
+    $21::bigint,
+    COALESCE($22::uuid, gen_random_uuid()),
+    $23::jsonb
 FROM enqueue_agent
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
 
 type CreateChatTaskParams struct {
-	AgentID                pgtype.UUID        `json:"agent_id"`
-	FireAt                 pgtype.Timestamptz `json:"fire_at"`
-	Priority               int32              `json:"priority"`
-	ChatSessionID          pgtype.UUID        `json:"chat_session_id"`
-	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
-	OriginatorUserID       pgtype.UUID        `json:"originator_user_id"`
-	AccountableUserID      pgtype.UUID        `json:"accountable_user_id"`
-	ForceFreshSession      pgtype.Bool        `json:"force_fresh_session"`
-	RuntimeMcpOverlay      []byte             `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps   []byte             `json:"runtime_connected_apps"`
-	OriginatorSource       pgtype.Text        `json:"originator_source"`
-	TriggerEvidenceKind    pgtype.Text        `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID   pgtype.UUID        `json:"trigger_evidence_ref_id"`
-	ChannelContextRevision pgtype.Int8        `json:"channel_context_revision"`
-	ID                     pgtype.UUID        `json:"id"`
-	Context                []byte             `json:"context"`
-	RuntimeID              pgtype.UUID        `json:"runtime_id"`
+	AgentID                     pgtype.UUID        `json:"agent_id"`
+	FireAt                      pgtype.Timestamptz `json:"fire_at"`
+	Priority                    int32              `json:"priority"`
+	ChatSessionID               pgtype.UUID        `json:"chat_session_id"`
+	InitiatorUserID             pgtype.UUID        `json:"initiator_user_id"`
+	OriginatorUserID            pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID           pgtype.UUID        `json:"accountable_user_id"`
+	ForceFreshSession           pgtype.Bool        `json:"force_fresh_session"`
+	RuntimeMcpOverlay           []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps        []byte             `json:"runtime_connected_apps"`
+	OriginatorSource            pgtype.Text        `json:"originator_source"`
+	TriggerEvidenceKind         pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID        pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	EffectiveModel              pgtype.Text        `json:"effective_model"`
+	EffectiveThinkingLevel      pgtype.Text        `json:"effective_thinking_level"`
+	EffectiveServiceTier        pgtype.Text        `json:"effective_service_tier"`
+	EffectiveRuntimeConfig      []byte             `json:"effective_runtime_config"`
+	EffectiveMaxConcurrentTasks pgtype.Int4        `json:"effective_max_concurrent_tasks"`
+	RuntimeConfigSource         pgtype.Text        `json:"runtime_config_source"`
+	RuntimeConfigHint           []byte             `json:"runtime_config_hint"`
+	ChannelContextRevision      pgtype.Int8        `json:"channel_context_revision"`
+	ID                          pgtype.UUID        `json:"id"`
+	Context                     []byte             `json:"context"`
+	RuntimeID                   pgtype.UUID        `json:"runtime_id"`
 }
 
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -451,6 +467,13 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.EffectiveModel,
+		arg.EffectiveThinkingLevel,
+		arg.EffectiveServiceTier,
+		arg.EffectiveRuntimeConfig,
+		arg.EffectiveMaxConcurrentTasks,
+		arg.RuntimeConfigSource,
+		arg.RuntimeConfigHint,
 		arg.ChannelContextRevision,
 		arg.ID,
 		arg.Context,
@@ -524,6 +547,13 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.DocCommentID,
 		&i.TranscriptPurgedAt,
 		&i.TranscriptPurgedBy,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+		&i.RuntimeConfigHint,
+		&i.EffectiveServiceTier,
 	)
 	return i, err
 }
@@ -605,7 +635,7 @@ FROM (
 WHERE task.id = $1
   AND pending.max_until IS NOT NULL
   AND (task.fire_at IS NULL OR task.fire_at < pending.max_until)
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step, task.usage_squad_id, task.doc_id, task.doc_thread_id, task.doc_comment_id, task.transcript_purged_at, task.transcript_purged_by
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step, task.usage_squad_id, task.doc_id, task.doc_thread_id, task.doc_comment_id, task.transcript_purged_at, task.transcript_purged_by, task.effective_model, task.effective_thinking_level, task.effective_runtime_config, task.effective_max_concurrent_tasks, task.runtime_config_source, task.runtime_config_hint, task.effective_service_tier
 `
 
 // Closes the enqueue-vs-append race: under READ COMMITTED a media message can
@@ -684,6 +714,13 @@ func (q *Queries) DeferChatTaskForSealedPendingMedia(ctx context.Context, taskID
 		&i.DocCommentID,
 		&i.TranscriptPurgedAt,
 		&i.TranscriptPurgedBy,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+		&i.RuntimeConfigHint,
+		&i.EffectiveServiceTier,
 	)
 	return i, err
 }
@@ -3078,7 +3115,7 @@ WHERE task.chat_session_id = $1
         AND message.role = 'user'
         AND message.channel_media_pending_until > now()
   )
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step, task.usage_squad_id, task.doc_id, task.doc_thread_id, task.doc_comment_id, task.transcript_purged_at, task.transcript_purged_by
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step, task.usage_squad_id, task.doc_id, task.doc_thread_id, task.doc_comment_id, task.transcript_purged_at, task.transcript_purged_by, task.effective_model, task.effective_thinking_level, task.effective_runtime_config, task.effective_max_concurrent_tasks, task.runtime_config_source, task.runtime_config_hint, task.effective_service_tier
 `
 
 // Media completion may race with the 3s run batcher. Promote every original
@@ -3163,6 +3200,13 @@ func (q *Queries) PromoteChannelChatTasksIfMediaReady(ctx context.Context, chatS
 			&i.DocCommentID,
 			&i.TranscriptPurgedAt,
 			&i.TranscriptPurgedBy,
+			&i.EffectiveModel,
+			&i.EffectiveThinkingLevel,
+			&i.EffectiveRuntimeConfig,
+			&i.EffectiveMaxConcurrentTasks,
+			&i.RuntimeConfigSource,
+			&i.RuntimeConfigHint,
+			&i.EffectiveServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -3595,7 +3639,7 @@ const setChatTaskInputOwnerSelf = `-- name: SetChatTaskInputOwnerSelf :one
 UPDATE agent_task_queue
 SET chat_input_task_id = id
 WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id, transcript_purged_at, transcript_purged_by, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
 
 // Stamps a freshly-created direct-chat task as the owner of its own input batch
@@ -3675,6 +3719,13 @@ func (q *Queries) SetChatTaskInputOwnerSelf(ctx context.Context, id pgtype.UUID)
 		&i.DocCommentID,
 		&i.TranscriptPurgedAt,
 		&i.TranscriptPurgedBy,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+		&i.RuntimeConfigHint,
+		&i.EffectiveServiceTier,
 	)
 	return i, err
 }

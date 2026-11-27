@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -136,4 +137,49 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if orig2 != "" {
 		t.Errorf("fail-open owner_fallback: originator = %s, want NULL (authorization carries no human)", orig2)
 	}
+}
+
+func TestSmartRuntimeCommentMergeKeepsExecutionUntilExplicitSwitch(t *testing.T) {
+	ctx := t.Context()
+	other := dbfx.User(t, "Second member", "comment-smart-merge@example.test")
+	dbfx.Member(t, testWorkspaceID, other, "member")
+	firstRuntime := dbfx.Runtime(t, "First runtime", testutil.Cols{"provider": "codex"})
+	secondRuntime := dbfx.Runtime(t, "Second runtime", testutil.Cols{"provider": "codex", "owner_id": other})
+	agentID := dbfx.Agent(t, "Review helper", "", testutil.Cols{"share_runtime": false, "recommended_cli": "codex"})
+	issueID := dbfx.Issue(t, "Comments with a shared agent")
+	root := dbfx.Comment(t, issueID, "Begin review")
+	second := dbfx.Comment(t, issueID, "Continue review", testutil.Cols{"parent_id": root, "author_id": other})
+	third := dbfx.Comment(t, issueID, "Use my runtime", testutil.Cols{"parent_id": root, "author_id": other})
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
+	if result := testHandler.enqueueCommentAgentTriggers(ctx, issue, parseUUID(root), []commentAgentTrigger{trigger}); result[agentID].status != DispatchQueued {
+		t.Fatalf("enqueue first comment: %+v", result[agentID])
+	}
+	assertExecution := func(comment, owner, runtime string) {
+		t.Helper()
+		tasks, err := testHandler.Queries.ListTasksByIssue(ctx, issue.ID)
+		if err != nil || len(tasks) != 1 {
+			t.Fatalf("want one queued task, got %d: %v", len(tasks), err)
+		}
+		task := tasks[0]
+		if uuidToString(task.TriggerCommentID) != comment || uuidToString(task.OriginatorUserID) != owner || uuidToString(task.RuntimeID) != runtime {
+			t.Fatalf("unexpected merge snapshot: comment=%s owner=%s runtime=%s", uuidToString(task.TriggerCommentID), uuidToString(task.OriginatorUserID), uuidToString(task.RuntimeID))
+		}
+	}
+	if got := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(second), pgtype.Text{}); got != commentMergeSucceeded {
+		t.Fatalf("continue on the queued runtime: %v", got)
+	}
+	assertExecution(second, testUserID, firstRuntime)
+	trigger.RuntimeRequester = parseUUID(other)
+	if got := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(third), pgtype.Text{}); got != commentMergeSucceeded {
+		t.Fatalf("switch to personal runtime: %v", got)
+	}
+	assertExecution(third, other, secondRuntime)
 }
