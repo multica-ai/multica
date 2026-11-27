@@ -862,7 +862,8 @@
     "context_receipt_package": "パッケージ",
     "context_receipt_instruction_file_bytes": "指示ファイル：{{size}}",
     "context_receipt_skill_package_bytes": "スキルパッケージ：{{size}}",
-    "context_receipt_other_file_bytes": "その他のファイル：{{size}}"
+    "context_receipt_other_file_bytes": "その他のファイル：{{size}}",
+    "trigger_oneshot": "API リクエスト"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

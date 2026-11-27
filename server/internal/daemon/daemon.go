@@ -6939,6 +6939,8 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
+	case task.OneShotPrompt != "":
+		meta.Kind = execenv.GCKindOneShot
 	case task.QuickCreatePrompt != "":
 		// Quick-create tasks reach WriteGCMeta before the server runs
 		// LinkTaskToIssue, so IssueID is always empty here. Persist the
@@ -8445,6 +8447,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotDescription:             task.AutopilotDescription,
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		OneShot:                          task.OneShotPrompt != "",
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,

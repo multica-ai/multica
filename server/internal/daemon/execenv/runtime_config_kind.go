@@ -34,12 +34,13 @@ const (
 	kindChat
 	// kindDocComment: answering a doc discussion (MUL-9933), no issue.
 	kindDocComment
+	kindOneShot
 )
 
 // classifyTask maps a TaskContextForEnv to the single taskKind the slim
 // brief should be assembled for. Precedence (documented for the tiebreak
 // case, although the daemon never sets two specific-kind flags at once):
-// chat → doc discussion → quick-create → autopilot run-only → issue.
+// chat → doc discussion → one-shot → quick-create → autopilot run-only → issue.
 //
 // Deliberately does not read ctx.TriggerCommentID: the classification must
 // not vary across runs of the same resumed session, or the brief's bytes
@@ -50,6 +51,8 @@ func classifyTask(ctx TaskContextForEnv) taskKind {
 		return kindChat
 	case ctx.DocID != "":
 		return kindDocComment
+	case ctx.OneShot:
+		return kindOneShot
 	case ctx.QuickCreatePrompt != "":
 		return kindQuickCreate
 	case ctx.AutopilotRunID != "":

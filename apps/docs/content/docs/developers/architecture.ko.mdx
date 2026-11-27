@@ -129,3 +129,20 @@ provider adapter 계층은 AI 코딩 도구별 시작, streaming 이벤트, 취�
 
 - [개발 참여](/developers/contributing) — 로컬 환경, worktree, 테스트 위치를 알아봅니다.
 - [개발 규칙](/developers/conventions) — 이름, 용어, 중국어 문구에 관한 저장소 규칙을 확인합니다.
+
+## 일회성 실행
+
+멤버 인증 정보로 `X-Workspace-ID`를 지정하여 `POST /api/tasks/oneshot`을 호출하면 Issue, Chat, Autopilot 또는 재사용 Agent를 만들지 않고 실행합니다. 게스트와 작업 인증 정보는 제출할 수 없습니다. 런타임은 온라인이며 같은 워크스페이스에 속하고 호출자에게 사용 권한이 있어야 합니다. 선택한 스킬도 같은 워크스페이스에 속해야 합니다. 모델과 추론 강도는 기존 런타임 검증을 따릅니다.
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+HTTP 202 응답에는 `task_id`, `status_uri`(`/api/tasks/oneshot/{task_id}`), `logs_uri`(`/{workspaceSlug}/runs/{task_id}`)가 있습니다. 웹이나 데스크톱에서 로그를 열 수 있습니다. 제출자만 조회하거나 취소할 수 있으며 취소는 `POST /api/tasks/{task_id}/cancel`입니다. 매번 새 세션으로 한 번만 시도합니다. 데몬은 `oneshot-runs-v1`을 지원해야 하며 이전 버전에서는 대기열에 남습니다. `system_prompt`는 템플릿 이름이 아닌 지시문 배열입니다. 생략한 설정은 런타임 기본값을 사용합니다.

@@ -386,6 +386,9 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
+	if task.OneShotPrompt != "" {
+		return "You are completing a one-shot Multica run. There is no assigned issue. Complete the user request and return the result.\n\n" + task.OneShotPrompt
+	}
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}

@@ -1009,6 +1009,8 @@ func writeInlineBlocksPolicy(b *strings.Builder) {
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	b.WriteString("## Output\n\n")
 	switch kind {
+	case kindOneShot:
+		b.WriteString("This is a one-shot API run with no assigned issue. Your final assistant output is captured automatically as the run result. Complete the supplied user request.\n")
 	case kindAutopilotRunOnly:
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n\n")
 		b.WriteString("**Delivering files here:** this surface is text-only — the run result carries no attachments. Describe what you produced; do not link its path.\n")
@@ -1131,6 +1133,8 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeWorkflowDocComment(&b)
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
+	case kindOneShot:
+		b.WriteString("## Workflow\n\nComplete the one-shot request supplied for this run. There is no assigned issue or chat. Do not create an issue or post comments unless the request explicitly asks for it. Return the result in your final response.\n\n")
 	case kindAutopilotRunOnly:
 		writeWorkflowAutopilot(&b)
 	case kindIssue:

@@ -1008,7 +1008,8 @@
     "context_receipt_package": "Paquete",
     "context_receipt_instruction_file_bytes": "Archivos de instrucciones: {{size}}",
     "context_receipt_skill_package_bytes": "Paquetes de skills: {{size}}",
-    "context_receipt_other_file_bytes": "Otros archivos: {{size}}"
+    "context_receipt_other_file_bytes": "Otros archivos: {{size}}",
+    "trigger_oneshot": "Solicitud API"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelada por el sistema",

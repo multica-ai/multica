@@ -2590,6 +2590,18 @@ export const AgentActivityBucketListSchema = z.array(z.object({
   duration_count: z.number().int().nonnegative().optional().catch(undefined),
 }).loose());
 
+export const OneShotRunSchema = z.object({
+  task: AgentTaskSchema,
+  input: z.object({
+    runtime_id: z.string(),
+    model_id: z.string().default(""),
+    effort: z.string().default(""),
+    skills: z.array(z.string()).nullish().transform((value) => value ?? []),
+    system_prompt: z.array(z.string()).nullish().transform((value) => value ?? []),
+    user_prompt: z.string(),
+  }),
+});
+
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
 
 export const AgentTaskPageSchema = z.object({

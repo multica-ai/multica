@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "Ouvrir dans un nouvel onglet"
+  },
+  "oneshot": {
+    "title": "Exécution ponctuelle",
+    "loading": "Chargement de l’exécution…",
+    "load_failed": "Impossible de charger cette exécution.",
+    "retry": "Réessayer",
+    "open_log": "Voir le journal"
   }
 }

@@ -4175,6 +4175,22 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	if agent.Kind == "system" && agent.SystemKey.Valid && strings.HasPrefix(agent.SystemKey.String, oneShotSystemKeyPrefix) {
+		ctx, valid := service.ParseOneShotContext(*task)
+		if !valid || ctx.RuntimeID != runtimeID || !task.OriginatorUserID.Valid || agent.OwnerID != task.OriginatorUserID {
+			return resp, nil, nil, 0, 0, h.failClaimedTaskBeforeLaunch(r.Context(), task, "Invalid one-shot run context", taskfailure.ReasonAgentUnknown, "invalid_oneshot", http.StatusConflict, "invalid one-shot run context")
+		}
+		if !requestHasClientCapability(r, protocol.DaemonCapabilityOneShotRunsV1) {
+			if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
+				return resp, nil, nil, 0, 0, &claimBuildFailure{outcome: "oneshot_requeue_failed", status: http.StatusInternalServerError, message: "failed to defer one-shot task"}
+			}
+			return resp, nil, nil, 0, 0, &claimBuildFailure{outcome: "oneshot_unsupported", status: http.StatusConflict, message: "upgrade the daemon to run one-shot tasks"}
+		}
+		resp.WorkspaceID = ctx.WorkspaceID
+		resp.OneShotPrompt = ctx.UserPrompt
+		resp.ThreadName = "One-shot run"
+	}
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
@@ -5835,11 +5851,12 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		// This invalidates the existing task and issue-usage queries without
 		// broadcasting token counts or changing task progress/status.
 		h.Bus.Publish(events.Event{
-			Type:        protocol.EventTaskUsage,
-			WorkspaceID: workspaceID,
-			ActorType:   "system",
-			TaskID:      uuidToString(task.ID),
-			Payload:     protocol.TaskUsageUpdatedPayload{TaskID: uuidToString(task.ID)},
+			Type:                protocol.EventTaskUsage,
+			MemberPrivateUserID: service.OneShotOwner(task),
+			WorkspaceID:         workspaceID,
+			ActorType:           "system",
+			TaskID:              uuidToString(task.ID),
+			Payload:             protocol.TaskUsageUpdatedPayload{TaskID: uuidToString(task.ID)},
 		})
 	}
 
@@ -6016,11 +6033,10 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast reach is deliberately unchanged: only issue- and chat-backed
-	// tasks streamed live messages before, and widening that to autopilot /
-	// quick-create tasks is a product decision, not part of this optimization.
+	// One-shot messages go only to the submitting member. Other standalone
+	// task kinds retain their existing broadcast reach.
 	workspaceID := ""
-	if task.IssueID.Valid || task.ChatSessionID.Valid {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || scope.MemberPrivateUserID != "" {
 		workspaceID = scope.WorkspaceID
 	}
 
@@ -6144,13 +6160,14 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			// in order, so the conversion is checked by the compiler and breaks
 			// loudly if the query ever stops returning the whole row.
 			h.Bus.Publish(events.Event{
-				Type:               protocol.EventTaskMessage,
-				WorkspaceID:        workspaceID,
-				ActorType:          "system",
-				TaskID:             taskID,
-				ChatSessionID:      chatSessionID,
-				ChatSessionOwnerID: scope.ChatSessionOwnerID,
-				Payload:            taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)),
+				Type:                protocol.EventTaskMessage,
+				WorkspaceID:         workspaceID,
+				ActorType:           "system",
+				TaskID:              taskID,
+				ChatSessionID:       chatSessionID,
+				ChatSessionOwnerID:  scope.ChatSessionOwnerID,
+				MemberPrivateUserID: scope.MemberPrivateUserID,
+				Payload:             taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)),
 			})
 		}
 	}
@@ -6864,6 +6881,10 @@ func (h *Handler) loadTaskForUser(w http.ResponseWriter, r *http.Request) (db.Ag
 	// be indistinguishable from one that does not exist.
 	wsID := scope.WorkspaceID
 	if wsID == "" || wsID != middleware.WorkspaceIDFromContext(r.Context()) {
+		writeError(w, http.StatusNotFound, "task not found")
+		return db.AgentTaskQueue{}, false
+	}
+	if _, oneShot := service.ParseOneShotContext(task); oneShot && (!task.OriginatorUserID.Valid || uuidToString(task.OriginatorUserID) != requestUserID(r) || isMachineCredentialActor(r)) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return db.AgentTaskQueue{}, false
 	}

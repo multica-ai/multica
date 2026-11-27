@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "在新標籤頁開啟"
+  },
+  "oneshot": {
+    "title": "單次執行",
+    "loading": "正在載入執行…",
+    "load_failed": "無法載入此執行。",
+    "retry": "重試",
+    "open_log": "檢視執行記錄"
   }
 }

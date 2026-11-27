@@ -129,3 +129,20 @@ An issue's assignee is polymorphic and may point to a member, agent, or squad. N
 
 - [Contributing](/developers/contributing) — Local environments, worktrees, and test locations.
 - [Development conventions](/developers/conventions) — Repository contracts for naming, terminology, and Chinese copy.
+
+## One-shot runs
+
+A member credential can submit `POST /api/tasks/oneshot` with `X-Workspace-ID`. This starts a Run without creating an Issue, Chat, Autopilot, or reusable Agent. Guests and task credentials cannot submit runs. The runtime must be online, belong to the workspace, and be accessible to the caller. Selected skills must belong to the same workspace. Model and effort follow the runtime’s normal validation.
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+The response is HTTP 202 with `task_id`, `status_uri` (`/api/tasks/oneshot/{task_id}`), and `logs_uri` (`/{workspaceSlug}/runs/{task_id}`). Open `logs_uri` in web or desktop to read the transcript. Only the submitting member can read or cancel the run; cancellation uses `POST /api/tasks/{task_id}/cancel`. Each run starts a fresh session and has one attempt. A daemon advertising `oneshot-runs-v1` is required; older daemons leave the run queued. `system_prompt` entries are literal instruction text, not template names. Omitted configuration uses the runtime’s defaults.

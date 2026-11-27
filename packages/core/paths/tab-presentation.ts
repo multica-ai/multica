@@ -40,6 +40,7 @@ export type TabVisual =
 
 /** Localization keys under the `layout.tab` namespace for tab type labels. */
 export type TabLabelKey =
+  | "run"
   | "issue"
   | "project"
   | "autopilot"
@@ -183,6 +184,8 @@ export function resolveTabPresentation(
         visual: { kind: "project-icon", icon: data.project?.icon ?? null },
         title: textOr(data.project?.title, "project"),
       };
+    case "run":
+      return { visual: { kind: "icon", icon: "Zap" }, title: { kind: "tab", tabKey: "run" } };
     case "autopilot":
       return {
         visual: { kind: "icon", icon: "Zap" },

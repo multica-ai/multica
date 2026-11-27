@@ -71,6 +71,7 @@ function workspaceScoped(slug: string) {
       `${ws}/issues/${encode(ref)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
+    oneShotRun: (id: string) => `${ws}/runs/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,

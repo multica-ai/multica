@@ -129,3 +129,20 @@ provider 适配层统一了不同 AI 编程工具的启动、流式事件、取�
 
 - [参与开发](/developers/contributing) — 本地环境、worktree 和测试位置。
 - [开发规范](/developers/conventions) — 命名、术语和中文文案的仓库契约。
+
+## 单次运行
+
+成员凭证可以通过 `POST /api/tasks/oneshot` 和 `X-Workspace-ID` 提交运行，无需创建 Issue、Chat、Autopilot 或可复用 Agent。访客和任务凭证不能提交。运行时必须在线、属于当前工作区且调用者有权使用；所选技能必须属于同一工作区。模型与推理强度沿用运行时的校验。
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+响应为 HTTP 202，包含 `task_id`、`status_uri`（`/api/tasks/oneshot/{task_id}`）和 `logs_uri`（`/{workspaceSlug}/runs/{task_id}`）。可在网页或桌面端打开日志。仅提交者可读取或取消运行；取消接口为 `POST /api/tasks/{task_id}/cancel`。每次运行使用新会话，最多尝试一次。守护进程需声明 `oneshot-runs-v1`，旧版不会执行该任务，任务仍在队列中。`system_prompt` 数组元素是指令文本，不是模板名称；省略的配置采用运行时默认值。

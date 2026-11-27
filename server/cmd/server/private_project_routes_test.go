@@ -71,6 +71,7 @@ type outsideProjectParam struct {
 // it cannot name a private project's object. A route declaring only these is
 // not probed.
 var routeParamsOutsideProjects = map[string]outsideProjectParam{
+	"oneshot/{taskId}":               {why: "one-shot runs have no issue, project, or source-project binding"},
 	"workspaces/{id}":                {why: "the workspace itself"},
 	"members/{memberId}":             {why: "a workspace membership"},
 	"invitations/{id}":               {why: "the caller's own workspace invitation"},

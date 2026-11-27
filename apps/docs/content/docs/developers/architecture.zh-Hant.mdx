@@ -129,3 +129,20 @@ provider 適配層統一了不同 AI 程式設計工具的啟動、流式事件�
 
 - [參與開發](/developers/contributing) — 本地環境、worktree 和測試位置。
 - [開發規範](/developers/conventions) — 命名、術語和中文文案的倉庫契約。
+
+## 單次執行
+
+成員憑證可透過 `POST /api/tasks/oneshot` 和 `X-Workspace-ID` 提交執行，無需建立 Issue、Chat、Autopilot 或可重用 Agent。訪客與任務憑證不能提交。執行環境必須在線上、屬於目前工作區且呼叫者有權使用；所選技能必須屬於同一工作區。模型與推理強度沿用執行環境的驗證。
+
+```json
+{
+  "runtime_id": "00000000-0000-4000-8000-000000000001",
+  "model_id": "your-runtime-model",
+  "effort": "high",
+  "skills": [],
+  "system_prompt": ["Review the supplied changes."],
+  "user_prompt": "<request>Review this patch.</request>"
+}
+```
+
+回應為 HTTP 202，包含 `task_id`、`status_uri`（`/api/tasks/oneshot/{task_id}`）與 `logs_uri`（`/{workspaceSlug}/runs/{task_id}`）。可在網頁或桌面端開啟記錄。僅提交者可讀取或取消；取消介面為 `POST /api/tasks/{task_id}/cancel`。每次執行使用新工作階段，最多嘗試一次。常駐程式需宣告 `oneshot-runs-v1`，舊版不執行，任務仍在佇列中。`system_prompt` 陣列元素是指令文字，不是範本名稱；省略的設定採用預設值。

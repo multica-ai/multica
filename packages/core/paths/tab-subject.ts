@@ -19,6 +19,7 @@ import { pageForSegment, type WorkspacePageKey } from "./route-icons";
 export type TabActorType = "agent" | "member" | "squad";
 
 export type TabSubject =
+  | { kind: "run"; id: string }
   /** A collection or tool page with no specific resource. */
   | { kind: "page"; page: WorkspacePageKey }
   /** My agents' work: the My issues route's `?scope=agents`. */
@@ -92,6 +93,8 @@ export function parseTabSubject(url: string): TabSubject {
       return { kind: "page", page: "views" };
     case "projects":
       return id ? { kind: "project", id } : { kind: "page", page: "projects" };
+    case "runs":
+      return id ? { kind: "run", id } : { kind: "unknown" };
     case "autopilots":
       return id ? { kind: "autopilot", id } : { kind: "page", page: "autopilots" };
     case "agents":
@@ -164,6 +167,8 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `issue:${subject.id}`;
     case "project":
       return `project:${subject.id}`;
+    case "run":
+      return `run:${subject.id}`;
     case "autopilot":
       return `autopilot:${subject.id}`;
     case "actor":

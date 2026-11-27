@@ -1,10 +1,12 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const OneShotContextType = "oneshot"
@@ -16,6 +18,18 @@ type OneShotRunInput struct {
 	Skills       []string `json:"skills,omitempty"`
 	SystemPrompt []string `json:"system_prompt,omitempty"`
 	UserPrompt   string   `json:"user_prompt"`
+}
+
+func ParseOneShotContext(task db.AgentTaskQueue) (OneShotContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid || task.DocID.Valid {
+		return OneShotContext{}, false
+	}
+	var ctx OneShotContext
+	if json.Unmarshal(task.Context, &ctx) != nil || ctx.Type != OneShotContextType {
+		return OneShotContext{}, false
+	}
+	validated, err := NewOneShotContext(ctx.WorkspaceID, ctx.OneShotRunInput)
+	return validated, err == nil
 }
 
 type OneShotContext struct {
@@ -37,6 +51,11 @@ func NewOneShotContext(workspaceID string, input OneShotRunInput) (OneShotContex
 	}
 	if strings.TrimSpace(input.UserPrompt) == "" {
 		return OneShotContext{}, fmt.Errorf("user_prompt is required")
+	}
+	for _, value := range append([]string{input.UserPrompt, input.ModelID, input.Effort}, input.SystemPrompt...) {
+		if strings.ContainsRune(value, '\x00') {
+			return OneShotContext{}, fmt.Errorf("run input must not contain NUL characters")
+		}
 	}
 	var skills []string
 	seen := make(map[string]struct{}, len(input.Skills))
@@ -64,4 +83,12 @@ func oneShotUUID(value, field string) (string, error) {
 		return "", fmt.Errorf("%s must be a UUID", field)
 	}
 	return util.UUIDToString(id), nil
+}
+
+// OneShotOwner is the authenticated submitter, never a caller-supplied identity.
+func OneShotOwner(task db.AgentTaskQueue) string {
+	if _, ok := ParseOneShotContext(task); ok {
+		return util.UUIDToString(task.OriginatorUserID)
+	}
+	return ""
 }

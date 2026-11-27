@@ -32,7 +32,8 @@
     "my_agents": "マイエージェントの作業",
     "unknown": "不明なページ",
     "doc": "ドキュメント",
-    "docFolder": "フォルダー"
+    "docFolder": "フォルダー",
+    "run": "単発実行"
   },
   "help": {
     "trigger": "ヘルプ",

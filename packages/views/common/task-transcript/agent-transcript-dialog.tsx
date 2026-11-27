@@ -925,6 +925,8 @@ export function AgentTranscriptDialog({
         ? t(($) => $.transcript.trigger_autopilot)
         : task.kind === "chat" || task.chat_session_id
           ? t(($) => $.transcript.trigger_chat)
+          : task.kind === "oneshot"
+            ? t(($) => $.transcript.trigger_oneshot)
           : task.kind === "quick_create"
             ? t(($) => $.transcript.trigger_quick_create)
             : task.kind === "doc_comment" || task.doc_id

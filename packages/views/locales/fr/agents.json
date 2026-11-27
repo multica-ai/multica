@@ -1033,7 +1033,8 @@
     "context_receipt_package": "Paquet",
     "context_receipt_instruction_file_bytes": "Fichiers d’instructions : {{size}}",
     "context_receipt_skill_package_bytes": "Paquets de skills : {{size}}",
-    "context_receipt_other_file_bytes": "Autres fichiers : {{size}}"
+    "context_receipt_other_file_bytes": "Autres fichiers : {{size}}",
+    "trigger_oneshot": "Requête API"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",

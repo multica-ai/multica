@@ -207,6 +207,7 @@ type TaskContextForEnv struct {
 	AutopilotDescription    string
 	AutopilotSource         string
 	AutopilotTriggerPayload string
+	OneShot                 bool
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
@@ -1175,6 +1176,7 @@ const (
 	GCKindChat         GCMetaKind = "chat"
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
 	GCKindQuickCreate  GCMetaKind = "quick_create"
+	GCKindOneShot      GCMetaKind = "oneshot"
 	// GCKindDoc is a doc discussion run's env, reused by the agent's next run
 	// on the same doc (MUL-9933).
 	GCKindDoc GCMetaKind = "doc"

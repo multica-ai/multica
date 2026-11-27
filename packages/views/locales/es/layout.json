@@ -32,7 +32,8 @@
     "unknown": "Página desconocida",
     "my_agents": "Trabajo de mis agentes",
     "doc": "Documento",
-    "docFolder": "Carpeta"
+    "docFolder": "Carpeta",
+    "run": "Ejecución única"
   },
   "help": {
     "trigger": "Ayuda",

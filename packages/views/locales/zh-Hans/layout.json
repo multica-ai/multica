@@ -32,7 +32,8 @@
     "my_agents": "我的智能体动态",
     "unknown": "未知页面",
     "doc": "文档",
-    "docFolder": "文件夹"
+    "docFolder": "文件夹",
+    "run": "单次运行"
   },
   "help": {
     "trigger": "帮助",

@@ -388,7 +388,7 @@ func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, 
 				attrs = append(attrs, "chat_session", checkedMeta.ChatSessionID)
 			case execenv.GCKindAutopilotRun:
 				attrs = append(attrs, "autopilot_run", checkedMeta.AutopilotRunID)
-			case execenv.GCKindQuickCreate:
+			case execenv.GCKindQuickCreate, execenv.GCKindOneShot:
 				attrs = append(attrs, "task", checkedMeta.TaskID)
 			case execenv.GCKindDoc:
 				attrs = append(attrs, "doc", checkedMeta.DocID)
@@ -588,7 +588,7 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionChat(ctx, taskDir, meta)
 	case execenv.GCKindAutopilotRun:
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
-	case execenv.GCKindQuickCreate:
+	case execenv.GCKindQuickCreate, execenv.GCKindOneShot:
 		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
 	case execenv.GCKindDoc:
 		return d.gcDecisionDoc(taskDir, meta)

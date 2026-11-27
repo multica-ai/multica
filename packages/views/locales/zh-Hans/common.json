@@ -144,5 +144,12 @@
   },
   "navigation": {
     "open_in_new_tab": "在新标签页打开"
+  },
+  "oneshot": {
+    "title": "单次运行",
+    "loading": "正在加载运行...",
+    "load_failed": "无法加载此运行。",
+    "retry": "重试",
+    "open_log": "查看运行日志"
   }
 }
