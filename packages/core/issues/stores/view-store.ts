@@ -1012,6 +1012,12 @@ export function createIssueViewStore(persistKey: string): StoreApi<IssueViewStat
   return store;
 }
 
+/** Factory: an in-memory store that never persists or rehydrates, for a
+ *  surface whose filters belong to the page alone (e.g. the trajectory). */
+export function createTransientIssueViewStore(): StoreApi<IssueViewState> {
+  return createStore<IssueViewState>()(viewStoreSlice);
+}
+
 /** Global singleton for the /issues page. */
 export const useIssueViewStore = create<IssueViewState>()(
   persist(viewStoreSlice, viewStorePersistOptions("multica_issues_view"))

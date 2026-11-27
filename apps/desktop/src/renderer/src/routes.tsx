@@ -16,6 +16,7 @@ import {
   RuntimeSettingsPage,
 } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
+import { TrajectoryRouteHost } from "@multica/views/issues/trajectory-entry";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
@@ -135,7 +136,9 @@ export const appRoutes: RouteObject[] = [
             path: "issues",
             element: (
               <IssueViewUrlSync scope={WORKSPACE_VIEW_SCOPE}>
-                <IssuesPage />
+                <TrajectoryRouteHost>
+                  {(renderHeaderTrailing) => <IssuesPage renderHeaderTrailing={renderHeaderTrailing} />}
+                </TrajectoryRouteHost>
               </IssueViewUrlSync>
             ),
           },

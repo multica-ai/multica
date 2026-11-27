@@ -9,6 +9,17 @@
     "test": "vitest run"
   },
   "exports": {
+    "./trajectory/capability": "./trajectory/capability.ts",
+    "./trajectory/link": "./trajectory/link.ts",
+    "./trajectory/web-entry": "./trajectory/web-entry.ts",
+    "./trajectory/graph": "./trajectory/graph.ts",
+    "./trajectory/graph-web": "./trajectory/graph-web.ts",
+    "./trajectory/visual": "./trajectory/visual.ts",
+    "./trajectory/current-execution": "./trajectory/current-execution.ts",
+    "./trajectory/readable-text": "./trajectory/readable-text.mjs",
+    "./trajectory/record-display": "./trajectory/record-display.ts",
+    "./trajectory/filter-catalog": "./trajectory/filter-catalog.ts",
+    "./trajectory/filter-validation": "./trajectory/filter-validation.ts",
     ".": "./index.ts",
     "./markdown": "./markdown/index.ts",
     "./types": "./types/index.ts",

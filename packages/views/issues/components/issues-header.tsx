@@ -155,7 +155,7 @@ type LocalDateRange = {
 
 // Helpers
 
-function getActiveFilterCount(
+export function getActiveFilterCount(
   state: {
     statusFilters: string[];
     priorityFilters: string[];

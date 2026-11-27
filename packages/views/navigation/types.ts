@@ -68,4 +68,13 @@ export interface NavigationAdapter {
    * it via `forward?.()`.
    */
   forward?: () => void;
+  /**
+   * Optional: rewrite the current URL in place, for state the page already
+   * shows (a selection, a deep-link target). Web uses `history.replaceState`,
+   * which Next.js mirrors into `useSearchParams` without a navigation or RSC
+   * request; `replace()` would re-render the route through the router.
+   * Adapters whose `replace()` is already in-memory leave it undefined and
+   * callers fall back to `replace()`.
+   */
+  replaceInPlace?: (path: string) => void;
 }

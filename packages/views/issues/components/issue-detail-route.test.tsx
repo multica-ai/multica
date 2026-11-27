@@ -128,6 +128,24 @@ describe("useCanonicalIssueUrl", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("keeps the query of the address it rewrites", () => {
+    const withQuery = ({ children }: { children: ReactNode }) => (
+      <NavigationProvider value={{
+        push,
+        replace,
+        back: vi.fn(),
+        pathname: "/acme/issues/x",
+        searchParams: new URLSearchParams("trajectory=1&seq=4"),
+        hash: "",
+        getShareableUrl: (path) => path,
+      }}>
+        {children}
+      </NavigationProvider>
+    );
+    renderHook(() => useCanonicalIssueUrl("uuid-134", "TRS-134", "#comment-c1"), { wrapper: withQuery });
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134?trajectory=1&seq=4#comment-c1");
+  });
+
   // The deliverable argument is optional: every existing caller passes the
   // hash alone, and its comment deep link must come out exactly as before.
   it("still keeps only the comment hash when no deliverable is named", () => {

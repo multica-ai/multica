@@ -41,8 +41,10 @@ export function useCanonicalIssueUrl(
   // A deliverable link keeps its `/deliverables/{name}` tail: dropping it
   // would turn the address into a plain issue link while the file is open.
   const canonicalRef = identifier ? issueRouteRef({ id: routeId, identifier }) : null;
+  // The query rides along too: it can carry a link target (`?trajectory=1&…`).
+  const search = navigation.searchParams.toString();
   const canonicalHref = canonicalRef
-    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${hash}`
+    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${search ? `?${search}` : ""}${hash}`
     : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the

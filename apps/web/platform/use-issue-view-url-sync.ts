@@ -16,8 +16,8 @@ import type { IssueViewScope } from "@multica/core/issue-views/queries";
  * the shared page component.
  *
  * The URL wins on mount (a pasted link opens that view); afterwards the
- * store drives the URL via history.replaceState — no navigation, no scroll
- * reset, no re-render of the route tree.
+ * store drives the URL via history.replaceState without a route navigation
+ * or scroll reset.
  */
 export function useIssueViewUrlSync(scope: IssueViewScope) {
   const wsId = useWorkspaceId();
@@ -42,11 +42,15 @@ export function useIssueViewUrlSync(scope: IssueViewScope) {
   // closing views is view state, not navigation.
   useEffect(() => {
     if (!adopted.current) return;
+    // The mount effect may just have adopted the link while this render
+    // still holds the previous view. Let the next render sync that value.
+    if ((useActiveIssueViewStore.getState().active[containerKey] ?? null) !== activeViewId) return;
     const url = new URL(window.location.href);
     const current = url.searchParams.get("view");
     if ((activeViewId ?? null) === (current ?? null)) return;
     if (activeViewId) url.searchParams.set("view", activeViewId);
     else url.searchParams.delete("view");
-    window.history.replaceState(window.history.state, "", url.toString());
-  }, [activeViewId]);
+    // Keep other consumers of useSearchParams in sync with the saved view.
+    window.history.replaceState(null, "", url.toString());
+  }, [activeViewId, containerKey]);
 }

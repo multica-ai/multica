@@ -57,6 +57,10 @@ const (
 	// as off, so a newer client never offers 365 days to a server that would
 	// read days=371 as the default 30.
 	DashboardHistory365d = "dashboard_history_365d"
+	// TrajectoryV1 gates the read-only Trajectory view and its graph endpoints.
+	// Off by default; FF_TRAJECTORY_V1=on enables it for a deployment. The
+	// capability endpoint reports the decision for the current workspace member.
+	TrajectoryV1 = "trajectory_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -114,6 +118,11 @@ func IssueDescriptionLiveEnabled(ctx context.Context, flags *featureflag.Service
 
 func DashboardHistory365dEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DashboardHistory365d, true)
+}
+
+func TrajectoryV1Enabled(ctx context.Context, flags *featureflag.Service, workspaceID, userID string) bool {
+	ctx = featureflag.WithEvalContext(ctx, featureflag.EvalContext{UserID: userID, WorkspaceID: workspaceID})
+	return flags.IsEnabled(ctx, TrajectoryV1, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

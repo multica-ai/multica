@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   advancedFilterFromSimple,
+  advancedFilterFromTableQuery,
   advancedFilterSignature,
   advancedFilterToTableQuery,
   countAdvancedConditions,
@@ -278,5 +279,23 @@ describe("statusColumnFilter", () => {
       negated: false,
       hiddenStatuses: ["done"],
     });
+  });
+});
+
+describe("advancedFilterFromTableQuery", () => {
+  it("is the inverse of advancedFilterToTableQuery, keeping negation, nesting and property operators", () => {
+    const table = {
+      match: "any" as const,
+      children: [
+        { field: "assignees" as const, negate: true, values: ["agent:a1", "none"] },
+        { match: "all" as const, children: [{ field: "property:score" as const, values: [{ op: "gte" as const, value: "3" }] }, { field: "due_dates" as const, values: ["overdue"] }] },
+      ],
+    };
+    const tree = advancedFilterFromTableQuery(table);
+    expect(tree.children[0]).toMatchObject({ type: "condition", field: "assignee", negated: true });
+    expect(advancedFilterToTableQuery(tree)).toEqual(table);
+  });
+  it("starts an empty tree without a query group", () => {
+    expect(advancedFilterFromTableQuery(undefined)).toMatchObject({ type: "group", match: "all", children: [] });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import type { IssueSurfaceController } from "../../issues/surface/use-issue-surface-controller";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Archive, ArchiveRestore, BellOff, BellRing, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
@@ -227,7 +228,10 @@ export function ProjectDetailSkeleton({
 
 // ProjectDetail
 
-export function ProjectDetail({ projectId }: { projectId: string }) {
+export function ProjectDetail({ projectId, renderHeaderTrailing }: {
+  projectId: string;
+  renderHeaderTrailing?: (controller: IssueSurfaceController) => React.ReactNode;
+}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -637,7 +641,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     hideCreate={archived}
                     afterTitle={projectTabs}
                     baseMenu={projectMenu}
-                    trailing={sidebarToggle}
+                    trailing={
+                      <>
+                        {renderHeaderTrailing?.(controller)}
+                        {sidebarToggle}
+                      </>
+                    }
                   />
                   {archived && (
                     <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>

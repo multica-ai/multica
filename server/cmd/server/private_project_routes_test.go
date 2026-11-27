@@ -16,12 +16,14 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	dbfx "github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // A route parameter is keyed by the literal path segment before it and its
@@ -491,7 +493,11 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
 	shared.uploadDir = t.TempDir()
 	t.Setenv("LOCAL_UPLOAD_DIR", shared.uploadDir)
-	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
+	// The visibility probe needs to reach the Trajectory handler's issue lookup.
+	flags := featureflag.NewStaticProvider()
+	flags.Set(featureflags.TrajectoryV1, featureflag.Rule{Default: true})
+	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil,
+		RouterOptions{FeatureFlags: featureflag.NewService(flags)})
 	call := func(token, method, path, body string) routeAnswer {
 		var req *http.Request
 		switch method {

@@ -28,6 +28,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
+import type { TrajectoryGraph } from "../trajectory/graph";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -457,6 +458,8 @@ import {
   EMPTY_SQUAD_BRIEFS,
   SubscribersListSchema,
   TaskMessageListSchema,
+  TrajectoryCapabilitySchema,
+  EMPTY_TRAJECTORY_CAPABILITY,
   TaskContextReceiptResponseSchema,
   TaskTranscriptPurgeSchema,
   EMPTY_TASK_TRANSCRIPT_PURGE,
@@ -951,7 +954,7 @@ function subscriberTarget(
 type WorkspaceScope = string | { workspaceId: string };
 
 /** `readOnly` marks a POST that changes nothing on the server. */
-type ApiRequestInit = RequestInit & { readOnly?: boolean };
+type ApiRequestInit = RequestInit & { readOnly?: boolean; trajectoryRead?: boolean };
 
 function workspaceHeader(
   scope?: WorkspaceScope,
@@ -1238,9 +1241,9 @@ export class ApiClient {
    */
   private csrfSessionValueRejected: string | null = null;
 
-  private readCsrfValue(): string | null {
+  private readCsrfValue(rejectedSessionValue = this.csrfSessionValueRejected): string | null {
     const sessionBound = this.readCookie(SESSION_CSRF_COOKIE);
-    if (sessionBound && sessionBound !== this.csrfSessionValueRejected) {
+    if (sessionBound && sessionBound !== rejectedSessionValue) {
       return sessionBound;
     }
     return this.readCookie(CSRF_COOKIE) ?? sessionBound;
@@ -1253,13 +1256,13 @@ export class ApiClient {
     return match ? match.slice(prefix.length) || null : null;
   }
 
-  private authHeaders(): Record<string, string> {
+  private authHeaders(rejectedSessionValue?: string | null): Record<string, string> {
     const headers: Record<string, string> = {};
     const token = this.getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const slug = getCurrentSlug();
     if (slug) headers["X-Workspace-Slug"] = slug;
-    const csrf = this.readCsrfValue();
+    const csrf = this.readCsrfValue(rejectedSessionValue);
     if (csrf) headers[CSRF_HEADER] = csrf;
     const id = this.options.identity;
     if (id?.platform) headers["X-Client-Platform"] = id.platform;
@@ -1340,9 +1343,10 @@ export class ApiClient {
     // Rebuilt per attempt rather than captured once: authHeaders() reads the
     // CSRF cookie at call time, and the retry below exists precisely because
     // that cookie may have just been replaced.
+    let trajectoryCsrfRejection: string | null | undefined;
     const buildHeaders = (): Record<string, string> => ({
       "X-Request-ID": rid,
-      ...this.authHeaders(),
+      ...this.authHeaders(trajectoryCsrfRejection),
       ...(init?.extraHeaders ?? {}),
       ...((init?.headers as Record<string, string>) ?? {}),
     });
@@ -1357,10 +1361,10 @@ export class ApiClient {
       requestId: rid,
       method,
       path,
-      body: typeof init?.body === "string" ? init.body : null,
+      body: !init?.trajectoryRead && typeof init?.body === "string" ? init.body : null,
     });
 
-    const { readOnly: _readOnly, ...requestInit } = init ?? {};
+    const { readOnly: _readOnly, trajectoryRead: _trajectoryRead, ...requestInit } = init ?? {};
     const send = async () => {
       try {
         return await fetch(`${this.baseUrl}${path}`, {
@@ -1372,7 +1376,7 @@ export class ApiClient {
         observer?.onEnd({
           requestId: rid,
           status: null,
-          error: err instanceof Error && err.name === "AbortError" ? "aborted" : String(err),
+          error: err instanceof Error && err.name === "AbortError" ? "aborted" : init?.trajectoryRead ? "trajectory_read_failed" : String(err),
         });
         throw err;
       }
@@ -1396,15 +1400,19 @@ export class ApiClient {
     if (res.status === 403 && isReplayableBody(init?.body)) {
       const { message } = await this.parseErrorBody(res.clone(), "");
       if (message === CSRF_REJECTED_ERROR) {
-        this.csrfSessionValueRejected = this.readCookie(SESSION_CSRF_COOKIE);
+        const rejectedValue = this.readCookie(SESSION_CSRF_COOKIE);
+        if (init?.trajectoryRead) trajectoryCsrfRejection = rejectedValue;
+        else this.csrfSessionValueRejected = rejectedValue;
         this.logger.info(`↻ ${method} ${path} (CSRF token rejected, retrying once)`, { rid });
         res = await send();
       }
     }
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized(credentialUsed);
-      const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
+      if (res.status === 401 && !init?.trajectoryRead) this.handleUnauthorized(credentialUsed);
+      const parsedError = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
+      const message = init?.trajectoryRead ? "trajectory_read_failed" : parsedError.message;
+      const body = init?.trajectoryRead ? undefined : parsedError.body;
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       observer?.onEnd({ requestId: rid, status: res.status, error: message });
@@ -1435,6 +1443,41 @@ export class ApiClient {
    */
   request(path: string, init?: RequestInit): Promise<unknown> {
     return this.fetch<unknown>(path, init);
+  }
+
+  /** Filter metadata is scoped to the opened Trajectory and handles errors on that page. */
+  readTrajectoryFilterMetadata(path: string, options: { workspaceId: string; signal: AbortSignal }): Promise<unknown> {
+    return this.fetch<unknown>(path, {
+      method: "GET",
+      signal: options.signal,
+      headers: workspaceHeader({ workspaceId: options.workspaceId }),
+      trajectoryRead: true,
+    });
+  }
+
+  async getTrajectoryCapability(workspaceId: string, signal?: AbortSignal): Promise<{ enabled: boolean }> {
+    const raw = await this.fetch<unknown>("/api/trajectory/capability", { signal, headers: workspaceHeader({ workspaceId }) });
+    const parsed = parseWithFallback(raw, TrajectoryCapabilitySchema, EMPTY_TRAJECTORY_CAPABILITY, { endpoint: "GET /api/trajectory/capability" });
+    return { enabled: parsed.enabled === true };
+  }
+
+  /** Opt-in read-only protocol; native requests retain their existing behavior. */
+  async listTaskTrajectory(issueIds: string[], options: { workspaceId: string; signal?: AbortSignal }): Promise<TrajectoryGraph> {
+    const { TrajectoryGraphSchema, emptyTrajectory } = await import("../trajectory/graph");
+    const raw = await this.fetch<unknown>("/api/issues/trajectory", {
+      method: "POST", readOnly: true, trajectoryRead: true, body: JSON.stringify({ issue_ids: issueIds }),
+      signal: options.signal, headers: workspaceHeader({ workspaceId: options.workspaceId }),
+    });
+    const parsed = TrajectoryGraphSchema.safeParse(raw);
+    return parseWithFallback(parsed.success ? parsed.data : null, TrajectoryGraphSchema, emptyTrajectory(""), { endpoint: "POST /api/issues/trajectory" });
+  }
+
+  async getIssueTrajectory(issueId: string, options: { workspaceId: string; signal?: AbortSignal; related?: boolean }): Promise<TrajectoryGraph> {
+    const { TrajectoryGraphSchema, emptyTrajectory } = await import("../trajectory/graph");
+    const path = `/api/issues/${encodeURIComponent(issueId)}/trajectory${options.related ? "" : "?scope=issue"}`;
+    const raw = await this.fetch<unknown>(path, { trajectoryRead: true, signal: options.signal, headers: workspaceHeader({ workspaceId: options.workspaceId }) });
+    const parsed = TrajectoryGraphSchema.safeParse(raw);
+    return parseWithFallback(parsed.success ? parsed.data : null, TrajectoryGraphSchema, emptyTrajectory(issueId), { endpoint: "GET /api/issues/:id/trajectory" });
   }
 
   // Auth
@@ -1662,12 +1705,19 @@ export class ApiClient {
     );
   }
 
-  async listIssueTableRows(params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> {
+  async listIssueTableRows(params: IssueTableRowsRequest, options?: { signal?: AbortSignal; workspaceId?: string; safeRead?: boolean }): Promise<IssueTableRowsResponse> {
     const raw = await this.fetch<unknown>("/api/issues/table/rows", {
       method: "POST",
       readOnly: true,
       body: JSON.stringify(params),
+      signal: options?.signal,
+      trajectoryRead: options?.safeRead,
+      headers: options?.workspaceId ? workspaceHeader({ workspaceId: options.workspaceId }) : undefined,
     });
+    if (options?.safeRead && !IssueTableRowsResponseSchema.safeParse(raw).success) {
+      parseWithFallback(null, IssueTableRowsResponseSchema, EMPTY_ISSUE_TABLE_ROWS_RESPONSE, { endpoint: "POST /api/issues/table/rows" });
+      throw new Error("trajectory_invalid_response");
+    }
     return parseWithFallback(
       raw,
       IssueTableRowsResponseSchema,
@@ -3483,6 +3533,23 @@ export class ApiClient {
     return parseWithFallback<TaskTranscriptPurge>(raw, TaskTranscriptPurgeSchema, EMPTY_TASK_TRANSCRIPT_PURGE, {
       endpoint: "DELETE /api/tasks/:id/messages",
     });
+  }
+
+  async listTrajectoryTaskMessages(
+    taskId: string,
+    { workspaceId, signal }: { workspaceId: string; signal?: AbortSignal },
+  ): Promise<TaskMessagePayload[]> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${encodeURIComponent(taskId)}/messages`, {
+      signal,
+      trajectoryRead: true,
+      headers: workspaceHeader({ workspaceId }),
+    });
+    const parsed = TaskMessageListSchema.safeParse(raw);
+    if (!parsed.success) {
+      parseWithFallback(null, TaskMessageListSchema, [], { endpoint: "GET /api/tasks/:id/messages" });
+      throw new Error("trajectory_invalid_response");
+    }
+    return parsed.data;
   }
 
   async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {

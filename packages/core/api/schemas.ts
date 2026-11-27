@@ -5294,3 +5294,7 @@ export const WorkspaceListItemSchema = z.object({
 export const WorkspacePinnedSchema = z.object({
   pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
 });
+
+// Only an explicit `enabled: true` shows Trajectory; anything else stays hidden.
+export const TrajectoryCapabilitySchema = z.object({ enabled: z.boolean().catch(false) }).loose();
+export const EMPTY_TRAJECTORY_CAPABILITY = { enabled: false };

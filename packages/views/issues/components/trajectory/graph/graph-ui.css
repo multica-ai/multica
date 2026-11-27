@@ -1,0 +1,277 @@
+.trajectory-theme {
+  --trajectory-background: oklch(1 0 0);
+  --trajectory-foreground: oklch(0.21 0.005 250);
+  --trajectory-muted: oklch(0.94 0.005 250);
+  --trajectory-muted-foreground: oklch(0.43 0.006 250);
+  --trajectory-faint: oklch(0.5 0.006 250);
+  --trajectory-border: oklch(0.59 0.006 250);
+  --trajectory-border-soft: oklch(0.872 0.005 250);
+  --trajectory-hover: oklch(0 0 0 / 0.045);
+  --trajectory-selected: oklch(0 0 0 / 0.12);
+  --trajectory-primary: oklch(0.455 0.14 210);
+  --trajectory-danger: oklch(0.5 0.19 22);
+  --trajectory-warning: oklch(0.498 0.17 55);
+  --trajectory-success: oklch(0.45 0.14 148);
+  --trajectory-info: oklch(0.481 0.14 245);
+  --trajectory-merged: oklch(0.49 0.18 305);
+  --trajectory-surface: oklch(0.985 0.002 250);
+  --trajectory-notice: oklch(0.47 0.11 70);
+  --trajectory-identity-1: oklch(0.508 0.09 180);
+  --trajectory-identity-2: oklch(0.522 0.09 262);
+  --trajectory-identity-3: oklch(0.528 0.09 292);
+  --trajectory-identity-4: oklch(0.532 0.09 350);
+  --trajectory-identity-5: oklch(0.524 0.09 311);
+  --trajectory-identity-6: oklch(0.512 0.09 130);
+  --trajectory-identity-7: oklch(0.532 0.09 330);
+  --trajectory-identity-8: oklch(0.514 0.09 225);
+  --trajectory-planner: oklch(0.5 0.16 295);
+  --trajectory-implementer: oklch(0.452 0.15 158);
+  --trajectory-reviewer: oklch(0.456 0.12 213);
+  --trajectory-tester: oklch(0.452 0.12 188);
+  --trajectory-provider: oklch(0.48 0.15 148);
+  --trajectory-provider-codex: oklch(0.48 0.15 148);
+  --trajectory-provider-anthropic: oklch(0.54 0.16 55);
+  --trajectory-provider-cursor: oklch(0.5 0.17 290);
+  --trajectory-provider-gemini: oklch(0.5 0.16 240);
+  --trajectory-provider-openrouter: #5558d9;
+  --trajectory-provider-moonshot: #1280fb;
+  --background: var(--trajectory-background);
+  --foreground: var(--trajectory-foreground);
+  --muted: var(--trajectory-muted);
+  --muted-foreground: var(--trajectory-muted-foreground);
+  --primary: var(--trajectory-primary);
+  --border: var(--trajectory-border);
+  --ring: var(--trajectory-primary);
+  color: var(--trajectory-foreground);
+  background-color: var(--trajectory-background);
+}
+.dark .trajectory-theme {
+  --trajectory-background: oklch(0.205 0.006 255);
+  --trajectory-foreground: oklch(0.93 0.006 90);
+  --trajectory-muted: oklch(0.25 0.009 255);
+  --trajectory-muted-foreground: oklch(0.79 0.015 255);
+  --trajectory-faint: oklch(0.68 0.012 255);
+  --trajectory-border: oklch(0.6 0.012 255);
+  --trajectory-border-soft: oklch(0.38 0.012 255);
+  --trajectory-hover: oklch(1 0 0 / 0.085);
+  --trajectory-selected: oklch(1 0 0 / 0.13);
+  --trajectory-primary: oklch(0.74 0.13 210);
+  --trajectory-danger: oklch(0.742 0.17 22);
+  --trajectory-warning: oklch(0.76 0.13 78);
+  --trajectory-success: oklch(0.71 0.13 148);
+  --trajectory-info: oklch(0.716 0.12 245);
+  --trajectory-merged: oklch(0.734 0.15 305);
+  --trajectory-surface: oklch(0.23 0.007 255);
+  --trajectory-notice: oklch(0.8 0.12 78);
+  --trajectory-identity-1: oklch(0.7 0.09 180);
+  --trajectory-identity-2: oklch(0.7 0.09 262);
+  --trajectory-identity-3: oklch(0.7 0.09 292);
+  --trajectory-identity-4: oklch(0.7 0.09 350);
+  --trajectory-identity-5: oklch(0.7 0.09 311);
+  --trajectory-identity-6: oklch(0.7 0.09 130);
+  --trajectory-identity-7: oklch(0.7 0.09 330);
+  --trajectory-identity-8: oklch(0.7 0.09 225);
+  --trajectory-planner: oklch(0.748 0.16 295);
+  --trajectory-implementer: oklch(0.76 0.15 158);
+  --trajectory-reviewer: oklch(0.78 0.12 213);
+  --trajectory-tester: oklch(0.78 0.12 188);
+  --trajectory-provider: oklch(0.72 0.16 150);
+  --trajectory-provider-codex: oklch(0.72 0.16 150);
+  --trajectory-provider-anthropic: oklch(0.74 0.15 55);
+  --trajectory-provider-cursor: oklch(0.7 0.16 290);
+  --trajectory-provider-gemini: oklch(0.72 0.16 240);
+  --trajectory-provider-openrouter: #676af6;
+  --trajectory-provider-moonshot: #1783ff;
+}
+.trajectory-timeline { container: trajectory / inline-size; display: flex; flex-direction: column; min-width: 0; padding: 8px; border-radius: 6px; }
+.trajectory-stream { position: relative; min-width: 0; }
+.trajectory-track { position: relative; margin-left: 64px; }
+.trajectory-rail { position: absolute; inset: 0 auto auto 0; pointer-events: none; overflow: visible; }
+.trajectory-row { position: relative; display: flex; min-width: 0; }
+.trajectory-clock { position: absolute; left: -64px; bottom: 0; display: flex; width: 64px; justify-content: flex-end; align-items: center; padding-right: 8px; color: var(--trajectory-faint); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.trajectory-marker { position: absolute; pointer-events: none; transform: translate(-50%, -50%); line-height: 0; }
+.trajectory-lane-hit { position: absolute; cursor: pointer; }
+.trajectory-lane-hit:focus-visible { outline: none; }
+.trajectory-count-marker { display: inline-block; width: 10px; height: 10px; border: 2px solid; border-radius: 50%; background-color: var(--trajectory-background); }
+/* A Run and its outputs carry their owning Issue's colour, so a Run stays traceable when the time order scatters it. */
+.trajectory-row[data-owner-tint] .trajectory-row-content { border-radius: 6px; background-color: color-mix(in oklab, var(--trajectory-owner) 7%, transparent); }
+.trajectory-row-content { container: trajectory-row / inline-size; display: flex; min-width: 0; flex: 1; align-items: flex-end; gap: 4px; }
+.trajectory-content { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; cursor: pointer; text-align: left; user-select: none; }
+.trajectory-content:hover { background-image: linear-gradient(var(--trajectory-hover), var(--trajectory-hover)); }
+.trajectory-content[aria-pressed="true"], .trajectory-content[aria-pressed="true"]:hover { background-image: linear-gradient(var(--trajectory-selected), var(--trajectory-selected)); }
+.trajectory-content:not(.trajectory-count):focus-visible { outline: none; box-shadow: 0 0 0 2px var(--trajectory-foreground); }
+.trajectory-label { display: flex; flex: 1; min-width: 160px; align-items: baseline; gap: 8px; overflow: hidden; }
+.trajectory-kind, .trajectory-stage, .trajectory-count, .trajectory-issue-meta { flex-shrink: 0; color: var(--trajectory-muted-foreground); font-size: 12px; line-height: 16px; }
+.trajectory-kind, .trajectory-stage, .trajectory-count, .trajectory-issue-meta, .trajectory-run-meta, .trajectory-provenance, .trajectory-day { font-variant-numeric: tabular-nums; }
+.trajectory-title { display: flex; align-items: center; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: 12px; line-height: 16px; font-weight: 400; }
+.trajectory-title-entry { font-size: 14px; line-height: 20px; }
+.trajectory-title-issue { display: block; font-size: 14px; line-height: 20px; font-weight: 500; }
+.trajectory-issue-meta { display: flex; align-items: center; gap: 12px; }
+.trajectory-issue-status { padding: 1px 6px; border-radius: 4px; color: var(--trajectory-status-tone, var(--trajectory-muted-foreground)); background: color-mix(in oklab, var(--trajectory-status-tone, var(--trajectory-muted-foreground)) 8%, transparent); font-size: 11px; line-height: 16px; }
+.trajectory-row[data-status-tone="danger"] { --trajectory-status-tone: var(--trajectory-danger); }
+.trajectory-row[data-status-tone="info"] { --trajectory-status-tone: var(--trajectory-info); }
+.trajectory-row[data-status-tone="success"] { --trajectory-status-tone: var(--trajectory-success); }
+.trajectory-row[data-status-tone="warning"] { --trajectory-status-tone: var(--trajectory-warning); }
+.trajectory-row-menu { display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; width: 24px; color: var(--trajectory-muted-foreground); }
+.trajectory-row-menu > button { height: auto; width: auto; padding: 0; border: 0; background: transparent; }
+.trajectory-role { display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; align-self: center; align-items: center; justify-content: center; border-radius: 50%; color: var(--trajectory-role); background: color-mix(in oklab, var(--trajectory-role) 14%, transparent); }
+.trajectory-role > svg { width: 12px; height: 12px; }
+.trajectory-run-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--trajectory-muted-foreground); font-size: 12px; line-height: 16px; }
+.trajectory-model { display: flex; align-items: center; gap: 8px; width: 176px; min-width: 0; overflow: hidden; }
+.trajectory-model[data-missing-model="true"] { width: auto; max-width: 110px; color: var(--trajectory-faint); font-size: 11px; }
+.trajectory-model > svg, .trajectory-model > img { color: var(--trajectory-provider); width: 12px; height: 12px; flex-shrink: 0; opacity: .75; }
+.trajectory-model > svg:not(.icon) { fill: currentColor; }
+.trajectory-model > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trajectory-duration { width: 72px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.trajectory-day { position: relative; display: flex; align-items: center; color: var(--trajectory-muted-foreground); font-size: 11px; line-height: 16px; font-weight: 500; }
+.trajectory-day time { position: absolute; left: -64px; }
+.trajectory-count { width: 100%; }
+.trajectory-symbol { display: inline-flex; width: 20px; height: 20px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 50%; color: var(--trajectory-tone, var(--trajectory-muted-foreground)); background: var(--trajectory-background); box-shadow: 0 0 0 1px color-mix(in oklab, var(--trajectory-tone, var(--trajectory-muted-foreground)) 20%, transparent); }
+.trajectory-symbol[data-tone="neutral"] { box-shadow: 0 0 0 1px var(--trajectory-border-soft); }
+.trajectory-symbol[data-tone="danger"], .trajectory-symbol[data-tone="info"] { background: color-mix(in oklab, var(--trajectory-tone) 10%, var(--trajectory-background)); }
+.trajectory-symbol[data-tone="danger"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--trajectory-danger) 65%, transparent); }
+.trajectory-symbol[data-tone="success"] { background: var(--trajectory-background); background-image: linear-gradient(color-mix(in oklab, var(--trajectory-success) 18%, transparent), color-mix(in oklab, var(--trajectory-success) 18%, transparent)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--trajectory-success) 70%, transparent); }
+.trajectory-symbol[data-symbol="artifact"] { color: var(--trajectory-foreground); box-shadow: 0 0 0 1px var(--trajectory-foreground); }
+.trajectory-symbol > svg { width: 12px; height: 12px; }
+.trajectory-provenance { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; color: var(--trajectory-danger); background: color-mix(in oklab, var(--trajectory-danger) 10%, var(--trajectory-background)); font-size: 12px; line-height: 16px; }
+.trajectory-provenance > svg { width: 12px; height: 12px; }
+.trajectory-provenance[data-creation-kind] { color: var(--trajectory-muted-foreground); background: color-mix(in oklab, var(--trajectory-danger) 6%, var(--trajectory-background)); font-size: 11px; }
+.trajectory-provenance[data-creation-kind] > svg { color: color-mix(in oklab, var(--trajectory-danger) 75%, var(--trajectory-muted-foreground)); }
+.trajectory-dialog { gap: 16px; border-radius: 12px; }
+.trajectory-dialog [data-slot="dialog-title"] { color: var(--trajectory-foreground); font-size: 16px; line-height: 16px; font-weight: 500; }
+.trajectory-tabs { gap: 16px; }
+.trajectory-tabs [data-slot="tabs-list"] { flex-shrink: 0; height: 28px; gap: 2px; border: 1px solid var(--trajectory-border); border-radius: 6px; padding: 1px; background: transparent; }
+.trajectory-tabs [data-slot="tabs-trigger"] { flex: 0 0 auto; height: 24px; border: 1px solid transparent; border-radius: 4px; padding: 0 8px; color: var(--trajectory-muted-foreground); font-size: 12px; line-height: 16px; font-weight: 400; box-shadow: none; }
+.trajectory-tabs [data-slot="tabs-trigger"][data-active] { color: var(--trajectory-foreground); background: var(--trajectory-selected); box-shadow: none; }
+.trajectory-tabs [data-slot="tabs-content"] { font-size: 12px; line-height: 16px; }
+.trajectory-inspector { display: flex; flex-direction: column; gap: 16px; font-size: 12px; line-height: 16px; }
+.trajectory-inspector-header { color: var(--trajectory-muted-foreground); }
+.trajectory-inspector-header > p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.trajectory-inspector-header > a, .trajectory-inspector-header > a + p { display: block; margin-top: 8px; }
+.trajectory-inspector a:not([data-slot="button"]):not(.trajectory-run-actions > a) { color: var(--trajectory-primary); text-decoration: underline; }
+.trajectory-inspector-section { display: flex; flex-direction: column; gap: 8px; }
+.trajectory-inspector h3 { font-weight: 500; }
+.trajectory-body-text, .trajectory-raw-text { margin: 0; min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; }
+.trajectory-raw-text { margin-top: 8px; color: var(--trajectory-muted-foreground); font-family: var(--font-mono); font-size: 11px; }
+.trajectory-owner-button { height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; justify-content: flex-start; }
+.trajectory-record-meta { display: grid; gap: 8px; margin-top: 12px; }
+.trajectory-record-meta > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; }
+.trajectory-record-meta dt { color: var(--trajectory-faint); }
+.trajectory-record-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.trajectory-record-time { display: block; overflow-wrap: anywhere; }
+.trajectory-disclosure, .trajectory-record-raw { min-width: 0; max-width: 100%; }
+.trajectory-disclosure > summary, .trajectory-record-raw > summary { cursor: pointer; color: var(--trajectory-primary); padding: 6px 0; }
+.trajectory-disclosure > section { margin-top: 12px; }
+.trajectory-detail-back { align-self: flex-start; }
+/* The Run reader lives in the portaled dialog, so use its theme tokens. */
+.trajectory-run-dialog {
+  --trajectory-primary: var(--primary);
+  --trajectory-border: var(--border);
+  --trajectory-muted-foreground: var(--muted-foreground);
+  --trajectory-faint: var(--muted-foreground);
+}
+.trajectory-run-inspector { gap: 0.875rem; font-size: var(--text-body); line-height: var(--text-body--line-height); }
+.trajectory-run-inspector .trajectory-inspector-header { display: grid; justify-items: start; gap: 0.5rem; min-width: 0; }
+.trajectory-run-inspector .trajectory-owner-button { padding-inline: 0.375rem; }
+.trajectory-run-inspector .trajectory-record-meta { width: 100%; margin-block: 0.25rem; font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.trajectory-run-inspector .trajectory-record-meta > div { grid-template-columns: minmax(6rem, 25%) minmax(0, 1fr); }
+.trajectory-run-inspector .trajectory-record-meta dd { color: var(--foreground); }
+.trajectory-run-inspector .trajectory-inspector-section { min-width: 0; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.trajectory-run-inspector .trajectory-inspector-section h3 { color: var(--foreground); font-size: var(--text-label); font-weight: 600; }
+.trajectory-run-inspector .trajectory-run-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.trajectory-run-dialog .trajectory-log details.trajectory-log-message { border-color: var(--border); background: var(--surface-raised); }
+.trajectory-run-locator { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 8px; font-size: 12px; line-height: 16px; color: var(--trajectory-muted-foreground); }
+.trajectory-locator-owner { overflow-wrap: anywhere; }
+.trajectory-inspector [data-slot="button"] { align-self: flex-start; }
+.trajectory-inspector [data-slot="button"]:not(:where(.trajectory-run-actions *)) { font-size: 12px; line-height: 16px; }
+.trajectory-preview { max-height: 288px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 4px; background: var(--trajectory-muted); padding: 8px; font-size: 12px; line-height: 16px; }
+.trajectory-record-button { display: block; width: 100%; padding: 8px; border-radius: 4px; background: var(--accent); font-size: 12px; line-height: 16px; text-align: left; overflow-wrap: anywhere; }
+.trajectory-relation-button { margin-bottom: 4px; background: color-mix(in oklab, var(--accent) 60%, transparent); }
+.trajectory-relation-button:last-child { margin-bottom: 0; }
+.trajectory-relation-button:hover { background: var(--accent); }
+.trajectory-relation-button > span { color: var(--trajectory-muted-foreground); }
+.trajectory-finding { cursor: pointer; }
+.trajectory-finding:focus-visible { outline: 2px solid var(--trajectory-primary); outline-offset: 2px; }
+.trajectory-log { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.trajectory-log-heading { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; font-weight: 500; }
+.trajectory-log-id { color: var(--trajectory-muted-foreground); overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 10px; line-height: 20px; }
+.trajectory-title-record { color: var(--trajectory-muted-foreground); }
+.trajectory-record-status { color: var(--trajectory-faint); }
+.trajectory-log details { border: 1px solid var(--trajectory-border); border-radius: 6px; padding: 12px; font-size: 12px; line-height: 16px; }
+.trajectory-log details[data-highlighted="true"] { box-shadow: 0 0 0 1px color-mix(in oklab, var(--trajectory-primary) 30%, transparent); }
+.trajectory-log summary { cursor: pointer; }
+.trajectory-log pre { margin-top: 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 11px; line-height: 16px; }
+.trajectory-log .trajectory-log-message { min-width: 0; padding: 12px; }
+.trajectory-log-message > summary { display: flex; flex-wrap: wrap; gap: 4px 12px; overflow-wrap: anywhere; }
+.trajectory-log-message > summary time { color: var(--trajectory-faint); }
+.trajectory-log-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; min-width: 0; }
+.trajectory-log-section h4 { font-weight: 500; }
+.trajectory-log .trajectory-record-raw, .trajectory-log .trajectory-disclosure { margin-top: 12px; padding: 0; border: 0; }
+.trajectory-log pre { max-height: none; overflow: visible; }
+@container trajectory-row (max-width: 640px) { .trajectory-label { min-width: 0; } }
+@container trajectory-row (max-width: 500px) { .trajectory-run-meta { display: none; } }
+@container trajectory-row (max-width: 360px) { .trajectory-label { gap: 6px; } .trajectory-kind, .trajectory-stage, .trajectory-provenance[data-creation-kind], .trajectory-issue-meta { display: none; } .trajectory-title-issue { font-size: 12px; line-height: 16px; } }
+@container trajectory (max-width: 440px) { .trajectory-track { margin-left: 0; } .trajectory-clock { display: none; } .trajectory-day time { left: calc(var(--trajectory-rail-width) + 8px); } }
+.trajectory-row[data-focus-role="history"] .trajectory-row-content, .trajectory-row[data-focus-role="history"] .trajectory-clock { opacity: .55; }
+.trajectory-row[data-focus-role="history"]:hover .trajectory-row-content, .trajectory-row[data-focus-role="history"]:focus-within .trajectory-row-content, .trajectory-row[data-focus-role="history"]:has([aria-pressed="true"]) .trajectory-row-content { opacity: 1; }
+.trajectory-row[data-current-state="running"] { --trajectory-current: var(--trajectory-info); }
+.trajectory-row[data-current-state="blocked"] { --trajectory-current: var(--trajectory-danger); }
+.trajectory-row[data-current-state="review"] { --trajectory-current: var(--trajectory-warning); }
+.trajectory-row[data-current-state] .trajectory-content { background-image: linear-gradient(color-mix(in oklab, var(--trajectory-current) 7%, transparent), color-mix(in oklab, var(--trajectory-current) 7%, transparent)); }
+.trajectory-row[data-current-state] .trajectory-content:hover { background-image: linear-gradient(color-mix(in oklab, var(--trajectory-current) 12%, transparent), color-mix(in oklab, var(--trajectory-current) 12%, transparent)); }
+.trajectory-row[data-summary-target="true"] .trajectory-row-content { opacity: 1; }
+.trajectory-row[data-summary-target="true"] .trajectory-content { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--trajectory-info) 65%, transparent); }
+/* Header: title row, search row, status chips. */
+.trajectory-header { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; flex-shrink: 0; gap: 12px; padding: 14px 20px 12px; border-bottom: 1px solid var(--trajectory-border-soft); background: var(--trajectory-background); }
+.trajectory-header-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.trajectory-heading { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.trajectory-heading > h2 { margin: 0; font-size: var(--text-title-sm); line-height: var(--text-title-sm--line-height); font-weight: 600; }
+.trajectory-heading > span { color: var(--trajectory-muted-foreground); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.trajectory-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.trajectory-header-search { display: flex; align-items: center; gap: 8px; }
+.trajectory-search { position: relative; flex: 1; min-width: 160px; }
+.trajectory-search > svg { position: absolute; left: 10px; top: 9px; width: 14px; height: 14px; color: var(--trajectory-muted-foreground); }
+.trajectory-search input { height: 32px; padding-left: 30px; background: var(--trajectory-surface); }
+.trajectory-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.trajectory-chip { gap: 6px; }
+.trajectory-chip-count { font-variant-numeric: tabular-nums; opacity: .75; }
+
+/* Current-state colors shared by chips, dots, summaries and bars. */
+[data-current-state="running"] { --trajectory-current: var(--trajectory-info); }
+[data-current-state="blocked"] { --trajectory-current: var(--trajectory-danger); }
+[data-current-state="review"] { --trajectory-current: var(--trajectory-warning); }
+.trajectory-dot { display: inline-block; width: 7px; height: 7px; flex-shrink: 0; border-radius: 9999px; background: var(--trajectory-current, var(--trajectory-muted-foreground)); }
+
+/* Body: notes, limit banner, project cards, collapsed list. */
+.trajectory-body { display: flex; min-height: 0; min-width: 0; flex: 1; flex-direction: column; gap: 12px; overflow: auto; padding: 12px 20px 24px; container: trajectory-body / inline-size; }
+/* Cards clip their content; without this a scrolling column would shrink them to fit instead of scrolling. */
+.trajectory-body > * { flex-shrink: 0; }
+.trajectory-note { color: var(--trajectory-muted-foreground); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.trajectory-no-focus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.trajectory-banner { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border: 1px solid color-mix(in oklab, var(--trajectory-warning) 30%, transparent); border-radius: 8px; color: var(--trajectory-notice); background: color-mix(in oklab, var(--trajectory-warning) 7%, var(--trajectory-background)); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.trajectory-banner > svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
+.trajectory-banner > p { flex: 1; }
+.trajectory-banner [data-slot="button"] { height: auto; padding: 0; color: inherit; font-weight: 500; }
+.trajectory-project, .trajectory-collapsed { min-width: 0; overflow: hidden; border: 1px solid var(--trajectory-border-soft); border-radius: 10px; background: var(--trajectory-background); }
+.trajectory-project-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 0 14px 0 4px; border-bottom: 1px solid var(--trajectory-border-soft); background: var(--trajectory-surface); }
+.trajectory-project-header { display: flex; flex: 1; align-items: center; justify-content: flex-start; min-width: 0; height: auto; min-height: 42px; gap: 10px; padding: 0 10px; border: 0; background: transparent; text-align: left; white-space: normal; }
+.trajectory-project-header > svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--trajectory-muted-foreground); }
+.trajectory-project-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-label); line-height: var(--text-label--line-height); font-weight: 600; }
+.trajectory-project-count { flex-shrink: 0; color: var(--trajectory-muted-foreground); font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 400; }
+.trajectory-project-body { padding: 8px; overflow-x: auto; }
+.trajectory-project-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.trajectory-summary-scope { color: var(--trajectory-muted-foreground); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.trajectory-summary-category { gap: 5px; color: var(--trajectory-muted-foreground); font-weight: 400; }
+.trajectory-summary-category:disabled .trajectory-dot { opacity: .3; }
+.trajectory-collapsed-row, .trajectory-collapsed-columns { display: grid; grid-template-columns: minmax(0, 1fr) 120px repeat(3, 80px); align-items: center; column-gap: 10px; padding-right: 14px; }
+.trajectory-collapsed-row { min-height: 44px; padding-left: 4px; border-bottom: 1px solid var(--trajectory-border-soft); }
+.trajectory-collapsed-row:hover { background: var(--trajectory-hover); }
+.trajectory-collapsed-row .trajectory-project-summary { grid-column: span 3; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 10px; }
+.trajectory-collapsed-row .trajectory-project-summary > [role="status"] { grid-column: span 3; }
+.trajectory-collapsed-row .trajectory-summary-category { justify-content: flex-start; }
+.trajectory-collapsed-columns { padding-top: 8px; padding-bottom: 8px; padding-left: 4px; background: var(--trajectory-surface); color: var(--trajectory-muted-foreground); font-size: var(--text-micro); line-height: var(--text-micro--line-height); }
+.trajectory-collapsed-columns > span:first-child { padding-left: 38px; }
+.trajectory-bar { display: flex; height: 6px; overflow: hidden; border-radius: 3px; background: var(--trajectory-muted); }
+.trajectory-bar > span { background: var(--trajectory-current); }
+
+@container trajectory-body (max-width: 640px) { .trajectory-collapsed-row .trajectory-bar, .trajectory-collapsed-columns { display: none; } .trajectory-collapsed-row { grid-template-columns: minmax(0, 1fr) repeat(3, auto); } .trajectory-collapsed-row .trajectory-project-summary { display: flex; } }
