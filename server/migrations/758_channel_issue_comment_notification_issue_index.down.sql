@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_channel_issue_comment_notification_issue_id;
