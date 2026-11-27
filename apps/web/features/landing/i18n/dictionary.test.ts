@@ -5,19 +5,19 @@ import { createLandingDict } from "./dictionary";
 
 describe("createLandingDict", () => {
   it("reuses the English copy for locales without their own dictionary", () => {
-    expect(createLandingDict("fr")).toEqual(createLandingDict("en"));
+    expect(createLandingDict("es")).toEqual(createLandingDict("en"));
   });
 
   it("serves translated copy for locales with a dictionary", () => {
     const en = createLandingDict("en");
-    for (const locale of ["zh-Hans", "ja", "ko"] as const) {
+    for (const locale of ["zh-Hans", "ja", "ko", "fr"] as const) {
       expect(createLandingDict(locale).faq.headline).not.toBe(en.faq.headline);
     }
   });
 
   it("translates the home page and site chrome instead of inheriting English", () => {
     const en = createLandingDict("en");
-    for (const locale of ["zh-Hans", "ja", "ko"] as const) {
+    for (const locale of ["zh-Hans", "ja", "ko", "fr"] as const) {
       const t = createLandingDict(locale);
       expect(t.home.hero.lead).not.toBe(en.home.hero.lead);
       expect(t.home.features.items.skills.body).not.toBe(en.home.features.items.skills.body);
@@ -29,7 +29,7 @@ describe("createLandingDict", () => {
 
   it("gives every locale the same mockup copy as English, with a title for every hero card", () => {
     const en = createLandingDict("en");
-    for (const locale of ["en", "zh-Hans", "ja", "ko"] as const) {
+    for (const locale of ["en", "zh-Hans", "ja", "ko", "fr"] as const) {
       const t = createLandingDict(locale);
       expect(shape(t.demo)).toEqual(shape(en.demo));
       for (const key of ["ship", "launch", "triage"] as const) {
@@ -44,7 +44,7 @@ describe("createLandingDict", () => {
 
   it("translates every page's title and share card", () => {
     const en = createLandingDict("en");
-    for (const locale of ["zh-Hans", "ja", "ko"] as const) {
+    for (const locale of ["zh-Hans", "ja", "ko", "fr"] as const) {
       const meta = createLandingDict(locale).meta;
       for (const [page, copy] of Object.entries(meta)) {
         const english = en.meta[page as keyof typeof meta];

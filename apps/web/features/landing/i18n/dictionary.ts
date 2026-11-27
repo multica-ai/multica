@@ -1,4 +1,5 @@
 import { createEnDict } from "./en";
+import { createFrDict } from "./fr";
 import { createJaDict } from "./ja";
 import { createKoDict } from "./ko";
 import { createZhDict } from "./zh";
@@ -14,12 +15,13 @@ const dictionaryFactories: Record<
   () => LandingDict
 > = {
   en: createEnDict,
+  fr: createFrDict,
   ja: createJaDict,
   ko: createKoDict,
   zh: createZhDict,
 };
 
-// Locales without their own landing copy (e.g. French) reuse another dictionary.
+// Locales without their own landing copy (e.g. Spanish) reuse another dictionary.
 export function createLandingDict(locale: Locale): LandingDict {
   return dictionaryFactories[toLandingDictionaryLocale(locale)]();
 }

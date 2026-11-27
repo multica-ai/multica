@@ -28,7 +28,7 @@ describe("parseInlineLinks", () => {
 });
 
 describe("trust pages copy", () => {
-  const dicts = (["en", "zh-Hans", "ja", "ko"] as const).map((locale) =>
+  const dicts = (["en", "zh-Hans", "ja", "ko", "fr"] as const).map((locale) =>
     createLandingDict(locale),
   );
 

@@ -44,7 +44,8 @@ describe("landing locale paths", () => {
 
   it("maps locales onto the languages the site has", () => {
     expect(landingPathLocale("zh-Hant")).toBe("zh-Hans");
-    expect(landingPathLocale("fr")).toBe("en");
+    expect(landingPathLocale("es")).toBe("en");
+    expect(landingPathLocale("fr")).toBe("fr");
     expect(landingPathLocale("ja")).toBe("ja");
   });
 
@@ -57,7 +58,8 @@ describe("landing locale paths", () => {
     expect(localizeHref("ja", "https://github.com/multica-ai/multica")).toBe("https://github.com/multica-ai/multica");
     expect(localizeHref("ja", "/zh/about")).toBe("/zh/about");
     expect(localizeHref("en", "/about")).toBe("/about");
-    expect(localizeHref("fr", "/about")).toBe("/about");
+    expect(localizeHref("es", "/about")).toBe("/about");
+    expect(localizeHref("fr", "/about")).toBe("/fr/about");
   });
 
   it("lists every language's URL with English as the default", () => {
@@ -66,6 +68,7 @@ describe("landing locale paths", () => {
       "zh-Hans": "https://www.multica.ai/zh",
       ko: "https://www.multica.ai/ko",
       ja: "https://www.multica.ai/ja",
+      fr: "https://www.multica.ai/fr",
       "x-default": "https://www.multica.ai/",
     });
     expect(landingAlternates("/download")).toMatchObject({ "zh-Hans": "/zh/download", "x-default": "/download" });
