@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Tooltip,
@@ -76,6 +77,7 @@ function AddFileInline({
           setError("");
         }}
         onKeyDown={(e) => {
+          if (isImeComposing(e)) return;
           if (e.key === "Enter") submit();
           if (e.key === "Escape") onCancel();
         }}

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
 import { FileTree, type FileTreeActions } from "./file-tree";
@@ -162,4 +162,54 @@ describe("FileTree entry points", () => {
     ).toBeInTheDocument();
   });
 
+});
+
+describe("FileTree IME composition", () => {
+  async function startRename() {
+    const onRename = vi.fn();
+    await renderWithI18n(
+      <FileTree
+        filePaths={PATHS}
+        selectedPath="notes.txt"
+        onSelect={vi.fn()}
+        actions={makeActions({ onRename })}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /notes\.txt/ }));
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: /重命名|Rename/ }),
+    );
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "xiangmu.md" } });
+    return { input, onRename };
+  }
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 13 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not rename with a composing Enter (%s)", async (_name, eventInit) => {
+    const { input, onRename } = await startRename();
+    fireEvent.keyDown(input, { key: "Enter", ...eventInit });
+    expect(onRename).not.toHaveBeenCalled();
+    expect(input).toHaveValue("xiangmu.md");
+  });
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 27 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not cancel with a composing Escape (%s)", async (_name, eventInit) => {
+    const { input, onRename } = await startRename();
+    fireEvent.keyDown(input, { key: "Escape", ...eventInit });
+    expect(onRename).not.toHaveBeenCalled();
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue("xiangmu.md");
+  });
+
+  it("renames once after composition ends", async () => {
+    const { input, onRename } = await startRename();
+    fireEvent.change(input, { target: { value: "项目.md" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: false, keyCode: 13 });
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith("notes.txt", "项目.md");
+  });
 });

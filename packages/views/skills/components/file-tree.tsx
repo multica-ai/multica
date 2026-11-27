@@ -13,6 +13,7 @@ import {
   PencilLine,
   Trash2,
 } from "@multica/ui/icons";
+import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
@@ -330,6 +331,7 @@ function RenameRow({
         }}
         onBlur={submit}
         onKeyDown={(event) => {
+          if (isImeComposing(event)) return;
           if (event.key === "Enter") submit();
           if (event.key === "Escape") onDone();
         }}

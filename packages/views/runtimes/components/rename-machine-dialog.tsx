@@ -9,6 +9,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../i18n";
 
 // RenameMachineDialog names a whole machine (MUL-4217). A machine hosts one
@@ -102,6 +103,7 @@ export function RenameMachineDialog({
             placeholder={t(($) => $.machine.rename_dialog.placeholder)}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter" && !submitting) {
                 e.preventDefault();
                 handleSave();

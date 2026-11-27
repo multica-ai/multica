@@ -190,3 +190,42 @@ async function addNewStatus(name: string) {
   fireEvent.change(input, { target: { value: name } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
+
+describe("WorkflowEditorPage IME composition", () => {
+  async function startNewStatus(value = "xiangmu") {
+    renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Add step/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /New status/ }));
+    const input = screen.getByPlaceholderText("Status name") as HTMLInputElement;
+    fireEvent.change(input, { target: { value } });
+    return input;
+  }
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 13 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not add a status with a composing Enter (%s)", async (_name, eventInit) => {
+    const input = await startNewStatus();
+    fireEvent.keyDown(input, { key: "Enter", ...eventInit });
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue("xiangmu");
+    expect(screen.queryByRole("heading", { name: "xiangmu" })).toBeNull();
+  });
+
+  it.each([
+    ["standard composition signal", { isComposing: true, keyCode: 27 }],
+    ["Safari composition signal", { isComposing: false, keyCode: 229 }],
+  ])("does not close the field with a composing Escape (%s)", async (_name, eventInit) => {
+    const input = await startNewStatus();
+    fireEvent.keyDown(input, { key: "Escape", ...eventInit });
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue("xiangmu");
+  });
+
+  it("adds the status once after composition ends", async () => {
+    const input = await startNewStatus();
+    fireEvent.change(input, { target: { value: "项目" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: false, keyCode: 13 });
+    expect(screen.getByRole("heading", { name: "项目" })).toBeTruthy();
+  });
+});
