@@ -1,6 +1,24 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { daemonStateDescription, daemonStatusAlive } from "./daemon-types";
+import {
+  daemonStateDescription,
+  daemonStatusAlive,
+  normalizePreventSleepMode,
+} from "./daemon-types";
+
+describe("normalizePreventSleepMode", () => {
+  it("keeps each supported mode", () => {
+    expect(normalizePreventSleepMode("on")).toBe("on");
+    expect(normalizePreventSleepMode("agent")).toBe("agent");
+    expect(normalizePreventSleepMode("off")).toBe("off");
+  });
+
+  it("falls back to off for a missing or unknown value", () => {
+    expect(normalizePreventSleepMode(undefined)).toBe("off");
+    expect(normalizePreventSleepMode(true)).toBe("off");
+    expect(normalizePreventSleepMode("always")).toBe("off");
+  });
+});
 
 describe("daemonStatusAlive", () => {
   it("treats a ready daemon as alive", () => {

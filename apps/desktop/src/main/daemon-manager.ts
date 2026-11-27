@@ -1,4 +1,13 @@
-import { app, ipcMain, BrowserWindow, shell, dialog, net, type MessageBoxOptions } from "electron";
+import {
+  app,
+  ipcMain,
+  BrowserWindow,
+  shell,
+  dialog,
+  net,
+  powerSaveBlocker,
+  type MessageBoxOptions,
+} from "electron";
 import { execFile } from "child_process";
 import {
   readFile,
@@ -21,7 +30,7 @@ import type {
   DaemonPrefs,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
-import { daemonStatusAlive } from "../shared/daemon-types";
+import { daemonStatusAlive, normalizePreventSleepMode } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import { createDaemonQuitHandler } from "./daemon-quit";
@@ -61,6 +70,7 @@ import {
   type AuthProbeResult,
 } from "./daemon-auth-probe";
 import { daemonSpawnEnv } from "./daemon-spawn-env";
+import { createSleepBlocker } from "./sleep-blocker";
 import { focusEnvironmentAt, type FocusEnvironmentResult } from "./environment-focus";
 
 const POLL_INTERVAL_MS = 5_000;
@@ -84,7 +94,7 @@ const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 // misses this second independent window is no longer treated as merely busy.
 const RECOVERY_HEALTH_PROBE_TIMEOUT_MS = 10_000;
 
-const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
+const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false, preventSleep: "off" };
 
 // Always a resolved Desktop-owned profile. "Not resolved yet" is represented by
 // `null` at every call site, never by an empty name — see daemon-profile.ts.
@@ -128,6 +138,12 @@ let autoStartSuppressedAfterQuit = false;
 // not replace it with a native daemon if its forwarded health endpoint drops.
 let externalDaemonObserved = false;
 const recoveryPolicy = new DaemonRecoveryPolicy();
+// "prevent-app-suspension" blocks system idle sleep only: the display can
+// still turn off, and closing the lid still sleeps the machine.
+const sleepBlocker = createSleepBlocker({
+  start: () => powerSaveBlocker.start("prevent-app-suspension"),
+  stop: (id) => powerSaveBlocker.stop(id),
+});
 const lifecycleOperations = new DaemonOperationGate();
 
 // Auth-probe state for the current start attempt. When a start fails to reach
@@ -467,6 +483,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
     profile: active.name,
     serverUrl: data.server_url,
     externallyManaged,
+    activeTaskCount: data.active_task_count ?? 0,
   };
 }
 
@@ -828,8 +845,8 @@ async function restartDaemonAfterUserSwitch(
 async function loadPrefs(): Promise<DaemonPrefs> {
   try {
     const raw = await readFile(PREFS_PATH, "utf-8");
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PREFS, ...parsed };
+    const prefs = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+    return { ...prefs, preventSleep: normalizePreventSleepMode(prefs.preventSleep) };
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -1266,6 +1283,7 @@ async function pollOnce(): Promise<void> {
     const status = await fetchHealth();
     if (quitting) return;
     currentState = status.state;
+    sleepBlocker.setAgentsWorking((status.activeTaskCount ?? 0) > 0);
     observeDaemonBoundary(status);
     const decision = recoveryDecision(status);
     sendStatus(
@@ -1326,6 +1344,8 @@ function stopPolling(): void {
     clearInterval(statusPollTimer);
     statusPollTimer = null;
   }
+  // Nothing refreshes the task count while polling is paused.
+  sleepBlocker.setAgentsWorking(false);
 }
 
 const LOG_TAIL_INITIAL_WINDOW_BYTES = 32 * 1024;
@@ -1477,6 +1497,7 @@ export function setupDaemonManager(
 ): void {
   getMainWindow = windowGetter;
   getStatusWindows = statusWindowsGetter;
+  void loadPrefs().then((prefs) => sleepBlocker.setMode(prefs.preventSleep));
 
   ipcMain.handle("daemon:set-target-api-url", async (_e, url: string) => {
     const normalized = url || null;
@@ -1556,10 +1577,15 @@ export function setupDaemonManager(
     (_event, prefs: Partial<DaemonPrefs>) =>
       loadPrefs().then((cur) => {
         const merged = { ...cur, ...prefs };
-        // Changing the preference still affects the next logged-in launch; it
-        // does not start/stop the current session. The Settings copy explicitly
-        // states that a launched daemon is supervised while Desktop stays open.
-        return savePrefs(merged).then(() => merged);
+        merged.preventSleep = normalizePreventSleepMode(merged.preventSleep);
+        // Changing the auto-start preference still affects the next logged-in
+        // launch; it does not start/stop the current session. The Settings copy
+        // explicitly states that a launched daemon is supervised while Desktop
+        // stays open. The sleep mode applies immediately.
+        return savePrefs(merged).then(() => {
+          sleepBlocker.setMode(merged.preventSleep);
+          return merged;
+        });
       }),
   );
   ipcMain.handle("daemon:auto-start", async () => {

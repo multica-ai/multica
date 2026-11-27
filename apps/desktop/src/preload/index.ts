@@ -42,6 +42,7 @@ import {
   type ThemeFolderWriteResult,
 } from "../shared/theme-folder";
 import type {
+  DaemonPrefs,
   DaemonStatus,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
@@ -491,9 +492,9 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
-  getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+  getPrefs: (): Promise<DaemonPrefs> =>
     ipcRenderer.invoke("daemon:get-prefs"),
-  setPrefs: (prefs: Partial<{ autoStart: boolean; autoStop: boolean }>): Promise<{ autoStart: boolean; autoStop: boolean }> =>
+  setPrefs: (prefs: Partial<DaemonPrefs>): Promise<DaemonPrefs> =>
     ipcRenderer.invoke("daemon:set-prefs", prefs),
   autoStart: (): Promise<void> =>
     ipcRenderer.invoke("daemon:auto-start"),

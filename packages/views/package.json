@@ -63,6 +63,7 @@
     "./extensions": "./extensions/index.ts",
     "./layout/collection-list": "./layout/collection-list/index.ts",
     "./common/pill-button": "./common/pill-button.tsx",
+    "./common/segmented-toggle": "./common/segmented-toggle.tsx",
     "./layout/route-icon-components": "./layout/route-icon-components.tsx",
     "./auth": "./auth/index.ts",
     "./search": "./search/index.ts",
