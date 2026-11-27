@@ -259,7 +259,7 @@ const desktopAPI = {
       chatSessionId?: string;
     }) => void,
   ) => subscribeToMainRendererChannel("inbox:open", callback),
-  /** Listen for native macOS back/forward swipe gestures. */
+  /** Listen for native Back and Forward actions. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
       if (isNavigationGesture(gesture)) callback(gesture);

@@ -69,14 +69,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Keyboard and mouse back/forward for the active tab's history:
- * Cmd/Ctrl+←/→ (browser convention), plus mouse side buttons 3/4. The
- * Cmd/Ctrl+[ / ] chords are handled by the shared shortcut registry
- * (packages/core/shortcuts via <GlobalShortcuts>) instead, so they stay
- * rebindable and identical on web and desktop. The renderer's mouseup is the
- * ONE cross-platform source for side buttons — the main process deliberately
- * does not forward `app-command` (Windows/Linux emit both, which would
- * double-navigate).
+ * Cmd/Ctrl+←/→ for the active tab's history. The shared shortcut registry
+ * handles the rebindable Cmd/Ctrl+[ / ] chords, and the main process handles
+ * mouse side buttons and native gestures.
  */
 export function useNavigationInputBindings() {
   const { goBack, goForward } = useTabHistory();
@@ -102,16 +97,9 @@ export function useNavigationInputBindings() {
       if (back) goBack();
       else goForward();
     };
-    const onMouseUp = (e: MouseEvent) => {
-      if (e.button !== 3 && e.button !== 4) return;
-      if (e.button === 3) goBack();
-      else goForward();
-    };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("mouseup", onMouseUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("mouseup", onMouseUp);
     };
   }, [goBack, goForward]);
 }
