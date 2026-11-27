@@ -35,6 +35,7 @@ export type {
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
+  AgentToolDetailsVisibility,
   AgentPermissionMode,
   AgentInvocationTarget,
   AgentInvocationTargetInput,

@@ -153,9 +153,28 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    tool_details_visibility = COALESCE(sqlc.narg('tool_details_visibility'), tool_details_visibility),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetAgentToolDetailsReaders :one
+-- Who may read the inputs and outputs of the agent's tool calls. Readers is
+-- only filled when the agent restricts them: the agent's owner and the
+-- workspace's owners and admins. Read on every message batch a run reports,
+-- so it is one indexed lookup and costs nothing more for unrestricted agents.
+SELECT
+    a.tool_details_visibility,
+    CASE WHEN a.tool_details_visibility = 'restricted' THEN
+        ARRAY(
+            SELECT m.user_id FROM member m
+            WHERE m.workspace_id = a.workspace_id AND m.role IN ('owner', 'admin')
+            UNION
+            SELECT a.owner_id WHERE a.owner_id IS NOT NULL
+        )
+    ELSE '{}'::uuid[] END::uuid[] AS readers
+FROM agent a
+WHERE a.id = $1;
 
 -- name: ClearAgentComposioToolkitAllowlist :one
 -- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based

@@ -407,6 +407,11 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 	if !ok {
 		return
 	}
+	// A chat is not one of the people the agent shows its tool details to,
+	// whoever is in it: a step names the tool and nothing it was given.
+	if e.ToolDetailsRestricted {
+		payload = payload.WithoutToolDetails()
+	}
 	switch payload.Type {
 	case "text":
 		if payload.Content == "" {

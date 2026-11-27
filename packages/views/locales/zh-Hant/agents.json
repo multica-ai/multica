@@ -852,7 +852,10 @@
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
     "composio_switch_hint": "提示：該 AI 代理已啟用已連接的應用程式。共享後，有權存取此 AI 代理的人都將可以透過它使用這些應用程式。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "run_logs_title": "執行紀錄",
+    "restrict_tool_details_label": "限制查看工具詳情",
+    "restrict_tool_details_desc": "開啟後，只有 AI 代理的所有者和工作區管理員能查看其執行中的工具輸入與輸出，其他成員只能看到呼叫了哪些工具及耗時。"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",
@@ -1003,7 +1006,12 @@
     "context_receipt_package": "套件總量",
     "context_receipt_instruction_file_bytes": "執行說明檔案：{{size}}",
     "context_receipt_skill_package_bytes": "skill 套件：{{size}}",
-    "context_receipt_other_file_bytes": "其他檔案：{{size}}"
+    "context_receipt_other_file_bytes": "其他檔案：{{size}}",
+    "tool_details_hidden_value": "已隱藏",
+    "tool_details_hidden_title": "工具輸入與輸出已隱藏",
+    "tool_details_hidden_body": "只有該 AI 代理的所有者和工作區管理員可以查看。",
+    "tool_details_hidden_toolbar": "工具詳情已隱藏",
+    "tool_details_restricted_toolbar": "工具詳情僅所有者和管理員可見"
   },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",

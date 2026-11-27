@@ -155,6 +155,40 @@ func TestPluginTaskMessagesReturnsTranscriptInSeqOrder(t *testing.T) {
 	}
 }
 
+// A plugin is not one of the people an agent's tool details are restricted to.
+func TestPluginTaskMessagesWithholdRestrictedToolDetails(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	withCallbackTokens(t)
+	installationID := installTaskReaderPlugin(t)
+
+	taskID, _ := restrictedTranscript(t, "plugin-transcript-restricted")
+	recorder := httptest.NewRecorder()
+	testHandler.ListPluginTaskMessages(recorder, pluginTaskMessagesRequest(taskCallbackToken(t, installationID, ""), taskID, ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(body.Messages))
+	}
+	tool := body.Messages[1]
+	if tool["tool"] != "fs_read" || tool["details_hidden"] != true || tool["input"] != nil || tool["output"] != nil {
+		t.Errorf("tool call = %v, want its name without input or output", tool)
+	}
+	if body.Messages[0]["content"] != "planning the run" || body.Messages[2]["content"] != "done" {
+		t.Errorf("reasoning or prose was withheld: %v", body.Messages)
+	}
+}
+
 func TestPluginTaskMessagesIncludeThinkingFalseDropsThinking(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

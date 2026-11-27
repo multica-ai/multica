@@ -2595,6 +2595,20 @@ describe("TaskMessageListSchema", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
   });
+
+  it("keeps the mark on a tool call whose details were withheld", () => {
+    const parsed = TaskMessageListSchema.parse([
+      { ...row, seq: 1, type: "tool_use", tool: "Bash", output: undefined, details_hidden: true },
+      { ...row, seq: 2 },
+    ]);
+    expect(parsed.map((m) => m.details_hidden)).toEqual([true, undefined]);
+  });
+
+  it("keeps the row and forgets a malformed withheld mark", () => {
+    const parsed = TaskMessageListSchema.parse([{ ...row, details_hidden: "yes" }]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.details_hidden).toBeUndefined();
+  });
 });
 
 

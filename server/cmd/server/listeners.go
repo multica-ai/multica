@@ -295,6 +295,11 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 			return
 		}
 
+		if payload, ok := restrictedToolMessage(e); ok {
+			sendRestrictedToolMessage(b, e, payload, projectAudience)
+			return
+		}
+
 		// A chat session is creator-private: its events and its tasks'
 		// transcript go only to the creator's connections bound to the
 		// session's workspace. Not the whole user scope: a connection to

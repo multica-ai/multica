@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,11 +79,13 @@ type taskOrigin interface {
 }
 
 // identityLookup resolves the WeCom sender on an inbound message to the
-// Multica user behind them. It answers the only question the step list's
-// audience gate asks — is this person the bot's principal — and *db.Queries
-// satisfies it with the row the identity resolver already reads.
+// Multica user behind them, and says who the agent shows its tool details to.
+// Those are the step list's audience gate — is this person the bot's
+// principal, and may they read the agent's tool calls — and *db.Queries
+// satisfies both.
 type identityLookup interface {
 	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
+	GetAgentToolDetailsReaders(ctx context.Context, id pgtype.UUID) (db.GetAgentToolDetailsReadersRow, error)
 }
 
 // TypingIndicatorManager opens a streaming bubble per round when messages are
@@ -363,6 +366,18 @@ func (m *TypingIndicatorManager) levelFor(ctx context.Context, inst engine.Resol
 		return progressLevelNone
 	}
 	if binding.MulticaUserID != inst.InstallerUserID {
+		return progressLevelNone
+	}
+	// An agent that restricts its tool details shows them only to its owner
+	// and the workspace's admins, and every step here is a tool call with its
+	// argument, so the installer sees the steps only as one of those.
+	audience, err := m.identities.GetAgentToolDetailsReaders(ctx, inst.AgentID)
+	if err != nil {
+		m.log.WarnContext(ctx, "wecom typing: cannot tell whether the agent restricts its tool details, showing no steps",
+			"installation_id", util.UUIDToString(inst.ID), "error", err)
+		return progressLevelNone
+	}
+	if audience.ToolDetailsVisibility == "restricted" && !slices.Contains(audience.Readers, inst.InstallerUserID) {
 		return progressLevelNone
 	}
 	return progressLevelDetail

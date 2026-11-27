@@ -297,6 +297,26 @@ type TaskMessagePayload struct {
 	// present as unknown rather than as complete.
 	OutputTruncated *bool  `json:"output_truncated,omitempty"`
 	CreatedAt       string `json:"created_at,omitempty"`
+	// DetailsHidden reports that the agent restricts its tool inputs and
+	// outputs and this reader is not allowed them: Input, Output and Content
+	// were removed from this tool_use/tool_result, not empty to begin with.
+	DetailsHidden bool `json:"details_hidden,omitempty"`
+}
+
+// WithoutToolDetails returns the message as a reader outside an agent's tool
+// details audience gets it. A tool call keeps its name, identity and timing;
+// its input, output and any text it carried are dropped. Prose, reasoning and
+// errors are not tool details and pass through unchanged.
+func (p TaskMessagePayload) WithoutToolDetails() TaskMessagePayload {
+	if p.Type != "tool_use" && p.Type != "tool_result" {
+		return p
+	}
+	p.Input = nil
+	p.Output = ""
+	p.Content = ""
+	p.OutputTruncated = nil
+	p.DetailsHidden = true
+	return p
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

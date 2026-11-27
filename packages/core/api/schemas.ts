@@ -2619,6 +2619,7 @@ export const TaskMessagePayloadSchema = z.object({
   output: z.string().optional(),
   output_truncated: z.boolean().optional().catch(undefined),
   created_at: z.string().optional(),
+  details_hidden: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);

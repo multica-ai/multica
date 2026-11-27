@@ -317,6 +317,11 @@ export function useTaskMessages(taskId: string, isLive: boolean, enabled = true)
  * conflict, and the original array reference is preserved when nothing new
  * arrives so React Query observers don't re-render on duplicate events.
  *
+ * The one exception is a tool call the server sent twice: an agent that
+ * restricts its tool details streams the call to the whole workspace without
+ * them, and to the people allowed them a second time whole. Whichever copy
+ * lands first, the whole one is what a reader keeps.
+ *
  * Both the realtime `task:message` handler (a single payload) and the
  * transcript backfill (a full refetch) write this cache. Routing both through
  * one helper keeps a forced backfill from blind-replacing a seq the WebSocket
@@ -328,10 +333,17 @@ export function mergeTaskMessagesBySeq(
   incoming: readonly TaskMessagePayload[],
 ): TaskMessagePayload[] {
   if (incoming.length === 0) return existing as TaskMessagePayload[];
-  const knownSeqs = new Set(existing.map((m) => m.seq));
-  const fresh = incoming.filter((m) => !knownSeqs.has(m.seq));
-  if (fresh.length === 0) return existing as TaskMessagePayload[];
-  return [...existing, ...fresh].sort((a, b) => a.seq - b.seq);
+  const bySeq = new Map(existing.map((m) => [m.seq, m]));
+  let changed = false;
+  for (const msg of incoming) {
+    const known = bySeq.get(msg.seq);
+    if (!known || (known.details_hidden && !msg.details_hidden)) {
+      bySeq.set(msg.seq, msg);
+      changed = true;
+    }
+  }
+  if (!changed) return existing as TaskMessagePayload[];
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
 }
 
 /**

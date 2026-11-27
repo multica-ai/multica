@@ -852,7 +852,10 @@
     "members_empty": "No hay miembros del espacio de trabajo para elegir",
     "composio_switch_hint": "Aviso: este agente tiene aplicaciones conectadas activadas. Al compartirlo, cualquiera con acceso podrá usar esas aplicaciones a través de este agente.",
     "trigger_members_count_one": "{{count}} persona",
-    "trigger_members_count_other": "{{count}} personas"
+    "trigger_members_count_other": "{{count}} personas",
+    "run_logs_title": "Registros de ejecución",
+    "restrict_tool_details_label": "Restringir detalles de herramientas",
+    "restrict_tool_details_desc": "Solo el propietario del agente y los administradores del espacio de trabajo pueden ver las entradas y salidas de las herramientas en sus ejecuciones. Los demás ven qué herramientas se ejecutaron y cuánto tardaron."
   },
   "profile_card": {
     "unavailable": "Agente no disponible",
@@ -1008,7 +1011,12 @@
     "context_receipt_package": "Paquete",
     "context_receipt_instruction_file_bytes": "Archivos de instrucciones: {{size}}",
     "context_receipt_skill_package_bytes": "Paquetes de skills: {{size}}",
-    "context_receipt_other_file_bytes": "Otros archivos: {{size}}"
+    "context_receipt_other_file_bytes": "Otros archivos: {{size}}",
+    "tool_details_hidden_value": "Oculto",
+    "tool_details_hidden_title": "La entrada y la salida de la herramienta están ocultas",
+    "tool_details_hidden_body": "Solo el propietario de este agente y los administradores del espacio de trabajo pueden verlas.",
+    "tool_details_hidden_toolbar": "Detalles de herramientas ocultos",
+    "tool_details_restricted_toolbar": "Detalles de herramientas visibles solo para el propietario y los administradores"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelada por el sistema",
