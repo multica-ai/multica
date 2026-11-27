@@ -324,6 +324,7 @@ func classifyAgentErrorText(lower string) Reason {
 	//    Connection stalled failures. Keep those failed resumes network-safe
 	//    instead of letting the exit-status wrapper trigger a fresh-session retry.
 	case isPiProviderNetworkError(lower), isCursorProviderNetworkError(lower),
+		containsAny(lower, claudeConnectionErrorWitnesses...),
 		containsAny(lower,
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
@@ -609,6 +610,28 @@ var legacyCursorProviderNetworkReasons = map[string]bool{
 	"agent_error":                     true,
 }
 
+// claudeConnectionErrorWitnesses are the Claude Code CLI's own messages for a
+// request whose connection was reset or had no route:
+//
+//	API Error: Connection dropped (ECONNRESET). ...
+//	API Error: No internet route — check your connection or VPN (ENETUNREACH)
+//
+// The "API Error:" prefix is required because the bare phrases, like bare
+// ECONNRESET, also come from local tools and MCP servers.
+var claudeConnectionErrorWitnesses = []string{
+	"api error: connection dropped (",
+	"api error: no internet route",
+}
+
+// legacyClaudeConnectionErrorReasons are the buckets a daemon predating these
+// witnesses files them under: process_failure when an exit status wraps the
+// message, or the catchalls.
+var legacyClaudeConnectionErrorReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
 // Kiro's stream-error witness, as it appears in session/prompt failures:
 //
 //	kiro session/prompt failed: session/prompt: Internal error (code=-32603,
@@ -788,6 +811,13 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// Classify's precedence if a more specific provider failure is present.
 	if (legacyCursorProviderNetworkReasons[reason] || cursorDiagnosticReason(reason, lowerError)) &&
 		isCursorProviderNetworkError(lowerError) && Classify(rawError) == ReasonAgentProviderNetwork {
+		return ReasonAgentProviderNetwork
+	}
+	// Same mixed-version gap for Claude Code's connection errors. Classify must
+	// still agree, so a co-occurring auth / quota / capacity signal wins.
+	if legacyClaudeConnectionErrorReasons[reason] &&
+		containsAny(lowerError, claudeConnectionErrorWitnesses...) &&
+		Classify(rawError) == ReasonAgentProviderNetwork {
 		return ReasonAgentProviderNetwork
 	}
 	// MUL-8314: same mixed-version gap for Kiro's dispatch failure. Classify
