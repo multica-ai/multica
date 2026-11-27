@@ -21,7 +21,18 @@ type issueRunOutcome struct {
 // or the caller passed --no-start and so already knows. An agent that assigned
 // or promoted an issue reads this instead of assuming its run started.
 func issueRunOutcomeNote(o *issueRunOutcome, noStart bool) string {
-	if o == nil || noStart {
+	if o == nil {
+		return ""
+	}
+	// --no-start used to stay silent here on the grounds that the caller asked
+	// for it. A caller that flips an issue into a handoff step with --no-start
+	// does not know the step's agent is dispatched by that very write, and the
+	// issue then waits with nothing scheduled. A deferred outcome means a run was
+	// on the table, so report it; queue reports and older servers stay quiet.
+	if noStart {
+		if o.Status == "deferred" {
+			return "no run started (--no-start): the assignee's agent will not pick this up on its own — a step handoff needs a plain status change"
+		}
 		return ""
 	}
 	switch o.Status {
