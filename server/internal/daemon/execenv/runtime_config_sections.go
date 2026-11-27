@@ -1004,8 +1004,7 @@ func writeInlineBlocksPolicy(b *strings.Builder) {
 	b.WriteString("\n**Charts and diagrams:** put them in the text as a fenced `html` or `mermaid` code block — it renders in place (name it with `title=\"...\"` after the language). An attached file, HTML included, shows as a card instead. Theming and sizing: the multica-platform issues reference.\n")
 }
 
-// writeOutput emits the kind-specific Output section: the always-on delivery
-// invariant plus one per-surface file-delivery policy line per kind.
+// writeOutput emits the delivery invariant and the stable output rules for each task kind.
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	b.WriteString("## Output\n\n")
 	switch kind {
@@ -1020,31 +1019,12 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		b.WriteString("Keep the reply concise and natural — state the outcome, not the process. Do NOT post progress updates.\n\n")
 		b.WriteString("**Delivering files here:** a doc reply carries no attachments. Describe what you produced in words; do not link its path.\n")
 	case kindChat:
-		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n\n")
-		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer, and
-		// the brief answers only the half that is stable for the whole session.
-		//
-		// `attachment upload` binds a file to the Multica chat reply whatever
-		// the surface; whether anything carries it the last hop is a property
-		// of the deployment — its object storage, and whether the server is new
-		// enough to report the hop at all. Both change under a session that
-		// resumes across the change, and this file is the prompt-cache prefix
-		// (MUL-5377), so rendering the verdict here made one resumed chat
-		// produce two different briefs. The verdict therefore lives in the
-		// per-turn chat prompt, which carries both branches
-		// (daemon.buildChatPrompt), and the copy below points at it.
-		// ctx.ChatChannelDeliversFiles must NOT be read from this file.
-		//
-		// Web/mobile chat keeps its own copy: it has no channel and no last hop
-		// to be uncertain about — the browser renders the bound file as a card.
-		//
-		// The orthogonal HISTORY layer (which read commands exist) is
-		// Slack-only and also lives in the per-turn chat prompt — do not
-		// collapse the two.
+		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n")
+		// The turn prompt owns file delivery. A channel's capability can
+		// change between turns, so defer to the current claim.
 		if ctx.ChatChannelType != "" {
-			fmt.Fprintf(b, "**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
+			fmt.Fprintf(b, "\n**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
 		} else {
-			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
 			writeInlineBlocksPolicy(b)
 		}
 	default:
