@@ -265,7 +265,7 @@ function SectionRow({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "flex h-8 shrink-0 items-center gap-1.5 rounded-md pr-2 pl-1 text-label",
+        "flex h-8 shrink-0 items-center gap-1.5 rounded-md pr-3 pl-1 text-label",
         isDragging ? "relative z-10 bg-popover shadow-[var(--menu-shadow)] ring-1 ring-surface-border" : "hover:bg-accent/50",
       )}
     >
