@@ -244,6 +244,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `MULTICA_DAEMON_POLL_INTERVAL`과 독립적으로 설정되며, 하향 jitter를 적용한 기본 실제 간격은 `2m30s`–`2m45s`이고 구형 Server 또는 결과가 불확실한 claim은 일반 polling 간격을 유지합니다 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | heartbeat 간격 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 상한 |
+| `MULTICA_DAEMON_HEALTH_PORT` | 기본 프로필은 `19514` | 우선 사용할 루프백 포트. 시작 또는 재시작 시 `--health-port`에 양수를 지정하면 해당 값이 우선합니다. 우선 포트를 사용할 수 없으면 데몬은 비어 있는 루프백 포트를 사용하고, 상태 확인과 중지에 사용할 실제 포트를 기록합니다. |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다. Cursor의 백그라운드 셸은 실행한 프로세스가 종료될 때까지 실행 중으로 간주됩니다. 이 상한에 도달하면 데몬이 해당 프로세스를 정리하고, Cursor가 최종 결과를 내도록 새 watchdog 예산을 부여합니다. 프로세스 소유권이나 정리를 검증할 수 없으면 일반적인 실행 취소 정책이 적용됩니다 |
