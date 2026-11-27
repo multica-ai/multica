@@ -180,8 +180,11 @@ Protocol.
 
 ## Handoff mode
 
-`leader` (default): every member reply wakes the leader, as described under
-[Comment and mention behavior](#comment-and-mention-behavior).
+`leader` (default): a member reply with no explicit `@agent` / `@squad` mention
+wakes the leader, as described under
+[Comment and mention behavior](#comment-and-mention-behavior); one that
+mentions another agent or squad runs only that target (see
+`references/mentions.md`).
 
 `direct`, for a comment written by a member's run on the squad's own issue:
 

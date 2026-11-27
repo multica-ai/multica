@@ -386,6 +386,9 @@
     "record_aria": "Modifier le raccourci de {{action}}",
     "recording": "Appuyez sur les touches",
     "record_hint": "Échap annule · Suppr efface",
+    "record_sequence_hint": "Appuyez sur une touche, ou deux à la suite pour une séquence comme G puis I · Échap annule",
+    "record_then_hint": "Appuyez sur la deuxième touche · ↵ garde une seule touche · Retour arrière recommence",
+    "then": "puis",
     "unassigned": "Non attribué",
     "no_results": "Aucune action de raccourci correspondante.",
     "conflict_error": "Déjà utilisé par {{action}}.",
@@ -489,6 +492,10 @@
         "label": "Répondre",
         "description": "Place le curseur dans la zone de commentaire de la tâche ouverte."
       },
+      "showShortcuts": {
+        "label": "Afficher les raccourcis clavier",
+        "description": "Ouvre la liste des raccourcis, ceux de la page actuelle en premier."
+      },
       "send": {
         "label": "Envoyer",
         "description": "Permet aussi de créer des tâches."
@@ -565,6 +572,32 @@
       "zoom_out": "Zoom arrière",
       "reset_zoom": "Réinitialiser le zoom",
       "close_dialog": "Fermer la fenêtre ou le menu"
+    },
+    "cheatsheet": {
+      "title": "Raccourcis clavier",
+      "current_page": "page actuelle",
+      "footer_prefix": "Les raccourcis sont enregistrés sur cet appareil. Modifiez-les dans ",
+      "footer_link": "Paramètres › Raccourcis",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Boîte de réception",
+        "issue": "Tâche",
+        "navigation": "Navigation",
+        "general": "Général",
+        "list": "Listes et tableaux",
+        "editor": "Éditeur"
+      },
+      "rows": {
+        "list_move": "Descendre / monter",
+        "list_columns": "Changer de colonne du tableau",
+        "list_open": "Ouvrir",
+        "list_peek": "Aperçu",
+        "list_select": "Sélectionner",
+        "list_extend": "Étendre la sélection",
+        "list_select_all": "Tout sélectionner",
+        "list_clear": "Effacer la sélection",
+        "editor_leave": "Quitter le champ"
+      }
     }
   },
   "chat": {

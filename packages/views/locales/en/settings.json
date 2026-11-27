@@ -386,6 +386,9 @@
     "record_aria": "Change shortcut for {{action}}",
     "recording": "Press keys",
     "record_hint": "Esc cancels · Delete clears",
+    "record_sequence_hint": "Press a key, or two in a row for a sequence such as G then I · Esc cancels",
+    "record_then_hint": "Press the second key · ↵ keeps one key · Backspace starts over",
+    "then": "then",
     "unassigned": "Unassigned",
     "no_results": "No matching shortcut actions.",
     "conflict_error": "Already used by {{action}}.",
@@ -489,6 +492,10 @@
         "label": "Reply",
         "description": "Focus the open issue's comment box."
       },
+      "showShortcuts": {
+        "label": "Show keyboard shortcuts",
+        "description": "Open the list of shortcuts, with the current page's first."
+      },
       "send": {
         "label": "Send",
         "description": "Also submits new issues."
@@ -565,6 +572,32 @@
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",
       "close_dialog": "Close dialog or menu"
+    },
+    "cheatsheet": {
+      "title": "Keyboard shortcuts",
+      "current_page": "current page",
+      "footer_prefix": "Shortcuts are saved on this device. Change them in ",
+      "footer_link": "Settings › Shortcuts",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Inbox",
+        "issue": "Issue",
+        "navigation": "Navigation",
+        "general": "General",
+        "list": "Lists and boards",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Move down / up",
+        "list_columns": "Move across board columns",
+        "list_open": "Open",
+        "list_peek": "Preview",
+        "list_select": "Select",
+        "list_extend": "Extend selection",
+        "list_select_all": "Select all",
+        "list_clear": "Clear selection",
+        "editor_leave": "Leave the field"
+      }
     }
   },
   "chat": {

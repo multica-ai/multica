@@ -386,6 +386,9 @@
     "record_aria": "Cambiar atajo de {{action}}",
     "recording": "Pulsa las teclas",
     "record_hint": "Esc cancela · Supr borra",
+    "record_sequence_hint": "Pulsa una tecla, o dos seguidas para una secuencia como G luego I · Esc cancela",
+    "record_then_hint": "Pulsa la segunda tecla · ↵ deja una sola tecla · Retroceso empieza de nuevo",
+    "then": "luego",
     "unassigned": "Sin asignar",
     "no_results": "Ninguna acción de atajo coincide.",
     "conflict_error": "Ya lo usa {{action}}.",
@@ -489,6 +492,10 @@
         "label": "Responder",
         "description": "Enfoca el cuadro de comentarios de la tarea abierta."
       },
+      "showShortcuts": {
+        "label": "Mostrar atajos de teclado",
+        "description": "Abre la lista de atajos, con los de la página actual primero."
+      },
       "send": {
         "label": "Enviar",
         "description": "También envía nuevas tareas."
@@ -565,6 +572,32 @@
       "zoom_out": "Alejar",
       "reset_zoom": "Restablecer zoom",
       "close_dialog": "Cerrar diálogo o menú"
+    },
+    "cheatsheet": {
+      "title": "Atajos de teclado",
+      "current_page": "página actual",
+      "footer_prefix": "Los atajos se guardan en este dispositivo. Cámbialos en ",
+      "footer_link": "Configuración › Atajos",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Bandeja de entrada",
+        "issue": "Tarea",
+        "navigation": "Navegación",
+        "general": "General",
+        "list": "Listas y tableros",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Bajar / subir",
+        "list_columns": "Cambiar de columna del tablero",
+        "list_open": "Abrir",
+        "list_peek": "Vista previa",
+        "list_select": "Seleccionar",
+        "list_extend": "Ampliar la selección",
+        "list_select_all": "Seleccionar todo",
+        "list_clear": "Quitar la selección",
+        "editor_leave": "Salir del campo"
+      }
     }
   },
   "chat": {

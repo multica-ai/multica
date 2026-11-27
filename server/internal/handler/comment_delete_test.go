@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -472,4 +473,56 @@ func TestRemoveReactionOnTombstoneIsNotFound(t *testing.T) {
 	testutil.Call(t, testHandler.RemoveReaction, withURLParam(newRequest(http.MethodDelete, "/api/comments/"+target+"/reactions", map[string]any{
 		"emoji": "👍",
 	}), "commentId", target)).Want(http.StatusNotFound)
+}
+
+// A wakeup scheduled from a comment keeps firing after that comment is
+// deleted. Its runs used to name the removed comment as their trigger, which
+// the task table rejects, so the wakeup never ran again.
+func TestDeletedCommentLeavesItsWakeupRunnable(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := dbfx.Issue(t, "wakeup outlives its comment")
+	dbfx.Cleanup(t, "DELETE FROM agent_task_queue WHERE issue_id=$1", issueID)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id=$1)", issueID)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issueID)
+	root := dbfx.Comment(t, issueID, "check this later")
+	reply := dbfx.Comment(t, issueID, "and this", testutil.Cols{"parent_id": root})
+
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	wakeups := map[string]db.IssueWakeup{}
+	// One agent each, so neither run is folded into the other's.
+	for i, parent := range []string{root, reply} {
+		agentID := dbfx.Agent(t, fmt.Sprintf("wakeup comment target %d", i), testRuntimeID)
+		w, err := svc.Create(context.Background(), parseUUID(issueID), parseUUID(testUserID), pgtype.UUID{}, service.WakeupInput{
+			AgentID: agentID, Kind: "every", IntervalSeconds: 3600, ParentCommentID: parent, Instruction: "look again",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wakeups[parent] = w
+	}
+
+	// The root becomes a tombstone, then goes with its last reply.
+	rec := newCommentEventRecorder()
+	rec.delete(t, root).Want(http.StatusNoContent)
+	rec.delete(t, reply).Want(http.StatusNoContent)
+	if got := loadCommentRowState(t, root); got.exists {
+		t.Fatalf("root = %+v, want it removed", got)
+	}
+
+	for parent, w := range wakeups {
+		id := uuidToString(w.ID)
+		req := withURLParams(newRequest(http.MethodPost, "/", nil), "id", issueID, "wakeupID", id)
+		testutil.Call(t, testHandler.TriggerIssueWakeup, req).Want(http.StatusNoContent)
+		var trigger *string
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT trigger_comment_id::text FROM agent_task_queue WHERE context->>'wakeup_id'=$1`, id,
+		).Scan(&trigger); err != nil {
+			t.Fatalf("wakeup from deleted comment %s did not run: %v", parent, err)
+		}
+		if trigger != nil {
+			t.Fatalf("run names deleted comment %s as its trigger", *trigger)
+		}
+	}
 }

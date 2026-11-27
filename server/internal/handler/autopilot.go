@@ -840,7 +840,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title == "" {
+	if strings.TrimSpace(req.Title) == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
@@ -1106,12 +1106,24 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		ProjectID:          prev.ProjectID,
 	}
 	if req.Title != nil {
+		if strings.TrimSpace(*req.Title) == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Status != nil {
+		if s := *req.Status; s != "active" && s != "paused" && s != "archived" {
+			writeError(w, http.StatusBadRequest, "status must be active, paused or archived")
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.ExecutionMode != nil {
+		if m := *req.ExecutionMode; m != "create_issue" && m != "run_only" {
+			writeError(w, http.StatusBadRequest, "execution_mode must be create_issue or run_only")
+			return
+		}
 		params.ExecutionMode = pgtype.Text{String: *req.ExecutionMode, Valid: true}
 	}
 	if _, ok := rawFields["description"]; ok {
@@ -2007,6 +2019,10 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
 	}
 	if req.CronExpression != nil {
+		if prev.Kind == "schedule" && *req.CronExpression == "" {
+			writeError(w, http.StatusBadRequest, "cron_expression is required for schedule triggers")
+			return
+		}
 		params.CronExpression = pgtype.Text{String: *req.CronExpression, Valid: true}
 	}
 	if req.Timezone != nil {
@@ -2376,7 +2392,12 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		// full payload from GetAutopilotRun.
 		resp[i] = runToResponseSlim(run)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": len(resp)})
+	total, err := h.Queries.CountAutopilotRuns(r.Context(), autopilot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count runs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": total})
 }
 
 // GetAutopilotRun returns a single run including its full trigger_payload.

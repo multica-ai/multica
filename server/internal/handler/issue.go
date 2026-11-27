@@ -3525,7 +3525,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if req.AssigneeType == nil && req.AssigneeID == nil {
 			if step, ok := createWorkflow.Step(status); ok && step.HandsOff() {
 				handoffCreatorType, handoffCreatorID := h.resolveActor(r, creatorID, workspaceID)
-				if t, id, ok := issueworkflow.ResolveHandler(step, createWorkflowProject, handoffCreatorType, parseUUID(handoffCreatorID)); ok {
+				if t, id, ok := issueworkflow.ResolveHandler(step, createWorkflowProject, handoffCreatorType, parseUUID(handoffCreatorID)); ok && !h.handoffTargetRetired(r.Context(), wsUUID, t, id) {
 					assigneeType = pgtype.Text{String: t, Valid: true}
 					assigneeID = id
 					if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
@@ -4103,6 +4103,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	req.TitleBase = sanitizeNullBytesPtr(req.TitleBase)
 	req.Description = sanitizeNullBytesPtr(req.Description)
 	req.DescriptionBase = sanitizeNullBytesPtr(req.DescriptionBase)
+	if req.Title != nil && *req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
 
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
@@ -4975,6 +4979,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if req.Updates.Title != nil && *req.Updates.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
 

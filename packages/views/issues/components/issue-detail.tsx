@@ -1141,11 +1141,11 @@ interface IssueDetailProps {
    * into view and flashes, replayed by `highlightRequestToken`. */
   highlightAppRequestId?: string;
   /**
-   * Far-left header slot, replacing the mobile sidebar trigger. A host that
-   * embeds this detail one level deep (the inbox, on a phone) passes its own
-   * "back" control here instead of stacking a second 48px bar above us — the
-   * breadcrumb this header already renders names the issue's container, not
-   * the surface the reader arrived from, so only the host can spell that trip.
+   * Far-left header slot, replacing the mobile sidebar trigger. Only the
+   * loaded header falls back to that trigger; the loading and not-found states
+   * draw just this slot, so a host that hands its whole screen to this detail
+   * (the inbox, on a phone) passes the trigger here to keep the nav reachable
+   * in every state.
    */
   leadingAction?: ReactNode;
   /**
@@ -1209,10 +1209,10 @@ export function IssueNotFound({
 }: {
   showBackLink?: boolean;
   /**
-   * Host-supplied way back, mirrored from `IssueDetailProps.leadingAction`. A
-   * host that hands its whole screen to this component (the inbox, on a phone)
-   * has no bar of its own left, so this state has to carry the trip back or
-   * there is none.
+   * Host-supplied leading control, mirrored from `IssueDetailProps.leadingAction`.
+   * A host that hands its whole screen to this component (the inbox, on a
+   * phone) has no bar of its own left, so this state has to carry the nav
+   * trigger or there is none.
    */
   leading?: ReactNode;
   /** Host controls at the end of the bar — the side peek's close button. */
@@ -1338,9 +1338,9 @@ export function IssueDetailSkeleton({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* The way back is real from the first frame, not once the issue lands:
-          a host that gave up its own bar for `leadingAction` has nothing else
-          to offer while this skeleton owns the screen. */}
+      {/* The host's leading control is real from the first frame, not once
+          the issue lands: a host that gave up its own bar for `leadingAction`
+          has nothing else to offer while this skeleton owns the screen. */}
       <DetailStateBar trailing={trailing}>
         {leading ?? (
           inboxItem?.issue_identifier ? (
@@ -3936,6 +3936,10 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             isPeek
               ? "mx-auto w-full px-6 py-5"
               : cn(READING_COLUMN, "px-[var(--space-sm,0.75rem)] py-[var(--space-lg,1.5rem)] max-md:pb-chat-launcher md:px-[var(--space-xl,2rem)] md:py-[var(--space-xl,2rem)]"),
+            // A sticky box only pins once the content overflows; on a short
+            // issue the column fills the viewport so the composer still sits
+            // at its bottom (see the spacer above the composer).
+            stickyComposer && "flex min-h-full flex-col",
             hideUnalignedLanding && "opacity-0",
             !hideUnalignedLanding &&
               !reduceMotion &&
@@ -4589,7 +4593,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               (the anchor's or the composer's margin), so it never covers the
               last comment for good. */}
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
-          {!stickyComposer && (
+          {stickyComposer ? (
+            <div aria-hidden className="grow" />
+          ) : (
             <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
               <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
             </div>

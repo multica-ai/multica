@@ -12,6 +12,14 @@ export function isMikaAgent(agent: Pick<Agent, "system_key">): boolean {
 }
 
 /**
+ * Whether the workspace may archive this agent. Mirrors the server's archive
+ * guard: Mika is the one product-defined agent with a lifecycle of its own.
+ */
+export function isArchivableAgent(agent: Pick<Agent, "system_key">): boolean {
+  return !agent.system_key || isMikaAgent(agent);
+}
+
+/**
  * Whether the workspace still needs a Mika provisioned.
  *
  * Deliberately "no Mika" rather than "no agents at all": the recovery
@@ -40,11 +48,14 @@ export function workspaceNeedsMika(agents: Pick<Agent, "system_key">[]): boolean
  * re-running the flow from here is always safe.
  */
 export function memberNeedsMikaSetup(
-  agents: Pick<Agent, "id" | "system_key">[],
+  agents: (Pick<Agent, "id" | "system_key"> & { archived_at?: string | null })[],
   sessions: Pick<ChatSession, "agent_id" | "last_message">[],
 ): boolean {
   const mika = agents.find(isMikaAgent);
   if (!mika) return true;
+  // An archived Mika is the workspace opting out, and the server refuses to
+  // provision past her.
+  if (mika.archived_at) return false;
 
   // Sessions are per member, so this is the caller's own conversation.
   const session = sessions.find((s) => s.agent_id === mika.id);

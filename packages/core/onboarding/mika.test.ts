@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isMikaAgent, memberNeedsMikaSetup, workspaceNeedsMika } from "./mika";
+import {
+  isArchivableAgent,
+  isMikaAgent,
+  memberNeedsMikaSetup,
+  workspaceNeedsMika,
+} from "./mika";
 
 const mika = { id: "agent-mika", system_key: "mika" };
 const other = { id: "agent-other", system_key: undefined };
@@ -66,5 +71,22 @@ describe("memberNeedsMikaSetup", () => {
 
   it("is false once the member has a kicked-off Mika conversation", () => {
     expect(memberNeedsMikaSetup([other, mika], [kicked])).toBe(false);
+  });
+
+  // Archiving Mika opts the workspace out; the server would refuse to
+  // provision a second one anyway.
+  it("is false when Mika is archived, even without a session", () => {
+    expect(
+      memberNeedsMikaSetup([{ ...mika, archived_at: "2026-11-26T08:00:00Z" }], []),
+    ).toBe(false);
+  });
+});
+
+describe("isArchivableAgent", () => {
+  it("allows ordinary agents and Mika, but not other system agents", () => {
+    expect(isArchivableAgent({ system_key: undefined })).toBe(true);
+    expect(isArchivableAgent({ system_key: "" })).toBe(true);
+    expect(isArchivableAgent({ system_key: "mika" })).toBe(true);
+    expect(isArchivableAgent({ system_key: "agent_builder:abc" })).toBe(false);
   });
 });

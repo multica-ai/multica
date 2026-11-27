@@ -124,7 +124,7 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		WorkspaceID: wsUUID,
 		SystemKey:   pgtype.Text{String: service.MikaSystemKey, Valid: true},
 	}); err == nil {
-		return existing, false, true
+		return refuseArchivedMika(w, existing)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to look up the workspace agent")
 		return db.Agent{}, false, false
@@ -171,7 +171,7 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		WorkspaceID: wsUUID,
 		SystemKey:   pgtype.Text{String: service.MikaSystemKey, Valid: true},
 	}); err == nil {
-		return existing, false, true
+		return refuseArchivedMika(w, existing)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to look up the workspace agent")
 		return db.Agent{}, false, false
@@ -234,6 +234,17 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 	return created, true, true
+}
+
+// refuseArchivedMika resolves an existing Mika row for resolveMikaAgent. An
+// archived Mika is a workspace's decision to stop using her: neither restore
+// her behind that decision nor provision a second one past it.
+func refuseArchivedMika(w http.ResponseWriter, existing db.Agent) (db.Agent, bool, bool) {
+	if existing.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "Mika is archived in this workspace; restore her from the Agents page to use her again")
+		return db.Agent{}, false, false
+	}
+	return existing, false, true
 }
 
 func (h *Handler) writeMikaAgentResponse(w http.ResponseWriter, r *http.Request, agent db.Agent, workspaceID, userID, sessionTitle string, created bool) {

@@ -9309,7 +9309,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
 		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
 	}
-	taskWarmPool := selectTaskWarmPool(d.warmPool, usesCustomProfileCommand)
+	taskWarmPool := selectTaskWarmPool(d.warmPool, usesCustomProfileCommand, env.LocalWorktree != nil)
 	codexShellEnv := agentEnv
 	if provider == "codex" && taskWarmPool != nil {
 		// Ensure Codex's managed shell_environment_policy allowlist permits
@@ -11766,12 +11766,23 @@ func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
 }
 
 // selectTaskWarmPool returns the daemon's warm session pool only for built-in
-// runtimes. Custom runtime profile commands (wrappers, version-pinned shims,
-// sandbox launchers) always launch cold so startup wrappers can read per-task
-// variables such as MULTICA_TOKEN and MULTICA_TASK_ID directly from the process
-// environment.
-func selectTaskWarmPool(pool *agent.WarmSessionPool, usesCustomProfileCommand bool) *agent.WarmSessionPool {
-	if usesCustomProfileCommand {
+// runtimes on durable workdirs. Custom runtime profile commands (wrappers,
+// version-pinned shims, sandbox launchers) always launch cold so startup
+// wrappers can read per-task variables such as MULTICA_TOKEN and
+// MULTICA_TASK_ID directly from the process environment.
+//
+// Worktree-mode local_directory tasks never pool either, and not only because
+// the reuse is impossible: every turn prepares a fresh env root, so the
+// worktree path in the warm fingerprint never matches a continuation turn and
+// the parked process would never be re-acquired anyway. What the parking does
+// do is keep the provider process alive — app-server and MCP subprocesses
+// included — with its working directory inside the worktree that Finalize is
+// about to remove. Unix tolerates removing a tree underneath a process;
+// Windows does not: the unlink of the process's cwd fails with a sharing
+// violation, `git worktree remove --force` errors out, the removal fallback
+// fails too, and the task is failed after its delivery already succeeded.
+func selectTaskWarmPool(pool *agent.WarmSessionPool, usesCustomProfileCommand, worktreeMode bool) *agent.WarmSessionPool {
+	if usesCustomProfileCommand || worktreeMode {
 		return nil
 	}
 	return pool

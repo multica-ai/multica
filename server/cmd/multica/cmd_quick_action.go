@@ -41,6 +41,14 @@ type quickActionDTO struct {
 	TargetMissing bool    `json:"target_missing"`
 }
 
+// Agents often read a leaf's --help without its group's, so the addressing and
+// human-only rules are repeated on each leaf they apply to.
+const (
+	quickActionRefNote = "<id-or-name> takes a full UUID, a UUID prefix, or an exact name " +
+		"(case-insensitive; an active action wins over an archived one with the same name)."
+	quickActionHumanOnlyNote = "Only a human member can run this; agent credentials are refused (403)."
+)
+
 var quickActionCmd = &cobra.Command{
 	Use:   "quick-action",
 	Short: "Manage and run workspace quick actions",
@@ -66,6 +74,7 @@ var quickActionListCmd = &cobra.Command{
 var quickActionGetCmd = &cobra.Command{
 	Use:   "get <id-or-name>",
 	Short: "Show one quick action",
+	Long:  "Show one quick action.\n\n" + quickActionRefNote,
 	Args:  exactArgs(1),
 	RunE:  runQuickActionGet,
 }
@@ -81,7 +90,9 @@ var quickActionCreateCmd = &cobra.Command{
 
 Omit --agent and --squad to create a targetless action that posts the prompt
 without @mentioning anyone. Visibility defaults to private; pass --visibility public
-to share with the workspace (requires owner/admin and a publicly-invocable target).`,
+to share with the workspace (requires owner/admin and a publicly-invocable target).
+
+` + quickActionHumanOnlyNote,
 	Args: exactArgs(0),
 	RunE: runQuickActionCreate,
 }
@@ -94,7 +105,9 @@ current values.
 
   multica quick-action update "Review" --squad JSquad
   multica quick-action update "Review" --clear-target
-  multica quick-action update "Review" --prompt-file ./review.md`,
+  multica quick-action update "Review" --prompt-file ./review.md
+
+` + quickActionRefNote + "\n\n" + quickActionHumanOnlyNote,
 	Args: exactArgs(1),
 	RunE: runQuickActionUpdate,
 }
@@ -102,6 +115,7 @@ current values.
 var quickActionArchiveCmd = &cobra.Command{
 	Use:   "archive <id-or-name>",
 	Short: "Archive a quick action",
+	Long:  "Archive a quick action.\n\n" + quickActionRefNote + "\n\n" + quickActionHumanOnlyNote,
 	Args:  exactArgs(1),
 	RunE:  makeQuickActionStatusRun("archived"),
 }
@@ -110,6 +124,7 @@ var quickActionRestoreCmd = &cobra.Command{
 	Use:     "restore <id-or-name>",
 	Aliases: []string{"unarchive"},
 	Short:   "Restore an archived quick action",
+	Long:    "Restore an archived quick action.\n\n" + quickActionRefNote + "\n\n" + quickActionHumanOnlyNote,
 	Args:    exactArgs(1),
 	RunE:    makeQuickActionStatusRun("active"),
 }
@@ -117,6 +132,7 @@ var quickActionRestoreCmd = &cobra.Command{
 var quickActionDeleteCmd = &cobra.Command{
 	Use:   "delete <id-or-name>",
 	Short: "Permanently delete a quick action",
+	Long:  "Permanently delete a quick action.\n\n" + quickActionRefNote + "\n\n" + quickActionHumanOnlyNote,
 	Args:  exactArgs(1),
 	RunE:  runQuickActionDelete,
 }
@@ -127,7 +143,9 @@ var quickActionRunCmd = &cobra.Command{
 	Long: `Run a saved quick action on an issue, posting its comment (and optional
 agent or squad mention) through the normal comment trigger path.
 
-Pass --dry-run to preview the rendered comment body without posting it.`,
+Pass --dry-run to preview the rendered comment body without posting it.
+
+` + quickActionRefNote,
 	Args: exactArgs(2),
 	RunE: runQuickActionRun,
 }

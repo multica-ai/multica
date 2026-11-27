@@ -281,4 +281,82 @@ describe("KeyboardShortcutsTab", () => {
       createShortcutChord("K", { primary: true }),
     );
   });
+
+  describe("sequences", () => {
+    const sequence = (first: string, then: string) => ({
+      ...createShortcutChord(first),
+      then: createShortcutChord(then),
+    });
+    const recorderFor = (action: string) =>
+      screen.getByRole("button", { name: `Change shortcut for ${action}` });
+
+    it("shows the default G then I with its separator", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      expect(within(recorderFor("Go to Inbox")).getByText("then")).toBeInTheDocument();
+      expect(getShortcut("goInbox")).toEqual(sequence("G", "I"));
+    });
+
+    it("records a navigation action's two keys one after the other", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      const recorder = recorderFor("Go to Autopilot");
+      expect(recorder).not.toHaveAttribute("data-shortcut-recorder");
+      fireEvent.click(recorder);
+      expect(recorder).toHaveAttribute("data-shortcut-recorder");
+      fireEvent.keyDown(recorder, { key: "g" });
+
+      expect(getShortcut("goAutopilots")).toBeNull();
+      expect(recorder).toHaveTextContent("then…");
+      expect(screen.getByText(/Press the second key/)).toBeInTheDocument();
+
+      fireEvent.keyDown(recorder, { key: "u" });
+      expect(getShortcut("goAutopilots")).toEqual(sequence("G", "U"));
+    });
+
+    it("keeps the first key alone on Enter, and starts over on Backspace", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      const recorder = recorderFor("Go to Autopilot");
+      fireEvent.click(recorder);
+      fireEvent.keyDown(recorder, { key: "o" });
+      fireEvent.keyDown(recorder, { key: "Backspace" });
+      expect(recorder).toHaveTextContent("Press keys");
+
+      fireEvent.keyDown(recorder, { key: "o" });
+      fireEvent.keyDown(recorder, { key: "Enter" });
+      expect(getShortcut("goAutopilots")).toEqual(createShortcutChord("O"));
+    });
+
+    it("refuses a key that starts another action's sequence, and a sequence after another's key", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      const recorder = recorderFor("Create issue");
+      fireEvent.click(recorder);
+      fireEvent.keyDown(recorder, { key: "g" });
+      expect(screen.getByRole("alert")).toHaveTextContent("Already used by Go to Inbox.");
+      expect(getShortcut("createIssue")).toEqual(createShortcutChord("C"));
+      fireEvent.keyDown(recorder, { key: "Escape" });
+
+      const autopilot = recorderFor("Go to Autopilot");
+      fireEvent.click(autopilot);
+      fireEvent.keyDown(autopilot, { key: "c" });
+      fireEvent.keyDown(autopilot, { key: "x" });
+      expect(screen.getByRole("alert")).toHaveTextContent("Already used by Create issue.");
+      expect(getShortcut("goAutopilots")).toBeNull();
+    });
+
+    it("refuses a sequence that is already taken", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      const recorder = recorderFor("Go to Autopilot");
+      fireEvent.click(recorder);
+      fireEvent.keyDown(recorder, { key: "g" });
+      fireEvent.keyDown(recorder, { key: "i" });
+      expect(screen.getByRole("alert")).toHaveTextContent("Already used by Go to Inbox.");
+    });
+
+    it("records other actions' single keys at once", () => {
+      renderWithI18n(<KeyboardShortcutsTab />);
+      const recorder = recorderFor("Create issue");
+      fireEvent.click(recorder);
+      fireEvent.keyDown(recorder, { key: "n" });
+      expect(getShortcut("createIssue")).toEqual(createShortcutChord("N"));
+    });
+  });
 });

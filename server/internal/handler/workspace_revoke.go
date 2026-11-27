@@ -175,6 +175,17 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		}
 	}
 
+	// The runtime block above only reaches the member's own runtimes. What they
+	// own or started elsewhere in the workspace stops here too (MUL-10284).
+	heir, err := service.MemberAssetHeir(ctx, qtx, workspaceID, userID, archivedBy)
+	if err != nil {
+		return empty, err
+	}
+	result.Retired, err = service.RetireMemberAssets(ctx, qtx, workspaceID, userID, archivedBy, heir)
+	if err != nil {
+		return empty, err
+	}
+
 	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
 	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
 	// every channel_* foreign key, moving that integrity rule to the application
@@ -260,6 +271,15 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	// above. A grant left behind would hand a re-invited user their old write
 	// access back without anyone granting it.
 	if err := qtx.DeleteAutopilotCollaboratorsByMember(ctx, db.DeleteAutopilotCollaboratorsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// squad_member rows are FK-free too. A row left behind keeps a removed user
+	// on the squad roster and puts a re-invited user back into the squad.
+	if err := qtx.DeleteSquadMembersByMember(ctx, db.DeleteSquadMembersByMemberParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
 	}); err != nil {
@@ -381,10 +401,11 @@ type revocationResult struct {
 	SharedRuntimeCount int
 	SharedTeardown     service.RuntimeTeardownResult
 	ReadyChats         []pgtype.UUID
+	Retired            service.RetiredMemberAssets
 }
 
 func (r revocationResult) isEmpty() bool {
-	return len(r.Runtimes) == 0 && r.SharedRuntimeCount == 0
+	return len(r.Runtimes) == 0 && r.SharedRuntimeCount == 0 && r.Retired.IsEmpty()
 }
 
 // publishRevocation runs all post-commit side effects: invalidate daemon token
@@ -404,17 +425,35 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// per-task event broadcast. Run this before the agent:archived burst so
 	// subscribers see "task cancelled" before the parent agent disappears
 	// from active lists, matching the order ArchiveAgent uses.
-	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
+	cancelledTasks := append(slices.Clone(result.CancelledTasks), result.Retired.CancelledTasks...)
+	if h.TaskService != nil && len(cancelledTasks) > 0 {
 		// Revocation only archives agents, so a per-task lookup would still
 		// resolve here; the workspace is passed for the same reason as
 		// everywhere else — it is known, and it is the one being revoked.
-		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
+		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, cancelledTasks)
 	}
 
-	for _, agent := range result.ArchivedAgents {
+	for _, agent := range slices.Concat(result.ArchivedAgents, result.Retired.ArchivedAgents) {
 		h.publish(protocol.EventAgentArchived, workspaceIDStr, actorType, actorIDStr, map[string]any{
 			"agent": h.agentToResponse(agent),
 		})
+	}
+	for _, agent := range result.Retired.TransferredAgents {
+		h.publish(protocol.EventAgentStatus, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"agent": broadcastAgentResponse(h.agentToResponse(agent)),
+		})
+	}
+	for _, ap := range result.Retired.PausedAutopilots {
+		h.publish(protocol.EventAutopilotUpdated, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"autopilot": autopilotToResponse(ap, nil),
+		})
+	}
+
+	// The member's daemon connections stay open after the commit, and their
+	// heartbeat leases were authorized when they opened. Invalidating each
+	// runtime drops it from every connection's heartbeat scope, on every node.
+	for _, rt := range result.Runtimes {
+		h.NotifyRuntimeGone(uuidToString(rt.ID))
 	}
 
 	h.PublishRuntimeTeardown(ctx, result.SharedTeardown, workspaceIDStr, actorType, actorIDStr, "revoke", false)
@@ -450,6 +489,12 @@ func logRevocation(result revocationResult, workspaceID, userID string, attrs ..
 		"tasks_cancelled", len(result.CancelledTasks),
 		"runtimes_taken_offline", len(result.OfflineRuntimeIDs),
 		"daemon_tokens_revoked", len(result.RevokedTokenHashes),
+		"owned_agents_archived", len(result.Retired.ArchivedAgents),
+		"started_tasks_cancelled", len(result.Retired.CancelledTasks),
+		"product_agents_transferred", len(result.Retired.TransferredAgents),
+		"autopilots_paused", len(result.Retired.PausedAutopilots),
+		"issue_wakeups_disabled", result.Retired.DisabledWakeups,
+		"chat_wakeups_ended", result.Retired.EndedChatWakeups,
 	}
 	slog.Info("member runtimes revoked", append(base, attrs...)...)
 }

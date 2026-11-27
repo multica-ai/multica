@@ -380,6 +380,9 @@
     "record_aria": "修改\"{{action}}\"的快捷键",
     "recording": "请按键",
     "record_hint": "Esc 取消 · Delete 清除",
+    "record_sequence_hint": "按一个键；连按两个键可设为序列，如 G 然后 I · Esc 取消",
+    "record_then_hint": "按第二个键 · ↵ 只用一个键 · Backspace 重来",
+    "then": "然后",
     "unassigned": "未设置",
     "no_results": "没有匹配的快捷键操作。",
     "conflict_error": "已被\"{{action}}\"使用。",
@@ -483,6 +486,10 @@
         "label": "回复",
         "description": "聚焦当前任务的评论框。"
       },
+      "showShortcuts": {
+        "label": "显示快捷键",
+        "description": "打开快捷键列表，当前页面相关的排在前面。"
+      },
       "send": {
         "label": "发送",
         "description": "也用于提交新任务。"
@@ -559,6 +566,32 @@
       "zoom_out": "缩小",
       "reset_zoom": "重置缩放",
       "close_dialog": "关闭对话框或菜单"
+    },
+    "cheatsheet": {
+      "title": "快捷键",
+      "current_page": "当前页面",
+      "footer_prefix": "快捷键仅保存在本设备，可在 ",
+      "footer_link": "设置 › 快捷键",
+      "footer_suffix": " 中修改。",
+      "groups": {
+        "inbox": "收件箱",
+        "issue": "任务",
+        "navigation": "导航",
+        "general": "常规",
+        "list": "列表与看板",
+        "editor": "编辑器"
+      },
+      "rows": {
+        "list_move": "下移 / 上移",
+        "list_columns": "在看板列之间移动",
+        "list_open": "打开",
+        "list_peek": "预览",
+        "list_select": "选中",
+        "list_extend": "扩展选择",
+        "list_select_all": "全选",
+        "list_clear": "取消选择",
+        "editor_leave": "离开输入框"
+      }
     }
   },
   "chat": {

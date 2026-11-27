@@ -8,6 +8,7 @@ import {
   timelineCharsPerLine,
 } from "./timeline-height-estimates";
 import type { TimelineFolds, TimelineRowItem } from "./timeline-row-content";
+import { MAX_MARKDOWN_CHARS } from "../../rich-content/markdown-limit";
 
 function comment(id: string, content: string, overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   return { id, type: "comment", actor_type: "member", actor_id: "user", created_at: "2026-09-07T00:00:00Z", content, ...overrides };
@@ -29,6 +30,13 @@ describe("estimateMarkdownHeight", () => {
     // The delimiter row is not a row.
     expect(estimateMarkdownHeight("| a | b |\n| --- | --- |\n| 1 | 2 |", 80))
       .toBe(estimateMarkdownHeight("| a | b |\n| 1 | 2 |", 80));
+  });
+
+  it("sizes a body too long to format as its bounded plain-text box", () => {
+    const atLimit = estimateMarkdownHeight("x\n".repeat(MAX_MARKDOWN_CHARS / 2), 80);
+    const past = estimateMarkdownHeight("x\n".repeat(MAX_MARKDOWN_CHARS), 80);
+    expect(past).toBeLessThan(1_000);
+    expect(past).toBeLessThan(atLimit);
   });
 });
 

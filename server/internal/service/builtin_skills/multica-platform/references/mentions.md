@@ -128,10 +128,13 @@ fallbacks — thread parent / conversation owner. Members can use `@all` to
 announce without requesting work from the assignee.
 
 For AGENT-authored comments, member mentions and `@all` do NOT suppress the
-squad leader fallback. A worker's result on a squad-assigned issue still
-returns to the assigned leader; in a guest squad's delegation thread, it still
-returns to the guest leader. People receive notifications as usual, and the
-existing leader self-trigger protection and pending-run dedup still apply.
+squad leader fallback, with one exception: when a member of a squad in `direct`
+handoff mode comments on that squad's issue and mentions a person but no agent,
+nobody is woken (see `references/squads.md`, Handoff mode). Otherwise a
+worker's result on a squad-assigned issue still returns to the assigned leader;
+in a guest squad's delegation thread, it still returns to the guest leader.
+People receive notifications as usual, and the existing leader self-trigger
+protection and pending-run dedup still apply.
 
 For any author, an EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
@@ -309,7 +312,8 @@ Correct:
 @all broadcast: `[@all](mention://all/all) heads up` — notifies human workspace
 members and runs no specific agent by itself. It suppresses the assignee
 auto-trigger only for member authors; worker-agent comments still return to
-the assigned or guest squad leader as described above.
+the assigned or guest squad leader as described above, except a person handoff
+in a `direct`-mode squad.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.
