@@ -65,7 +65,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       "expo-router",
       "expo-image",
-      "expo-localization",
+      ["expo-localization", { supportedLocales: ["en", "ru", "zh-Hans", "zh-Hant"] }],
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",

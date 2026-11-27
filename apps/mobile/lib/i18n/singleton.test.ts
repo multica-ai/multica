@@ -72,3 +72,15 @@ describe("mobile i18n singleton", () => {
     expect(i18n.t("issues:runs.status.completed")).toBe("运行成功");
   });
 });
+
+describe("Russian mobile copy", () => {
+  it("resolves regional Russian, including plural forms and project labels", () => {
+    const t = i18n.getFixedT("ru-RU");
+    expect(t("auth:verify.sent_to", { email: "test@example.org" })).toContain("на test@example.org");
+    expect(t("chat:elapsed.replied", { time: "21 с" })).toBe("Ответ за 21 с");
+    for (const [count, expected] of [[1, "задача"], [2, "задачи"], [5, "задач"], [11, "задач"], [21, "задача"]] as const) {
+      expect(t("issues:list.count", { count })).toBe(`${count} ${expected}`);
+    }
+    expect(t("projects:list.title")).toBe("Проекты");
+  });
+});

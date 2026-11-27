@@ -148,3 +148,21 @@ describe("mobile i18n resources", () => {
     }
   });
 });
+
+it("covers the Russian core flows and preserves their placeholders in every plural form", () => {
+  const russian = new Map(readLocale("ru"));
+  for (const [namespace, source] of readLocale("en")) {
+    if (!["auth.json", "issues.json", "chat.json", "editor.json", "navigation.json", "workspace.json", "projects.json", "settings.json"].includes(namespace)) continue;
+    const translations = flattenEntries(russian.get(namespace));
+    for (const [key, text] of flattenEntries(source)) {
+      const keys = key.endsWith("_other")
+        ? ["one", "few", "many", "other"].map((form) => key.replace(/other$/, form))
+        : [key];
+      for (const form of keys) {
+        const translated = translations.get(form);
+        expect(translated, namespace + ":" + form).toBeTruthy();
+        expect(placeholdersOf(translated!)).toEqual(placeholdersOf(text));
+      }
+    }
+  }
+});

@@ -1,0 +1,38 @@
+{
+  "back": "Назад",
+  "tabs": {
+    "inbox": "Входящие",
+    "my_issues": "Мои задачи",
+    "chat": "Чат",
+    "more": "Ещё"
+  },
+  "more_menu": {
+    "pinned": "Закреплённое",
+    "issues": "Задачи",
+    "projects": "Проекты",
+    "account_settings": "Настройки аккаунта"
+  },
+  "routes": {
+    "issues": "Задачи",
+    "projects": "Проекты",
+    "settings": "Настройки",
+    "profile": "Профиль",
+    "notifications": "Уведомления",
+    "search": "Поиск",
+    "issue": "Задача",
+    "project": "Проект",
+    "assignee": "Исполнитель",
+    "mention": "Упоминание",
+    "agents": "Агенты",
+    "pinned": "Закреплённое",
+    "switch_workspace": "Сменить рабочее пространство",
+    "new_issue": "Новая задача",
+    "new_project": "Новый проект",
+    "edit_issue": "Изменить задачу",
+    "edit_project": "Изменить проект",
+    "runs": "Запуски",
+    "execution_record": "Журнал выполнения",
+    "add_resource": "Добавить ресурс",
+    "recent": "Недавние"
+  }
+}

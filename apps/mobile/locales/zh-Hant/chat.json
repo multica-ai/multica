@@ -94,7 +94,9 @@
   "elapsed": {
     "replied": "用時 {{time}} 回覆",
     "finished": "用時 {{time}} 完成",
-    "failed": "執行 {{time}} 後失敗"
+    "failed": "執行 {{time}} 後失敗",
+    "seconds": "{{value}}s",
+    "minutes": "{{value}}m"
   },
   "details": {
     "show": "顯示詳情"

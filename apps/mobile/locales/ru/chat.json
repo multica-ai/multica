@@ -1,0 +1,165 @@
+{
+  "tabs": {
+    "title": "Чат"
+  },
+  "composer": {
+    "no_agent": "Агент не выбран",
+    "revoked": "У вас больше нет доступа к запуску агента",
+    "no_agents": "В этом рабочем пространстве нет агентов",
+    "archived": "Чат в архиве",
+    "runtime_required": "Агенту нужна среда выполнения",
+    "replying_to": "Ответ для {{name}}",
+    "cancel_reply": "Отменить ответ",
+    "mention": "Упомянуть участника или задачу",
+    "upload_image": "Загрузить изображение",
+    "upload_file": "Загрузить файл",
+    "send": "Отправить",
+    "queue": "Поставить сообщение в очередь",
+    "default_placeholder": "Введите сообщение…",
+    "unavailable": "Чат недоступен",
+    "stop_agent": "Остановить агента",
+    "file_too_large_title": "Файл слишком большой",
+    "file_too_large_message": "Размер файла должен быть меньше 100 МБ.",
+    "working": "Агент работает…",
+    "message": "Сообщение…"
+  },
+  "empty": {
+    "greeting": "Привет! Я {{name}}",
+    "no_agent_title": "Чат с агентами",
+    "examples": "Нажмите на пример, чтобы подставить его в поле ввода.",
+    "starter_help_label": "Чем ты можешь помочь?",
+    "starter_help_prompt": "Кратко расскажи, с чем ты лучше всего справляешься.",
+    "starter_task_label": "Предложи первую задачу",
+    "starter_task_prompt": "Предложи три полезные задачи, которые я могу тебе поручить.",
+    "starter_action_label": "С чего начать?",
+    "starter_action_prompt": "Предложи первый шаг с учётом того, что ты знаешь о моём рабочем пространстве."
+  },
+  "picker": {
+    "title": "Выберите агента",
+    "placeholder": "Поиск агентов…",
+    "empty": "Нет доступных агентов.",
+    "needs_runtime": "Нужна среда выполнения"
+  },
+  "banners": {
+    "no_agent": "Нет доступных агентов",
+    "runtime_required": "Подключите среду выполнения, чтобы запустить агента.",
+    "offline": "{{name}} не в сети. Сообщения останутся в очереди до восстановления связи.",
+    "no_agent_action": "Для начала чата откройте «Ещё» → «Агенты» и добавьте или включите агента.",
+    "offline_unstable": "Возможно, {{name}} отключился. Сообщение попадёт в очередь.",
+    "runtime_required_name": "Чтобы запустить {{name}}, подключите среду выполнения в веб-версии или настольном приложении."
+  },
+  "status": {
+    "offline": "Не в сети",
+    "reconnecting": "Восстанавливаем связь",
+    "queued": "В очереди",
+    "starting": "Запускается",
+    "thinking": "Обдумывает ответ",
+    "typing": "Печатает",
+    "working": "Работает",
+    "running_command": "Выполняет команду",
+    "reading_files": "Читает файлы",
+    "searching_code": "Ищет в коде",
+    "making_edits": "Вносит изменения",
+    "searching_web": "Ищет в интернете",
+    "retrying": "Повторяет попытку"
+  },
+  "alerts": {
+    "no_permission_title": "Нет доступа к запуску агента",
+    "no_permission_message": "Сообщение не отправлено. Попросите владельца агента вернуть вам доступ к запуску.",
+    "runtime_title": "Нужна среда выполнения",
+    "runtime_message": "Подключите среду выполнения в веб-версии или настольном приложении, затем отправьте сообщение.",
+    "not_sent": "Сообщение не отправлено",
+    "delete_title": "Удалить чат?",
+    "delete_confirm": "Удалить"
+  },
+  "failure": {
+    "invocation_not_allowed": "Сообщение не отправлено. У вас больше нет доступа к запуску агента.",
+    "agent_runtime_required": "Чтобы отправить сообщение, подключите агенту среду выполнения.",
+    "runtime_access_denied": "Сообщение не отправлено. {{detail}}",
+    "default": "Не удалось отправить сообщение. Попробуйте ещё раз.",
+    "runtime_access_recovery": "Закрытая среда выполнения недоступна. Откройте к ней доступ или подключите агенту другую среду."
+  },
+  "a11y": {
+    "suggested_followups": "Варианты продолжения",
+    "show_error_details": "Показать сведения об ошибке",
+    "no_agents": "Нет доступных агентов",
+    "session_actions": "Действия с чатом",
+    "new_chat": "Новый чат",
+    "sessions_agent_picker": "Чаты и выбор агента"
+  },
+  "title": {
+    "fallback": "Чат",
+    "this_agent": "Этот агент"
+  },
+  "elapsed": {
+    "replied": "Ответ за {{time}}",
+    "finished": "Завершено за {{time}}",
+    "failed": "Сбой через {{time}}",
+    "seconds": "{{value}} с",
+    "minutes": "{{value}} мин"
+  },
+  "details": {
+    "show": "Подробнее"
+  },
+  "sessions": {
+    "title": "Чаты",
+    "empty": "Чатов пока нет.",
+    "archived": "в архиве",
+    "new_chat": "Новый чат"
+  },
+  "no_response": "Агент завершил работу без текстового ответа.",
+  "failure_reason": {
+    "default": "Сбой запуска",
+    "queued_expired": "Истекло время ожидания в очереди",
+    "runtime_offline": "Служба выполнения не в сети",
+    "runtime_reconnect_timeout": "Служба выполнения не успела восстановить связь",
+    "runtime_recovery": "Служба выполнения перезапущена",
+    "timeout": "Истекло время выполнения",
+    "cleanup_unconfirmed": "Не удалось подтвердить остановку процесса агента",
+    "cleanup_blocked": "Предыдущий запуск может ещё выполняться. Убедитесь, что он остановлен, затем повторите неудачный запуск агента в задаче через веб-версию или настольное приложение, если повтор доступен.",
+    "iteration_limit": "Достигнут предел итераций",
+    "agent_blocked": "Ожидается ответ пользователя",
+    "api_invalid_request": "API модели отклонил запрос",
+    "skill_bundle_unavailable": "Не удалось скачать навыки агента",
+    "runtime_cli_timeout": "Истекло время ожидания локального CLI",
+    "environment_prepare_failed": "Не удалось подготовить среду выполнения",
+    "runtime_access_denied": "Агент не смог ответить. Откройте доступ к закрытой среде выполнения или подключите другую среду.",
+    "runtime_access_revoked": "Доступ к среде отозван. Перед следующим запуском подключите доступную среду.",
+    "invalid_task_identity": "Идентификатор запуска не совпадает",
+    "agent_error_provider_auth_or_access": "Ошибка авторизации у провайдера",
+    "agent_error_provider_quota_limit": "Квота провайдера исчерпана",
+    "agent_error_provider_capacity_or_rate_limit": "Провайдер ограничил частоту запросов",
+    "agent_error_provider_server_error": "Ошибка сервера провайдера",
+    "agent_error_provider_network": "Нет связи с провайдером",
+    "agent_error_process_failure": "Процесс агента аварийно завершился",
+    "agent_error_empty_or_unparseable_output": "Агент не вернул пригодный ответ",
+    "agent_error_agent_timeout": "Истекло время ожидания агента",
+    "agent_error_context_overflow": "Превышен размер контекста",
+    "agent_error_missing_config": "Отсутствует ключ API или настройки",
+    "agent_error_model_not_found_or_unavailable": "Модель недоступна",
+    "agent_error_runtime_version_unsupported": "Версия CLI агента не поддерживается",
+    "agent_error_runtime_missing_executable": "CLI агента не установлен",
+    "agent_error_unknown": "Ошибка выполнения агента",
+    "agent_fallback_message": "Агент не смог сформировать ответ",
+    "codex_resume_oversized": "Сеанс слишком большой для возобновления",
+    "idle_watchdog": "Агент остановлен из-за бездействия",
+    "local_directory_error": "Ошибка локальной папки",
+    "local_directory_missing": "Локальная папка проекта больше не существует",
+    "cancelled": "Отменено системой",
+    "agent_error": "Ошибка выполнения агента",
+    "codex_semantic_inactivity": "Codex перестал продвигаться в работе",
+    "manual": "Отменено пользователем",
+    "user_cancelled": "Отменено пользователем"
+  },
+  "timeline": {
+    "steps_count_one": "{{count}} шаг",
+    "steps_count_other": "{{count}} шага",
+    "tool": "Инструмент",
+    "tool_result_named": "Результат {{tool}}: ",
+    "tool_result_unnamed": "Результат: ",
+    "truncated": "…(сокращено)",
+    "error": "Ошибка",
+    "steps_count_few": "{{count}} шага",
+    "steps_count_many": "{{count}} шагов"
+  }
+}
