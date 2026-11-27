@@ -11,12 +11,14 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 [Project](/projects) resources tell agents which code this body of work uses and where to run. Resources stay linked to the project, so there is no need to re-paste repository URLs or local paths into every issue.
 
-Two resource types are supported today:
+You can attach two kinds of execution resources.
 
 | Resource | Best for | Where runs happen |
 |---|---|---|
 | **GitHub repository** | Code shared by the team, with checkouts managed by the runtime | A runtime-managed working directory |
 | **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original folder or an isolated worktree on a specific computer |
+
+Every project also has a [project space](/project-spaces) for persistent files and folder uploads. It stays with the project when its execution resources change.
 
 ## How resources enter a run
 

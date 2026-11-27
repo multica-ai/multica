@@ -11,12 +11,14 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 Les ressources d'un [projet](/projects) indiquent aux agents quel code utilise cet ensemble de travail et où s'exécuter. Les ressources restent rattachées au projet : inutile de recoller les URL de dépôts ou les chemins locaux dans chaque tâche.
 
-Deux types de ressources sont pris en charge aujourd'hui :
+Vous pouvez rattacher deux types de ressources d’exécution.
 
 | Ressource | Idéal pour | Où ont lieu les exécutions |
 |---|---|---|
 | **Dépôt GitHub** | Du code partagé par l'équipe, avec des checkouts gérés par le runtime | Un répertoire de travail géré par le runtime |
 | **Répertoire local** | Un checkout existant, un très gros dépôt, ou lorsque vous voulez inspecter directement les modifications locales | Le dossier d'origine ou un worktree isolé, sur un ordinateur précis |
+
+Chaque projet dispose aussi d’un espace de stockage persistant. Ouvrez **Espace projet** dans les ressources pour importer des fichiers ou un dossier.
 
 ## Comment les ressources entrent dans une exécution
 

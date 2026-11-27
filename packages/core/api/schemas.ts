@@ -1089,6 +1089,8 @@ export interface AppConfigResponse {
    * servers, so the app shows no Browse entry and makes no store requests. */
   theme_store_enabled?: boolean;
   server_version?: string;
+  project_space_available?: boolean;
+  project_space_configured?: boolean;
 }
 
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -1381,6 +1383,8 @@ export const AppConfigSchema = z.object({
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   theme_store_enabled: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
+  project_space_available: BooleanWithDefaultSchema(false).optional(),
+  project_space_configured: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -1406,6 +1410,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   comment_delete_keep_replies_supported: false,
   theme_store_enabled: false,
   feature_flags: {},
+  project_space_available: false,
+  project_space_configured: false,
 };
 
 export type StoreThemeMode = "light" | "dark";
@@ -1874,6 +1880,53 @@ export const ListProjectsResponseSchema = z.object({
   projects: z.array(ProjectSchema).default([]),
   total: z.number().default(0),
 }).loose();
+
+export const ListProjectSpaceFilesResponseSchema = z.object({
+  entries: z.array(z.object({
+    name: z.string(),
+    relative_path: z.string(),
+    kind: z.enum(["file", "directory"]).catch("file"),
+    size_bytes: z.number().int().nonnegative(),
+    modified_at: z.string(),
+  })),
+  total: z.number().int().nonnegative(),
+});
+
+export const ProjectSpaceImportFileSchema = z.object({
+  id: z.string().min(1),
+  relative_path: z.string().min(1),
+  stored_relative_path: OptionalStringSchema,
+  content_type: z.string(),
+  size_bytes: z.number().int().nonnegative(),
+  sha256: OptionalStringSchema,
+  status: z.enum(["queued", "uploading", "completed", "skipped", "failed", "unknown"]).catch("unknown"),
+  error_code: OptionalStringSchema,
+});
+
+export const ProjectSpaceImportSchema = z.object({
+  id: z.string().min(1),
+  project_id: z.string().min(1),
+  batch_name: z.string(),
+  status: z.enum(["queued", "uploading", "finalizing", "completed", "partial", "failed", "unknown"]).catch("unknown"),
+  total_files: z.number().int().nonnegative(),
+  total_bytes: z.number().int().nonnegative(),
+  completed_files: z.number().int().nonnegative(),
+  failed_files: z.number().int().nonnegative(),
+  files: z.array(ProjectSpaceImportFileSchema),
+});
+
+export const ListProjectSpaceImportsResponseSchema = z.object({
+  imports: z.array(ProjectSpaceImportSchema),
+  total: z.number().int().nonnegative(),
+});
+
+export const SaveProjectSpaceAttachmentsResponseSchema = z.object({
+  saved_paths: z.array(z.string()),
+});
+
+export const OrganizeProjectSpaceResponseSchema = z.object({
+  task_id: z.string().min(1),
+});
 
 export const ProjectProgressDetailSchema = z.object({
   progress: ProjectProgressSchema,

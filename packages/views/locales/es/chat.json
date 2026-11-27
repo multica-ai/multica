@@ -108,7 +108,10 @@
     "quick_actions_heading": "Preguntas de seguimiento",
     "quick_actions_aria": "Seguimientos sugeridos",
     "quick_actions_regenerate": "Regenerar sugerencias",
-    "quick_actions_regenerate_failed": "No se han podido actualizar las sugerencias. Inténtalo de nuevo."
+    "quick_actions_regenerate_failed": "No se han podido actualizar las sugerencias. Inténtalo de nuevo.",
+    "save_to_project": "Guardar en el espacio del proyecto",
+    "saved_to_project": "Adjuntos guardados en el espacio del proyecto",
+    "save_to_project_failed": "No se pudieron guardar los adjuntos"
   },
   "session_history": {
     "untitled": "Sin título",

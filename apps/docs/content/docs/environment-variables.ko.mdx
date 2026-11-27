@@ -162,6 +162,13 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | `CLOUDFRONT_PRIVATE_KEY` | 전체 private key |
 | `CLOUDFRONT_PRIVATE_KEY_SECRET` | Secrets Manager에서 private key를 읽을 때 사용 |
 
+## 프로젝트 공간 저장소
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_PROJECT_SPACE_ROOT` | `./data/project-spaces` | 프로젝트 파일의 공유 루트입니다. 백엔드와 프로젝트 에이전트를 실행하는 데몬에 같은 경로를 설정합니다. |
+| `MULTICA_PROJECT_IMPORT_STAGING_ROOT` | `./data/project-imports` | 파일과 폴더를 가져올 때 사용하는 비공개 임시 저장소입니다. 백엔드에서만 사용합니다. |
+
 ## Redis와 rate limit
 
 | 변수 | 기본값 | 설명 |

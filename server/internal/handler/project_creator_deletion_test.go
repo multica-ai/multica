@@ -64,8 +64,9 @@ func TestProjectCreatorDeletionPreservesWorkspaceData(t *testing.T) {
 			if n := dbfx.Count(t, "SELECT count(*) FROM project WHERE id=$1", project.ID); n != remaining {
 				t.Fatalf("remaining projects = %d, want %d", n, remaining)
 			}
-			if n := dbfx.Count(t, "SELECT count(*) FROM project_resource WHERE project_id=$1", project.ID); n != remaining {
-				t.Fatalf("remaining resources = %d, want %d", n, remaining)
+			remainingResources := remaining * 2 // Attached repository and project space.
+			if n := dbfx.Count(t, "SELECT count(*) FROM project_resource WHERE project_id=$1", project.ID); n != remainingResources {
+				t.Fatalf("remaining resources = %d, want %d", n, remainingResources)
 			}
 			var issueProject, sessionProject *string
 			dbfx.QueryRow(t, "SELECT project_id::text FROM issue WHERE id=$1", issue).Scan(&issueProject)

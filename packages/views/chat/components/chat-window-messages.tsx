@@ -17,6 +17,7 @@ const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 /** Message-only observers leave with the fading list; the composer stays alive. */
 export function ChatWindowMessages({
   sessionId,
+  projectId,
   pendingTask,
   pendingTaskLoading,
   availability,
@@ -28,6 +29,7 @@ export function ChatWindowMessages({
   children,
 }: {
   sessionId: string | null;
+  projectId?: string | null;
   pendingTask: ChatPendingTask | null | undefined;
   pendingTaskLoading: boolean;
   availability: AgentAvailability | undefined;
@@ -94,6 +96,7 @@ export function ChatWindowMessages({
           hasOlderMessages={!!hasNextPage}
           isFetchingOlderMessages={isFetchingNextPage}
           onLoadOlderMessages={() => void fetchNextPage()}
+          projectId={projectId}
           onQuickAction={onQuickAction}
           quickActionsDisabled={quickActionsDisabled}
           onRegenerateQuickActions={(message) => sessionId

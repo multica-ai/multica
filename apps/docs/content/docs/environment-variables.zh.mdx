@@ -162,6 +162,13 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `CLOUDFRONT_PRIVATE_KEY` | 完整私钥 |
 | `CLOUDFRONT_PRIVATE_KEY_SECRET` | 从 Secrets Manager 读取私钥时使用 |
 
+## 项目空间存储
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_PROJECT_SPACE_ROOT` | `./data/project-spaces` | 项目文件的共享根目录。后端与运行项目智能体的守护进程应配置相同的路径。 |
+| `MULTICA_PROJECT_IMPORT_STAGING_ROOT` | `./data/project-imports` | 文件和文件夹导入使用的私有暂存目录，仅后端使用。 |
+
 ## Redis 与限流
 
 | 变量 | 默认值 | 说明 |

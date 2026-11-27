@@ -42,6 +42,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/projectspace"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -272,6 +273,7 @@ type Handler struct {
 	LivenessStore      LivenessStore
 	HeartbeatScheduler HeartbeatScheduler
 	Storage            storage.Storage
+	ProjectSpace       *projectspace.Service
 	CFSigner           *auth.CloudFrontSigner
 	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
@@ -556,6 +558,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LivenessStore:                NewNoopLivenessStore(),
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
 		Storage:                      store,
+		ProjectSpace:                 projectspace.NewFromEnv(),
 		CFSigner:                     cfSigner,
 		Analytics:                    analyticsClient,
 		QoderRateLimiter:             NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 6, Window: time.Minute}),

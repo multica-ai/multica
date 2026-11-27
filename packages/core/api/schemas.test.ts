@@ -3,6 +3,12 @@ import {
   AgentTaskSchema,
   IssueSchema,
   AppConfigSchema,
+  ListProjectSpaceFilesResponseSchema,
+  ListProjectSpaceImportsResponseSchema,
+  OrganizeProjectSpaceResponseSchema,
+  ProjectSpaceImportFileSchema,
+  ProjectSpaceImportSchema,
+  SaveProjectSpaceAttachmentsResponseSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -82,6 +88,38 @@ import {
 } from "./schemas";
 import { IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("project space responses", () => {
+  it("falls back on malformed listings and incomplete writes", () => {
+    const endpoint = "project space";
+    for (const [raw, schema] of [
+      [{ entries: null, total: 0 }, ListProjectSpaceFilesResponseSchema],
+      [{ imports: {}, total: 0 }, ListProjectSpaceImportsResponseSchema],
+      [{ id: "import-1", files: [] }, ProjectSpaceImportSchema],
+      [{ id: "", relative_path: "notes.md" }, ProjectSpaceImportFileSchema],
+      [{ saved_paths: [null] }, SaveProjectSpaceAttachmentsResponseSchema],
+      [{ task_id: "" }, OrganizeProjectSpaceResponseSchema],
+    ] as const) {
+      expect(parseWithFallback(raw, schema, null, { endpoint })).toBeNull();
+    }
+  });
+
+  it("handles newly introduced statuses without reporting success", () => {
+    const file = {
+      id: "file-1", relative_path: "notes.md", content_type: "text/plain",
+      size_bytes: 4, status: "scanning",
+    };
+    const manifest = {
+      id: "import-1", project_id: "project-1", batch_name: "research",
+      status: "scanning", total_files: 1, total_bytes: 4, completed_files: 0,
+      failed_files: 0, files: [file],
+    };
+    expect(ProjectSpaceImportSchema.parse(manifest)).toMatchObject({
+      status: "unknown",
+      files: [{ status: "unknown" }],
+    });
+  });
+});
 
 describe("IssueUnreadPageSchema", () => {
   const endpoint = "GET /api/issues/unread";

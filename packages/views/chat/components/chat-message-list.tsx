@@ -23,6 +23,7 @@ import {
   Brain,
   AlertCircle,
   AlertTriangle,
+  Archive,
   ArrowUpRight,
   RotateCw,
 } from "@multica/ui/icons";
@@ -31,6 +32,7 @@ import { TruncatedTooltip } from "@multica/ui/components/common/truncated-toolti
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { api } from "@multica/core/api";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -39,6 +41,7 @@ import { PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
 import type { AgentAvailability } from "@multica/core/agents";
 import { resolveFailureReasonKey } from "@multica/core/agents";
 import type {
+  Attachment,
   ChatMessage,
   ChatPendingTask,
   ChatQuickAction,
@@ -101,6 +104,7 @@ interface ChatMessageListProps {
   onLoadOlderMessages?: () => void;
   /** Transform assistant task text for embedded chat protocols before render/copy. */
   transformContent?: (content: string) => string;
+  projectId?: string | null;
   /** Send the full hidden prompt behind an assistant follow-up chip. */
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled?: boolean;
@@ -217,6 +221,7 @@ export function ChatMessageList({
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
   transformContent,
+  projectId,
   onQuickAction,
   quickActionsDisabled = false,
   onRegenerateQuickActions,
@@ -464,6 +469,7 @@ export function ChatMessageList({
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
               transformContent={transformContent}
+              projectId={projectId}
               onQuickAction={onQuickAction}
               quickActionsDisabled={quickActionsDisabled}
               onRegenerateQuickActions={onRegenerateQuickActions}
@@ -547,6 +553,7 @@ const MessageBubble = memo(function MessageBubble({
   item,
   isPending,
   transformContent,
+  projectId,
   onQuickAction,
   quickActionsDisabled,
   onRegenerateQuickActions,
@@ -560,6 +567,7 @@ const MessageBubble = memo(function MessageBubble({
   item: ChatRenderItem;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  projectId?: string | null;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
@@ -621,6 +629,9 @@ const MessageBubble = memo(function MessageBubble({
             content={message.content}
             className="mt-1.5"
           />
+          {projectId && !!message.attachments?.length && (
+            <SaveAttachmentsToProjectButton projectId={projectId} attachments={message.attachments} />
+          )}
         </div>
       </div>
     );
@@ -633,6 +644,7 @@ const MessageBubble = memo(function MessageBubble({
         message={message}
         isPending={isPending}
         transformContent={transformContent}
+        projectId={projectId}
         onQuickAction={onQuickAction}
         quickActionsDisabled={quickActionsDisabled}
         onRegenerateQuickActions={onRegenerateQuickActions}
@@ -668,6 +680,7 @@ function AssistantMessage({
   message,
   isPending,
   transformContent,
+  projectId,
   onQuickAction,
   quickActionsDisabled,
   onRegenerateQuickActions,
@@ -680,6 +693,7 @@ function AssistantMessage({
   message?: ChatMessage;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  projectId?: string | null;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
@@ -772,6 +786,9 @@ function AssistantMessage({
             attachments={message.attachments}
             content={settledContent ?? message.content}
           />
+          {projectId && !!message.attachments?.length && (
+            <SaveAttachmentsToProjectButton projectId={projectId} attachments={message.attachments} />
+          )}
           <MessageFooter
             message={message}
             timeline={timeline}
@@ -803,6 +820,37 @@ function AssistantMessage({
         </>
       )}
     </div>
+  );
+}
+
+function SaveAttachmentsToProjectButton({
+  projectId,
+  attachments,
+}: {
+  projectId: string;
+  attachments: Attachment[];
+}) {
+  const { t } = useT("chat");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveAttachmentsToProjectSpace(projectId, attachments.map((attachment) => attachment.id));
+      toast.success(t(($) => $.message_list.saved_to_project));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.message_list.save_to_project_failed));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Button type="button" variant="ghost" size="xs" className="mt-1 text-muted-foreground"
+      disabled={saving} aria-busy={saving} onClick={() => void save()}>
+      <Archive />
+      {t(($) => $.message_list.save_to_project)}
+    </Button>
   );
 }
 

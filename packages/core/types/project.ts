@@ -217,7 +217,8 @@ export interface ListProjectsResponse {
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
 //   - local_directory: agent execution on a specific daemon,
 //     ref = { local_path, daemon_id, label?, execution_mode? }
-export type ProjectResourceType = "github_repo" | "local_directory";
+//   - project_space: server-managed project files, ref = { version: 1 }
+export type ProjectResourceType = "github_repo" | "local_directory" | "project_space";
 
 export interface GithubRepoResourceRef {
   url: string;
@@ -252,9 +253,14 @@ export interface LocalDirectoryResourceRef {
   execution_mode?: LocalDirectoryExecutionMode;
 }
 
+export interface ProjectSpaceResourceRef {
+  version: 1;
+}
+
 export type ProjectResourceRef =
   | GithubRepoResourceRef
   | LocalDirectoryResourceRef
+  | ProjectSpaceResourceRef
   | Record<string, unknown>;
 
 export interface ProjectResource {
@@ -287,5 +293,64 @@ export interface UpdateProjectResourceRequest {
 
 export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
+  total: number;
+}
+
+export interface ProjectSpaceEntry {
+  name: string;
+  relative_path: string;
+  kind: "file" | "directory";
+  size_bytes: number;
+  modified_at: string;
+}
+
+export interface ListProjectSpaceFilesResponse {
+  entries: ProjectSpaceEntry[];
+  total: number;
+}
+
+export type ProjectSpaceImportStatus =
+  | "queued"
+  | "uploading"
+  | "finalizing"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "unknown";
+
+export interface ProjectSpaceImportFile {
+  id: string;
+  relative_path: string;
+  stored_relative_path?: string;
+  content_type: string;
+  size_bytes: number;
+  sha256?: string;
+  status: "queued" | "uploading" | "completed" | "skipped" | "failed" | "unknown";
+  error_code?: string;
+}
+
+export interface ProjectSpaceImport {
+  id: string;
+  project_id: string;
+  batch_name: string;
+  status: ProjectSpaceImportStatus;
+  total_files: number;
+  total_bytes: number;
+  completed_files: number;
+  failed_files: number;
+  files: ProjectSpaceImportFile[];
+}
+
+export interface CreateProjectSpaceImportRequest {
+  batch_name: string;
+  files: Array<{
+    relative_path: string;
+    content_type: string;
+    size_bytes: number;
+  }>;
+}
+
+export interface ListProjectSpaceImportsResponse {
+  imports: ProjectSpaceImport[];
   total: number;
 }

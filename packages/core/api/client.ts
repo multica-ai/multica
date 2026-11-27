@@ -161,6 +161,11 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ListProjectSpaceFilesResponse,
+  ListProjectSpaceImportsResponse,
+  ProjectSpaceImport,
+  ProjectSpaceImportFile,
+  CreateProjectSpaceImportRequest,
   Label,
   IssueProperty,
   IssuePropertyValue,
@@ -444,6 +449,12 @@ import {
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
+  ListProjectSpaceFilesResponseSchema,
+  ListProjectSpaceImportsResponseSchema,
+  ProjectSpaceImportSchema,
+  ProjectSpaceImportFileSchema,
+  SaveProjectSpaceAttachmentsResponseSchema,
+  OrganizeProjectSpaceResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
   SearchProjectsResponseSchema,
@@ -720,6 +731,12 @@ export interface DashboardRequestParams {
 }
 
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
+  const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
+  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  return parsed;
+}
+
+function parseProjectSpaceResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
   return parsed;
@@ -5102,6 +5119,88 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  async listProjectSpaceFiles(
+    projectId: string,
+    relativePath = "",
+  ): Promise<ListProjectSpaceFilesResponse> {
+    const query = relativePath ? `?path=${encodeURIComponent(relativePath)}` : "";
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/space/files${query}`);
+    return parseProjectSpaceResponse(raw, ListProjectSpaceFilesResponseSchema, "GET /api/projects/{id}/space/files");
+  }
+
+  async listProjectSpaceImports(
+    projectId: string,
+  ): Promise<ListProjectSpaceImportsResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/space/imports`);
+    return parseProjectSpaceResponse(raw, ListProjectSpaceImportsResponseSchema, "GET /api/projects/{id}/space/imports");
+  }
+
+  async createProjectSpaceImport(
+    projectId: string,
+    data: CreateProjectSpaceImportRequest,
+  ): Promise<ProjectSpaceImport> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/space/imports`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseProjectSpaceResponse(raw, ProjectSpaceImportSchema, "POST /api/projects/{id}/space/imports");
+  }
+
+  async uploadProjectSpaceImportFile(
+    projectId: string,
+    importId: string,
+    fileId: string,
+    body: Blob,
+  ): Promise<ProjectSpaceImportFile> {
+    const res = await this.fetchRaw(
+      `/api/projects/${projectId}/space/imports/${importId}/files/${fileId}`,
+      {
+        method: "PUT",
+        body,
+        headers: { "Content-Type": "application/octet-stream" },
+      },
+    );
+    const raw: unknown = await res.json();
+    return parseProjectSpaceResponse(raw, ProjectSpaceImportFileSchema, "PUT /api/projects/{id}/space/imports/{importId}/files/{fileId}");
+  }
+
+  async completeProjectSpaceImport(
+    projectId: string,
+    importId: string,
+  ): Promise<ProjectSpaceImport> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/space/imports/${importId}/complete`,
+      { method: "POST", body: "{}" },
+    );
+    return parseProjectSpaceResponse(raw, ProjectSpaceImportSchema, "POST /api/projects/{id}/space/imports/{importId}/complete");
+  }
+
+  async saveAttachmentsToProjectSpace(
+    projectId: string,
+    attachmentIds: string[],
+    targetPath?: string,
+  ): Promise<{ saved_paths: string[] }> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/space/save-attachments`, {
+      method: "POST",
+      body: JSON.stringify({
+        attachment_ids: attachmentIds,
+        ...(targetPath ? { target_path: targetPath } : {}),
+      }),
+    });
+    return parseProjectSpaceResponse(raw, SaveProjectSpaceAttachmentsResponseSchema, "POST /api/projects/{id}/space/save-attachments");
+  }
+
+  async organizeProjectSpace(
+    projectId: string,
+    agentId?: string,
+  ): Promise<{ task_id: string }> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/space/organize`, {
+      method: "POST",
+      body: JSON.stringify(agentId ? { agent_id: agentId } : {}),
+    });
+    return parseProjectSpaceResponse(raw, OrganizeProjectSpaceResponseSchema, "POST /api/projects/{id}/space/organize");
   }
 
   // Labels

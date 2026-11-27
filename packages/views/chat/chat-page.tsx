@@ -429,6 +429,7 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
+          projectId={c.activeProjectId}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           quickActionsDisabled={
             !!c.pendingTaskId ||

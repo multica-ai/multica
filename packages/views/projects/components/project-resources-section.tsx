@@ -4,9 +4,11 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Copy,
+  ChevronRight,
   FolderGit,
   FolderOpen,
   GitBranch,
+  HardDrive,
   Laptop,
   Link2,
   Monitor,
@@ -40,6 +42,11 @@ import {
 } from "@multica/core/runtimes";
 import { useConfigStore } from "@multica/core/config";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@multica/ui/components/ui/collapsible";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   Dialog,
@@ -84,6 +91,7 @@ import {
 } from "./local-directory-mode-options";
 import { GithubRefField, githubRefHasError } from "./github-ref-field";
 import { localDirectoryLabel } from "./local-directory-label";
+import { ProjectSpacePanel } from "./project-space-panel";
 import {
   buildRuntimeMachines,
   type RuntimeMachine,
@@ -180,8 +188,9 @@ export function ProjectResourcesSection({
 
   const repos = resources.filter(isGithubRef);
   const folders = resources.filter(isLocalDirectoryRef);
+  const projectSpace = resources.find((resource) => resource.resource_type === "project_space");
   const others = resources.filter(
-    (r) => !isGithubRef(r) && !isLocalDirectoryRef(r),
+    (r) => !isGithubRef(r) && !isLocalDirectoryRef(r) && r.resource_type !== "project_space",
   );
   // Picking a folder needs the desktop's daemon_id, so web cannot add one. It
   // still lists existing folders, and changing their mode or removing them
@@ -257,6 +266,7 @@ export function ProjectResourcesSection({
         />
       ) : (
         <ObjectSectionCard>
+          {projectSpace && <ProjectSpaceRow projectId={projectId} readOnly={readOnly} />}
           {repos.map((resource) => (
             <GithubRepoRow
               key={resource.id}
@@ -285,6 +295,32 @@ export function ProjectResourcesSection({
         </ObjectSectionCard>
       )}
     </ObjectSection>
+  );
+}
+
+function ProjectSpaceRow({ projectId, readOnly }: { projectId: string; readOnly: boolean }) {
+  const { t } = useT("projects");
+  const label = t(($) => $.resources.project_space);
+  if (readOnly) return <ResourceRow icon={HardDrive} name={label} />;
+
+  return (
+    <Collapsible>
+      <ResourceRow
+        icon={HardDrive}
+        name={label}
+        menu={
+          <CollapsibleTrigger
+            render={<Button variant="ghost" size="icon-xs" aria-label={label} />}
+            className="group/space"
+          >
+            <ChevronRight className="transition-transform duration-150 motion-reduce:transition-none group-data-[panel-open]/space:rotate-90" />
+          </CollapsibleTrigger>
+        }
+      />
+      <CollapsibleContent>
+        <ProjectSpacePanel projectId={projectId} />
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

@@ -103,7 +103,10 @@
     "quick_actions_heading": "フォローアップ質問",
     "quick_actions_aria": "フォローアップの候補",
     "quick_actions_regenerate": "候補を再生成",
-    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。"
+    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。",
+    "save_to_project": "プロジェクトスペースに保存",
+    "saved_to_project": "添付ファイルをプロジェクトスペースに保存しました",
+    "save_to_project_failed": "添付ファイルを保存できませんでした"
   },
   "session_history": {
     "untitled": "無題",

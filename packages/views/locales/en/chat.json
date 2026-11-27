@@ -108,7 +108,10 @@
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
-    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again.",
+    "save_to_project": "Save to project space",
+    "saved_to_project": "Attachments saved to project space",
+    "save_to_project_failed": "Failed to save attachments"
   },
   "session_history": {
     "untitled": "Untitled",

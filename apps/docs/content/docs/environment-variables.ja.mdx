@@ -162,6 +162,13 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `CLOUDFRONT_PRIVATE_KEY` | 完全な秘密鍵 |
 | `CLOUDFRONT_PRIVATE_KEY_SECRET` | Secrets Manager から秘密鍵を読み込む場合に使用 |
 
+## プロジェクトスペースのストレージ
+
+| 変数 | 既定値 | 説明 |
+|---|---|---|
+| `MULTICA_PROJECT_SPACE_ROOT` | `./data/project-spaces` | プロジェクトファイルの共有ルート。バックエンドとプロジェクトのエージェントを実行するデーモンで同じパスを指定します。 |
+| `MULTICA_PROJECT_IMPORT_STAGING_ROOT` | `./data/project-imports` | ファイルやフォルダーの取り込みに使う非公開の一時領域。バックエンドのみが使用します。 |
+
 ## Redis とレート制限
 
 | 変数 | デフォルト | 説明 |

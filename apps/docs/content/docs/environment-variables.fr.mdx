@@ -162,6 +162,13 @@ Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un
 | `CLOUDFRONT_PRIVATE_KEY` | Clé privée complète |
 | `CLOUDFRONT_PRIVATE_KEY_SECRET` | À utiliser lorsque la clé privée est lue depuis Secrets Manager |
 
+## Stockage des espaces projet
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_PROJECT_SPACE_ROOT` | `./data/project-spaces` | Répertoire partagé. Utilisez le même chemin sur le serveur et sur les daemons qui exécutent les agents du projet. |
+| `MULTICA_PROJECT_IMPORT_STAGING_ROOT` | `./data/project-imports` | Répertoire temporaire privé pour les imports. Seul le serveur l’utilise. |
+
 ## Redis et limitation de débit
 
 | Variable | Valeur par défaut | Description |

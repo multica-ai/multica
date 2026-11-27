@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_project_space_import_file_status ON project_space_import_file(import_id, status);

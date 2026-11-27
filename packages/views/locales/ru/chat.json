@@ -118,7 +118,10 @@
     "tools_few": "{{count}} инструмента",
     "tools_many": "{{count}} инструментов",
     "process_steps_few": "{{count}} шага",
-    "process_steps_many": "{{count}} шагов"
+    "process_steps_many": "{{count}} шагов",
+    "save_to_project": "Сохранить в пространстве проекта",
+    "saved_to_project": "Вложения сохранены в пространстве проекта",
+    "save_to_project_failed": "Не удалось сохранить вложения"
   },
   "session_history": {
     "untitled": "Без названия",
