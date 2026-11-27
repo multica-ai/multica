@@ -182,6 +182,15 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	if expectedRevision.Valid {
+		h.mutateConditionalIssueMetadata(w, r, issue, userID, key, req.Value, expectedRevision.Int64)
+		return
+	}
+
 	// Enforce the key-count cap in the handler. The DB only guards size,
 	// and a clear 4xx for "too many keys" beats a CHECK violation that
 	// happens to fire on the size cap once enough keys accumulate.
@@ -194,10 +203,11 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	queryStarted := time.Now()
 	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.SetIssueMetadataKeyRow, error) {
 		return q.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         key,
-			Value:       []byte(req.Value),
+			ID:               issue.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
+			Key:              key,
+			Value:            []byte(req.Value),
 		})
 	})
 	queryDuration := time.Since(queryStarted)
@@ -218,6 +228,11 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 				h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
 				slog.Warn("GetIssueMetadataInWorkspace after metadata set no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
 				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
+				return
+			}
+			if expectedRevision.Valid && current.Revision != expectedRevision.Int64 {
+				h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
+				writeRevisionConflict(w, "issue", issue.ID, expectedRevision.Int64, current.Revision)
 				return
 			}
 			h.recordIssueMetadataMutation(r, "set", "noop", issueID, key, queryDuration)
@@ -267,12 +282,22 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	expectedRevision, ok := parseIssueExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	if expectedRevision.Valid {
+		h.mutateConditionalIssueMetadata(w, r, issue, userID, key, nil, expectedRevision.Int64)
+		return
+	}
+
 	queryStarted := time.Now()
 	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.DeleteIssueMetadataKeyRow, error) {
 		return q.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         key,
+			ID:               issue.ID,
+			WorkspaceID:      issue.WorkspaceID,
+			ExpectedRevision: expectedRevision,
+			Key:              key,
 		})
 	})
 	queryDuration := time.Since(queryStarted)
@@ -293,6 +318,11 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 				h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
 				slog.Warn("GetIssueMetadataInWorkspace after metadata delete no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
 				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
+				return
+			}
+			if expectedRevision.Valid && current.Revision != expectedRevision.Int64 {
+				h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
+				writeRevisionConflict(w, "issue", issue.ID, expectedRevision.Int64, current.Revision)
 				return
 			}
 			h.recordIssueMetadataMutation(r, "delete", "noop", issueID, key, queryDuration)

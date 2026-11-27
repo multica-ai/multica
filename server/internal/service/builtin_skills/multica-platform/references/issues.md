@@ -1,6 +1,6 @@
 # Issues
 
-Product contracts the runtime brief does not fully encode.
+Product contracts the runtime brief does not fully encode. For revision-guarded mutations, see [Conditional issue writes](issue-revisions.md).
 
 - [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)

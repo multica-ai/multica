@@ -352,8 +352,9 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":     "issue",
-		"references/sub-issues.md": "sub-issue",
+		"references/issues.md":          "issue",
+		"references/issue-revisions.md": "issue",
+		"references/sub-issues.md":      "sub-issue",
 		// A dependency task arrives as an issue task ("make MUL-2 wait for
 		// MUL-1"), and the description has no room left under its cap.
 		"references/dependencies.md":  "issue",

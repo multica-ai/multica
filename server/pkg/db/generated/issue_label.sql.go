@@ -40,17 +40,19 @@ func (q *Queries) AttachLabelToAgent(ctx context.Context, arg AttachLabelToAgent
 }
 
 const attachLabelToIssue = `-- name: AttachLabelToIssue :one
-WITH inserted AS (
+WITH locked_issue AS MATERIALIZED (
+    SELECT id, revision FROM issue
+    WHERE id = $2::uuid
+      AND workspace_id = $3::uuid
+      AND ($1::bigint IS NULL OR revision = $1::bigint)
+    FOR NO KEY UPDATE
+), inserted AS (
     INSERT INTO issue_to_label (issue_id, label_id)
-    SELECT $1::uuid, $2::uuid
-    WHERE EXISTS (
-        SELECT 1 FROM issue i
-        WHERE i.id = $1::uuid
-          AND i.workspace_id = $3::uuid
-    )
+    SELECT $2::uuid, $4::uuid
+    WHERE EXISTS (SELECT 1 FROM locked_issue)
       AND EXISTS (
         SELECT 1 FROM issue_label l
-        WHERE l.id = $2::uuid
+        WHERE l.id = $4::uuid
           AND l.workspace_id = $3::uuid
           AND l.resource_type = 'issue'
     )
@@ -61,16 +63,20 @@ WITH inserted AS (
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM inserted)
+      AND NOT $5::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
-       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
+       COALESCE((SELECT revision FROM bumped), CASE WHEN $1::bigint IS NOT NULL THEN (SELECT revision FROM locked_issue) ELSE 0 END)::bigint AS issue_revision
+WHERE $1::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue)
 `
 
 type AttachLabelToIssueParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	LabelID     pgtype.UUID `json:"label_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LabelID           pgtype.UUID `json:"label_id"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
 }
 
 type AttachLabelToIssueRow struct {
@@ -78,8 +84,16 @@ type AttachLabelToIssueRow struct {
 	IssueRevision int64 `json:"issue_revision"`
 }
 
+// Lock the owner before association writes so a conditional mutation cannot
+// insert a label while another writer consumes its expected issue revision.
 func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssueParams) (AttachLabelToIssueRow, error) {
-	row := q.db.QueryRow(ctx, attachLabelToIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, attachLabelToIssue,
+		arg.ExpectedRevision,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.LabelID,
+		arg.DeferRevisionBump,
+	)
 	var i AttachLabelToIssueRow
 	err := row.Scan(&i.Changed, &i.IssueRevision)
 	return i, err
@@ -300,31 +314,37 @@ func (q *Queries) DetachLabelFromAgent(ctx context.Context, arg DetachLabelFromA
 }
 
 const detachLabelFromIssue = `-- name: DetachLabelFromIssue :one
-WITH deleted AS (
+WITH locked_issue AS MATERIALIZED (
+    SELECT id, revision FROM issue
+    WHERE id = $2::uuid
+      AND workspace_id = $3::uuid
+      AND ($1::bigint IS NULL OR revision = $1::bigint)
+    FOR NO KEY UPDATE
+), deleted AS (
     DELETE FROM issue_to_label
-    WHERE issue_id = $1::uuid
-      AND label_id = $2::uuid
-      AND EXISTS (
-          SELECT 1 FROM issue i
-          WHERE i.id = $1::uuid
-            AND i.workspace_id = $3::uuid
-      )
+    WHERE issue_id = $2::uuid
+      AND label_id = $4::uuid
+      AND EXISTS (SELECT 1 FROM locked_issue)
     RETURNING issue_id
 ), bumped AS (
     UPDATE issue
     SET revision = revision + 1,
         last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM deleted)
+      AND NOT $5::bool
     RETURNING revision
 )
 SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
-       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
+       COALESCE((SELECT revision FROM bumped), CASE WHEN $1::bigint IS NOT NULL THEN (SELECT revision FROM locked_issue) ELSE 0 END)::bigint AS issue_revision
+WHERE $1::bigint IS NULL OR EXISTS (SELECT 1 FROM locked_issue)
 `
 
 type DetachLabelFromIssueParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	LabelID     pgtype.UUID `json:"label_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision  pgtype.Int8 `json:"expected_revision"`
+	IssueID           pgtype.UUID `json:"issue_id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	LabelID           pgtype.UUID `json:"label_id"`
+	DeferRevisionBump bool        `json:"defer_revision_bump"`
 }
 
 type DetachLabelFromIssueRow struct {
@@ -332,10 +352,15 @@ type DetachLabelFromIssueRow struct {
 	IssueRevision int64 `json:"issue_revision"`
 }
 
-// Workspace-guarded DELETE: only deletes if the issue is in the given
-// workspace. Mirror of the attach query.
+// Workspace-guarded DELETE, serialized with every issue revision writer.
 func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromIssueParams) (DetachLabelFromIssueRow, error) {
-	row := q.db.QueryRow(ctx, detachLabelFromIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, detachLabelFromIssue,
+		arg.ExpectedRevision,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.LabelID,
+		arg.DeferRevisionBump,
+	)
 	var i DetachLabelFromIssueRow
 	err := row.Scan(&i.Changed, &i.IssueRevision)
 	return i, err

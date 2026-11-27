@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -651,8 +652,14 @@ func writeFeatureDisabled(w http.ResponseWriter, code, msg string) {
 }
 
 func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID, expected, actual int64) {
+	// Name both revisions in the prose. The generic "resource changed" line is
+	// surfaced verbatim by the CLI (FormatError), and an agent that reads it
+	// cannot know which revision to retry with. The structured fields carry the
+	// same values for automation that parses JSON instead of the sentence.
 	writeJSON(w, http.StatusConflict, map[string]any{
-		"error":             "resource changed since it was loaded",
+		"error": fmt.Sprintf(
+			"%s revision is now %d, but this write expected %d; re-read and reconcile the changes before retrying",
+			resourceType, actual, expected),
 		"code":              "revision_conflict",
 		"resource_type":     resourceType,
 		"resource_id":       uuidToString(resourceID),

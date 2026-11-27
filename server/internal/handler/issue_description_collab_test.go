@@ -146,6 +146,50 @@ func TestUpdateIssueDescriptionBaseRevisionWithoutLiveEditing(t *testing.T) {
 	putIssueForTest(t, id, map[string]any{"description": "Delta"}).Want(http.StatusOK)
 }
 
+func TestUpdateIssueRequiresBothRevisionPreconditions(t *testing.T) {
+	id := dbfx.Issue(t, "Before", testutil.Cols{"description": "Before", "revision": 7, "description_revision": 3})
+	for _, tc := range []struct {
+		resourceType        string
+		issueRevision       int
+		descriptionRevision int
+	}{
+		{"issue", 6, 3},
+		{"issue_description", 7, 2},
+	} {
+		t.Run(tc.resourceType, func(t *testing.T) {
+			var conflict struct {
+				Code         string `json:"code"`
+				ResourceType string `json:"resource_type"`
+			}
+			putIssueForTest(t, id, map[string]any{
+				"title":                     "Stale",
+				"description":               "Stale",
+				"expected_revision":         tc.issueRevision,
+				"description_base_revision": tc.descriptionRevision,
+			}).Want(http.StatusConflict).JSON(&conflict)
+			if conflict.Code != "revision_conflict" || conflict.ResourceType != tc.resourceType {
+				t.Fatalf("conflict = %+v, want revision_conflict for %s", conflict, tc.resourceType)
+			}
+			current := getIssueForTest(t, id)
+			if current.Title != "Before" || current.Description == nil || *current.Description != "Before" {
+				t.Fatalf("stale request changed issue: %+v", current)
+			}
+		})
+	}
+
+	var updated IssueResponse
+	putIssueForTest(t, id, map[string]any{
+		"title":                     "After",
+		"description":               "After",
+		"expected_revision":         7,
+		"description_base_revision": 3,
+	}).Want(http.StatusOK).JSON(&updated)
+	if updated.Title != "After" || updated.Description == nil || *updated.Description != "After" ||
+		updated.Revision != 8 || updated.DescriptionRevision == nil || *updated.DescriptionRevision != 4 {
+		t.Fatalf("matching revisions must apply both fields and advance both revisions: %+v", updated)
+	}
+}
+
 func TestUpdateIssueDescriptionGoesThroughTheLiveSession(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
