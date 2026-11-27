@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
+import { toast } from "sonner";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
@@ -12,12 +13,14 @@ import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 import { InlineCommentRun, PlacedInlineCommentRun, REPLY_PENDING_CALL_NOTICE_MS } from "./inline-comment-run";
 
-const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
-vi.mock("@multica/core/api", () => ({ api: {
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
+  api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
   listTasksByIssue: vi.fn(),
-}, dispatchReasonCode: dispatchReasonCodeMock }));
+} }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
@@ -50,10 +53,42 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
     </QueryClientProvider>
   </TooltipProvider>;
   const rendered = renderWithI18n(view(initialTask));
-  return { client, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
+  return { client, unmount: rendered.unmount, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
 }
 
 describe("InlineCommentRun", () => {
+  it("reports a stop failure after leaving the issue", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.cancelTask).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const view = setup(task({ status: "queued" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+    await waitFor(() => expect(api.cancelTask).toHaveBeenCalledWith("issue", id));
+    view.unmount();
+    expect(view.client.isMutating()).toBe(1);
+    await act(async () => reject(new Error("offline")));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith("Failed to cancel run");
+    view.client.clear();
+  });
+
+  it.each([
+    { reason: undefined, message: "Failed to retry run" },
+    { reason: "invocation_not_allowed", message: "Not retried — you don't have permission to use this agent" },
+  ])("reports a retry failure after leaving the issue ($reason)", async ({ reason, message }) => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.rerunIssue).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const view = setup(task({ status: "failed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
+    await waitFor(() => expect(api.rerunIssue).toHaveBeenCalledWith("issue", id));
+    view.unmount();
+    expect(view.client.isMutating()).toBe(1);
+    await act(async () => reject(reason
+      ? new ApiError("Forbidden", 403, "Forbidden", { reason_code: reason })
+      : new Error("offline")));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(message);
+    view.client.clear();
+  });
+
   it("shows a clipped tool name and its summary when the activity step is focused", async () => {
     const tool = "mcp__company-knowledge-base__search_documents_with_filters";
     vi.mocked(api.listTaskMessages).mockResolvedValue([

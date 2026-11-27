@@ -127,7 +127,7 @@ function RunStopControl({ task }: { task: AgentTask }) {
     </IconButton>
     <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
       showRunningNote={task.status !== "queued"}
-      onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />
+      onConfirm={() => void cancel.mutateAsync(task.id).catch(() => toast.error(t(($) => $.execution_log.cancel_failed)))} />
   </>;
 }
 
@@ -283,9 +283,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
-          onClick={() => retry.mutate(task.id, { onError: (error) => toast.error(
+          onClick={() => void retry.mutateAsync(task.id).catch((error) => toast.error(
             dispatchReasonCode(error) === "invocation_not_allowed" ? t(($) => $.execution_log.retry_blocked) : t(($) => $.execution_log.retry_failed),
-          ) })}>
+          ))}>
           <RotateCcw /><span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
         </Button>}
       </div>
