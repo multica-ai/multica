@@ -8,6 +8,11 @@ describe("nextRowMenuState", () => {
     expect(nextRowMenuState(menu, false, "trigger-hover")).toBeNull();
   });
 
+  it("keeps a right-click menu open when one of its submenus opens", () => {
+    const menu = { open: true, point: { x: 1, y: 2 } };
+    expect(nextRowMenuState(menu, false, "sibling-open")).toBeNull();
+  });
+
   it("keeps the point while closing, so the menu does not jump as it animates out", () => {
     const menu = { open: true, point: { x: 1, y: 2 } };
     expect(nextRowMenuState(menu, false, "outside-press")).toEqual({ open: false, point: { x: 1, y: 2 } });

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { RowActionsMenu, RowActionsPointMenu } from "./row-actions-menu";
 
 describe("RowActionsMenu", () => {
@@ -65,4 +71,28 @@ it("does not open an empty cursor menu", () => {
     />,
   );
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+});
+
+it("keeps a cursor menu open while its trailing submenu opens", async () => {
+  const onOpenChange = vi.fn();
+  render(
+    <RowActionsPointMenu
+      menu={{ open: true, point: { x: 30, y: 40 } }}
+      onOpenChange={onOpenChange}
+      groups={[[{ key: "view", icon: null, label: "View", onSelect: vi.fn() }]]}
+      trailing={
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Comment actions</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuItem>Reply</DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      }
+    />,
+  );
+
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Comment actions" }));
+
+  expect(await screen.findByRole("menuitem", { name: "Reply" })).toBeInTheDocument();
+  expect(onOpenChange).not.toHaveBeenCalledWith(false);
 });

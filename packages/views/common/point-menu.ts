@@ -33,17 +33,22 @@ export function usePointAnchor(point: RowMenuState["point"]) {
 }
 
 /**
+ * Closes Base UI sends a menu its trigger did not press open, which it treats
+ * as hover-opened: the pointer leaving the trigger, and a submenu opening
+ * inside it (read as a sibling menu opening). A right-click menu is neither.
+ */
+const HOVER_MENU_CLOSE_REASONS = new Set(["trigger-hover", "sibling-open"]);
+
+/**
  * The state a menu moves to when Base UI asks it to open or close, or null to
- * stay put. Base UI treats a menu its trigger did not press open as
- * hover-opened and closes it when the pointer leaves the trigger; a
- * right-click menu never touched the trigger.
+ * stay put.
  */
 export function nextRowMenuState(
   menu: RowMenuState,
   open: boolean,
   reason: string,
 ): RowMenuState | null {
-  if (!open && menu.point && reason === "trigger-hover") return null;
+  if (!open && menu.point && HOVER_MENU_CLOSE_REASONS.has(reason)) return null;
   return open ? { open: true, point: null } : { open: false, point: menu.point };
 }
 
