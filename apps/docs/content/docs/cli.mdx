@@ -71,6 +71,8 @@ multica auth status
 multica daemon status
 ```
 
+To compare two caller environments, run `multica auth status --json` with the same executable, profile, and environment as the failing command. The JSON reports the CLI version and commit, selected profile and workspace, server origin, managed-task context, and token verification state. It omits token values, account details, and server response bodies. A token marked `verified` does not verify access to the selected workspace.
+
 If you only need to sign in again without overwriting other configuration, run `multica login`. On a machine without a browser, create a personal access token in the web settings first, then enter it with:
 
 ```bash

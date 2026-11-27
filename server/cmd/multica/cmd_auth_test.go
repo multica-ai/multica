@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -690,5 +691,109 @@ func TestRunAuthStatusDistinguishesVerificationFailure(t *testing.T) {
 				t.Fatalf("unexpected debug details in auth status output: %q", out)
 			}
 		})
+	}
+}
+
+func TestAuthStatusJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name, tokenState, verificationError                         string
+		status                                                      int
+		task, noServer, noToken, disconnect, noTaskRoot, wrongScope bool
+	}{
+		{name: "ordinary profile", tokenState: "verified", status: http.StatusOK},
+		{name: "managed task", tokenState: "verified", status: http.StatusOK, task: true},
+		{name: "rejected", tokenState: "rejected", verificationError: "auth_required", status: http.StatusUnauthorized},
+		{name: "server error", tokenState: "unverified", verificationError: "server_error", status: http.StatusServiceUnavailable},
+		{name: "unreachable", tokenState: "unverified", verificationError: "network_refused", disconnect: true},
+		{name: "missing server", tokenState: "unverified", verificationError: "server_unconfigured", noServer: true},
+		{name: "missing token", tokenState: "missing", noToken: true},
+		{name: "managed task missing token", tokenState: "missing", task: true, noToken: true},
+		{name: "managed task missing config", tokenState: "unverified", verificationError: "task_config_unavailable", task: true, noTaskRoot: true},
+		{name: "managed task with a personal token", tokenState: "invalid_scope", task: true, wrongScope: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const secret = "secret-token-material"
+			const workspace = "00000000-0000-4000-8000-000000000123"
+			token := "mul_" + secret
+			if tc.task {
+				if !tc.wrongScope {
+					token = "mat_" + secret
+				}
+				t.Setenv("MULTICA_TASK_ID", "test-task-id")
+				if !tc.noTaskRoot {
+					t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+				}
+			}
+			if tc.noToken {
+				token = ""
+			}
+			t.Setenv("MULTICA_TOKEN", token)
+			t.Setenv("MULTICA_WORKSPACE_ID", workspace)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.noToken || tc.noTaskRoot || tc.wrongScope || r.URL.Path != "/api/me" || r.Header.Get("Authorization") != "Bearer "+token {
+					t.Errorf("unexpected status request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				if tc.status == http.StatusOK {
+					fmt.Fprint(w, `{"name":"test user","email":"private@example.test"}`)
+				} else {
+					fmt.Fprint(w, "private server body")
+				}
+			}))
+			defer srv.Close()
+			if tc.disconnect {
+				srv.Close()
+			}
+			origin := srv.URL
+			if tc.noServer {
+				origin = ""
+			}
+			t.Setenv("MULTICA_SERVER_URL", origin)
+
+			var out bytes.Buffer
+			rootCmd.SetArgs([]string{"auth", "status", "--json", "--profile", "bridge-diagnostics"})
+			rootCmd.SetOut(&out)
+			t.Cleanup(func() {
+				rootCmd.SetArgs(nil)
+				rootCmd.SetOut(nil)
+				rootCmd.PersistentFlags().Set("profile", "")
+				rootCmd.PersistentFlags().Lookup("profile").Changed = false
+				if flag := authStatusCmd.Flags().Lookup("json"); flag != nil {
+					_ = authStatusCmd.Flags().Set("json", "false")
+					flag.Changed = false
+				}
+			})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatalf("invalid JSON status: %v", err)
+			}
+			for key, want := range map[string]any{
+				"version": version, "commit": commit, "profile": "bridge-diagnostics",
+				"server_origin": origin, "workspace_id": workspace,
+				"daemon_managed": tc.task, "token_state": tc.tokenState,
+			} {
+				if got[key] != want {
+					t.Errorf("%s = %v, want %v", key, got[key], want)
+				}
+			}
+			if code, _ := got["verification_error"].(string); code != tc.verificationError {
+				t.Errorf("verification_error = %q, want %q", code, tc.verificationError)
+			}
+			for _, forbidden := range []string{secret, "private@example.test", "private server body", "test-task-id"} {
+				if strings.Contains(out.String(), forbidden) {
+					t.Fatal("JSON status leaked private data")
+				}
+			}
+		})
+	}
+}
+
+func TestAuthStatusServerOriginOmitsURLCredentials(t *testing.T) {
+	got := authStatusServerOrigin("https://user:private@example.test:8443/private-path?token=private#private")
+	if got != "https://example.test:8443" {
+		t.Fatalf("server origin = %q", got)
 	}
 }

@@ -71,6 +71,8 @@ multica auth status
 multica daemon status
 ```
 
+要比较两个调用环境，请使用与失败命令相同的可执行文件、配置档案和环境运行 `multica auth status --json`。JSON 会报告 CLI 版本和提交、所选配置档案和工作区、服务器源、受管任务上下文，以及令牌验证状态。输出不包含令牌值、账号信息或服务器响应正文。令牌状态为 `verified` 不代表已验证对所选工作区的访问权限。
+
 如果只需要重新登录，不想覆盖其他配置，运行 `multica login`。没有浏览器的环境可以先在 Web 设置中创建个人访问令牌，再输入：
 
 ```bash
