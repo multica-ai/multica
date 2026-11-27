@@ -134,6 +134,20 @@ Multica stores the session identifier the tool returns. The next time work conti
 
 Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
+### Tuning context for long Codex runs
+
+Codex can replay a large context on each model request before reaching its automatic compaction threshold. Total input across a run can include cached tokens and can be much larger than any single request.
+
+To try earlier compaction and smaller tool results on one Codex agent, add these four entries under [Custom arguments](/agents-create#custom-arguments-and-mcp). The values are an example for a large context window.
+
+```json
+["-c", "model_auto_compact_token_limit=250000", "-c", "tool_output_token_limit=3000"]
+```
+
+The first setting lowers the threshold for automatic history compaction. The second limits how many tokens from each tool result Codex stores in history. If the agent compacts repeatedly or loses details it needs, raise the corresponding limit or remove its `-c` pair.
+
+The daemon reports `codex context compaction completed` when it receives a completed compaction item for the run. When Codex supplies usage data, the entry includes the last reported request's input, its cached input and the model context window. Compare the next request's input and the task outcome across similar runs when tuning the limits.
+
 ## MCP configuration
 
 Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.

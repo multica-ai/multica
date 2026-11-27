@@ -2463,11 +2463,20 @@ type codexClient struct {
 	// usageTotal is the last accepted cumulative v2 usage snapshot for the
 	// active turn. Comparing later snapshots against it makes replay and
 	// duplicate delivery idempotent while retaining multi-response turns.
-	usageTotal    codexRawTokenUsage
-	usageTotalSet bool
+	usageTotal       codexRawTokenUsage
+	usageTotalSet    bool
+	lastContextUsage codexContextUsage
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+}
+
+// codexContextUsage describes one request, independently of cumulative usage.
+type codexContextUsage struct {
+	turnID            string
+	inputTokens       int64
+	cachedInputTokens int64
+	modelWindow       int64
 }
 
 type codexAgentMessageStream struct {
@@ -3822,6 +3831,30 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	}
 
 	switch {
+	case method == "item/completed" && itemType == "contextCompaction":
+		if c.cfg.Logger != nil {
+			turnID, _ := params["turnId"].(string)
+			c.usageMu.Lock()
+			usage := c.lastContextUsage
+			c.usageMu.Unlock()
+			attrs := []slog.Attr{
+				slog.String("task_id", c.cfg.TaskID),
+				slog.String("thread_id", c.getThreadID()),
+				slog.String("turn_id", turnID),
+				slog.String("item_id", itemID),
+			}
+			if turnID != "" && usage.turnID == turnID {
+				if usage.inputTokens > 0 {
+					attrs = append(attrs, slog.Int64("last_input_tokens", usage.inputTokens),
+						slog.Int64("last_cached_input_tokens", usage.cachedInputTokens))
+				}
+				if usage.modelWindow > 0 {
+					attrs = append(attrs, slog.Int64("model_context_window", usage.modelWindow))
+				}
+			}
+			c.cfg.Logger.LogAttrs(context.Background(), slog.LevelInfo, "codex context compaction completed", attrs...)
+		}
+
 	case method == "item/agentMessage/delta" && itemType == "agentMessage":
 		// JSON-RPC framing remains authoritative: handleLine invokes us only
 		// after a whole newline-delimited JSON event parsed successfully. Stream
@@ -3948,6 +3981,12 @@ func (c *codexClient) updateThreadTokenUsage(params map[string]any) {
 	total := codexRawTokenUsageFromV2(totalMap)
 	delta := codexRawTokenUsageFromV2(last)
 	c.usageMu.Lock()
+	c.lastContextUsage = codexContextUsage{
+		turnID:            turnID,
+		inputTokens:       delta.InputTokens,
+		cachedInputTokens: delta.CachedInputTokens,
+		modelWindow:       codexInt64(tokenUsage, "modelContextWindow"),
+	}
 	if c.usageTotalSet {
 		delta = subtractCodexRawTokenUsage(total, c.usageTotal)
 	}

@@ -84,6 +84,7 @@ func (c *codexClient) attachTurnHooks(h codexTurnHooks) {
 
 	c.usageMu.Lock()
 	c.usage = TokenUsage{}
+	c.lastContextUsage = codexContextUsage{}
 	if !h.preserveUsageBaseline {
 		c.usageTotal = codexRawTokenUsage{}
 		c.usageTotalSet = false
