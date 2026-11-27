@@ -299,7 +299,8 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 type LocalWorktreeOutcome struct {
 	// Branch is the branch holding the task's work, or "" when the task made
 	// no changes at all (a read-only run) — in that case the branch is deleted
-	// so it never shows up in the user's `git branch` as an empty artifact.
+	// so it never remains in the user's `git branch` as an empty artifact.
+	// A retained checkout delays that deletion until its environment ends.
 	Branch string
 	// AutoCommitted is true when the agent left uncommitted changes that
 	// Finalize committed so they would survive the worktree's removal.
@@ -313,6 +314,9 @@ type LocalWorktreeOutcome struct {
 	// changes. The worktree at this path was intentionally left on disk because
 	// it is the only remaining copy of that work.
 	PreservedPath string
+	// RetainedWorktree is a completed delivery whose checkout is still in use.
+	// Releasing it removes only the checkout, without delivering a second time.
+	RetainedWorktree *FinalizedLocalWorktree
 }
 
 // PrepareLocalWorktree creates the task's worktree and replays the user's
@@ -569,6 +573,16 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 // for the user's changes. The surviving worktree stays registered in the
 // user's repo, so `git worktree list` points straight at it.
 func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, error) {
+	return w.finalize(logger, false)
+}
+
+// FinalizeForEnvironment delivers the task branch while leaving the checkout
+// registered for a declared environment. The caller owns its eventual release.
+func (w *LocalWorktree) FinalizeForEnvironment(logger *slog.Logger) (LocalWorktreeOutcome, error) {
+	return w.finalize(logger, true)
+}
+
+func (w *LocalWorktree) finalize(logger *slog.Logger, retain bool) (LocalWorktreeOutcome, error) {
 	if w == nil {
 		return LocalWorktreeOutcome{}, nil
 	}
@@ -751,6 +765,21 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 					"a new branch instead of continuing this one",
 				w.Branch, recErr, w.Path, w.GitRoot)
 		}
+	}
+
+	if retain {
+		retained, retainErr := w.retainedForEnvironment(tip, outcome.LeftoverRef)
+		if retainErr != nil {
+			outcome.PreservedPath = w.Path
+			return outcome, fmt.Errorf("could not record environment worktree cleanup; preserving %s: %w", w.Path, retainErr)
+		}
+		outcome.RetainedWorktree = retained
+		if dropped {
+			outcome.RetainedWorktree.EmptyBranch = w.Branch
+			outcome.RetainedWorktree.EmptyTip = tip
+			outcome.Branch = ""
+		}
+		return outcome, nil
 	}
 
 	if removeErr := removeLocalWorktreeDir(w.GitRoot, w.Path, logger); removeErr != nil {

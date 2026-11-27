@@ -226,6 +226,8 @@ Anyone with access to the issue can read an environment's logs. Multica redacts 
 
 While the daemon is down, it does not supervise anything; environments whose processes are still alive are picked up again when it restarts. A run directory with a running environment is not removed by the daemon's workspace cleanup until the environment stops.
 
+When a declared environment serves a managed Git worktree, successful run completion keeps that checkout and its installed dependencies available. The checkout is released after the last environment using it stops or expires. New uncommitted changes made after delivery keep the checkout available for recovery; ignored dependencies alone do not prevent cleanup.
+
 ## Let an agent write the file [#agent]
 
 Agents know the format: Multica's built-in platform skill, which every agent receives, documents `.multica/environments.toml` and how to verify one. Ask in an issue, for example:

@@ -8927,9 +8927,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		defer d.markActiveEnvRoot(env.RootDir)()
 	}
 	// Finalize the worktree on EVERY exit path, success or failure: commit
-	// whatever the agent left uncommitted, then unregister the worktree from
-	// the user's repo. Deferred against the named return so a task that fails
-	// mid-run still hands back the branch holding its partial work instead of
+	// whatever the agent left uncommitted, then unregister the worktree once no
+	// declared environment needs it. Deferred against the named return so a
+	// task that fails mid-run still hands back the branch holding its partial work instead of
 	// letting `git worktree remove --force` delete it. A failing task is
 	// exactly when the user most wants to see how far the agent got.
 	//
@@ -8944,13 +8944,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if taskResult.EnvRoot == "" {
 				taskResult.EnvRoot = env.RootDir
 			}
-			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
+			outcome, finalizeErr := d.environments.finalizeWorktree(env.LocalWorktree, taskLog)
 			if outcome.Branch != "" {
 				taskResult.BranchName = outcome.Branch
 			}
 			if finalizeErr == nil {
 				// The configured local_directory becomes authoritative only after
-				// Finalize confirms the disposable task worktree is actually gone.
+				// Finalize confirms branch delivery. A declared environment may
+				// still retain the disposable checkout until it ends.
 				if localAssignment != nil {
 					taskResult.DurableWorkDir = localAssignment.AbsPath
 				}

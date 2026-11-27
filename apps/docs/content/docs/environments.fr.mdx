@@ -226,6 +226,8 @@ Toute personne ayant accès à la tâche peut lire les journaux d'un environneme
 
 Pendant que le daemon est arrêté, rien n'est supervisé ; au redémarrage, il reprend les environnements dont les processus tournent encore. Un répertoire d'exécution où tourne un environnement n'est pas supprimé par le nettoyage des espaces de travail du daemon tant que l'environnement n'est pas arrêté.
 
+Lorsqu’un environnement déclaré utilise un arbre de travail Git géré, la fin réussie de l’exécution conserve ce checkout et ses dépendances installées. Le checkout est libéré lorsque le dernier environnement qui l’utilise s’arrête ou expire. De nouvelles modifications non commitées après la livraison conservent le checkout pour permettre leur récupération ; les dépendances ignorées par Git ne bloquent pas le nettoyage.
+
 ## Laisser un agent écrire le fichier [#agent]
 
 Les agents connaissent le format : la compétence de plateforme intégrée à Multica, que reçoit chaque agent, documente `.multica/environments.toml` et la façon de le vérifier. Demandez-le dans une tâche, par exemple :
