@@ -83,7 +83,6 @@ func sendRestrictedToolMessage(b realtime.Broadcaster, e events.Event, payload p
 		}
 	}
 	realtime.M.RecordEvent(e.Type)
-	b.BroadcastToWorkspace(e.WorkspaceID, stripped)
 	readers := make([]string, 0, len(e.ToolDetailReaders))
 	for userID, ok := range e.ToolDetailReaders {
 		if ok {
@@ -91,9 +90,12 @@ func sendRestrictedToolMessage(b realtime.Broadcaster, e events.Event, payload p
 		}
 	}
 	sort.Strings(readers)
+	// The full frames go first: a client that keeps the first copy of a seq,
+	// as clients built before details_hidden do, then keeps the full one.
 	for _, userID := range readers {
 		toMember(userID, full)
 	}
+	b.BroadcastToWorkspace(e.WorkspaceID, stripped)
 }
 
 func taskMessageFrame(e events.Event, payload protocol.TaskMessagePayload) ([]byte, error) {

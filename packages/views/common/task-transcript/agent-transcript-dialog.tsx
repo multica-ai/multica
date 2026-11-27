@@ -1991,6 +1991,7 @@ function StepInspector({
 
   const call = isCallStep(step) ? step : null;
   const message = call ? null : (step as TraceMessageStep);
+  const detailsHidden = call !== null && callDetailsHidden(call);
 
   const handleCopy = useCallback(() => {
     const parts: string[] = [];
@@ -2036,16 +2037,18 @@ function StepInspector({
             </>
           )}
         </span>
-        <IconButton
-          variant="ghost"
-          size="icon-sm"
-          onClick={handleCopy}
-          label={t(($) => $.transcript.copy_step)}
-          tooltipSide="bottom"
-          className="shrink-0 text-muted-foreground"
-        >
-          <CopyCheckIcon copied={copied} />
-        </IconButton>
+        {!detailsHidden && (
+          <IconButton
+            variant="ghost"
+            size="icon-sm"
+            onClick={handleCopy}
+            label={t(($) => $.transcript.copy_step)}
+            tooltipSide="bottom"
+            className="shrink-0 text-muted-foreground"
+          >
+            <CopyCheckIcon copied={copied} />
+          </IconButton>
+        )}
         <IconButton
           variant="ghost"
           size="icon-sm"
@@ -2064,7 +2067,7 @@ function StepInspector({
           animate={{ opacity: 1 }}
           transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
         >
-          {call && callDetailsHidden(call) ? (
+          {detailsHidden ? (
             <div className="flex flex-col items-center gap-1.5 px-6 py-12 text-center">
               <Lock aria-hidden className="mb-1 h-4 w-4 text-faint-foreground" />
               <p className="text-caption font-medium text-foreground">

@@ -1306,6 +1306,7 @@ describe("restricted tool details", () => {
     expect(screen.getByText("Tool input and output are hidden")).toBeInTheDocument();
     expect(screen.getByText("Only this agent's owner and workspace admins can see them.")).toBeInTheDocument();
     expect(screen.queryByText("Input")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy this step" })).not.toBeInTheDocument();
   });
 
   it("marks a folded group of withheld calls as hidden", () => {

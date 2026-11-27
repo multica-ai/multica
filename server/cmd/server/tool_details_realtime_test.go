@@ -119,6 +119,42 @@ func TestRestrictedToolCallReachesTheWorkspaceWithoutItsDetails(t *testing.T) {
 	}
 }
 
+// sendOrder records which kind of frame went out in what order.
+type sendOrder struct {
+	*fakeBroadcaster
+	sent []string
+}
+
+func (s *sendOrder) BroadcastToScope(scopeType, scopeID string, message []byte) {
+	s.sent = append(s.sent, scopeType)
+	s.fakeBroadcaster.BroadcastToScope(scopeType, scopeID, message)
+}
+
+func (s *sendOrder) BroadcastToWorkspace(workspaceID string, message []byte) {
+	s.sent = append(s.sent, "workspace")
+	s.fakeBroadcaster.BroadcastToWorkspace(workspaceID, message)
+}
+
+// Clients built before details_hidden keep the first copy of a seq, so a
+// reader must get the full call before the stripped one.
+func TestRestrictedToolCallReachesReadersBeforeTheWorkspace(t *testing.T) {
+	bus := events.New()
+	b := &sendOrder{fakeBroadcaster: &fakeBroadcaster{}}
+	registerListeners(bus, b)
+
+	bus.Publish(restrictedToolEvent(""))
+
+	want := []string{realtime.ScopeWorkspaceMember, realtime.ScopeWorkspaceMember, "workspace"}
+	if len(b.sent) != len(want) {
+		t.Fatalf("sent %v, want %v", b.sent, want)
+	}
+	for i := range want {
+		if b.sent[i] != want[i] {
+			t.Fatalf("sent %v, want %v", b.sent, want)
+		}
+	}
+}
+
 func TestRestrictedToolCallInAPrivateProjectGoesToEachMemberOnce(t *testing.T) {
 	bus := events.New()
 	fb := &fakeBroadcaster{}

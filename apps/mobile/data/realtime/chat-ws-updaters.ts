@@ -365,7 +365,10 @@ export function reconcileAcceptedChatSend(
 /**
  * Append a `task:message` payload into the per-task timeline cache.
  *
- * - De-dupes on `seq` (server may re-emit on flaky network).
+ * - De-dupes on `seq` (server may re-emit on flaky network). A reader of a
+ *   restricted agent's tool details gets both the stripped and the full copy
+ *   of a tool call, so a full copy replaces a `details_hidden` one, as
+ *   `mergeTaskMessagesBySeq` does on web.
  * - Sorts by `seq` ASC after insert so reordered late-arriving rows still
  *   render in execution order.
  * - Creates the cache entry on first event (empty default), so the timeline
@@ -384,8 +387,10 @@ export function appendTaskMessage(
   qc.setQueryData<TaskMessagePayload[]>(
     chatKeys.taskMessages(payload.task_id),
     (old = []) => {
-      if (old.some((m) => m.seq === payload.seq)) return old;
-      return [...old, payload].sort((a, b) => a.seq - b.seq);
+      const index = old.findIndex((m) => m.seq === payload.seq);
+      if (index === -1) return [...old, payload].sort((a, b) => a.seq - b.seq);
+      if (!old[index]!.details_hidden || payload.details_hidden) return old;
+      return old.map((m, i) => (i === index ? payload : m));
     },
   );
 }

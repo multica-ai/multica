@@ -5,9 +5,11 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatQuickActionsPayload,
+  TaskMessagePayload,
 } from "@multica/core/types";
 
 import {
+  appendTaskMessage,
   applyChatDoneToCache,
   applyChatQuickActionsToCache,
   promotePendingTaskToRunning,
@@ -616,5 +618,38 @@ describe("reconcileAcceptedChatSend", () => {
       status: "queued",
       queued_tasks: [],
     });
+  });
+});
+
+describe("appendTaskMessage", () => {
+  const call = (over: Partial<TaskMessagePayload> = {}): TaskMessagePayload => ({
+    task_id: "task-1",
+    issue_id: "issue-1",
+    seq: 2,
+    type: "tool_use",
+    tool: "Bash",
+    input: { command: "ls" },
+    ...over,
+  });
+  const hidden = call({ input: undefined, details_hidden: true });
+  const cached = (qc: QueryClient) => qc.getQueryData<TaskMessagePayload[]>(chatKeys.taskMessages("task-1"));
+
+  it("keeps the full copy of a tool call whichever copy arrives first", () => {
+    for (const order of [[hidden, call()], [call(), hidden]]) {
+      const qc = new QueryClient();
+      for (const payload of order) appendTaskMessage(qc, payload);
+      expect(cached(qc)).toEqual([call()]);
+    }
+  });
+
+  it("ignores a repeat of a seq it already has", () => {
+    const qc = new QueryClient();
+    appendTaskMessage(qc, call());
+    appendTaskMessage(qc, call({ input: { command: "pwd" } }));
+    appendTaskMessage(qc, call({ seq: 1, type: "text", tool: undefined, input: undefined, content: "hi" }));
+    expect(cached(qc)?.map((m) => [m.seq, m.input?.command ?? m.content])).toEqual([
+      [1, "hi"],
+      [2, "ls"],
+    ]);
   });
 });
