@@ -57,6 +57,21 @@ Par défaut, le daemon s'exécute en arrière-plan. Commandes courantes :
 
 Pour placer les répertoires de travail des exécutions sur un autre disque, enregistrez une racine pour le profil courant avec `multica config set workspaces_root <path>`, ou passez `--workspaces-root <path>` à `daemon start` ou `daemon restart`. L'option prime sur `MULTICA_WORKSPACES_ROOT`, qui prime elle-même sur la configuration du profil. Les répertoires d'exécution existants ne sont pas déplacés lorsque la racine change.
 
+### Répertoire local par défaut d’un agent [#agent-default-directory]
+
+Définissez `MULTICA_AGENT_LOCAL_DIRECTORIES` dans l’environnement de démarrage du daemon pour associer les UUID complets des agents à des chemins absolus sur cet ordinateur :
+
+```bash
+export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
+multica daemon restart
+```
+
+La correspondance s’applique aux exécutions de tâches, de chats, de création rapide et d’automatisations sans liaison `local_directory` de projet. Les liaisons de projet restent prioritaires, y compris celles d’un autre daemon. Les agents coordinateurs conservent leur répertoire de travail géré. Les agents non configurés gardent le comportement existant.
+
+Le flux `in_place` existant rend accessibles les instructions, les skills et les réglages locaux des outils ; l’agent peut modifier les fichiers du répertoire. Les exécutions de tâches, de création rapide et d’automatisations partagent le verrou de chemin existant ; les tours de chat restent exemptés. Le nettoyage ne supprime pas le répertoire utilisateur.
+
+Un JSON incorrect, un UUID d’agent invalide ou un chemin vide ou relatif empêche le démarrage du daemon. Le répertoire doit exister et être accessible en écriture au début de l’exécution. Redémarrez le daemon après avoir modifié son environnement de démarrage. Cette correspondance n’est pas un réglage d’agent côté serveur.
+
 Au démarrage, le daemon détecte les outils de codage IA pris en charge présents dans le `PATH` et enregistre des runtimes pour les espaces de travail auxquels vous êtes autorisé à vous connecter. Si vous venez d'installer un outil ou de vous y connecter, redémarrez le daemon pour qu'il le détecte.
 
 Pour démarrer, le daemon a besoin de détecter au moins un outil de codage IA intégré pris en charge. Les méthodes d'installation et les noms des exécutables figurent dans [Installer les outils de codage IA](/install-agent-runtime).
@@ -162,7 +177,7 @@ Cursor enregistre les connexions OAuth MCP par répertoire de projet, et chaque 
 
 Lorsque l'agent a une configuration MCP, chaque exécution reçoit son propre répertoire de données Cursor, et le `mcp-auth.json` de l'exécution qui s'y trouve est cette copie. Lorsqu'il n'en a pas, l'exécution utilise votre propre répertoire de données Cursor (`~/.cursor`, ou le `CURSOR_DATA_DIR` du daemon) et les serveurs MCP qui y sont configurés ; le daemon remplace seulement par une copie du fichier de l'agent le `mcp-auth.json` que Cursor conserve sous `projects/` pour le répertoire de l'exécution. Cette copie est supprimée lors du nettoyage du répertoire de l'exécution.
 
-Sans configuration MCP, deux sortes d'exécutions ne reçoivent pas de copie, car leur projet Cursor est aussi le vôtre et la copie remplacerait votre propre connexion : les exécutions qui travaillent sur place dans le répertoire local d'un projet, et celles dont le répertoire se trouve dans un dépôt git qui l'englobe de l'extérieur, comme un dépôt de dotfiles dans votre dossier personnel, que Cursor traite alors comme le projet. Ces exécutions utilisent la connexion que Cursor détient déjà pour ce répertoire, et leur transcription ne donne pas de commande de connexion ; connectez-vous en lançant vous-même `cursor-agent mcp login <server>` dans ce répertoire.
+Sans configuration MCP, deux sortes d'exécutions ne reçoivent pas de copie, car leur projet Cursor est aussi le vôtre et la copie remplacerait votre propre connexion : les exécutions qui travaillent sur place dans un répertoire local, et celles dont le répertoire se trouve dans un dépôt git qui l'englobe de l'extérieur, comme un dépôt de dotfiles dans votre dossier personnel, que Cursor traite alors comme le projet. Ces exécutions utilisent la connexion que Cursor détient déjà pour ce répertoire, et leur transcription ne donne pas de commande de connexion ; connectez-vous en lançant vous-même `cursor-agent mcp login <server>` dans ce répertoire.
 
 Si un serveur demande encore une connexion, la transcription de l'exécution indique lequel et donne la commande à lancer sur l'ordinateur du runtime. Pour un agent avec une configuration MCP, par exemple :
 
@@ -201,9 +216,9 @@ Le tableau décrit la suppression complète des répertoires gérés par Multica
 
 Tant que la tâche reste ouverte, seul le contenu régénérable est supprimé 12 heures après la fin d'une exécution : `node_modules`, `.next`, `.turbo` et les chemins exacts `.sandbox-bin`, `.tmp/plugins`, `.tmp/marketplaces`, `cache/remote_plugin_catalog` sous `codex-home`. Les autres fichiers, dont les bases SQLite et leurs WAL, sont conservés. Les répertoires d'exécution de tâches gérés sont aussi supprimés entièrement 14 jours après la fin par défaut, que la tâche soit fermée ou non.
 
-Pour un chat non archivé dans un répertoire de travail géré par Multica, le daemon applique le même nettoyage régénérable, par défaut 12 heures après la dernière exécution. Il mémorise le nettoyage réussi et évite les parcours répétés pour cette exécution. Une exécution ultérieure devient éligible après le même délai. Pour un chat directement dans le répertoire local d'un projet, seuls les chemins exacts de cache Codex ci-dessus sont nettoyés.
+Pour un chat non archivé dans un répertoire de travail géré par Multica, le daemon applique le même nettoyage régénérable, par défaut 12 heures après la dernière exécution. Il mémorise le nettoyage réussi et évite les parcours répétés pour cette exécution. Une exécution ultérieure devient éligible après le même délai. Pour un chat directement dans le répertoire local, seuls les chemins exacts de cache Codex ci-dessus sont nettoyés.
 
-Lors d’une exécution sur place, le répertoire de travail est le répertoire local du projet. Le daemon le laisse intact pendant le nettoyage. Le répertoire de suivi conserve les journaux du daemon et `output/`. Après `MULTICA_GC_COMPLETED_TASK_TTL` (14 jours par défaut), il supprime tout le `codex-home` si les historiques de session sont stockés hors du répertoire de suivi. Les homes contenant l'unique historique local sont conservés. La valeur `0` désactive cette expiration. Une exécution ultérieure recrée le home et reconnecte le stockage de conversation ; celui-ci reste soumis à sa propre politique de conservation ci-dessous.
+Le daemon ne supprime jamais le répertoire local. Le répertoire de suivi conserve les journaux du daemon et `output/`. Après `MULTICA_GC_COMPLETED_TASK_TTL` (14 jours par défaut), il supprime tout le `codex-home` si les historiques de session sont stockés hors du répertoire de suivi. Les homes contenant l'unique historique local sont conservés. La valeur `0` désactive cette expiration. Une exécution ultérieure recrée le home et reconnecte le stockage de conversation ; celui-ci reste soumis à sa propre politique de conservation ci-dessous.
 
 Le répertoire de suivi peut donc encore apparaître dans `multica daemon disk-usage --by-task` après la fin de l’exécution. Le délai des tâches terminées ne supprime ni le répertoire de suivi ni les répertoires personnels d’autres fournisseurs, comme un `hermes-home` conservé.
 

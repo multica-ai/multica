@@ -44,9 +44,10 @@ type localDirectoryRef struct {
 // absolute path; the path mutex keys on it so two different routes to the
 // same directory are serialised.
 type localDirectoryAssignment struct {
-	Ref      localDirectoryRef
-	AbsPath  string // user-provided path, cleaned but not symlink-resolved
-	RealPath string // canonical key for the path mutex
+	Ref          localDirectoryRef
+	AbsPath      string // user-provided path, cleaned but not symlink-resolved
+	RealPath     string // canonical key for the path mutex
+	AgentDefault bool
 }
 
 // UsesWorktree reports whether this assignment runs each task in its own git
@@ -104,7 +105,8 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 }
 
 // localDirectoryAssignmentForTask returns the local_directory assignment a task
-// should execute inside. Squad-leader tasks are coordinators: they may create
+// should execute inside. Project bindings take precedence over machine-local
+// agent defaults. Squad-leader tasks are coordinators: they may create
 // child issues or comments, but should not bind to the user's repo worktree or
 // hold the path mutex while downstream workers are ready to write.
 //
@@ -117,11 +119,32 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 // turn queue behind a 20-minute build (issue #7344), and answering "no
 // assignment" there to free the lock would have silently moved chat out of the
 // user's directory as well.
-func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
+func localDirectoryAssignmentForTask(task Task, daemonID string, defaults map[string]string) (*localDirectoryAssignment, error) {
 	if task.IsLeaderTask {
 		return nil, nil
 	}
-	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	if err != nil || assignment != nil {
+		return assignment, err
+	}
+	// An explicit project binding still owns the choice on another device.
+	for _, resource := range task.ProjectResources {
+		if resource.ResourceType == localDirectoryResourceType {
+			return nil, nil
+		}
+	}
+	path, configured := defaults[task.AgentID]
+	if !configured || daemonID == "" {
+		return nil, nil
+	}
+	assignment, err = resolveLocalDirectoryRef(localDirectoryRef{
+		LocalPath: path, DaemonID: daemonID, ExecutionMode: localDirectoryModeInPlace,
+	})
+	if err != nil {
+		return nil, err
+	}
+	assignment.AgentDefault = true
+	return assignment, nil
 }
 
 // localDirectoryLockExempt reports whether a task may run inside an in_place
@@ -195,21 +218,25 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 				strings.TrimSpace(ref.LocalPath),
 			)
 		}
-		absPath, err := normalizeLocalPath(ref.LocalPath)
+		var err error
+		match, err = resolveLocalDirectoryRef(ref)
 		if err != nil {
 			return nil, err
-		}
-		realPath, err := resolveRealPath(absPath)
-		if err != nil {
-			return nil, err
-		}
-		match = &localDirectoryAssignment{
-			Ref:      ref,
-			AbsPath:  absPath,
-			RealPath: realPath,
 		}
 	}
 	return match, nil
+}
+
+func resolveLocalDirectoryRef(ref localDirectoryRef) (*localDirectoryAssignment, error) {
+	absPath, err := normalizeLocalPath(ref.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	realPath, err := resolveRealPath(absPath)
+	if err != nil {
+		return nil, err
+	}
+	return &localDirectoryAssignment{Ref: ref, AbsPath: absPath, RealPath: realPath}, nil
 }
 
 // normalizeLocalPath strips whitespace and resolves the path to an absolute
