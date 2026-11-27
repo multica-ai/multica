@@ -43,6 +43,7 @@ import {
   useIssuePeekActions,
   useIssuePeekLinkProps,
 } from "../surface/peek-context";
+import { useIsIssueCursor } from "../surface/issue-cursor";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -212,8 +213,8 @@ export const BoardCardContent = memo(function BoardCardContent({
       data-assignee-type={issue.assignee_type ?? "none"}
       className={
         framed
-          ? "rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50"
-          : "rounded-t-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] transition-colors group-hover/card:bg-board-card-hover group-data-[peeked]/card:bg-board-card-hover"
+          ? "rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50 group-data-[cursor]/card:border-foreground/15 group-data-[cursor]/card:bg-board-card-hover group-data-[cursor]/card:ring-1 group-data-[cursor]/card:ring-ring/60"
+          : "rounded-t-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] transition-colors group-hover/card:bg-board-card-hover group-data-[peeked]/card:bg-board-card-hover group-data-[cursor]/card:bg-board-card-hover"
       }
     >
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
@@ -390,6 +391,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   const p = useWorkspacePaths();
   const peek = useIssuePeekActions();
   const peeked = useIsIssuePeeked(issue.id);
+  const cursor = useIsIssueCursor(issue.id);
   const peekLinkProps = useIssuePeekLinkProps(issue);
   const {
     attributes,
@@ -435,6 +437,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         data-board-card=""
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked && !nested ? "" : undefined}
+        data-cursor={cursor && !nested ? "" : undefined}
         {...attributes}
         {...listeners}
         className={`${nested ? "" : "group/card"} transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}
@@ -458,7 +461,11 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
           <div className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card shadow-[var(--board-card-shadow,var(--surface-shadow))]">
             {/* Hover and peek styling stay on this card's own section, so
                 hovering a nested sub-issue does not light up the parent. */}
-            <div className="group/card" data-peeked={peeked ? "" : undefined}>
+            <div
+              className="group/card"
+              data-peeked={peeked ? "" : undefined}
+              data-cursor={cursor ? "" : undefined}
+            >
               {link}
             </div>
             {/* A right-click belongs to the innermost card; stop it here so

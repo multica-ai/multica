@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { createShortcutChord } from "@multica/core/shortcuts";
+import { createShortcutChord, createShortcutSequence } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "./shortcut-keycaps";
 
 describe("ShortcutKeycaps", () => {
@@ -101,5 +101,16 @@ describe("ShortcutKeycaps", () => {
 
     expect(screen.getByRole("img", { name: "Esc" })).toBeInTheDocument();
     expect(container.querySelector("[title='Esc']")).toHaveTextContent("Esc");
+  });
+
+  it("renders a sequence as one keycap per key, with an optional separator", () => {
+    const sequence = createShortcutSequence("G", createShortcutChord("I"));
+    const { container, rerender } = render(<ShortcutKeycaps shortcut={sequence} platform="macos" thenLabel="then" />);
+
+    expect(screen.getByRole("img", { name: "G I" })).toHaveTextContent("GthenI");
+    expect(container.querySelectorAll("[data-slot='kbd']")).toHaveLength(2);
+
+    rerender(<ShortcutKeycaps shortcut={sequence} platform="macos" />);
+    expect(screen.getByRole("img", { name: "G I" })).toHaveTextContent("GI");
   });
 });

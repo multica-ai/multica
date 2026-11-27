@@ -131,6 +131,7 @@
     "cancel_dialog_confirm": "Cancel all runs",
     "archive_dialog_title": "Archive \"{{name}}\"?",
     "archive_dialog_description": "The agent won't be assignable or mentionable, and any active runs will be cancelled. All history is preserved and you can restore it later.",
+    "archive_dialog_mika_note": " The \"Start with Mika\" prompt won't appear again until Mika is restored.",
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive",
     "set_access_applies_to_one": "Applies to {{count}} agent.",
@@ -963,6 +964,14 @@
     "search_placeholder": "Search this run...",
     "no_matches": "No steps match this search.",
     "more_actions": "More",
+    "purge_log": "Clear run log",
+    "purge_confirm_title": "Clear this run's log?",
+    "purge_confirm_body": "Every step, tool input and output, and the agent's final output are deleted for everyone. The run's status, timing and usage stay. This can't be undone.",
+    "purge_confirm_action": "Clear log",
+    "purge_cancel": "Cancel",
+    "purge_done": "Run log cleared",
+    "purge_failed": "Couldn't clear the run log",
+    "purged_by": "Run log cleared by {{name}} · {{time}}",
     "kind_text": "Agent",
     "kind_tool": "Tool",
     "kind_thinking": "Thinking",
@@ -1139,5 +1148,9 @@
     "new_app": "New app for this agent",
     "adds_app_note": "Answering adds {{app}} to {{agent}} for future runs.",
     "add_to_agent": "Add {{app}} to {{agent}}"
+  },
+  "lifecycle": {
+    "danger_zone": "Danger zone",
+    "restore_label": "Restore agent"
   }
 }

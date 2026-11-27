@@ -13,6 +13,8 @@ job starts. The vulnerability scan is fail-closed by default.
 Release notes use GoReleaser's GitHub changelog to credit commit authors and
 recognized co-authors between the previous and current tags. Keep all commits,
 including documentation, tests, and chores, so their authors are credited too.
+Squash commits take their message from the PR description, so co-authors are
+recognized from the `Co-authored-by:` lines at its end.
 Commit-subject `@` characters are separated from the following text with an HTML
 comment; only the generated author mentions populate GitHub's Contributors list.
 

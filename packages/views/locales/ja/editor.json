@@ -255,5 +255,9 @@
     "turn_into": "変換",
     "duplicate": "複製",
     "delete": "削除"
+  },
+  "plain_text": {
+    "notice": "長すぎるため、プレーンテキストで表示しています。",
+    "download": ".txt でダウンロード"
   }
 }

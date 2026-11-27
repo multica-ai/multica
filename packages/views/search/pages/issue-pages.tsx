@@ -16,6 +16,7 @@ import {
 } from "@multica/core/issue-workflows";
 import { issueLabelsOptions, labelListOptions } from "@multica/core/labels/queries";
 import { useAttachLabelToIssue, useDetachLabel } from "@multica/core/labels/mutations";
+import { takeInboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useModalStore } from "@multica/core/modals";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { selectableProjects } from "@multica/core/projects";
@@ -28,7 +29,7 @@ import { useIssueStatusOptions } from "../../issues/utils/status-options";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { HighlightText } from "../highlight-text";
-import { useIssueTargetWriter, targetIssues } from "../issue-target";
+import { noteInboxBarActionFromPalette, useIssueTargetWriter, targetIssues } from "../issue-target";
 import { scoreRow, scoreText } from "../matching";
 import { usePalette } from "../palette-context";
 import { PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowCheck, RowHint } from "../rows";
@@ -110,6 +111,7 @@ export function IssueStatusPage({ target, query }: { target: IssueTarget; query:
       });
       return;
     }
+    if (single) noteInboxBarActionFromPalette(single.id, { type: "status", status });
     writer.apply({ status });
   };
 
@@ -209,6 +211,12 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
 
   const select = (type: "member" | "agent" | "squad" | null, id: string | null) => {
     palette.close();
+    if (target.kind === "single") {
+      noteInboxBarActionFromPalette(target.issue.id, {
+        type: "assignee",
+        assignee: type && id ? { type, id } : null,
+      });
+    }
     writer.assign(type, id);
   };
 
@@ -556,7 +564,8 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
             value={`quick-action:${action.id}`}
             onSelect={() => {
               palette.close();
-              run(action);
+              noteInboxBarActionFromPalette(issue.id, { type: "quick_action", name: action.name });
+              void run(action).then((posted) => posted || takeInboxBarAction(issue.id));
             }}
             className={ROW_CLASS}
           >

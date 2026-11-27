@@ -610,7 +610,7 @@ function QuickActionsSub({ issueId, primitives: P }: { issueId: string; primitiv
       </P.SubTrigger>
       <P.SubContent className="max-w-80">
         {quickActions.map((action) => (
-          <P.Item key={action.id} onClick={() => run(action)}>
+          <P.Item key={action.id} onClick={() => void run(action)}>
             <Zap className="h-3.5 w-3.5" />
             <span className="min-w-0 flex-1 truncate">{action.name}</span>
             {action.target_name && (

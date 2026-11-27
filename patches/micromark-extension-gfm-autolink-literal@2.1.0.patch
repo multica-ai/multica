@@ -1,0 +1,117 @@
+diff --git a/dev/index.d.ts b/dev/index.d.ts
+index 36f53b55bf7d7494d1ed6a8b21564825e385142f..f98ac643bf744ad71c006205b33d4c6230cfa8a6 100644
+--- a/dev/index.d.ts
++++ b/dev/index.d.ts
+@@ -6,10 +6,14 @@ export {gfmAutolinkLiteralHtml} from './lib/html.js'
+  */
+ declare module 'micromark-util-types' {
+   /**
+-   * Augment token with a field to improve performance.
++   * Augment token with fields to improve performance.
+    */
+   interface Token {
+     _gfmAutolinkLiteralWalkedInto?: boolean
++    _gfmAutolinkLiteralSkipTo?: {
++      index: number
++      token: Token
++    }
+   }
+ 
+   /**
+diff --git a/dev/lib/syntax.js b/dev/lib/syntax.js
+index 904e27200ae4980183beda525d33feef70c2e7f7..e37da95b897fcc8d1c6a8bdbc8a5b79462a92812 100644
+--- a/dev/lib/syntax.js
++++ b/dev/lib/syntax.js
+@@ -971,12 +971,32 @@ function previousUnbalanced(events) {
+       result = false
+       break
+     }
++
++    // Resume at a previously found unbalanced label if that event still holds
++    // the same token. `_balanced` is not enough: a label that becomes a link
++    // keeps `_balanced === false` while its events are spliced out.
++    const skip = token._gfmAutolinkLiteralSkipTo
++    if (
++      skip !== undefined &&
++      skip.index < index &&
++      events[skip.index] !== undefined &&
++      events[skip.index][1] === skip.token
++    ) {
++      index = skip.index + 1
++    }
+   }
+ 
+-  if (events.length > 0 && !result) {
+-    // Mark the last token as “walked into” w/o finding
+-    // anything.
+-    events[events.length - 1][1]._gfmAutolinkLiteralWalkedInto = true
++  if (events.length > 0) {
++    if (!result) {
++      // Mark the last token as “walked into” w/o finding
++      // anything.
++      events[events.length - 1][1]._gfmAutolinkLiteralWalkedInto = true
++    } else if (index >= 0) {
++      events[events.length - 1][1]._gfmAutolinkLiteralSkipTo = {
++        index,
++        token: events[index][1]
++      }
++    }
+   }
+ 
+   return result
+diff --git a/index.d.ts b/index.d.ts
+index 36f53b55bf7d7494d1ed6a8b21564825e385142f..f98ac643bf744ad71c006205b33d4c6230cfa8a6 100644
+--- a/index.d.ts
++++ b/index.d.ts
+@@ -6,10 +6,14 @@ export {gfmAutolinkLiteralHtml} from './lib/html.js'
+  */
+ declare module 'micromark-util-types' {
+   /**
+-   * Augment token with a field to improve performance.
++   * Augment token with fields to improve performance.
+    */
+   interface Token {
+     _gfmAutolinkLiteralWalkedInto?: boolean
++    _gfmAutolinkLiteralSkipTo?: {
++      index: number
++      token: Token
++    }
+   }
+ 
+   /**
+diff --git a/lib/syntax.js b/lib/syntax.js
+index dffbaf15146b34d3b3f634286629ccb148866f4c..d8b39e6e2649198c91ca614742e55aa0b134565a 100644
+--- a/lib/syntax.js
++++ b/lib/syntax.js
+@@ -844,11 +844,26 @@ function previousUnbalanced(events) {
+       result = false;
+       break;
+     }
++
++    // Resume at a previously found unbalanced label if that event still holds
++    // the same token. `_balanced` is not enough: a label that becomes a link
++    // keeps `_balanced === false` while its events are spliced out.
++    const skip = token._gfmAutolinkLiteralSkipTo;
++    if (skip !== undefined && skip.index < index && events[skip.index] !== undefined && events[skip.index][1] === skip.token) {
++      index = skip.index + 1;
++    }
+   }
+-  if (events.length > 0 && !result) {
+-    // Mark the last token as “walked into” w/o finding
+-    // anything.
+-    events[events.length - 1][1]._gfmAutolinkLiteralWalkedInto = true;
++  if (events.length > 0) {
++    if (!result) {
++      // Mark the last token as “walked into” w/o finding
++      // anything.
++      events[events.length - 1][1]._gfmAutolinkLiteralWalkedInto = true;
++    } else if (index >= 0) {
++      events[events.length - 1][1]._gfmAutolinkLiteralSkipTo = {
++        index,
++        token: events[index][1]
++      };
++    }
+   }
+   return result;
+ }
+\ No newline at end of file

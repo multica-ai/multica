@@ -69,6 +69,10 @@ WHERE context->>'wakeup_id'= @wakeup_id::text AND status IN ('queued','deferred'
 -- A system rule only rests while its issue is closed and resumes on reopen.
 UPDATE issue_wakeup SET enabled=false,disabled_at=clock_timestamp(),updated_at=clock_timestamp()
 WHERE issue_id= @issue_id AND disabled_at IS NULL AND system_rule IS NULL;
+-- name: DisableIssueWakeupsByCreator :execrows
+-- A departing member's wakeups would keep waking agents on their behalf.
+UPDATE issue_wakeup SET enabled=false,disabled_at=clock_timestamp(),updated_at=clock_timestamp()
+WHERE workspace_id= @workspace_id AND created_by= @created_by AND disabled_at IS NULL AND system_rule IS NULL;
 -- name: CancelUnstartedIssueWakeupTasks :many
 UPDATE agent_task_queue SET status='cancelled',completed_at=now(),error='Issue closed; wakeup disabled'
 WHERE issue_id= @issue_id AND context->>'wakeup_id' IS NOT NULL AND status IN ('queued','deferred') AND started_at IS NULL RETURNING *;
@@ -332,3 +336,10 @@ WHERE id= @id AND status='dispatched' AND dispatched_at= @dispatched_at RETURNIN
 -- not finished: the run that made a change still knows about it.
 SELECT count(*) FROM agent_task_queue WHERE id=ANY(@ids::uuid[]) AND agent_id= @agent_id AND issue_id= @issue_id
  AND status IN ('dispatched','running','waiting_local_directory');
+
+-- name: DetachWakeupsFromComments :exec
+-- A wakeup outlives the comment it was scheduled from. Its runs carry that
+-- comment as their trigger, which must exist, so a deleted comment is dropped
+-- from the rule instead.
+UPDATE issue_wakeup SET parent_comment_id=NULL
+WHERE workspace_id= @workspace_id AND parent_comment_id=ANY(@comment_ids::uuid[]);

@@ -11,28 +11,25 @@ import (
 
 // A runtime or profile delete is refused while user agents are still bound.
 // Telling the user to "reassign or archive them" is only true for agents they
-// can actually reach: the archive endpoint rejects anything carrying a
-// system_key outright. Naming one remedy for every blocker therefore hands some
-// users an instruction that cannot be carried out — the same class of defect
-// this whole change set exists to remove, so the refusals classify their
-// blockers instead.
+// can actually reach: the archive endpoint rejects every system_key except
+// Mika's. Naming one remedy for every blocker therefore hands some users an
+// instruction that cannot be carried out — the same class of defect this whole
+// change set exists to remove, so the refusals classify their blockers instead.
 //
 // Hidden kind='system' agents (the Agent Builder carriers) are never blockers:
 // both delete guards list kind='user' only, and TeardownRuntime deletes the
 // carriers with their runtime (GH #9762).
 //
 // system_key, not kind, is the discriminator. Mika is deliberately kind='user'
-// (it must stay visible and assignable) while still being product-owned and
-// unarchivable.
+// (it must stay visible and assignable) while still being product-owned.
 type blockingAgentClass int
 
 const (
 	// blockingAgentUser is an ordinary workspace agent: rebind or archive it.
 	blockingAgentUser blockingAgentClass = iota
-	// blockingAgentMika is the workspace's built-in Mika. It cannot be archived
-	// (agent.go rejects any system_key there) but it CAN be rebound: UpdateAgent
-	// takes runtime_id for it like any other manageable agent. Those two halves
-	// have to be stated separately or the remedy is wrong in one direction.
+	// blockingAgentMika is the workspace's built-in Mika. It can be archived or
+	// rebound like any manageable agent, but a profile refusal only clears if
+	// the new runtime is outside that profile, so it gets its own clause.
 	blockingAgentMika
 	// blockingAgentOtherSystem is any future product-owned agent. Unarchivable
 	// like the rest, with no remedy this code can name specifically.
@@ -105,11 +102,10 @@ const (
 // blocker was product-owned and the caller should say so rather than suggest
 // an action.
 func blockingAgentRemedies(classes map[blockingAgentClass]bool, scope blockingAgentScope) []string {
-	// "Reassign or archive them" must not appear to cover the product-owned
+	// "Reassign or archive them" must not appear to cover the unarchivable
 	// blockers listed beside them, which is exactly the instruction they cannot
 	// follow. When both are present the clause names which ones it applies to.
-	mixed := classes[blockingAgentMika] ||
-		classes[blockingAgentOtherSystem]
+	mixed := classes[blockingAgentOtherSystem]
 
 	var out []string
 	if classes[blockingAgentUser] && mixed {
@@ -118,21 +114,14 @@ func blockingAgentRemedies(classes map[blockingAgentClass]bool, scope blockingAg
 		out = append(out, "Reassign or archive them first.")
 	}
 	if classes[blockingAgentMika] {
-		// Mika is unarchivable but NOT immovable: UpdateAgent takes runtime_id
-		// for it like any other agent an admin can manage (the only system_key
-		// guard in agent.go is on archive), and the agent detail page shows it
-		// an editable runtime picker. An earlier version of this message said
-		// there was no supported way to move it, which told an owner who could
-		// have fixed this in one edit to give up instead — the exact failure
-		// this whole change set is about. TestMikaRemedyMatchesWhatMikaCanDo
-		// exercises both halves against the real endpoints so the claim cannot
-		// drift from the product again.
+		// TestMikaRemedyMatchesWhatMikaCanDo exercises both remedies against
+		// the real endpoints so the claim cannot drift from the product again.
 		target := "another runtime"
 		if scope == blockingAgentScopeProfile {
 			target = "a runtime that this profile does not provide"
 		}
 		out = append(out, fmt.Sprintf(
-			"Mika is built into Multica, so it cannot be archived — but it can be moved: open Mika's agent page and bind it to %s.",
+			"Mika can be archived, or moved: open Mika's agent page and bind it to %s.",
 			target,
 		))
 	}

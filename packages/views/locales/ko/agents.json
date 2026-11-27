@@ -123,6 +123,7 @@
     "cancel_dialog_confirm": "모든 실행 취소",
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 실행은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
+    "archive_dialog_mika_note": " Mika를 복원하기 전까지 'Mika와 시작' 안내가 다시 표시되지 않습니다.",
     "archive_dialog_cancel": "취소",
     "archive_dialog_confirm": "보관",
     "set_access_applies_to_other": "{{count}}개 agent에 적용됩니다."
@@ -795,6 +796,14 @@
     "search_placeholder": "이 작업 검색…",
     "no_matches": "검색과 일치하는 단계가 없습니다.",
     "more_actions": "더보기",
+    "purge_log": "실행 로그 지우기",
+    "purge_confirm_title": "이 실행의 로그를 지울까요?",
+    "purge_confirm_body": "모든 단계, 도구 입력과 출력, 에이전트의 최종 출력이 삭제되어 누구도 볼 수 없게 됩니다. 실행 상태, 소요 시간, 사용량은 유지됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "purge_confirm_action": "로그 지우기",
+    "purge_cancel": "취소",
+    "purge_done": "실행 로그를 지웠습니다",
+    "purge_failed": "실행 로그를 지우지 못했습니다",
+    "purged_by": "{{name}} 님이 실행 로그를 지웠습니다 · {{time}}",
     "kind_text": "에이전트",
     "kind_tool": "도구",
     "kind_thinking": "사고",
@@ -1107,5 +1116,9 @@
     "new_app": "이 에이전트의 새 앱",
     "adds_app_note": "응답하면 이후 실행부터 {{agent}}이(가) {{app}}을(를) 사용할 수 있습니다.",
     "add_to_agent": "{{agent}}에 {{app}} 추가"
+  },
+  "lifecycle": {
+    "danger_zone": "위험 영역",
+    "restore_label": "에이전트 복원"
   }
 }

@@ -370,7 +370,7 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 			fmt.Fprintf(&b, "Inspect this configuration with `multica issue wakeup get %s %s --output json`. If recurring work is no longer needed, disable it with `multica issue wakeup disable %s %s`.\n", task.IssueID, task.WakeupID, task.IssueID, task.WakeupID)
 		}
 		if task.TriggerCommentID != "" {
-			fmt.Fprintf(&b, "Post your result using `multica issue comment add %s --parent %s --content-file ./reply.md --output table && rm ./reply.md`. This is the original delivery thread, not a new comment trigger.\n", task.IssueID, task.TriggerCommentID)
+			b.WriteString(execenv.BuildWakeupReplyInstructions(task.IssueID, task.TriggerCommentID))
 		}
 		return b.String()
 	}
@@ -810,10 +810,17 @@ func buildChatPromptWithOptions(task Task, opts promptOpts) string {
 		b.WriteString("Audience: direct room.\n\n")
 	}
 	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
-	// the agent must KNOW it is operating inside that channel — otherwise an ask
-	// like "what did you just talk about" sends it to read Multica instead of the
-	// channel conversation. A web-only chat session gets no such block — its
-	// history is the Multica chat_session the agent already resumes.
+	// the agent must KNOW where the conversation lives — otherwise an ask like
+	// "what did you just talk about" sends it to read Multica issues instead of
+	// the channel conversation. Every branch below names the platform and says
+	// where to read the conversation back, and that positive pointer is the whole
+	// guard. A web-only chat session gets no such block — its history is the
+	// Multica chat_session the agent already resumes.
+	//
+	// Do not add a prohibition such as "never look in Multica issues or comments
+	// for this conversation" on top. Agents read "for this conversation" as the
+	// rule's scope and refused every issue or comment lookup asked from the IM
+	// chat, attributing the refusal to the channel (MUL-10272).
 	//
 	// The history half: `multica chat history` is served by handler/chat_history.go,
 	// which reads the live channel for Slack and falls back to the stored
@@ -823,8 +830,7 @@ func buildChatPromptWithOptions(task Task, opts promptOpts) string {
 	// thread reader, so they get the transcript command without the thread
 	// drill-down (MUL-4899).
 	//
-	// WHERE the conversation lives is therefore per-branch, not shared: only the
-	// unconditional "don't go looking in issues/comments" survives up top. Saying
+	// WHERE the conversation lives is therefore per-branch, not shared. Saying
 	// "its history lives in the channel, NOT in Multica" for every channel type
 	// contradicted the very next line on a transcript surface, which tells the
 	// agent Multica stored it and hands it the command to read it back. An agent
@@ -837,7 +843,6 @@ func buildChatPromptWithOptions(task Task, opts promptOpts) string {
 	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Never look in Multica issues or comments for this conversation.\n", platform)
 		if task.ChatChannelType == execenv.ChannelTypeFeishu {
 			// Every field passed the Feishu id shape check, so the JSON carries
 			// no free text that could read as instructions.

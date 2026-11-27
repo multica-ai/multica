@@ -672,6 +672,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
 
 	for _, f := range req.Files {
 		if !validateFilePath(f.Path) {

@@ -81,6 +81,7 @@
     "resolved": "해결됨 {{count}}",
     "close": "댓글 닫기",
     "quote_missing": "댓글을 단 텍스트가 변경되었습니다",
+    "quote_changed": "원문 변경됨",
     "reply_placeholder": "답글 또는 @ 멘션…",
     "new_placeholder": "댓글을 추가하거나 @로 멘션하세요...",
     "submit": "댓글",

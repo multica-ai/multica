@@ -67,7 +67,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				// three flags stay discoverable, MUL-3508 follow-up) plus the
 				// skill pointer; the skill side of the contract is asserted in
 				// internal/service (TestPlatformSkillCoversPlatformContracts).
-				"`--status todo` starts an agent-assigned child immediately",
+				"`--status todo` starts an agent-assigned child once nothing it waits on",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
 				"read `references/sub-issues.md` in the `multica-platform` skill",
@@ -2449,7 +2449,7 @@ func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
 		}
 	}
 	rule := strings.Index(out, "Default to one issue, one PR.")
-	flags := strings.Index(out, "`--status todo` starts an agent-assigned child immediately")
+	flags := strings.Index(out, "`--status todo` starts an agent-assigned child once nothing it waits on")
 	if rule < 0 || flags < 0 || rule > flags {
 		t.Errorf("the split rule must come before the sub-issue flags it gates:\n%s", out)
 	}
@@ -2532,7 +2532,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			// The flags themselves are unconditional: they stay discoverable
 			// with or without a skill to point at.
 			for _, always := range []string{
-				"`--status todo` starts an agent-assigned child immediately",
+				"`--status todo` starts an agent-assigned child once nothing it waits on",
 				"`--stage <N>` groups children into ordered stages",
 			} {
 				if !strings.Contains(out, always) {

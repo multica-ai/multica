@@ -116,6 +116,50 @@ func TestListAutopilots_DerivedFields(t *testing.T) {
 	}
 }
 
+// TestListAutopilots_PausedOmitsNextRun: the scheduler only fires schedule
+// triggers of an active autopilot, so a paused one must not list the next run
+// its enabled trigger still stores.
+func TestListAutopilots_PausedOmitsNextRun(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "autopilot-list-paused-agent", []byte(`[]`))
+	paused := insertListTestAutopilot(t, agentID, "list-paused-next-run")
+	if _, err := testPool.Exec(ctx, `UPDATE autopilot SET status = 'paused' WHERE id = $1`, paused); err != nil {
+		t.Fatalf("pause autopilot fixture: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, timezone, next_run_at)
+		VALUES ($1, 'schedule', true, '0 9 * * *', 'UTC', now() + interval '1 hour')
+	`, paused); err != nil {
+		t.Fatalf("insert trigger: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.ListAutopilots(w, newRequest("GET", "/api/autopilots", nil))
+	if w.Code != 200 {
+		t.Fatalf("ListAutopilots: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Autopilots []map[string]any `json:"autopilots"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode body: %v", err)
+	}
+	for _, row := range body.Autopilots {
+		if row["id"] != paused {
+			continue
+		}
+		if next, present := row["next_run_at"]; present {
+			t.Errorf("next_run_at: expected omitted for a paused autopilot, got %v", next)
+		}
+		return
+	}
+	t.Fatalf("paused autopilot %s missing from list", paused)
+}
+
 func TestListAutopilots_DefaultExcludesArchived(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

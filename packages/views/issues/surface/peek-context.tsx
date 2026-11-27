@@ -126,6 +126,7 @@ export function resolveIssueClick(
 export const IssuePeekActionsContext = createContext<IssuePeekActions | null>(null);
 export const IssuePeekIdContext = createContext<string | null>(null);
 export const IssuePeekPositionContext = createContext<IssuePeekPosition | null>(null);
+export const IssuePeekColumnsContext = createContext<IssuePeekColumns | null>(null);
 
 /** `null` outside a surface that hosts a peek (e.g. a board inside a dialog). */
 export function useIssuePeekActions() {
@@ -147,6 +148,11 @@ export function useIssuePeekOpen() {
 
 export function useIssuePeekPosition() {
   return useContext(IssuePeekPositionContext);
+}
+
+/** The current view's published order (see `publishColumns`). */
+export function useIssuePeekColumns() {
+  return useContext(IssuePeekColumnsContext);
 }
 
 type PeekIssue = Pick<Issue, "id" | "identifier">;

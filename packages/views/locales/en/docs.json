@@ -81,6 +81,7 @@
     "resolved": "Resolved {{count}}",
     "close": "Close comments",
     "quote_missing": "The commented text was changed",
+    "quote_changed": "Text changed",
     "reply_placeholder": "Reply, or @ someone...",
     "new_placeholder": "Add a comment, or @ someone...",
     "submit": "Comment",

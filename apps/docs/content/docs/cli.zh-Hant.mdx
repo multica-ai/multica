@@ -282,7 +282,7 @@ multica agent env set <agent-id> --custom-env-stdin < agent-env.json
 multica agent update <agent-id> --mcp-config-file ./mcp.json
 ```
 
-- `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。
+- `--custom-env` 系列只在 `agent create` 中可用。之後修改用 `agent env set`，它整體替換原有變數，值寫成 `****` 的鍵保留原值。`agent env get` 和 `agent env set` 輸出的值都顯示為 `****`，要看原值（例如複製到另一個 AI 代理）請加 `--show-values`。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
 - 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
@@ -523,7 +523,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `copy <agent-id>` | 複製為新 AI 代理，原 AI 代理不受影響 | `--name`（預設為原名加 ` (copy)`）、`--runtime-id`（複製到其他執行時時必須同時指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等機密配置不會複製，需用與 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 檢視 AI 代理的執行 | |
 | | `avatar <id>` | 上傳頭像 | |
-| | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值 |
+| | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值。輸出的值顯示為 `****`，加 `--show-values` 顯示原值 |
 | | `skills list/set/add <agent-id>` | 管理繫結的 skill | `--skill-ids`（`set` 全量替換，`add` 增量新增） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 給該 agent 分配工作區 MCP 服務 | server id 從 `workspace mcp list` 獲取。庫裡的條目在這裡新增之前不會生效；`disable` 只停止下發，保留分配 |
 | `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--mode`（均必填）、`--agent` / `--squad` / `--squad-id`（三選一，必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
