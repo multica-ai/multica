@@ -113,10 +113,11 @@ ACCESS_ALLOWED_EMAILS=*@example.com,contractor@partner.com
 ```
 
 - Empty (the default) → no restriction.
-- Otherwise, sign-in (verification code and Google) is refused for any other email, and every authenticated API and WebSocket request from any other account returns 403. This covers browser sessions, personal access tokens, daemon tokens, and agent task tokens started by that account.
-- Unlike `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, it applies to existing accounts too, and an invitation does not bypass it. Removing someone from the list cuts off their existing sessions and tokens after a restart.
-- `*@example.com` does not match subdomains such as `dev.example.com`; list them separately.
-- A malformed entry (for example `example.com` without `*@`) stops the backend from starting.
+- Otherwise, sign-in (verification code and Google) is refused for any other email, and every authenticated API request from any other account returns 403 with code `access_not_allowed`. This covers browser sessions, personal access tokens, daemon tokens, agent task tokens, Connected Apps calls from agent runs started by that account, and plugin callbacks acting for that account. A browser that is already signed in is signed out and told the account is not allowed.
+- WebSocket connections are refused too: a handshake authenticated by the session cookie gets 403, and a client that authenticates in its first message gets an error message and the connection is closed.
+- Unlike `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, it applies to existing accounts too, and an invitation does not bypass it. Removing someone from the list cuts off their API access after a restart. File-download cookies (CloudFront signed cookies, when configured) that were already issued stay valid until they expire.
+- `*@example.com` does not match subdomains such as `dev.example.com`; list them separately. Internationalized domains must be written in their ASCII form (`xn--...`).
+- A malformed entry (for example `example.com` without `*@`, or a domain containing a space) stops the backend from starting.
 
 Things to know:
 
