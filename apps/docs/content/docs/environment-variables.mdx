@@ -254,6 +254,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_CODEX_MEMORY` | off | Set to `1`, `true`, `yes`, or `on` to keep Codex native memory in daemon-managed Codex runs; it is turned off per run by default. See [Codex native memory and subagents](/daemon-runtimes#codex-memory) |
 | `MULTICA_CODEX_MULTI_AGENT` | off | Same values; keeps Codex native subagents. The run counts as finished when the parent thread finishes, so results subagents have not handed back are lost |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Grace period after cancellation for Codex app-server to acknowledge `turn/interrupt` and emit `turn/completed`, preserving final token usage before forced process cleanup. On unusually slow hosts, tune this from the interrupt latency recorded in daemon logs |
+| `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` | `60` | Start a fresh Codex thread instead of resuming one whose latest request used at least this percentage of the model's context window. A thread that full re-compacts within a few tool calls of the next run. The fresh run is told the previous conversation could not be resumed. `0` disables |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |

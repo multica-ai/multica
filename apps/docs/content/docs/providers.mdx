@@ -132,6 +132,8 @@ Tools marked ✓ can continue an existing session in a later run, provided the o
 
 Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; if it cannot, it starts a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
 
+Codex keeps every earlier run's prompt when it compacts a thread, so a thread resumed across many runs on one issue can fill the context window again within a few tool calls. When the latest request of the thread to resume used at least 60% of the model's context window, Multica starts a new Codex thread instead and tells the agent the previous conversation could not be resumed. Set `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` to change the limit, or `0` to turn it off.
+
 Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration

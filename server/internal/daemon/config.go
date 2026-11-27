@@ -37,7 +37,12 @@ const (
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	DefaultCodexHandshakeTimeout          = 30 * time.Second
 	DefaultCodexTurnInterruptTimeout      = 2 * time.Second
-	DefaultCodexThreadHandshakeTimeout    = 60 * time.Second
+	// DefaultCodexResumeContextPercent sits well below Codex's own
+	// auto-compaction point (about 90% of the window): a thread already that
+	// full re-compacts within a few tool calls of a resumed run, and each
+	// compaction keeps every earlier run prompt (GH #11652).
+	DefaultCodexResumeContextPercent   = 60
+	DefaultCodexThreadHandshakeTimeout = 60 * time.Second
 	// DefaultOpenCodeIdleWatchdog shortens the no-message budget for OpenCode
 	// runs while they are not executing a tool. OpenCode streams text and tool
 	// events incrementally, so a completely silent interval here covers both a
@@ -148,16 +153,20 @@ type Config struct {
 	// latency recorded in the Codex lifecycle logs.
 	CodexTurnInterruptTimeout   time.Duration
 	CodexThreadHandshakeTimeout time.Duration
-	OpenCodeIdleWatchdog        time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
-	AgentIdleWatchdog           time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog           time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
-	ClaudeArgs                  []string
-	CodexArgs                   []string
-	CodebuddyArgs               []string
-	QwenArgs                    []string
-	DroidArgs                   []string
-	AmpArgs                     []string
-	QwenpawArgs                 []string
+	// CodexResumeContextPercent starts a fresh Codex thread instead of
+	// resuming one whose latest request used at least this percentage of the
+	// model's context window (MULTICA_CODEX_RESUME_CONTEXT_PERCENT). 0 disables.
+	CodexResumeContextPercent int
+	OpenCodeIdleWatchdog      time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
+	AgentIdleWatchdog         time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog         time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
+	ClaudeArgs                []string
+	CodexArgs                 []string
+	CodebuddyArgs             []string
+	QwenArgs                  []string
+	DroidArgs                 []string
+	AmpArgs                   []string
+	QwenpawArgs               []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -485,6 +494,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		codexTurnInterruptTimeout = DefaultCodexTurnInterruptTimeout
 	}
 
+	codexResumeContextPercent, err := intFromEnv("MULTICA_CODEX_RESUME_CONTEXT_PERCENT", DefaultCodexResumeContextPercent)
+	if err != nil {
+		return Config{}, err
+	}
+	if codexResumeContextPercent < 0 || codexResumeContextPercent > 100 {
+		return Config{}, fmt.Errorf("MULTICA_CODEX_RESUME_CONTEXT_PERCENT: must be between 0 and 100, got %d", codexResumeContextPercent)
+	}
+
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
 	if err != nil {
 		return Config{}, err
@@ -679,6 +696,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
 		CodexHandshakeTimeout:           codexHandshakeTimeout,
 		CodexTurnInterruptTimeout:       codexTurnInterruptTimeout,
+		CodexResumeContextPercent:       codexResumeContextPercent,
 		CodexThreadHandshakeTimeout:     codexThreadHandshakeTimeout,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,

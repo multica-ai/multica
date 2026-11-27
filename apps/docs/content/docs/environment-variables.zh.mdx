@@ -254,6 +254,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_CODEX_MEMORY` | 关闭 | 设为 `1`、`true`、`yes` 或 `on` 时，在守护进程管理的 Codex 运行中保留 Codex 原生记忆；默认按运行关闭，见 [Codex 原生记忆与子智能体](/daemon-runtimes#codex-memory) |
 | `MULTICA_CODEX_MULTI_AGENT` | 关闭 | 取值同上，保留 Codex 原生子智能体。父线程结束时运行即判为结束，子智能体未交回的结果会丢失 |
 | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | 任务取消后等待 Codex app-server 确认 `turn/interrupt` 并发出 `turn/completed` 的宽限期，以便在强制清理进程前保留最终 token 用量。主机异常缓慢时，可根据 daemon 日志记录的中断延迟调整 |
+| `MULTICA_CODEX_RESUME_CONTEXT_PERCENT` | `60` | 若 Codex 线程最近一次请求已用掉模型上下文窗口的这个百分比以上，就不再恢复它，改为开启新线程。这么满的线程在下一次运行时，几次工具调用内就会再次压缩。新的运行会被告知之前的对话无法恢复。`0` 表示禁用 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
