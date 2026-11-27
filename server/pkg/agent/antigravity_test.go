@@ -25,7 +25,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{Cwd: "/work"},
-		quietAntigravityLogger(),
+		false, quietAntigravityLogger(),
 	)
 
 	want := []string{
@@ -52,7 +52,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{Cwd: "/work", Model: "Claude Opus 4.6 (Thinking)"},
-		quietAntigravityLogger(),
+		false, quietAntigravityLogger(),
 	)
 
 	want := []string{
@@ -69,7 +69,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	}
 
 	// Empty model must omit the flag entirely so agy resolves its own default.
-	bare := buildAntigravityArgs("hi", "/tmp/agy.log", 0, ExecOptions{}, quietAntigravityLogger())
+	bare := buildAntigravityArgs("hi", "/tmp/agy.log", 0, ExecOptions{}, false, quietAntigravityLogger())
 	if slices.Contains(bare, "--model") {
 		t.Fatalf("--model must be omitted when opts.Model is empty; got %v", bare)
 	}
@@ -88,7 +88,7 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 		"/tmp/agy.log",
 		0,
 		ExecOptions{Cwd: "/work"},
-		quietAntigravityLogger(),
+		false, quietAntigravityLogger(),
 	)
 
 	want := []string{
@@ -201,7 +201,7 @@ func TestBuildAntigravityArgsResume(t *testing.T) {
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{ResumeSessionID: "b8b263a4-4b2f-4339-acc9-78b248e2b606"},
-		quietAntigravityLogger(),
+		false, quietAntigravityLogger(),
 	)
 
 	joined := strings.Join(args, " ")
@@ -219,12 +219,12 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 		time.Minute,
 		ExecOptions{
 			ExtraArgs: []string{
-				"--settings", "/tmp/biz-gate.json", // Claude Code-only daemon/profile arg; agy rejects it
+				"--settings", "/tmp/biz-gate.json", // daemon settings may use another provider's schema
 			},
 			// Each blocked flag below must be stripped silently — the daemon
 			// owns these because they're required for non-interactive,
 			// resume-aware operation, or because the flag is unsupported by
-			// Antigravity.
+			// this CLI.
 			CustomArgs: []string{
 				"-p", "hijacked-prompt",
 				"-i",
@@ -241,7 +241,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"--add-dir", "/extra", // user-added workspace dir should survive
 			},
 		},
-		quietAntigravityLogger(),
+		false, quietAntigravityLogger(),
 	)
 
 	joined := strings.Join(args, " ")
@@ -275,7 +275,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 		t.Errorf("custom --log-file value leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "--settings") || strings.Contains(joined, "biz-gate.json") || strings.Contains(joined, "agent-settings.json") {
-		t.Errorf("Antigravity-incompatible --settings flag leaked through filter: %v", args)
+		t.Errorf("unverified --settings flag leaked through filter: %v", args)
 	}
 	if !strings.Contains(joined, "--add-dir /extra") {
 		t.Errorf("non-blocked --add-dir flag should pass through: %v", args)

@@ -118,6 +118,8 @@ QwenPaw, MiniMax Code et ZeroClaw font exception : ils n'acceptent pas de modèl
 
 Antigravity affiche ses variantes de raisonnement comme des modèles distincts lorsqu’elles figurent dans `agy models`. Sélectionnez la variante exacte dans le sélecteur de modèle, suffixe compris. Multica ne propose pas de réglage du raisonnement séparé pour Antigravity. Si vous passez `--effort` dans les arguments personnalisés, Antigravity vérifie que cette option est compatible avec le modèle sélectionné.
 
+Les arguments personnalisés d’un agent peuvent aussi inclure `--settings`, avec du JSON en ligne ou le chemin d’un fichier de paramètres pour cette exécution. Multica le transmet uniquement si la commande sélectionnée annonce `--settings` dans `--help` ; si la vérification échoue ou si l’option est absente, elle reste filtrée. Les arguments supplémentaires du daemon ne peuvent toujours pas injecter de paramètres, et Multica conserve le contrôle des options essentielles au protocole.
+
 DeepSeek Harness publie son catalogue de modèles depuis le runtime lui-même (`dsh --profile multica --list-models`). Ses identifiants de modèle utilisent la forme `provider/model` (par exemple `deepseek-official/deepseek-chat`) ; sélectionnez donc l'identifiant complet dans la liste.
 
 <Callout type="info">

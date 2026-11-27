@@ -120,6 +120,8 @@ QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model c
 
 For Antigravity, use the model picker to select the exact reasoning variant shown by `agy models`, including any suffix. Multica has no separate **Thinking** setting for Antigravity. If you pass `--effort` in custom arguments, Antigravity checks whether it can be combined with the selected model.
 
+Agent custom arguments can also include `--settings` with inline JSON or a settings-file path for that run. Multica forwards it only when the selected command advertises `--settings` in `--help`; if the probe fails or the flag is absent, it remains filtered. Daemon-wide extra arguments still cannot inject settings, and Multica keeps control of protocol-critical flags.
+
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
 <Callout type="info">
