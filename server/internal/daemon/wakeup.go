@@ -452,7 +452,8 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
-			d.handleWSHeartbeatAckForConnection(context.Background(), &ack, wsRPCGeneration)
+			// Claimed work survives a socket reconnect, but must stop when the daemon stops.
+			d.handleWSHeartbeatAckForConnection(d.recoveryContext(), &ack, wsRPCGeneration)
 		case protocol.EventDaemonRPCResponse:
 			var resp protocol.RPCResponsePayload
 			if err := json.Unmarshal(msg.Payload, &resp); err != nil {
