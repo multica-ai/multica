@@ -1239,16 +1239,17 @@ export function useRealtimeSync(
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
       if (prefix === "task" && msg.type !== "task:progress") {
-        const payload = msg.payload as { issue_id?: unknown; doc_id?: unknown };
+        const payload = msg.payload as { issue_id?: unknown; doc_id?: unknown; chat_session_id?: unknown };
         const issueId = typeof payload?.issue_id === "string" && payload.issue_id ? payload.issue_id : null;
         const docId = typeof payload?.doc_id === "string" && payload.doc_id ? payload.doc_id : null;
+        const chatSessionId = typeof payload?.chat_session_id === "string" && payload.chat_session_id ? payload.chat_session_id : null;
         const wsId = getCurrentWsId();
         // A doc discussion run only changes that doc's run status.
         if (docId) {
           if (wsId) debouncedRefresh(`doc-task:${docId}`, () => {
             qc.invalidateQueries({ queryKey: docKeys.tasks(wsId, docId) });
           });
-        } else debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
+        } else if (issueId || !chatSessionId) debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
           qc.invalidateQueries({ queryKey: issueId ? issueKeys.tasks(issueId) : issueKeys.tasksAll() });
           // Events don't carry the ancestor chain needed to scope subtree projections.
           if (issueId) qc.invalidateQueries({ queryKey: issueKeys.tasksAll(), predicate: (q) => q.queryKey[3] === "subtree" });

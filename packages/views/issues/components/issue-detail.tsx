@@ -86,7 +86,7 @@ import { PropRow } from "../../common/prop-row";
 import { useIsGuest } from "@multica/core/permissions";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, IssueSubscriber, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { AgentTask, Attachment, InboxItem, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, IssueSubscriber, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
@@ -113,6 +113,7 @@ import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { revealElement, useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
+import { IssueRunLookupProvider } from "./issue-run-lookup-context";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
@@ -510,6 +511,7 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
 }
 
 const EMPTY_COLLAPSED_IDS: string[] = [];
+const EMPTY_AGENT_TASKS: AgentTask[] = [];
 
 // Flat per-item shape consumed by <Virtuoso>. Virtuoso needs a flat array
 // where each entry is one rendered row; we keep the grouping logic from
@@ -4539,29 +4541,31 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 // flash empty.
                 <TimelineSkeleton />
               ) : (
-                <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
-                  <div ref={virtualTimelineRef} className="mt-4">
-                    <Virtuoso
-                      key={`${wsId}:${id}`}
-                      ref={virtuosoRef}
-                      customScrollParent={scrollContainerEl}
-                      data={items}
-                      heightEstimates={timelineHeightEstimates}
-                      increaseViewportBy={timelineOverscan}
-                      totalListHeightChanged={handleTimelineHeightChange}
-                      rangeChanged={handleTimelineRangeChanged}
-                      computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
-                      // Also load-bearing for long threads: keepThreadRowAnchored
-                      // corrects after Virtuoso's resize handling in the same frame.
-                      skipAnimationFrameInResizeObserver
-                      // followOutput intentionally NOT set. Virtuoso treats
-                      // it as a sticky "is at bottom" flag and resets
-                      // scrollTop to maxScrollTop on every height-change
-                      // tick — issue-detail is document-shaped, not chat.
-                      itemContent={renderItem}
-                    />
-                  </div>
-                </ImageThumbnailsProvider>
+                <IssueRunLookupProvider timeline={timeline} tasks={commentTasks ?? EMPTY_AGENT_TASKS}>
+                  <ImageThumbnailsProvider enabled={commentImageLayout === "thumbnails"}>
+                    <div ref={virtualTimelineRef} className="mt-4">
+                      <Virtuoso
+                        key={`${wsId}:${id}`}
+                        ref={virtuosoRef}
+                        customScrollParent={scrollContainerEl}
+                        data={items}
+                        heightEstimates={timelineHeightEstimates}
+                        increaseViewportBy={timelineOverscan}
+                        totalListHeightChanged={handleTimelineHeightChange}
+                        rangeChanged={handleTimelineRangeChanged}
+                        computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
+                        // Also load-bearing for long threads: keepThreadRowAnchored
+                        // corrects after Virtuoso's resize handling in the same frame.
+                        skipAnimationFrameInResizeObserver
+                        // followOutput intentionally NOT set. Virtuoso treats
+                        // it as a sticky "is at bottom" flag and resets
+                        // scrollTop to maxScrollTop on every height-change
+                        // tick — issue-detail is document-shaped, not chat.
+                        itemContent={renderItem}
+                      />
+                    </div>
+                  </ImageThumbnailsProvider>
+                </IssueRunLookupProvider>
               )
             )}
 

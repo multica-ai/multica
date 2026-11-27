@@ -3,11 +3,12 @@
 import { useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bell } from "@multica/ui/icons";
-import { issueTasksOptions, issueWakeupsOptions } from "@multica/core/issues";
+import { issueWakeupsOptions } from "@multica/core/issues";
 import type { AgentTask, IssueWakeup } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
+import { useIssueRunLookup, useTaskWakeupId } from "./issue-run-lookup-context";
 
 /** The wakeup that started a run, when the issue still has it. */
 export function useRunWakeup(issueId: string, wakeupId?: string): IssueWakeup | undefined {
@@ -22,8 +23,14 @@ export function useRunWakeup(issueId: string, wakeupId?: string): IssueWakeup | 
  * that a wakeup started. Renders nothing for other comments.
  */
 export function WakeupSourceChip({ issueId, taskId }: { issueId: string; taskId: string }) {
-  const select = useCallback((tasks: AgentTask[]) => tasks.find((task) => task.id === taskId)?.wakeup_id, [taskId]);
-  const { data: wakeupId } = useQuery({ ...issueTasksOptions(issueId), select });
+  const lookup = useIssueRunLookup();
+  if (!lookup) return <StandaloneWakeupSourceChip issueId={issueId} taskId={taskId} />;
+  const wakeupId = lookup.wakeupIdByTask.get(taskId);
+  return wakeupId ? <WakeupSourceChipLabel issueId={issueId} wakeupId={wakeupId} /> : null;
+}
+
+function StandaloneWakeupSourceChip({ issueId, taskId }: { issueId: string; taskId: string }) {
+  const wakeupId = useTaskWakeupId(issueId, taskId);
   return wakeupId ? <WakeupSourceChipLabel issueId={issueId} wakeupId={wakeupId} /> : null;
 }
 
