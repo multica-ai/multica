@@ -25,6 +25,9 @@ export interface CreateIssueRequest {
   /** ID-keyed custom-property values validated and persisted atomically with
    * the issue. */
   properties?: IssuePropertyValues;
+  /** Create even when an active issue with the same title exists, instead of
+   * the server answering 409 active_duplicate_issue. */
+  allow_duplicate?: boolean;
 }
 
 export interface CreateCommentSubIssueManualRequest {

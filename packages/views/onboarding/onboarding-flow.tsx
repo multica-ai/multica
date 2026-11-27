@@ -307,23 +307,18 @@ export function OnboardingFlow({
           : null;
       if (!issueRef) {
         const contentLang = pickContentLang(i18n.language);
+        const guide = {
+          title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
+          description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
+          status: "in_progress" as const,
+          priority: "high" as const,
+          assignee_type: "member" as const,
+          assignee_id: user.id,
+        };
         try {
-          const issue = await api.createIssue(
-            {
-              title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
-              description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
-              status: "in_progress",
-              priority: "high",
-              assignee_type: "member",
-              assignee_id: user.id,
-            },
-            workspace.slug,
-          );
+          const issue = await api.createIssue(guide, workspace.slug);
           issueRef = issueRouteRef(issue);
         } catch (err) {
-          // A reload, or a create whose response was lost, leaves the guide
-          // from an earlier attempt in place; the duplicate guard then
-          // answers with that issue, which is the one to open.
           const duplicate =
             err instanceof ApiError && err.status === 409
               ? parseWithFallback<DuplicateIssueErrorBody | null>(
@@ -337,7 +332,29 @@ export function OnboardingFlow({
             toast.error(t(($) => $.errors.guide_failed));
             return;
           }
-          issueRef = issueRouteRef(duplicate.issue);
+          if (
+            duplicate.issue.assignee_type === "member" &&
+            duplicate.issue.assignee_id === user.id
+          ) {
+            // A reload, or a create whose response was lost, leaves this
+            // member's guide from an earlier attempt in place; that is the
+            // one to open.
+            issueRef = issueRouteRef(duplicate.issue);
+          } else {
+            // The guide title is fixed per language, so another member's
+            // guide in this workspace matches too (#11233). Theirs is not
+            // this member's guide.
+            try {
+              const issue = await api.createIssue(
+                { ...guide, allow_duplicate: true },
+                workspace.slug,
+              );
+              issueRef = issueRouteRef(issue);
+            } catch {
+              toast.error(t(($) => $.errors.guide_failed));
+              return;
+            }
+          }
         }
         guideIssueRef.current = { workspaceId: workspace.id, issueRef };
       }

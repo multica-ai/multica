@@ -3082,6 +3082,9 @@ export const EMPTY_SQUAD_BRIEFS = { handoff_mode: "leader" as const, briefs: [] 
 //     so a future server-side rename of `status` must not knock this branch
 //     out. `.loose()` lets the field pass through unchanged for any other
 //     consumer.
+//   - `issue.assignee_type` / `assignee_id` are null for an unassigned issue
+//     and read as null when missing or malformed: callers use them only to
+//     tell whose issue matched, so they never knock the whole body out.
 
 export const DuplicateIssueErrorBodySchema = z.object({
   code: z.literal("active_duplicate_issue"),
@@ -3090,6 +3093,8 @@ export const DuplicateIssueErrorBodySchema = z.object({
     id: z.string(),
     identifier: z.string(),
     title: z.string(),
+    assignee_type: z.string().nullish().catch(null),
+    assignee_id: z.string().nullish().catch(null),
   }).loose(),
 }).loose();
 
@@ -3111,6 +3116,8 @@ export interface DuplicateIssueErrorBody {
     id: string;
     identifier: string;
     title: string;
+    assignee_type?: string | null;
+    assignee_id?: string | null;
   };
 }
 

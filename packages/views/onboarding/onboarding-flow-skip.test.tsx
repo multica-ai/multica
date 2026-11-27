@@ -103,7 +103,13 @@ function renderAtRuntimeStep() {
   return { onComplete, skip: screen.getByRole("button", { name: "skip runtime" }) };
 }
 
-function duplicateGuideConflict(body?: unknown) {
+function duplicateGuideConflict(
+  body?: unknown,
+  assignee: { assignee_type: string | null; assignee_id: string | null } = {
+    assignee_type: "member",
+    assignee_id: "u-1",
+  },
+) {
   return new ApiError(
     "Active duplicate issue exists",
     409,
@@ -115,6 +121,7 @@ function duplicateGuideConflict(body?: unknown) {
         id: "issue-existing",
         identifier: "NEW-1",
         title: "Connect a runtime to start with Mika",
+        ...assignee,
       },
     },
   );
@@ -246,6 +253,70 @@ describe("OnboardingFlow — skipping runtime setup", () => {
         issueRef: "NEW-1",
       });
     });
+  });
+
+  // The guide title is fixed per language, so another member's guide in the
+  // same workspace trips the duplicate guard too (#11233).
+  it("creates this member's own guide when the duplicate belongs to another member", async () => {
+    mockCreateIssue
+      .mockRejectedValueOnce(
+        duplicateGuideConflict(undefined, { assignee_type: "member", assignee_id: "u-2" }),
+      )
+      .mockResolvedValueOnce({ id: "issue-own", identifier: "NEW-2" });
+    mockCompleteOnboarding.mockResolvedValue(undefined);
+    const { onComplete, skip } = renderAtRuntimeStep();
+
+    fireEvent.click(skip);
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
+        kind: "issue",
+        issueRef: "NEW-2",
+      });
+    });
+    expect(mockCreateIssue).toHaveBeenCalledTimes(2);
+    expect(mockCreateIssue.mock.calls[0]?.[0]).not.toHaveProperty("allow_duplicate");
+    expect(mockCreateIssue.mock.calls[1]?.[0]).toMatchObject({
+      assignee_type: "member",
+      assignee_id: "u-1",
+      allow_duplicate: true,
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it("creates this member's own guide when the duplicate is unassigned", async () => {
+    mockCreateIssue
+      .mockRejectedValueOnce(
+        duplicateGuideConflict(undefined, { assignee_type: null, assignee_id: null }),
+      )
+      .mockResolvedValueOnce({ id: "issue-own", identifier: "NEW-2" });
+    mockCompleteOnboarding.mockResolvedValue(undefined);
+    const { onComplete, skip } = renderAtRuntimeStep();
+
+    fireEvent.click(skip);
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
+        kind: "issue",
+        issueRef: "NEW-2",
+      });
+    });
+    expect(mockCreateIssue.mock.calls[1]?.[0]).toMatchObject({ allow_duplicate: true });
+  });
+
+  it("stays on the step when creating its own guide next to another member's fails", async () => {
+    mockCreateIssue
+      .mockRejectedValueOnce(
+        duplicateGuideConflict(undefined, { assignee_type: "member", assignee_id: "u-2" }),
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { onComplete, skip } = renderAtRuntimeStep();
+
+    fireEvent.click(skip);
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledOnce());
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("does not treat a 409 without a valid duplicate body as the guide", async () => {
