@@ -2,7 +2,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enRuntimes from "../../locales/en/runtimes.json";
@@ -76,7 +77,53 @@ describe("parseRuntimeConcurrencyDraft", () => {
 describe("RuntimeConcurrencyField", () => {
   beforeEach(() => {
     mockUpdateRuntime.mockReset();
+    vi.mocked(toast.error).mockClear();
     mockUpdateRuntime.mockResolvedValue(makeRuntime(1));
+  });
+
+  it("reports a failed limit save after leaving the runtime page", async () => {
+    let rejectSave!: (error: Error) => void;
+    mockUpdateRuntime.mockReturnValue(new Promise((_, reject) => {
+      rejectSave = reject;
+    }));
+    const { unmount } = renderField(makeRuntime(3));
+    const input = screen.getByLabelText("Concurrency");
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { max_concurrent_tasks: 2 }));
+    unmount();
+    await act(async () => rejectSave(new Error("Runtime update failed")));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledExactlyOnceWith("Runtime update failed"));
+  });
+
+  it("restores a rejected limit and lets the member retry", async () => {
+    mockUpdateRuntime.mockRejectedValueOnce(new Error("Save rejected"));
+    renderField(makeRuntime(3));
+    const input = screen.getByLabelText("Concurrency");
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledExactlyOnceWith("Save rejected"));
+    expect(input).toHaveValue(3);
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "4" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(mockUpdateRuntime).toHaveBeenLastCalledWith("rt-1", { max_concurrent_tasks: 4 }));
+    expect(mockUpdateRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the translated failure message for an unknown error after leaving", async () => {
+    let rejectSave!: (error: unknown) => void;
+    mockUpdateRuntime.mockReturnValue(new Promise((_, reject) => {
+      rejectSave = reject;
+    }));
+    const { unmount } = renderField(makeRuntime(3));
+    const input = screen.getByLabelText("Concurrency");
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(mockUpdateRuntime).toHaveBeenCalledTimes(1));
+    unmount();
+    await act(async () => rejectSave(null));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledExactlyOnceWith(enRuntimes.detail.toast_concurrency_failed));
   });
 
   it("saves a new limit on Enter", async () => {

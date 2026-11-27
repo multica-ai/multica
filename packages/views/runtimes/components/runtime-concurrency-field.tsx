@@ -68,19 +68,16 @@ export function RuntimeConcurrencyField({
       return;
     }
     if (next === value) return;
-    updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { max_concurrent_tasks: next } },
-      {
-        onError: (err) => {
-          setDraft(toDraft(value));
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.detail.toast_concurrency_failed),
-          );
-        },
-      },
-    );
+    void updateRuntime
+      .mutateAsync({ runtimeId: runtime.id, patch: { max_concurrent_tasks: next } })
+      .catch((err: unknown) => {
+        setDraft(toDraft(value));
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.detail.toast_concurrency_failed),
+        );
+      });
   };
 
   return (
