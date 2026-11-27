@@ -1,6 +1,30 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
+)
+
+// Exercise the classification/normalization/resume-safety chain used by
+// FailTask. An old daemon's non-empty context_overflow reason must be corrected
+// before it can clear the chat pointer and exclude the session on the next turn.
+func TestTokenWindowQuotaPreservesSession(t *testing.T) {
+	t.Parallel()
+	const raw = `429 {"error":{"code":"token_window_quota_exceeded","message":"This API key has reached its 5h usage limit"}}`
+	for _, reported := range []string{
+		taskfailure.ReasonAgentContextOverflow.String(), // Older daemon.
+		taskfailure.Classify(raw).String(),              // Current daemon.
+	} {
+		normalized := taskfailure.NormalizeDaemonReason(reported, raw).String()
+		if ResumeUnsafeFailure(normalized, raw) {
+			t.Errorf("quota failure must preserve the session: reported=%q normalized=%q", reported, normalized)
+		}
+		if retryableReasons[normalized] {
+			t.Errorf("exhausted usage quota must not trigger automatic retries: reason=%q", normalized)
+		}
+	}
+}
 
 func TestResumeUnsafeFailureIgnoresCodebuddyProtocolSummary(t *testing.T) {
 	const summary = "\n[codebuddy protocol: exit_code=0 stdout_bytes=1400 stderr_bytes=0 event_count=1 invalid_event_count=0 assistant_event_count=0 tool_use_count=0 saw_result=true result_is_error=true result_bytes=0 last_assistant_bytes=0 scanner_error=false]"
