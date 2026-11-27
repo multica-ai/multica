@@ -7,6 +7,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { getRequestLocale } from "@/lib/request-locale";
 import { HTML_LANG } from "@/lib/html-lang";
+import { withBasePath } from "@/lib/base-path";
 import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
 import {
   resolveBrowserApiBaseUrl,
@@ -96,11 +97,11 @@ export const metadata: Metadata = {
   description:
     "Source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    shortcut: ["/favicon.svg"],
+    icon: [{ url: withBasePath("/favicon.svg"), type: "image/svg+xml" }],
+    shortcut: [withBasePath("/favicon.svg")],
     // iOS never reads the manifest's icons for the home screen; it needs its
     // own opaque, full-bleed square and rounds the corners itself.
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+    apple: [{ url: withBasePath("/icons/apple-touch-icon.png"), sizes: "180x180" }],
   },
   // Home-screen behaviour: launch without browser chrome, and label the icon
   // "Multica" rather than the long SEO <title>. `capable` renders the
