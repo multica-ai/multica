@@ -4,6 +4,8 @@ import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import type { BatchIssueLabelOps, Issue, UpdateIssueRequest } from "@multica/core/types";
 import { errorCode } from "@multica/core/api";
+import { useCommandBarContextStore, type CommandBarContext } from "@multica/core/command-bar";
+import { noteInboxBarAction, type InboxBarAction } from "@multica/core/inbox/auto-archive";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useBatchUpdateIssues, useUpdateIssue } from "@multica/core/issues/mutations";
@@ -15,6 +17,41 @@ import type { IssueTarget } from "./types";
 
 export function targetIssues(target: IssueTarget): Issue[] {
   return target.kind === "single" ? [target.issue] : target.issues;
+}
+
+/** `contexts` (newest first) with a list cursor's issue moved behind the rest. */
+export function withCursorLast(contexts: readonly CommandBarContext[]): readonly CommandBarContext[] {
+  if (!contexts.some(isCursorContext)) return contexts;
+  return [...contexts.filter((context) => !isCursorContext(context)), ...contexts.filter(isCursorContext)];
+}
+
+function isCursorContext(context: CommandBarContext): boolean {
+  return context.kind === "issue" && context.cursor === true;
+}
+
+/**
+ * What issue commands act on: the newest issue or selection a page
+ * registered, and a list cursor's issue only when there is neither.
+ */
+export function issueTargetFromContexts(contexts: readonly CommandBarContext[]): IssueTarget | null {
+  for (const context of withCursorLast(contexts)) {
+    if (context.kind === "issue") return { kind: "single", issue: context.issue };
+    if (context.kind === "issues") {
+      return { kind: "batch", issues: context.issues, clearSelection: context.clearSelection };
+    }
+  }
+  return null;
+}
+
+/**
+ * Record a palette write to the Inbox's open issue as its bar records one, so
+ * once the notification archives the bar names what the user did.
+ */
+export function noteInboxBarActionFromPalette(issueId: string, action: InboxBarAction) {
+  const inbox = useCommandBarContextStore
+    .getState()
+    .entries.find((entry) => entry.context.kind === "inbox")?.context;
+  if (inbox?.kind === "inbox" && inbox.item?.issue_id === issueId) noteInboxBarAction(issueId, action);
 }
 
 /**

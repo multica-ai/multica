@@ -460,3 +460,30 @@ func TestQuickActionRunAndDryRun(t *testing.T) {
 		t.Errorf("run output unexpected:\n%s", runOut)
 	}
 }
+
+func TestQuickActionLeafHelpCarriesAddressingAndHumanOnlyRules(t *testing.T) {
+	tests := []struct {
+		cmd       *cobra.Command
+		ref       bool
+		humanOnly bool
+	}{
+		{quickActionGetCmd, true, false},
+		{quickActionCreateCmd, false, true},
+		{quickActionUpdateCmd, true, true},
+		{quickActionArchiveCmd, true, true},
+		{quickActionRestoreCmd, true, true},
+		{quickActionDeleteCmd, true, true},
+		{quickActionRunCmd, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd.CommandPath(), func(t *testing.T) {
+			help := renderHelp(t, tt.cmd)
+			if got := strings.Contains(help, quickActionRefNote); got != tt.ref {
+				t.Errorf("addressing note present = %v, want %v; rendered:\n%s", got, tt.ref, help)
+			}
+			if got := strings.Contains(help, quickActionHumanOnlyNote); got != tt.humanOnly {
+				t.Errorf("human-only note present = %v, want %v; rendered:\n%s", got, tt.humanOnly, help)
+			}
+		})
+	}
+}

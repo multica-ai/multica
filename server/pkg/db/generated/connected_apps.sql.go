@@ -1099,6 +1099,39 @@ func (q *Queries) ListAppActionRulesForRun(ctx context.Context, arg ListAppActio
 	return items, nil
 }
 
+const listAppRequestInboxHolders = `-- name: ListAppRequestInboxHolders :many
+SELECT DISTINCT recipient_id FROM inbox_item
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND NOT archived
+  AND recipient_type = 'member'
+  AND details->>'request_id' = ANY($2::text[])
+`
+
+type ListAppRequestInboxHoldersParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RequestIds  []string    `json:"request_ids"`
+}
+
+// The members holding an open notification for any of the requests.
+func (q *Queries) ListAppRequestInboxHolders(ctx context.Context, arg ListAppRequestInboxHoldersParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAppRequestInboxHolders, arg.WorkspaceID, arg.RequestIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var recipient_id pgtype.UUID
+		if err := rows.Scan(&recipient_id); err != nil {
+			return nil, err
+		}
+		items = append(items, recipient_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAppToolClassOverrides = `-- name: ListAppToolClassOverrides :many
 SELECT workspace_id, toolkit_slug, tool_slug, action_class, updated_by, updated_at FROM app_tool_class_override
 WHERE workspace_id = $1 AND toolkit_slug = $2

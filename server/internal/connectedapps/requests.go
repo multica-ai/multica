@@ -137,7 +137,6 @@ func (s *Service) WithdrawTeamAsk(ctx context.Context, workspaceID, memberID pgt
 		return err
 	}
 	s.withdraw(ctx, req)
-	s.archiveAdminNotifications(ctx, req, pgtype.UUID{}, "app_request_withdrawn")
 	return nil
 }
 
@@ -174,6 +173,14 @@ func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActio
 // Approve executes an approved request with args (nil keeps the agent's) and
 // resumes the agent with the outcome. Only the approver may approve.
 func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, args map[string]any) (db.AppActionRequest, error) {
+	decided, err := s.approve(ctx, workspaceID, actorID, requestID, args)
+	if err == nil {
+		s.endTeamRequests(ctx, actorID, "app_request_decided", decided)
+	}
+	return decided, err
+}
+
+func (s *Service) approve(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, args map[string]any) (db.AppActionRequest, error) {
 	req, asAdmin, err := s.pendingForDecider(ctx, workspaceID, actorID, requestID)
 	if err != nil {
 		return db.AppActionRequest{}, err
@@ -217,9 +224,6 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		return db.AppActionRequest{}, err
 	}
 	if decided.Kind == KindConnect {
-		if isTeamConnect(decided) {
-			s.archiveAdminNotifications(ctx, decided, actorID, "app_request_decided")
-		}
 		if !decided.TaskID.Valid {
 			s.publishChange(decided)
 			s.notify(ctx, decided, NotifActionResult)
@@ -290,12 +294,16 @@ func (s *Service) ResolveTeamConnectRequests(ctx context.Context, workspaceID, a
 		slog.Warn("connectedapps: list team connect requests failed", "toolkit", slug, "error", err)
 		return
 	}
+	var decided []db.AppActionRequest
 	for _, r := range rows {
-		if _, err := s.Approve(ctx, workspaceID, adminID, r.ID, nil); err != nil &&
-			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) && !errors.Is(err, ErrCannotAddApp) {
+		row, err := s.approve(ctx, workspaceID, adminID, r.ID, nil)
+		if err == nil {
+			decided = append(decided, row)
+		} else if !errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) && !errors.Is(err, ErrCannotAddApp) {
 			slog.Warn("connectedapps: resolve team connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
 		}
 	}
+	s.endTeamRequests(ctx, adminID, "app_request_decided", decided...)
 }
 
 // DeclineTeamConnectRequests is an admin declining everything waiting for
@@ -307,9 +315,15 @@ func (s *Service) DeclineTeamConnectRequests(ctx context.Context, workspaceID, a
 	if err != nil {
 		return err
 	}
+	var decided []db.AppActionRequest
+	defer func() { s.endTeamRequests(ctx, adminID, "app_request_decided", decided...) }()
 	for _, r := range rows {
-		if _, err := s.Reject(ctx, workspaceID, adminID, r.ID, ""); err != nil && !errors.Is(err, ErrNotPending) {
+		row, err := s.reject(ctx, workspaceID, adminID, r.ID, "")
+		if err != nil && !errors.Is(err, ErrNotPending) {
 			return err
+		}
+		if err == nil {
+			decided = append(decided, row)
 		}
 	}
 	return nil
@@ -317,6 +331,14 @@ func (s *Service) DeclineTeamConnectRequests(ctx context.Context, workspaceID, a
 
 // Reject declines a request and resumes the agent so it can adapt.
 func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
+	decided, err := s.reject(ctx, workspaceID, actorID, requestID, reason)
+	if err == nil {
+		s.endTeamRequests(ctx, actorID, "app_request_decided", decided)
+	}
+	return decided, err
+}
+
+func (s *Service) reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
 	_, asAdmin, err := s.pendingForDecider(ctx, workspaceID, actorID, requestID)
 	if err != nil {
 		return db.AppActionRequest{}, err
@@ -340,9 +362,6 @@ func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pg
 			toolkit: decided.ToolkitSlug, tool: decided.ToolSlug, class: decided.ActionClass,
 			outcome: "rejected", requestID: decided.ID,
 		})
-	}
-	if isTeamConnect(decided) {
-		s.archiveAdminNotifications(ctx, decided, actorID, "app_request_decided")
 	}
 	s.publishChange(decided)
 	if !decided.TaskID.Valid {
@@ -575,7 +594,16 @@ func (s *Service) withdraw(ctx context.Context, req db.AppActionRequest) {
 	if err != nil {
 		return
 	}
-	s.publishChange(row)
+	s.RequestsCancelled(ctx, row)
+}
+
+// RequestsCancelled follows up requests that were cancelled while pending,
+// here or by a member leaving the workspace.
+func (s *Service) RequestsCancelled(ctx context.Context, cancelled ...db.AppActionRequest) {
+	for _, r := range cancelled {
+		s.publishChange(r)
+	}
+	s.endTeamRequests(ctx, pgtype.UUID{}, "app_request_withdrawn", cancelled...)
 }
 
 func (s *Service) resume(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) {
@@ -617,6 +645,7 @@ func (s *Service) Sweep(ctx context.Context) {
 		s.publishChange(r)
 		s.notify(ctx, r, NotifActionResult)
 	}
+	s.endTeamRequests(ctx, pgtype.UUID{}, "", expired...)
 	due, err := s.q.ClaimAppActionRequestReminders(ctx)
 	if err != nil {
 		slog.Warn("connectedapps: claim reminders failed", "error", err)
@@ -688,6 +717,95 @@ func (s *Service) notifyAdmins(ctx context.Context, req db.AppActionRequest) {
 	for _, admin := range recipients {
 		if !told[admin] {
 			s.deliver(ctx, req, NotifConnectRequested, admin)
+		}
+	}
+}
+
+// endTeamRequests runs once team account requests stopped pending. An
+// admin's one open notification for an app stands for every request waiting
+// for it (notifyAdmins), so whoever held one for an ended request is told
+// about the oldest request still waiting that concerns them. Admins who
+// archived theirs, or never held one, are not told. archiveReason, when set,
+// archives the ended requests' notifications, except keep's: the admin who
+// decided them keeps theirs where they acted on it. Expired ones stay.
+func (s *Service) endTeamRequests(ctx context.Context, keep pgtype.UUID, archiveReason string, ended ...db.AppActionRequest) {
+	type app struct {
+		workspaceID pgtype.UUID
+		slug        string
+	}
+	var apps []app
+	byApp := map[app][]db.AppActionRequest{}
+	for _, r := range ended {
+		if !isTeamConnect(r) {
+			continue
+		}
+		k := app{r.WorkspaceID, r.ToolkitSlug}
+		if _, seen := byApp[k]; !seen {
+			apps = append(apps, k)
+		}
+		byApp[k] = append(byApp[k], r)
+	}
+	for _, k := range apps {
+		reqs := byApp[k]
+		ids := make([]string, len(reqs))
+		for i, r := range reqs {
+			ids[i] = util.UUIDToString(r.ID)
+		}
+		holders, err := s.q.ListAppRequestInboxHolders(ctx, db.ListAppRequestInboxHoldersParams{
+			WorkspaceID: k.workspaceID, RequestIds: ids,
+		})
+		if err != nil {
+			slog.Warn("connectedapps: list team request notification holders failed", "toolkit", k.slug, "error", err)
+		}
+		if archiveReason != "" {
+			for _, r := range reqs {
+				s.archiveAdminNotifications(ctx, r, keep, archiveReason)
+			}
+		}
+		s.handOffTeamNotices(ctx, k.workspaceID, k.slug, holders)
+	}
+}
+
+// handOffTeamNotices tells each of holders about the oldest request still
+// waiting for slug's team account that they are a recipient of, unless they
+// already hold an open notification for one.
+func (s *Service) handOffTeamNotices(ctx context.Context, workspaceID pgtype.UUID, slug string, holders []pgtype.UUID) {
+	if len(holders) == 0 {
+		return
+	}
+	waiting, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list team connect requests failed", "toolkit", slug, "error", err)
+		return
+	}
+	if len(waiting) == 0 {
+		return
+	}
+	notified, err := s.q.ListTeamConnectNotifiedRecipients(ctx, db.ListTeamConnectNotifiedRecipientsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug, RecipientIds: holders,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list notified admins for team request failed", "toolkit", slug, "error", err)
+		return
+	}
+	left := make(map[pgtype.UUID]bool, len(holders))
+	for _, id := range holders {
+		left[id] = true
+	}
+	for _, id := range notified {
+		delete(left, id)
+	}
+	for _, r := range waiting {
+		if len(left) == 0 {
+			return
+		}
+		for _, admin := range s.teamConnectRecipients(ctx, r) {
+			if left[admin] {
+				s.deliver(ctx, r, NotifConnectRequested, admin)
+				delete(left, admin)
+			}
 		}
 	}
 }

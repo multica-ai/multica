@@ -339,6 +339,21 @@ describe("IssuePeekHost", () => {
     expect(screen.getByTestId("detail")).toHaveTextContent("a1");
   });
 
+  it("keeps H / L at the board's outer columns, but not where there is one column", () => {
+    renderHost([["a1"], ["b1"]]);
+    openCard("b1");
+    expect(fireEvent.keyDown(document.body, { key: "l" })).toBe(false);
+    expect(fireEvent.keyDown(document.body, { key: "h" })).toBe(false);
+    expect(screen.getByTestId("detail")).toHaveTextContent("a1");
+    expect(fireEvent.keyDown(document.body, { key: "h" })).toBe(false);
+  });
+
+  it("leaves L to the issue shortcuts in a single-column list", () => {
+    renderHost([["i-1", "i-2"]]);
+    openCard("i-1");
+    expect(fireEvent.keyDown(document.body, { key: "l" })).toBe(true);
+  });
+
   it("steps with the arrow keys, unless the reader clicked into the panel", () => {
     renderHost();
     openCard("i-1");

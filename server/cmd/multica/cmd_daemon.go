@@ -1574,7 +1574,7 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	case "running":
 		printDaemonStatusReport(os.Stdout, label, health)
 	case "starting":
-		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+		fmt.Fprintf(os.Stdout, "%s: starting (pid %s)\n", label, formatHealthPID(health["pid"]))
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
@@ -1619,13 +1619,39 @@ func describeDaemonManager(launchedBy string) string {
 	return launchedBy
 }
 
+// formatHealthPID renders the pid from a decoded daemon health response. The
+// map comes from encoding/json, so an integer pid arrives as a float64, and
+// fmt's %v switches to exponent notation once it needs seven digits: a pid of
+// 1531839 prints as "1.531839e+06". Converting to int first keeps the pid
+// readable, which matters because a daemon that has been up a while is exactly
+// the one a reader is trying to identify. Anything that is not a number is
+// passed through unchanged so an older or newer daemon still shows something.
+func formatHealthPID(v any) string {
+	switch pid := v.(type) {
+	case float64:
+		return strconv.FormatInt(int64(pid), 10)
+	case float32:
+		return strconv.FormatInt(int64(pid), 10)
+	case int:
+		return strconv.Itoa(pid)
+	case int64:
+		return strconv.FormatInt(pid, 10)
+	case string:
+		return pid
+	case nil:
+		return "?"
+	default:
+		return fmt.Sprint(pid)
+	}
+}
+
 // printDaemonStatusReport renders a key/value summary of the daemon health
 // response. The value column is aligned to the widest label so the dynamic
 // "Daemon [profile]" row stays in step with the static rows below it.
 func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	type row struct{ key, value string }
 	rows := []row{
-		{label, fmt.Sprintf("running (pid %v, uptime %v)", health["pid"], health["uptime"])},
+		{label, fmt.Sprintf("running (pid %s, uptime %v)", formatHealthPID(health["pid"]), health["uptime"])},
 	}
 	if version, ok := health["cli_version"].(string); ok && version != "" {
 		rows = append(rows, row{"Version", version})

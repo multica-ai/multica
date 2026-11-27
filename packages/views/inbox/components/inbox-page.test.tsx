@@ -1,7 +1,10 @@
+import type { ReactElement } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { AgentTask, InboxItem } from "@multica/core/types";
+import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
+import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useCommandBarContextStore } from "@multica/core/command-bar";
@@ -310,6 +313,7 @@ function reset() {
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
+  push.mockClear();
   markReadMutate.mockReset();
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
@@ -347,8 +351,9 @@ describe("InboxPage", () => {
     const { rerender } = render(<InboxPage />);
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
     rerender(<InboxPage />);
-    const back = issueDetailProps.at(-1)?.leadingAction as { props: { onClick: () => void } };
-    act(() => back.props.onClick());
+    // Back on the list: the system back gesture, or the nav sheet's link to it.
+    searchParams = new URLSearchParams();
+    rerender(<InboxPage />);
     expect(screen.queryByTestId("issue-detail")).toBeNull();
     fireEvent.click(screen.getByTestId("row"));
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
@@ -898,44 +903,64 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
   });
 
-  it("writes a bare issue param when selecting in the main view", () => {
+  // The phone detail's header holds the nav trigger, not a way back, so the
+  // opening has to be a history entry for the back gesture to return to the list.
+  it("opens a phone row as a history entry with a bare issue param", () => {
     reset();
     listData.active = [item({ id: "active-1", issue_id: "issue-3" })];
 
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-3");
+  });
+
+  it("hands a phone issue detail the nav trigger for every state it draws", () => {
+    reset();
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item()];
+    const { unmount } = render(<InboxPage />);
+    // The loading and not-found states draw only this slot, so it carries the
+    // nav, never a way back that would lock the nav sheet out (MUL-10233).
+    expect((issueDetailProps.at(-1)?.leadingAction as ReactElement).type).toBe(CollapsedNavTrigger);
+    unmount();
+
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item()];
+    render(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.leadingAction).toBeUndefined();
   });
 
   // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
   // not an issue, so `IssueDetail` never renders for it — and `IssueDetail` is
-  // what carries the way back in its own header on a phone. This branch has to
-  // supply its own bar or opening one of these is a dead end.
-  it("keeps a way back to the list for a notification with no issue", () => {
+  // what carries the nav trigger in its own header on a phone. This branch has
+  // to supply its own header or opening one of these is a dead end.
+  it("keeps the nav reachable for a notification with no issue", () => {
     reset();
     listData.active = [
       item({ id: "inbox-note", issue_id: null, type: "quick_create_failed" }),
     ];
 
-    render(<InboxPage />);
+    render(
+      <SidebarProvider>
+        <InboxPage />
+      </SidebarProvider>,
+    );
     fireEvent.click(screen.getByTestId("row"));
 
     // Mobile swaps the list out for the detail, so the row is gone…
     expect(screen.queryByTestId("row")).toBeNull();
 
-    // …and the only thing that can bring it back is the bar this branch adds.
-    // Located structurally: the test's `useT` returns one string for every key,
-    // so every button in this detail shares an accessible name.
-    const back = document.querySelector<HTMLButtonElement>(".h-12.border-b button");
-    expect(back).not.toBeNull();
-
-    fireEvent.click(back!);
-
-    expect(screen.getByTestId("row")).toBeInTheDocument();
+    // …and the header this branch adds keeps the way to the nav sheet.
+    const header = document.querySelector("[data-mc='page-header']");
+    expect(header?.querySelector("[data-sidebar='trigger']")).not.toBeNull();
   });
 
   it("retries a failed quick-create with its original source context", async () => {

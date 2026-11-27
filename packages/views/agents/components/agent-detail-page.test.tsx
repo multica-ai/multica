@@ -783,10 +783,24 @@ describe("AgentDetailPage DM button", () => {
 });
 
 describe("AgentDetailPage more actions", () => {
-  it("keeps Settings and copy actions but no Archive for a system agent", async () => {
+  it("offers Archive for Mika and says the Mika prompt stops", async () => {
+    agentsRef.current = [{ ...baseAgent, system_key: "mika" }];
+    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    fireEvent.click(
+      within(openMoreActions()).getByRole("menuitem", { name: "Archive agent" }),
+    );
+    expect(
+      await screen.findByText(/"Start with Mika" prompt won't appear again/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Settings and copy actions but no Archive for other system agents", async () => {
     // An admin passes `canEditAgent`, so only the system key keeps Archive
     // out of the menu.
-    agentsRef.current = [{ ...baseAgent, system_key: "mika" }];
+    agentsRef.current = [{ ...baseAgent, system_key: "agent_builder:abc" }];
     membersRef.current = [{ user_id: "user-1", role: "admin" }];
     renderPage();
 

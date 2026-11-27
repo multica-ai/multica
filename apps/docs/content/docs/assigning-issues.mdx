@@ -66,6 +66,8 @@ When the issue already has an agent or squad owner, moving it out of `backlog` o
 
 Only the fixed `backlog` status works this way. A [custom status](/issues#custom-statuses) in the `unstarted` category does **not** park work: assigning an agent to an issue there starts a run right away. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
 
+An issue with unfinished [blockers](/issues#relations) (manual blockers or earlier sub-issue stages) also holds off starting a run on assignment until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed, and then starts automatically unless the issue is in `backlog`.
+
 ## Assignment permissions
 
 Whether you can assign an agent is decided by its Access:

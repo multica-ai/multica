@@ -217,6 +217,18 @@ export function canDeleteWorkspace(ctx: PermissionContext): Decision {
   );
 }
 
+/**
+ * Clear a finished run's log. Mirrors `PurgeTaskTranscript`
+ * (`server/internal/handler/task_transcript_purge.go`): owners and admins only.
+ */
+export function canPurgeRunLog(ctx: PermissionContext): Decision {
+  if (isAdminLike(ctx.role)) return ALLOW;
+  return deny(
+    "not_admin_role",
+    "Only workspace owners and admins can clear a run's log.",
+  );
+}
+
 export function canManageMembers(ctx: PermissionContext): Decision {
   if (isAdminLike(ctx.role)) return ALLOW;
   return deny(

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithI18n } from "../../test/i18n";
 import en from "../../locales/en/projects.json";
 
@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   updateMock: vi.fn(),
   pickDirectory: vi.fn(),
   validateLocalDirectory: vi.fn(),
+  copyText: vi.fn(),
 }));
 
 const NOW = Date.now();
@@ -98,19 +99,33 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => state.daemon,
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: state.copyText }));
 
 import { ProjectResourcesSection } from "./project-resources-section";
 
 const strings = en.resources;
 
-function pickFolder(isGitRepo: boolean) {
+async function openAddMenu() {
+  fireEvent.click(screen.getByRole("button", { name: strings.add }));
+  return screen.findByRole("menuitem", {
+    name: (name) => name.startsWith(strings.add_local),
+  });
+}
+
+async function pickFolder(isGitRepo: boolean) {
   state.pickDirectory.mockResolvedValueOnce({
     ok: true,
     path: "/Users/dev/work/game-client",
     basename: "game-client",
   });
   state.validateLocalDirectory.mockResolvedValueOnce({ ok: true, is_git_repo: isGitRepo });
-  fireEvent.click(screen.getByRole("button", { name: strings.local_pick }));
+  fireEvent.click(await openAddMenu());
+  return screen.findByRole("dialog");
+}
+
+async function openRowMenu(name: string) {
+  fireEvent.click(screen.getByRole("button", { name: `Actions for ${name}` }));
+  return screen.findByRole("menu");
 }
 
 beforeEach(() => {
@@ -122,6 +137,7 @@ beforeEach(() => {
   state.updateMock.mockReset().mockResolvedValue({});
   state.pickDirectory.mockReset();
   state.validateLocalDirectory.mockReset();
+  state.copyText.mockReset().mockResolvedValue(true);
 });
 
 describe("ProjectResourcesSection — local folders", () => {
@@ -137,24 +153,40 @@ describe("ProjectResourcesSection — local folders", () => {
   // A folder is identified by its path, so a rename only changed the title and
   // read as a broken edit action beside the other controls (MUL-7525). What
   // remains is the one setting that changes how tasks run on the folder.
-  it("offers the execution mode and remove actions, and no rename", () => {
+  it("offers the execution mode and remove actions, and no rename", async () => {
     state.resources = [folder("game-client", "daemon-1")];
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByRole("button", { name: strings.mode_badge_worktree })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: strings.remove_tooltip })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
+    const menu = await openRowMenu("game-client");
+    expect(within(menu).getByRole("menuitem", { name: strings.remove_tooltip })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /rename/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  // The server allows one folder per computer, so a machine that already has
-  // one offers no way to add a second.
-  it("does not offer another folder on a computer that already has one", () => {
+  it("copies a folder's path from its row menu", async () => {
     state.resources = [folder("game-client", "daemon-1")];
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    expect(screen.queryByRole("button", { name: strings.local_pick })).not.toBeInTheDocument();
+    const menu = await openRowMenu("game-client");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: strings.copy_path }));
+    await waitFor(() => expect(state.copyText).toHaveBeenCalledWith("/Users/dev/work/game-client"));
   });
 
-  it("lists folders under the computer they belong to, with that computer's state", () => {
+  it("asks for a repository or folder when the project has neither", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    expect(screen.getByText(strings.empty)).toBeInTheDocument();
+  });
+
+  // The server allows one folder per computer, so a machine that already has
+  // one offers no way to add a second, and says why.
+  it("does not offer another folder on a computer that already has one", async () => {
+    state.resources = [folder("game-client", "daemon-1")];
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const item = await openAddMenu();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent(strings.add_local_exists);
+  });
+
+  it("names the computer each folder belongs to, with that computer's state", async () => {
     state.runtimes = [
       runtime("daemon-1", "macbook.local", "online"),
       runtime("daemon-2", "studio-pc.local", "offline"),
@@ -162,12 +194,28 @@ describe("ProjectResourcesSection — local folders", () => {
     state.resources = [folder("server-checkout", "daemon-2")];
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    expect(screen.getByText("studio-pc.local")).toBeInTheDocument();
-    expect(screen.getByText(`· ${strings.local_offline}`)).toBeInTheDocument();
-    expect(screen.getByText("server-checkout")).toBeInTheDocument();
-    // This computer has no folder yet, so it shows the slot to choose one.
-    expect(screen.getByText(strings.local_this_computer)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: strings.local_pick })).toBeEnabled();
+    const row = screen.getByText("server-checkout").closest("[data-resource-row]") as HTMLElement;
+    expect(within(row).getByText("studio-pc.local")).toBeInTheDocument();
+    expect(within(row).getByText(strings.local_offline)).toBeInTheDocument();
+    // This computer has no folder yet, so the Add menu offers one.
+    const item = await openAddMenu();
+    expect(item).not.toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent(strings.add_local_hint);
+  });
+
+  it("marks this computer's folder and lists it first", () => {
+    state.runtimes = [
+      runtime("daemon-1", "macbook.local", "online"),
+      runtime("daemon-2", "studio-pc.local", "online"),
+    ];
+    state.resources = [folder("server-checkout", "daemon-2"), folder("game-client", "daemon-1")];
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    const rows = document.querySelectorAll("[data-resource-row]");
+    expect(rows[0]).toHaveTextContent("game-client");
+    expect(within(rows[0] as HTMLElement).getByText(strings.local_this_computer)).toBeInTheDocument();
+    expect(rows[1]).toHaveTextContent("server-checkout");
+    expect(within(rows[1] as HTMLElement).queryByText(strings.local_offline)).not.toBeInTheDocument();
   });
 
   it("falls back to a generic name for a computer with no registered runtime", () => {
@@ -178,7 +226,7 @@ describe("ProjectResourcesSection — local folders", () => {
 
   // Picking needs this machine's daemon, so web cannot add a folder; editing
   // one only rewrites the resource, so that stays available.
-  it("lets web edit existing folders but not add one", () => {
+  it("lets web edit existing folders but not add one", async () => {
     state.desktop = false;
     state.daemon = { daemonId: null, deviceName: null, running: false };
     state.runtimes = [runtime("daemon-2", "studio-pc.local", "online")];
@@ -186,13 +234,15 @@ describe("ProjectResourcesSection — local folders", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     expect(screen.getByText("studio-pc.local")).toBeInTheDocument();
-    expect(screen.queryByText(`· ${strings.local_offline}`)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: strings.local_pick })).not.toBeInTheDocument();
+    expect(screen.queryByText(strings.local_offline)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: strings.mode_badge_worktree })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: strings.remove_tooltip })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actions for server-checkout" })).toBeInTheDocument();
+    const item = await openAddMenu();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent(strings.add_local_desktop_only);
   });
 
-  it("lists folders read-only, with no slot on this computer and nothing to change", () => {
+  it("lists folders read-only, with nothing to add or change", () => {
     state.resources = [folder("game-client", "daemon-1"), folder("server-checkout", "daemon-2")];
     renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
 
@@ -200,35 +250,37 @@ describe("ProjectResourcesSection — local folders", () => {
     expect(screen.getByText("server-checkout")).toBeInTheDocument();
     expect(screen.getAllByText(strings.mode_badge_worktree)).toHaveLength(2);
     expect(screen.queryByRole("button", { name: strings.mode_badge_worktree })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: strings.remove_tooltip })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Actions for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: strings.add })).not.toBeInTheDocument();
   });
 
-  it("shows no local folders read-only when there are none, even on desktop", () => {
+  it("says there is nothing yet, read-only, without offering to add", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
-    expect(screen.queryByText(strings.local_group)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: strings.local_pick })).not.toBeInTheDocument();
+    expect(screen.getByText(strings.empty_read_only)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: strings.add })).not.toBeInTheDocument();
   });
 
-  it("asks to start the daemon before a folder can be chosen", () => {
+  it("asks to start the daemon before a folder can be chosen", async () => {
     state.daemon = { daemonId: null, deviceName: "MacBook", running: false };
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    expect(screen.getByText(strings.local_daemon_offline_hint)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: strings.local_pick })).toBeDisabled();
+    const item = await openAddMenu();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent(strings.local_daemon_offline_hint);
   });
 
   // The mode is part of what the user is choosing — whether tasks edit this
   // folder or hand back a branch — so it is asked before anything is created.
-  it("asks for the mode in place and creates the folder with it", async () => {
+  it("asks for the mode in a dialog and creates the folder with it", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    pickFolder(true);
+    const dialog = await pickFolder(true);
 
-    expect(await screen.findByText("/Users/dev/work/game-client")).toBeInTheDocument();
-    const [direct, parallel] = screen.getAllByRole("radio");
+    expect(within(dialog).getByText("/Users/dev/work/game-client")).toBeInTheDocument();
+    const [direct, parallel] = within(dialog).getAllByRole("radio");
     expect(parallel).toHaveAttribute("aria-checked", "true");
     expect(state.createMock).not.toHaveBeenCalled();
 
     fireEvent.click(direct!);
-    fireEvent.click(screen.getByRole("button", { name: strings.mode_add }));
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.mode_add }));
 
     await waitFor(() =>
       expect(state.createMock).toHaveBeenCalledWith({
@@ -246,31 +298,46 @@ describe("ProjectResourcesSection — local folders", () => {
   it("keeps the picked folder on screen with the server's reason when adding fails", async () => {
     state.createMock.mockRejectedValueOnce(new Error("this computer already has a folder"));
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    pickFolder(true);
+    const dialog = await pickFolder(true);
 
-    fireEvent.click(await screen.findByRole("button", { name: strings.mode_add }));
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.mode_add }));
 
-    expect(await screen.findByText("this computer already has a folder")).toBeInTheDocument();
-    expect(screen.getByText("/Users/dev/work/game-client")).toBeInTheDocument();
+    expect(await within(dialog).findByText("this computer already has a folder")).toBeInTheDocument();
+    expect(within(dialog).getByText("/Users/dev/work/game-client")).toBeInTheDocument();
+  });
+
+  it("swaps the picked folder for another one from the dialog", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    const dialog = await pickFolder(true);
+
+    state.pickDirectory.mockResolvedValueOnce({
+      ok: true,
+      path: "/Users/dev/work/notes",
+      basename: "notes",
+    });
+    state.validateLocalDirectory.mockResolvedValueOnce({ ok: true, is_git_repo: false });
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.local_dialog_change }));
+
+    expect(await within(dialog).findByText("/Users/dev/work/notes")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("radio")[0]).toHaveAttribute("aria-checked", "true");
   });
 
   it("starts a non-git folder on direct editing, with parallel closed", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    pickFolder(false);
+    const dialog = await pickFolder(false);
 
-    await screen.findByText("/Users/dev/work/game-client");
-    const [direct, parallel] = screen.getAllByRole("radio");
+    const [direct, parallel] = within(dialog).getAllByRole("radio");
     expect(direct).toHaveAttribute("aria-checked", "true");
     expect(parallel).toBeDisabled();
   });
 
-  it("returns to the slot when the picked folder is cancelled", async () => {
+  it("creates nothing when the picked folder is cancelled", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    pickFolder(true);
+    const dialog = await pickFolder(true);
 
-    fireEvent.click(await screen.findByRole("button", { name: strings.mode_cancel }));
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.mode_cancel }));
 
-    expect(screen.getByRole("button", { name: strings.local_pick })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(state.createMock).not.toHaveBeenCalled();
   });
 

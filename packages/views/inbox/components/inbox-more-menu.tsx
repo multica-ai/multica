@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { BellOff, Check, CircleDot, ListTree, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -14,8 +15,10 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import { useToggleIssueSubscriber, useUnsubscribeFromIssueSubtree } from "@multica/core/issues/mutations";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
 import { isOwnIssue } from "@multica/core/issues/ownership";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -53,21 +56,8 @@ export function InboxMoreMenu({
   onUnsubscribe: (scope: InboxUnsubscribeScope) => void;
 }) {
   const { t } = useT("inbox");
-  const wsId = useWorkspaceId();
-  const { data: issue } = useQuery(issueDetailOptions(wsId, issueId));
-  const { data: agents, isSuccess: agentsKnown } = useQuery(agentListOptions(wsId));
-  const { data: subscribers, isSuccess: subscribersKnown } = useQuery(issueSubscribersOptions(issueId));
-  const { data: children = [], isSuccess: childrenLoaded, isFetching: childrenFetching } = useQuery({
-    ...childIssuesOptions(wsId, issueId),
-    enabled: !!issue,
-  });
+  const { offered, asksScope, childCountKnown, childCount } = useUnsubscribeOffer(issueId, userId);
   const [open, setOpen] = useState(false);
-
-  const subscribed = !!subscribers?.some((s) => s.user_type === "member" && s.user_id === userId);
-  const offered =
-    !!issue && agentsKnown && subscribersKnown && subscribed && !isOwnIssue(issue, userId, agents ?? []);
-  const childCountKnown = childrenLoaded && !childrenFetching;
-  const asksScope = !childCountKnown || children.length > 0;
 
   useInboxShortcut(
     "unsubscribeArchiveInboxItem",
@@ -83,7 +73,7 @@ export function InboxMoreMenu({
       >
         <MoreHorizontal />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-auto min-w-56 max-w-80">
+      <DropdownMenuContent side="top" align="end" className="w-auto min-w-56 max-w-80">
         {/* onClick, not onSelect: Base UI's Menu.Item has no onSelect. */}
         <DropdownMenuItem onClick={onToggleRead}>
           {read ? <CircleDot /> : <Check />}
@@ -113,7 +103,7 @@ export function InboxMoreMenu({
               <DropdownMenuItem onClick={() => onUnsubscribe("subtree")}>
                 <ListTree />
                 {childCountKnown
-                  ? t(($) => $.unsubscribe.subtree, { count: children.length })
+                  ? t(($) => $.unsubscribe.subtree, { count: childCount })
                   : t(($) => $.unsubscribe.subtree_unknown)}
               </DropdownMenuItem>
             </DropdownMenuGroup>
@@ -122,4 +112,78 @@ export function InboxMoreMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/**
+ * `…` once the open notification has settled (archived, snoozed) and stays on
+ * screen: following its issue is all that is left to change there, so it
+ * offers only the way out. Unlike "Unsubscribe & archive" it leaves the
+ * notification as it is. Renders nothing where unsubscribing is not offered.
+ */
+export function InboxSettledMoreMenu({ issueId }: { issueId: string }) {
+  const { t } = useT("inbox");
+  const { t: tIssues } = useT("issues");
+  const userId = useAuthStore((s) => s.user?.id);
+  const { offered, asksScope } = useUnsubscribeOffer(issueId, userId);
+  const leave = useToggleIssueSubscriber(issueId);
+  const leaveSubtree = useUnsubscribeFromIssueSubtree(issueId);
+  if (!offered || !userId) return null;
+
+  // On the request's promise: moving on to the next notification unmounts the
+  // menu before the request settles, and React Query skips per-call callbacks then.
+  const unsubscribe = () =>
+    void leave.mutateAsync({ userId, userType: "member", subscribed: true }).then(
+      () => toast.success(t(($) => $.kept.unsubscribed), { description: t(($) => $.toasts.unsubscribed_hint) }),
+      () => toast.error(tIssues(($) => $.detail.subscription_update_failed)),
+    );
+  const unsubscribeSubtree = () =>
+    void leaveSubtree.mutateAsync({ userId, userType: "member" }).then(
+      () => toast.success(tIssues(($) => $.detail.unsubscribe_subtree_succeeded)),
+      () => toast.error(tIssues(($) => $.detail.unsubscribe_subtree_failed)),
+    );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <IconButton label={t(($) => $.detail.more_actions)} tooltipSide="top" className="text-muted-foreground" />
+        }
+      >
+        <MoreHorizontal />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" className="w-auto min-w-56 max-w-80">
+        <DropdownMenuItem disabled={leave.isPending} onClick={unsubscribe}>
+          <BellOff />
+          {tIssues(($) => $.detail.unsubscribe_this)}
+        </DropdownMenuItem>
+        {asksScope && (
+          <DropdownMenuItem disabled={leaveSubtree.isPending} onClick={unsubscribeSubtree}>
+            <ListTree />
+            {tIssues(($) => $.detail.unsubscribe_subtree)}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Whether the viewer may leave the issue from the Inbox: they follow it, and
+ * it is not theirs or their agent's. Unknown until every query behind that
+ * has answered, so the offer never flashes where it does not belong.
+ */
+function useUnsubscribeOffer(issueId: string, userId: string | undefined) {
+  const wsId = useWorkspaceId();
+  const { data: issue } = useQuery(issueDetailOptions(wsId, issueId));
+  const { data: agents, isSuccess: agentsKnown } = useQuery(agentListOptions(wsId));
+  const { data: subscribers, isSuccess: subscribersKnown } = useQuery(issueSubscribersOptions(issueId));
+  const { data: children = [], isSuccess: childrenLoaded, isFetching: childrenFetching } = useQuery({
+    ...childIssuesOptions(wsId, issueId),
+    enabled: !!issue,
+  });
+  const subscribed = !!subscribers?.some((s) => s.user_type === "member" && s.user_id === userId);
+  const offered =
+    !!issue && agentsKnown && subscribersKnown && subscribed && !isOwnIssue(issue, userId, agents ?? []);
+  const childCountKnown = childrenLoaded && !childrenFetching;
+  return { offered, childCountKnown, childCount: children.length, asksScope: !childCountKnown || children.length > 0 };
 }

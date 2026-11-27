@@ -3620,3 +3620,67 @@ func TestWebhook_UninstallDeletesAllBindings(t *testing.T) {
 		t.Errorf("deleted broadcasts must cover both workspaces; saw %v", seen)
 	}
 }
+
+func TestParseCIEventTargets(t *testing.T) {
+	base := `"installation":{"id":42},"repository":{"name":"multica","owner":{"login":"multica-ai"}}`
+	for _, tc := range []struct {
+		name        string
+		body        string
+		wantNumbers []int32
+		wantSHA     string
+		wantOK      bool
+	}{
+		{
+			name:    "check_run with head_sha and empty pull_requests",
+			body:    `{` + base + `,"check_run":{"head_sha":"abc123","pull_requests":[]}}`,
+			wantSHA: "abc123",
+			wantOK:  true,
+		},
+		{
+			name:    "check_run falls back to check_suite head_sha",
+			body:    `{` + base + `,"check_run":{"pull_requests":[],"check_suite":{"head_sha":"suite456"}}}`,
+			wantSHA: "suite456",
+			wantOK:  true,
+		},
+		{
+			name:        "workflow_run with pull_requests",
+			body:        `{` + base + `,"workflow_run":{"head_sha":"wf789","pull_requests":[{"number":11563},{"number":11563}]}}`,
+			wantNumbers: []int32{11563},
+			wantSHA:     "wf789",
+			wantOK:      true,
+		},
+		{
+			name:    "workflow_run with empty pull_requests falls back to head_sha",
+			body:    `{` + base + `,"workflow_run":{"head_sha":"wf999","pull_requests":[]}}`,
+			wantSHA: "wf999",
+			wantOK:  true,
+		},
+		{
+			name:    "status event uses top-level sha",
+			body:    `{` + base + `,"sha":"status111"}`,
+			wantSHA: "status111",
+			wantOK:  true,
+		},
+		{
+			name:   "missing installation is ignored",
+			body:   `{"repository":{"name":"multica","owner":{"login":"multica-ai"}},"sha":"abc"}`,
+			wantOK: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			instID, owner, repo, numbers, sha, ok := parseCIEventTargets([]byte(tc.body))
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%t, want %t", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if instID != 42 || owner != "multica-ai" || repo != "multica" {
+				t.Fatalf("target=(%d,%s/%s), want (42,multica-ai/multica)", instID, owner, repo)
+			}
+			if !reflect.DeepEqual(numbers, tc.wantNumbers) || sha != tc.wantSHA {
+				t.Fatalf("numbers=%v sha=%q, want numbers=%v sha=%q", numbers, sha, tc.wantNumbers, tc.wantSHA)
+			}
+		})
+	}
+}

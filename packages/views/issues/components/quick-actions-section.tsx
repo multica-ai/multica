@@ -29,6 +29,7 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 
@@ -291,7 +292,7 @@ export function QuickActionsMenu({
   return (
     <>
       <DropdownMenu>
-        <TooltipHint label={label} side={side}>
+        <TooltipHint label={label} shortcut={<ActionShortcutKeycaps action="runIssueQuickAction" />} side={side}>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" aria-label={label} className="shrink-0" disabled={running} />}
           >

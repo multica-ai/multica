@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -267,6 +268,13 @@ func (h *Handler) DeleteDocComment(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
+	}
+	// Runs answering a deleted discussion have nothing left to answer. A run
+	// triggered by a deleted reply still has the discussion to read.
+	if !comment.ParentID.Valid {
+		if err := h.TaskService.CancelTasksForDocThread(r.Context(), doc.ID, comment.ID); err != nil {
+			slog.Warn("delete doc discussion: cancel runs failed", "doc_id", uuidToString(doc.ID), "thread_id", uuidToString(comment.ID), "error", err)
+		}
 	}
 	h.publish(protocol.EventDocCommentChanged, workspaceID, actorType, actorID, map[string]any{
 		"doc_id": uuidToString(doc.ID), "comment_id": uuidToString(comment.ID),

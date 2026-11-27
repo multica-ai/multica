@@ -44,6 +44,7 @@ export type {
   ContextReceiptLoad,
   ContextReceiptSource,
   TaskContextReceiptResponse,
+  TaskTranscriptPurge,
   TaskAttribution,
   AttributionUser,
   TaskCancellationActor,

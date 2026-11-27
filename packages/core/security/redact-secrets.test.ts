@@ -88,6 +88,30 @@ describe("redactSecrets", () => {
     expect(result).not.toContain("xoxb-");
   });
 
+  it("redacts Slack app-level and config/refresh tokens", () => {
+    const cases = [
+      ["xa", "pp-1-A0000000000-1111111111-abcdefdeadbeefcafe"],
+      ["xo", "xe-1-My0abcdefghijklmnopqrstuvwx"],
+    ];
+    for (const parts of cases) {
+      const token = parts.join("");
+      const result = redactSecrets(`connecting with ${token} now`);
+      expect(result).toBe("connecting with [REDACTED SLACK TOKEN] now");
+    }
+  });
+
+  it("redacts Stripe live secret and restricted keys", () => {
+    const sk = ["sk_", "live_", "51Abcdef0000000000000000"].join("");
+    const rk = ["rk_", "live_", "51Abcdef0000000000000000"].join("");
+    expect(redactSecrets(`restricted ${sk}`)).toBe("restricted [REDACTED STRIPE KEY]");
+    expect(redactSecrets(`restricted ${rk}`)).toBe("restricted [REDACTED STRIPE KEY]");
+  });
+
+  it("leaves Stripe publishable keys unredacted", () => {
+    const pk = ["pk_", "live_", "51Abcdef0000000000000000"].join("");
+    expect(redactSecrets(`publishable ${pk}`)).toBe(`publishable ${pk}`);
+  });
+
   it("redacts JWT tokens", () => {
     const result = redactSecrets("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c");
     expect(result).not.toContain("eyJhbGci");

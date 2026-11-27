@@ -113,6 +113,8 @@
     "runtime_reconnect_timeout": "守護程序未及時重新連線",
     "runtime_recovery": "守護程序已重啟",
     "timeout": "執行逾時",
+    "cleanup_unconfirmed": "未能確認 AI 代理行程已結束",
+    "cleanup_blocked": "上次執行可能尚未結束。確認已停止後，如有此 AI 代理的失敗任務執行紀錄，可在網頁版或桌面版重試。",
     "iteration_limit": "達到迭代次數上限",
     "agent_blocked": "等待人工輸入",
     "api_invalid_request": "模型 API 拒絕了請求",
