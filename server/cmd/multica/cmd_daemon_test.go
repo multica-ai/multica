@@ -396,6 +396,27 @@ list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
 		}
 	})
 
+	t.Run("tls handshake timeout names the GODEBUG check", func(t *testing.T) {
+		t.Parallel()
+		// A network that drops Go's large post-quantum ClientHello lets the
+		// TCP connection open, so this is neither "refused" nor an i/o
+		// timeout; the shared CLI hint is what tells the user what to try.
+		logPath := writeLog(t, "daemon.log", "18:40:46.588 INF starting daemon component=daemon\n")
+		errLogPath := writeLog(t, "daemon.err.log", `Error: list workspaces: Get "https://api.multica.ai/api/daemon/workspaces": net/http: TLS handshake timeout
+`)
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath, errLogPath: errLogPath}, nil, "", "https://api.multica.ai")
+		msg := err.Error()
+		if !strings.Contains(msg, cli.TLSHandshakeTimeoutMessage()) || !strings.Contains(msg, "GODEBUG=tlsmlkem=0") {
+			t.Fatalf("error = %q, want the TLS handshake timeout hint", msg)
+		}
+		if !strings.Contains(msg, logPath) {
+			t.Fatalf("error = %q, want pointer to the log file", msg)
+		}
+		if strings.Contains(msg, "net/http") {
+			t.Fatalf("error = %q, want no raw log lines for a classified failure", msg)
+		}
+	})
+
 	t.Run("unrecognized failure keeps filtered excerpt plus crash output", func(t *testing.T) {
 		t.Parallel()
 		logPath := writeLog(t, "daemon.log", `18:00:00.001 DBG some debug detail component=daemon
