@@ -296,6 +296,10 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` は JSON 配列で、起動引数の最後に置かれます。モデルは `--model` で選んでください。カスタム引数の中の `--model` を受け付けないツールもあります。
 - エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。
 
+エージェントの `--runtime-config` の JSON に `"issue_session_policy": "fresh"` を設定すると、タスクの実行時に前回のセッションや管理対象の作業ディレクトリを引き継ぎません。タスクの再実行にも適用されます。既存のエージェントを更新するときは、他の設定キーを保持してください。このキーを削除すると、既定のセッション再利用に戻ります。
+
+ローカルディレクトリをリンクしている場合、`in_place` は引き続き設定済みのフォルダーを使用し、`worktree` は同じタスクとエージェントの既存ブランチを引き継げます。
+
 ### エージェントの実行履歴
 
 `multica agent tasks <agent-id> --limit 200` は最新の実行ページを返します。既定および最大のページサイズは 200 です。さらに実行がある場合は stderr にカーソルが出力されるため、そのまま `--before '<cursor>'` に渡して次のページを取得します。`--output json` は配列出力を維持し、そのページ分の使用量のみを含みます。

@@ -296,6 +296,10 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` est un tableau JSON placé à la fin des arguments de lancement. Choisissez le modèle avec `--model` ; certains outils refusent un `--model` dans les arguments personnalisés.
 - `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte.
 
+Dans le JSON `--runtime-config` d’un agent, définissez `"issue_session_policy": "fresh"` pour démarrer chaque exécution de tâche sans reprendre la session ni le répertoire de travail géré de l’exécution précédente. Cette option s’applique aussi aux relances. Conservez les autres clés quand vous modifiez un agent existant. Supprimez cette clé pour rétablir la reprise de session par défaut.
+
+Pour un dossier local lié, `in_place` utilise toujours le dossier configuré et `worktree` peut reprendre une branche existante pour la même tâche et le même agent.
+
 ### Historique d'exécution d'un agent
 
 `multica agent tasks <agent-id> --limit 200` renvoie la page d'exécutions la plus récente. La taille de page par défaut et maximale est 200. S'il existe d'autres exécutions, stderr affiche un curseur ; passez-le tel quel avec `--before '<cursor>'` pour lire la page suivante. `--output json` conserve le format tableau JSON et inclut uniquement l'utilisation de cette page.

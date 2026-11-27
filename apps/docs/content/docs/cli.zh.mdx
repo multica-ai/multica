@@ -296,6 +296,10 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` 是 JSON 数组，排在启动参数的最后。选模型用 `--model`，部分工具会拒绝出现在自定义参数里的 `--model`。
 - 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。
 
+在智能体的 `--runtime-config` JSON 中设置 `"issue_session_policy": "fresh"`，每次运行任务时都从新会话开始，不沿用上次运行的托管工作目录。重试任务也适用。更新已有智能体时，请保留其他运行时配置项。删除此项即可恢复默认的会话复用行为。
+
+对于已关联的本地目录，`in_place` 仍使用配置的文件夹，`worktree` 则可以继续使用同一任务和智能体对应的现有分支。
+
 ### 智能体运行记录
 
 `multica agent tasks <agent-id> --limit 200` 返回最新一页运行记录。默认与最大分页大小都是 200。还有更多运行记录时，stderr 会打印一个 cursor；原样传入 `--before '<cursor>'` 即可读取下一页。`--output json` 保持数组输出，且只包含该页的用量。

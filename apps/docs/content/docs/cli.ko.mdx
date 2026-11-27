@@ -296,6 +296,10 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
 - 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
 
+에이전트의 `--runtime-config` JSON에 `"issue_session_policy": "fresh"`를 설정하면 태스크를 실행할 때 이전 실행의 세션과 관리되는 작업 디렉터리를 재사용하지 않습니다. 태스크를 다시 실행할 때도 적용됩니다. 기존 에이전트를 업데이트할 때는 다른 런타임 설정 키를 유지하세요. 이 키를 제거하면 기본 세션 재사용 동작으로 돌아갑니다.
+
+연결된 로컬 디렉터리에서 `in_place`는 설정된 폴더를 계속 사용하고, `worktree`는 같은 태스크와 에이전트의 기존 브랜치에서 작업을 이어갈 수 있습니다.
+
 ### 에이전트 실행 기록
 
 `multica agent tasks <agent-id> --limit 200`은 최신 실행 페이지를 반환합니다. 기본 및 최대 페이지 크기는 200입니다. 실행 기록이 더 있으면 stderr에 커서가 출력되며, 이를 그대로 `--before '<cursor>'`에 넘겨 다음 페이지를 읽습니다. `--output json`은 배열 출력을 유지하며 해당 페이지의 사용량만 포함합니다.

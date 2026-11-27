@@ -287,6 +287,10 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` 是 JSON 陣列，排在啟動引數的最後。選模型用 `--model`，部分工具會拒絕出現在自定義引數裡的 `--model`。
 - 誰能呼叫 AI 代理用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是舊寫法，會對映到 `--permission-mode`；兩者同時給出時以 `--permission-mode` 為準。
 
+在 AI 代理的 `--runtime-config` JSON 中設定 `"issue_session_policy": "fresh"`，每次執行任務時都會開啟新工作階段，且不會沿用上次執行的受管理工作目錄。重試任務時也適用。更新既有 AI 代理時，請保留其他執行時設定。移除此設定即可恢復預設的工作階段續用行為。
+
+對於已連結的本機目錄，`in_place` 仍使用設定的資料夾，`worktree` 則可以繼續使用同一任務與 AI 代理對應的現有分支。
+
 ### AI 代理執行記錄
 
 `multica agent tasks <agent-id> --limit 200` 返回最新一頁執行記錄。預設與最大分頁大小都是 200。還有更多執行記錄時，stderr 會印出一個 cursor；原樣帶入 `--before '<cursor>'` 即可讀取下一頁。`--output json` 維持陣列輸出，且只包含該頁的用量。
