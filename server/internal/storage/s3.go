@@ -262,6 +262,11 @@ func (s *S3Storage) storageClass() types.StorageClass {
 //
 //	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
+	// Local objects copied to S3 retain their key relative to the uploads root.
+	if key, ok := strings.CutPrefix(rawURL, "/uploads/"); ok {
+		return key
+	}
+
 	if s.endpointURL != "" {
 		for _, prefix := range []string{
 			customEndpointObjectPrefix(s.endpointURL, s.bucket, true),

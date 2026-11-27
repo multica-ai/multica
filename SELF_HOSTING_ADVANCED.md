@@ -116,6 +116,29 @@ Things to know:
 Uploads and attachments are written to local disk by default. Set `S3_BUCKET` to
 use S3-compatible object storage instead.
 
+#### Moving existing local attachments to object storage
+
+Setting `S3_BUCKET` selects the object-storage backend; it does not copy files
+from the uploads volume. Before switching, back up the uploads volume and keep
+the same Compose project and volume names during upgrades.
+
+For attachment records with site-relative `/uploads/<key>` URLs, copy each file
+relative to `LOCAL_UPLOAD_DIR` to the same `<key>` in the private bucket. For
+example, `workspaces/<workspace-id>/<attachment-id>.png` must retain the entire
+workspace path. The S3 reader strips only `/uploads/` from these records, so the
+existing attachment IDs and Markdown download links can stay unchanged. Do not
+flatten objects to their filenames. URLs written with an absolute
+`LOCAL_UPLOAD_BASE_URL` need a separately verified mapping before migration.
+
+Compare byte counts and SHA-256 hashes between source files and downloaded
+objects; exclude `.meta.json` sidecars and `.tmp` staging files from the copy.
+Keep the original volume and a separate backup until authenticated downloads,
+workspace/private-project denial cases, and anonymous object-access denial pass.
+Record which objects were copied or missing. A database backup alone does not
+contain the uploaded file bytes. Keep the bucket private and use `proxy` or
+`presign`; exposing `/uploads/` through a static file server bypasses attachment
+authorization.
+
 #### Local disk (default)
 
 | Variable | Description |

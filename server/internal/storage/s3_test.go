@@ -315,6 +315,44 @@ func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
 	}
 }
 
+func TestS3StorageReadsMigratedLocalAttachment(t *testing.T) {
+	const key = "workspaces/workspace-a/attachment.md"
+	const payload = "synthetic migrated attachment"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/test-bucket/"+key {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "<Error><Code>NoSuchKey</Code></Error>")
+			return
+		}
+		_, _ = io.WriteString(w, payload)
+	}))
+	t.Cleanup(server.Close)
+	store := &S3Storage{
+		client: s3.New(s3.Options{
+			Region:       "us-east-1",
+			Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+			BaseEndpoint: aws.String(server.URL),
+			UsePathStyle: true,
+		}),
+		bucket:      "test-bucket",
+		endpointURL: server.URL,
+	}
+
+	body, err := store.GetReader(context.Background(), store.KeyFromURL("/uploads/"+key))
+	if err != nil {
+		t.Fatalf("read attachment copied from local storage: %v", err)
+	}
+	defer body.Close()
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != payload {
+		t.Fatalf("download = %q, want %q", data, payload)
+	}
+}
+
 func TestS3StoragePresignGet(t *testing.T) {
 	store := &S3Storage{
 		client: s3.New(s3.Options{
