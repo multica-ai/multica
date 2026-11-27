@@ -24,6 +24,9 @@ func TestCursorConnectionStalledRetriesWithSession(t *testing.T) {
 			if resumeUnsafeFailureReason(reason) {
 				t.Fatal("stalled transport must preserve the session for retry")
 			}
+			// The capacity policy does not apply to provider_network, so a bare
+			// TaskService is enough as the receiver.
+			svc := &TaskService{}
 			for _, tc := range []struct {
 				name         string
 				attempt, max int32
@@ -38,7 +41,7 @@ func TestCursorConnectionStalledRetriesWithSession(t *testing.T) {
 					Attempt: tc.attempt, MaxAttempts: tc.max,
 					IssueID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
 				}
-				if got := retryEligible(reason, task); got != tc.want {
+				if got := svc.retryEligible(reason, task); got != tc.want {
 					t.Errorf("%s: retryEligible = %v, want %v", tc.name, got, tc.want)
 				}
 			}

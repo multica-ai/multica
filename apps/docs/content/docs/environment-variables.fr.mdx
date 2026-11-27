@@ -228,6 +228,17 @@ Lorsque la clé d'API et l'URL de base sont toutes deux vides, cette couche est 
 Ceci ne concerne que la couche d'assistance. L'exécution d'un agent suit un chemin de données distinct : lorsqu'un agent répond dans une discussion, votre daemon exécute l'outil de codage IA de cet agent avec les propres identifiants de l'outil, et ne lui transmet pas les paramètres `MULTICA_LLM_*` ci-dessus. (Les variables de connexion à Multica propres à l'exécution, dont l'agent a besoin, sont injectées séparément par le daemon.) Vider les variables ci-dessus n'a aucun effet sur ce chemin — contrôlez-le via la configuration du runtime de l'agent.
 </Callout>
 
+## Réessai automatique des tâches
+
+Quand l'exécution d'un agent échoue, le serveur peut la relancer automatiquement. Les causes d'infrastructure transitoires (reconnexion du runtime, coupures réseau du fournisseur, dépassements de délai) sont déjà réessayables par défaut ; les échecs de capacité et de limite de débit du fournisseur (réponses de type `429 Too Many Requests`) ne le sont pas — ils restent définitifs, car relancer immédiatement un fournisseur limité aggrave la limitation. Un déploiement dont le fournisseur récupère vite (capacité dédiée, passerelle avec sa propre file) peut l'activer :
+
+| Variable | Valeur par défaut | Description |
+|---|---|---|
+| `MULTICA_CAPACITY_RETRY_MAX_ATTEMPTS` | non définie | Nombre total de tentatives pour une tâche échouée sur capacité, première exécution incluse |
+| `MULTICA_CAPACITY_RETRY_BASE_DELAY` | non définie | Délai avant le premier réessai ; double à chaque tentative suivante |
+| `MULTICA_CAPACITY_RETRY_MAX_DELAY` | non définie | Plafond du délai exponentiel ; non définie signifie sans plafond |
+
+Définir l'une des trois variables active la fonctionnalité ; une valeur manquante ou invalide retombe sur la valeur par défaut ci-dessus au lieu de faire échouer le démarrage. Chaque paramètre est indépendant : `MAX_ATTEMPTS` seul élargit la chaîne de réessais avec des relances immédiates, `BASE_DELAY` seul applique le délai dans la longueur de chaîne par défaut, et `MAX_DELAY` seule n'a aucun effet (aucun délai à plafonner). Les tentatives restent immédiates quand `BASE_DELAY` est non définie, et la séquence `BASE_DELAY, 2×, 4×…` est plafonnée par `MAX_DELAY`. Une tâche créée avec le réessai explicitement désactivé (`max_attempts = 1`) n'est jamais relancée, quelle que soit cette configuration.
 ## Configuration du daemon
 
 Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et non dans le conteneur de l'API.

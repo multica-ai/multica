@@ -217,6 +217,25 @@ func parseLLMDisableThinking(raw string) (bool, error) {
 	}
 }
 
+// capacityRetryPolicyFromEnv reads the MULTICA_CAPACITY_RETRY_* knobs into the
+// service's capacity auto-retry schedule. Setting ANY of the three opts the
+// deployment into retrying provider capacity/rate-limit failures; when none is
+// set the zero value is returned, which keeps the upstream behavior of
+// terminating on those failures. Each knob then acts independently, and an
+// unset (or invalid) one falls back to the upstream schedule for what it
+// governs — max attempts stays the task column default, retries stay
+// immediate, the backoff stays uncapped — matching envDuration's
+// warn-and-default posture rather than the LLM knobs' fail-the-boot one: a
+// typo'd backoff narrows a retry window, it does not invalidate a security
+// boundary.
+func capacityRetryPolicyFromEnv() service.CapacityRetryPolicy {
+	return service.CapacityRetryPolicy{
+		MaxAttempts: int32(envPositiveInt("MULTICA_CAPACITY_RETRY_MAX_ATTEMPTS", 0)),
+		BaseDelay:   envDuration("MULTICA_CAPACITY_RETRY_BASE_DELAY", 0),
+		MaxDelay:    envDuration("MULTICA_CAPACITY_RETRY_MAX_DELAY", 0),
+	}
+}
+
 func envPositiveInt64(name string, def int64) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -701,6 +720,7 @@ func main() {
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
 		LLMDisableThinking:  llmDisableThinking,
+		CapacityRetryPolicy: capacityRetryPolicyFromEnv(),
 	})
 	// member_delegation_day exists only for self-host telemetry; DO_NOT_TRACK
 	// stops writing it as well as sending the snapshot.

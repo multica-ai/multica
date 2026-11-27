@@ -231,6 +231,18 @@ When both the API key and the base URL are empty, this layer is disabled and mak
 This covers the assist layer only. Running an agent is a separate data path: when an agent answers a chat, your daemon executes that agent's AI coding tool using the tool's own credentials, and does not forward the `MULTICA_LLM_*` settings above to it. (The run-scoped Multica connection variables the agent needs are injected by the daemon separately.) Emptying the variables above does not affect that path — govern it through the agent's runtime configuration.
 </Callout>
 
+## Task auto-retry
+
+When an agent run fails, the server can retry it automatically. Transient infrastructure reasons (runtime reconnect, provider network cuts, timeouts) are already retryable by default; provider capacity and rate-limit failures (`429 Too Many Requests`-class responses) are not — they stay terminal, because hammering a throttled provider with immediate retries makes the limit worse. A deployment whose provider recovers quickly (dedicated capacity, a gateway with its own queue) can opt in:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_CAPACITY_RETRY_MAX_ATTEMPTS` | unset | Total attempts for a capacity-failed task, including the first run |
+| `MULTICA_CAPACITY_RETRY_BASE_DELAY` | unset | Backoff before the first retry; doubles for each later attempt |
+| `MULTICA_CAPACITY_RETRY_MAX_DELAY` | unset | Cap for the doubling backoff; unset means no cap |
+
+Setting any one of the three opts in; a missing or invalid value falls back to the default above rather than failing startup. Each knob is independent: `MAX_ATTEMPTS` alone widens the retry chain with immediate retries, `BASE_DELAY` alone backs off within the default chain length, and `MAX_DELAY` alone has no effect (there is no backoff to cap). Attempts stay immediate when `BASE_DELAY` is unset, and the delay sequence `BASE_DELAY, 2×, 4×…` is capped at `MAX_DELAY`. A task created with retry explicitly disabled (`max_attempts = 1`) is never retried regardless of this policy.
+
 ## Daemon configuration
 
 The variables below are read on the computer that runs your agents, not in the API container.

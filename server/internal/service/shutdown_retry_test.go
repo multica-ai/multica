@@ -8,6 +8,9 @@ import (
 )
 
 func TestShutdownRetryUsesExistingBudgetAndSessionPolicy(t *testing.T) {
+	// The capacity policy does not apply to runtime_recovery, so a bare
+	// TaskService is enough as the receiver.
+	svc := &TaskService{}
 	for _, tc := range []struct {
 		reason       string
 		attempt, max int32
@@ -19,10 +22,10 @@ func TestShutdownRetryUsesExistingBudgetAndSessionPolicy(t *testing.T) {
 		{"cancelled", 1, 2, false},
 	} {
 		task := db.AgentTaskQueue{Attempt: tc.attempt, MaxAttempts: tc.max, IssueID: pgtype.UUID{Valid: true}}
-		if got := retryEligible(tc.reason, task); got != tc.want {
+		if got := svc.retryEligible(tc.reason, task); got != tc.want {
 			t.Errorf("retryEligible(%s, %d/%d) = %v, want %v", tc.reason, tc.attempt, tc.max, got, tc.want)
 		}
-		if ceiling := retryAttemptCeiling(tc.reason, tc.max); ceiling != tc.max {
+		if ceiling := svc.retryAttemptCeiling(tc.reason, tc.max); ceiling != tc.max {
 			t.Errorf("%s widened budget to %d", tc.reason, ceiling)
 		}
 	}

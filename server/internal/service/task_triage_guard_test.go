@@ -33,9 +33,12 @@ func TestRetryEligibleExcludesTriageRuns(t *testing.T) {
 		// must not make the whole eligibility check fall over either.
 		"malformed context": {`not json`, true},
 	}
+	// "timeout" is untouched by the capacity policy, so a bare TaskService is
+	// enough as the receiver.
+	svc := &TaskService{}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := retryEligible("timeout", issueLinked(tc.context)); got != tc.want {
+			if got := svc.retryEligible("timeout", issueLinked(tc.context)); got != tc.want {
 				t.Errorf("retryEligible with context %q = %v, want %v", tc.context, got, tc.want)
 			}
 		})

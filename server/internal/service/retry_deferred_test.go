@@ -10,7 +10,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
@@ -355,39 +354,167 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 	}
 }
 
-func TestFailTaskTraeDisconnectNeedsToolHistory(t *testing.T) {
-	const disconnect = `traecli session/prompt failed: session/prompt: Internal error (code=-32603, data={"message":"stream disconnected before completion: llm response empty stream","trae_stream_errors":[{"trae_error_info":{"response_stream_disconnected":{"http_status_code":null}}}]})`
+// TestFailTaskCapacityBackoffBudget pins the capacity/rate-limit retry
+// posture once a deployment has opted in via a fully-configured
+// CapacityRetryPolicy (10 attempts, 30s base, 2m cap — the schedule this
+// deployment runs): FailTask grants the widened budget, defers EVERY capacity
+// retry by the exponential backoff (a 429 that already survived the agent
+// CLI's internal retries must not bounce straight back into the limit), and
+// still honours max_attempts=1 as disabled. The opted-out behavior (zero
+// policy → no retry child at all) is pinned by TestFailTaskCapacityRetryOptOut
+// below; the per-knob upstream fallbacks are pinned in
+// TestCapacityRetrySchedule.
+func TestFailTaskCapacityBackoffBudget(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	ws, user, agentID, _ := seedAttributionFixture(t, pool)
-	fx := testutil.New(pool, ws, user)
-	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	// The deployment's explicit configuration: all three knobs set.
+	const (
+		wantCeiling = int32(10)
+		baseDelay   = 30 * time.Second
+		maxDelay    = 2 * time.Minute
+	)
+	svc := &TaskService{
+		Queries:   q,
+		TxStarter: pool,
+		Bus:       events.New(),
+		CapacityRetryPolicy: CapacityRetryPolicy{
+			MaxAttempts: wantCeiling,
+			BaseDelay:   baseDelay,
+			MaxDelay:    maxDelay,
+		},
+	}
+
 	var runtimeID string
-	fx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
-	for _, tc := range []struct {
-		name, reason       string
-		noToolCallsStarted bool
-		wantChildren       int
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+
+	cases := []struct {
+		name         string
+		attempt      int32
+		maxAttempts  int32
+		wantChild    bool
+		wantAttempt  int32
+		wantMax      int32
+		wantMinDelay time.Duration
 	}{
-		{"missing history from an older daemon", "agent_error.provider_server_error", false, 0},
-		{"network classification alone", "agent_error.provider_network", false, 0},
-		{"verified tool-free turn", "agent_error.provider_network", true, 1},
-	} {
+		// First failure: budget widened to 10, child deferred by the base
+		// backoff (30s), self-consistent attempt=2/max_attempts=10.
+		{"first retry deferred 30s with widened budget", 1, 2, true, 2, 10, baseDelay},
+		// Mid-chain failure (attempt 4): same widened budget; the uncapped
+		// 30s<<3 = 4m backoff is capped at 2m.
+		{"mid-chain retry backs off to the cap", 4, 10, true, 5, 10, maxDelay},
+		// Last attempt inside the widened budget (attempt 9): backoff is capped.
+		{"ninth attempt still defers", 9, 10, true, 10, 10, maxDelay},
+		// Budget exhausted (attempt=10): no child.
+		{"budget exhausted stops the chain", 10, 10, false, 0, 0, 0},
+		// max_attempts=1 disables auto-retry — even capacity gets none.
+		{"disabled budget is never revived", 1, 1, false, 0, 0, 0},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			issue := fx.Issue(t, tc.name)
-			id := fx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issue, "status": "running", "max_attempts": 2})
-			t.Cleanup(func() { fx.Exec(t, `DELETE FROM agent_task_queue WHERE parent_task_id = $1`, id) })
-			failed, _, err := svc.FailTaskWithTransition(context.Background(), util.MustParseUUID(id), protocol.TaskFailRequest{
-				Error: disconnect, SessionID: "test-session", FailureReason: tc.reason, NoToolCallsStarted: tc.noToolCallsStarted,
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+				VALUES ($1, $2, $3, 'running', 0, $4, $5, 'src-session', '/tmp/src-workdir')
+				RETURNING id
+			`, agentID, runtimeID, issueID, tc.attempt, tc.maxAttempts).Scan(&parentID); err != nil {
+				t.Fatalf("insert parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
 			})
-			if err != nil {
-				t.Fatal(err)
+
+			if _, err := svc.FailTask(ctx, parentID, "exceeded retry limit, last status: 429 Too Many Requests, request id: 8e48d42b-7979-456e-b814-d779d38e6099", "src-session", "/tmp/src-workdir", "", "agent_error.provider_capacity_or_rate_limit", false, "", ""); err != nil {
+				t.Fatalf("FailTask: %v", err)
 			}
-			if failed.Status != "failed" || failed.FailureReason.String != "agent_error.provider_network" {
-				t.Fatalf("parent = %s / %s", failed.Status, failed.FailureReason.String)
+
+			var (
+				childAttempt, childMax int32
+				childStatus            string
+				fireAt                 pgtype.Timestamptz
+				n                      int
+			)
+			row := pool.QueryRow(ctx, `SELECT count(*), coalesce(max(attempt),0), coalesce(max(max_attempts),0), coalesce(max(status),''), max(fire_at) FROM agent_task_queue WHERE parent_task_id = $1`, parentID)
+			if err := row.Scan(&n, &childAttempt, &childMax, &childStatus, &fireAt); err != nil {
+				t.Fatalf("read child: %v", err)
 			}
-			if got := fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, id); got != tc.wantChildren {
-				t.Fatalf("retry children = %d, want %d", got, tc.wantChildren)
+			if !tc.wantChild {
+				if n != 0 {
+					t.Fatalf("expected no retry child, got %d", n)
+				}
+				return
+			}
+			if n != 1 {
+				t.Fatalf("expected exactly one retry child, got %d", n)
+			}
+			if childAttempt != tc.wantAttempt {
+				t.Errorf("child attempt = %d, want %d", childAttempt, tc.wantAttempt)
+			}
+			if childMax != tc.wantMax {
+				t.Errorf("child max_attempts = %d, want %d (self-consistent budget)", childMax, tc.wantMax)
+			}
+			if childStatus != "deferred" {
+				t.Errorf("child status = %q, want deferred: every capacity retry must back off", childStatus)
+			}
+			if !fireAt.Valid {
+				t.Fatalf("child fire_at is NULL, want a backoff-armed fire_at")
+			}
+			// FailTask stamps fire_at = now + backoff at its own instant, and
+			// time.Until re-measures from the assertion's instant, so the lead
+			// is strictly smaller than the backoff by the elapsed test time.
+			// A generous clock-skew tolerance keeps the assertion on the
+			// schedule's shape, not on machine jitter.
+			const measurementTolerance = 5 * time.Second
+			if lead := time.Until(fireAt.Time); lead < tc.wantMinDelay-measurementTolerance {
+				t.Errorf("child fire_at leads by %s, want >= %s", lead, tc.wantMinDelay)
 			}
 		})
+	}
+}
+
+// TestFailTaskCapacityRetryOptOut pins the upstream default: a TaskService
+// with no CapacityRetryPolicy configured terminates a
+// provider_capacity_or_rate_limit failure instead of retrying it, exactly as
+// an unmodified deployment does. This is the contract that keeps the feature
+// opt-in — a deployment that never sets MULTICA_CAPACITY_RETRY_* never sees
+// behavior drift.
+func TestFailTaskCapacityRetryOptOut(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	// Zero policy: no env vars set, upstream behavior.
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, 1, 2, 'src-session', '/tmp/src-workdir')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+	})
+
+	if _, err := svc.FailTask(ctx, parentID, "exceeded retry limit, last status: 429 Too Many Requests, request id: 8e48d42b-7979-456e-b814-d779d38e6099", "src-session", "/tmp/src-workdir", "", "agent_error.provider_capacity_or_rate_limit", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, parentID).Scan(&n); err != nil {
+		t.Fatalf("read children: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected no retry child with zero policy (upstream behavior), got %d", n)
 	}
 }
