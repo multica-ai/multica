@@ -22,8 +22,14 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+const ORIGINAL_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH;
+
 import { WebNavigationProvider } from "./navigation";
 import { useNavigation, type NavigationAdapter } from "@multica/views/navigation";
+
+afterEach(() => {
+  process.env.NEXT_PUBLIC_BASE_PATH = ORIGINAL_BASE_PATH;
+});
 
 function navigate(path: string) {
   window.dispatchEvent(
@@ -165,5 +171,92 @@ describe("WebNavigationProvider prefetch", () => {
     adapter().prefetch?.("/acme/issues/MUL-1");
 
     expect(router.prefetch).toHaveBeenCalledWith("/acme/issues/MUL-1", { kind: "full" });
+  });
+});
+
+describe("WebNavigationProvider getShareableUrl with basePath", () => {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  it("returns origin + path when NEXT_PUBLIC_BASE_PATH is unset", () => {
+    delete process.env.NEXT_PUBLIC_BASE_PATH;
+    const adapter = renderAdapter();
+
+    expect(adapter().getShareableUrl("/acme/issues/MUL-1")).toBe(`${origin}/acme/issues/MUL-1`);
+  });
+
+  it("returns origin + basePath + path for a root-relative path", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().getShareableUrl("/acme/issues/MUL-1")).toBe(`${origin}/multica/acme/issues/MUL-1`);
+  });
+
+  it("does not double-prefix a path that already starts with basePath", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().getShareableUrl("/multica/acme/issues/MUL-1")).toBe(`${origin}/multica/acme/issues/MUL-1`);
+  });
+
+  it("strips trailing slash from basePath", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica/";
+    const adapter = renderAdapter();
+
+    expect(adapter().getShareableUrl("/acme/issues/MUL-1")).toBe(`${origin}/multica/acme/issues/MUL-1`);
+  });
+
+  it("returns path unchanged when it does not start with /", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().getShareableUrl("relative/path")).toBe("relative/path");
+  });
+});
+
+describe("WebNavigationProvider resolveHref with basePath", () => {
+  it("returns path unchanged when NEXT_PUBLIC_BASE_PATH is unset", () => {
+    delete process.env.NEXT_PUBLIC_BASE_PATH;
+    const adapter = renderAdapter();
+
+    expect(adapter().resolveHref!("/acme/issues/MUL-1")).toBe("/acme/issues/MUL-1");
+  });
+
+  it("prepends basePath to a root-relative path", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().resolveHref!("/acme/issues/MUL-1")).toBe("/multica/acme/issues/MUL-1");
+  });
+
+  it("does not double-prefix a path that already starts with basePath", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().resolveHref!("/multica/acme/issues/MUL-1")).toBe("/multica/acme/issues/MUL-1");
+  });
+
+  it("strips trailing slash from basePath", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica/";
+    const adapter = renderAdapter();
+
+    expect(adapter().resolveHref!("/acme/issues/MUL-1")).toBe("/multica/acme/issues/MUL-1");
+  });
+
+  it("returns path unchanged when it does not start with /", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    expect(adapter().resolveHref!("relative/path")).toBe("relative/path");
+  });
+
+  it("returns path without origin (relative), unlike getShareableUrl which is absolute", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/multica";
+    const adapter = renderAdapter();
+
+    const resolved = adapter().resolveHref!("/acme/issues/MUL-1");
+    const shareable = adapter().getShareableUrl("/acme/issues/MUL-1");
+
+    expect(resolved).toBe("/multica/acme/issues/MUL-1");
+    expect(shareable).toBe(`${window.location.origin}/multica/acme/issues/MUL-1`);
   });
 });

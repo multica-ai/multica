@@ -39,8 +39,10 @@ export interface NavigationAdapter {
   openWorkspaceInNewWindow?: (slug: string) => void;
   /** Desktop only: slugs of the workspaces other windows currently show. */
   workspacesInOtherWindows?: () => readonly string[];
-  /** Return a shareable URL for a path. Web: origin + path. Desktop: public web URL of the connected environment. */
+  /** Return a shareable URL for a path. Web: origin + basePath + path. Desktop: public web URL of the connected environment. */
   getShareableUrl: (path: string) => string;
+  /** Web only: basePath + path with no origin, so the SSR and client hrefs match. */
+  resolveHref?: (path: string) => string;
   /**
    * Optional: warm up route assets / RSC payload for a path. Web wires this
    * to `router.prefetch`; desktop leaves it undefined because react-router

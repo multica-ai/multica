@@ -8,6 +8,7 @@ import {
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { canGoBackInApp } from "./in-app-history";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
@@ -32,7 +33,7 @@ function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
         detail?.disposition === "foreground-tab"
       ) {
         window.open(
-          window.location.origin + path,
+          window.location.origin + withBasePath(path),
           "_blank",
           "noopener,noreferrer",
         );
@@ -85,10 +86,13 @@ function NavigationProviderInner({
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),
     hash,
-    getShareableUrl: (path: string) =>
-      typeof window === "undefined" ? path : window.location.origin + path,
+    getShareableUrl: (path: string) => {
+      if (typeof window === "undefined" || !path.startsWith("/")) return path;
+      return window.location.origin + withBasePath(path);
+    },
+    resolveHref: withBasePath,
     openInDesktop: (path: string) => {
-      const url = window.location.origin + path;
+      const url = window.location.origin + withBasePath(path);
       window.location.href = `multica://open/issue?url=${encodeURIComponent(url)}`;
     },
     // router.prefetch is a no-op in dev mode by Next.js design; in production

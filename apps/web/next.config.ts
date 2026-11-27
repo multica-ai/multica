@@ -39,6 +39,16 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
   : undefined;
 
 const nextConfig: NextConfig = {
+  // Serving under a URL path prefix (reverse-proxy mount). Next.js needs this at
+  // build time: it prefixes the router, next/link, and the /_next/ asset URLs.
+  // Raw fetch("/api/...") is NOT prefixed, so the deployment must also set
+  // NEXT_PUBLIC_API_URL to the prefixed origin.
+  ...(process.env.NEXT_PUBLIC_BASE_PATH
+    ? {
+        basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+        assetPrefix: process.env.NEXT_PUBLIC_BASE_PATH,
+      }
+    : {}),
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
   // Otherwise `next dev` writes a generic apps/web/AGENTS.md; agent guidance
   // lives in the root AGENTS.md.

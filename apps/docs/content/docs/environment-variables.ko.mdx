@@ -65,6 +65,7 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 HTTP origin, 쉼표로 구분 |
 | `ALLOWED_ORIGINS` | CORS 또는 프런트엔드 주소로 fallback | WebSocket origin allowlist, 쉼표로 구분 |
 | `COOKIE_DOMAIN` | 비어 있음 | 프런트엔드와 backend의 host가 다르고 브라우저가 API 도메인에 직접 접근할 때 필수. 단일 도메인 배포에서는 비워 둠 |
+| `NEXT_PUBLIC_BASE_PATH` | 비어 있음 | Web 앱을 `/multica` 같은 하위 경로에서 제공할 때 쓰는 URL 경로 접두사. 빌드 시점에 읽으므로 `Dockerfile.web`의 빌드 인자로 전달하고, 변경 후에는 이미지를 다시 빌드 |
 
 <Callout type="warning">
 `MULTICA_DAEMON_SERVER_URL`은 인증이 필요 없는 `/api/config` 엔드포인트에서 반환되며 클라이언트가 읽을 수 있습니다. 공개 설정으로 취급하고 자격 증명, 토큰 또는 기타 비밀을 절대 포함하지 마세요.

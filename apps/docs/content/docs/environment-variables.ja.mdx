@@ -65,6 +65,7 @@ primary とレプリカの接続上限は独立しています。全 API プロ�
 | `CORS_ALLOWED_ORIGINS` | 空 | 追加で許可する HTTP origin。カンマ区切り |
 | `ALLOWED_ORIGINS` | CORS / フロントエンド設定にフォールバック | WebSocket origin の許可リスト。カンマ区切り |
 | `COOKIE_DOMAIN` | 空 | フロントエンドと API の host が異なり、ブラウザが API ドメインへ直接アクセスする場合は必須。単一ドメイン構成では空のまま |
+| `NEXT_PUBLIC_BASE_PATH` | 空 | Web アプリを `/multica` などのサブパス配下で配信するための URL パスプレフィックス。ビルド時に読み込まれるため、`Dockerfile.web` のビルド引数として渡し、変更後はイメージを再ビルドしてください |
 
 <Callout type="warning">
 `MULTICA_DAEMON_SERVER_URL` は認証なしの `/api/config` エンドポイントから返され、クライアントが読み取れます。公開設定として扱い、認証情報・トークンなどのシークレットを含めないでください。

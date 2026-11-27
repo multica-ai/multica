@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { withBasePath } from "@/lib/base-path";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
@@ -238,7 +239,7 @@ function CallbackContent() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <a href={paths.login()} className="text-primary underline-offset-4 hover:underline">
+            <a href={withBasePath(paths.login())} className="text-primary underline-offset-4 hover:underline">
               {t(($) => $.web.callback.back_to_login)}
             </a>
           </CardContent>

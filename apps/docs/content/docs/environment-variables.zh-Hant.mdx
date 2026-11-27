@@ -65,6 +65,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `CORS_ALLOWED_ORIGINS` | 空 | 額外允許的 HTTP origin，逗號分隔 |
 | `ALLOWED_ORIGINS` | 回退到 CORS / 前端地址 | WebSocket origin 白名單，逗號分隔 |
 | `COOKIE_DOMAIN` | 空 | 前後端不同 host 且瀏覽器直接訪問 API 域時必須設定；單域部署保持為空 |
+| `NEXT_PUBLIC_BASE_PATH` | 空 | 將 Web 應用部署在子路徑（如 `/multica`）下時使用的 URL 路徑前綴。建置時讀取：作為 `Dockerfile.web` 的建置參數傳入，修改後需重新建置映像 |
 
 <Callout type="warning">
 `MULTICA_DAEMON_SERVER_URL` 會由無需認證的 `/api/config` 介面返回，客戶端可以讀取。請將它視為公開配置，切勿填入憑據、令牌或其他金鑰。

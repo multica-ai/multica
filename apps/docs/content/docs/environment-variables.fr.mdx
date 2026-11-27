@@ -65,6 +65,7 @@ Les limites de connexions du primaire et du réplica sont indépendantes. Dimens
 | `CORS_ALLOWED_ORIGINS` | vide | Origines HTTP supplémentaires autorisées, séparées par des virgules |
 | `ALLOWED_ORIGINS` | se rabat sur les origines CORS / frontend | Liste des origines WebSocket autorisées, séparées par des virgules |
 | `COOKIE_DOMAIN` | vide | Obligatoire lorsque le frontend et l'API utilisent des hôtes différents et que le navigateur communique directement avec le domaine de l'API ; laissez vide pour les déploiements sur un seul domaine |
+| `NEXT_PUBLIC_BASE_PATH` | vide | Préfixe de chemin d'URL pour servir l'application web sous un sous-chemin, par exemple `/multica`. Lu à la compilation : passez-le comme argument de build à `Dockerfile.web` et reconstruisez l'image après l'avoir modifié |
 
 <Callout type="warning">
 `MULTICA_DAEMON_SERVER_URL` est renvoyée par le point de terminaison `/api/config`, qui ne requiert aucune authentification, et elle est visible par les clients. Considérez-la comme une configuration publique ; n'y placez jamais d'identifiants, de jetons ni d'autres secrets.
