@@ -138,6 +138,8 @@ Then set up DNS and proxy the local ports with Caddy. Caddy obtains TLS certific
 
 ```text
 app.example.com {
+    encode zstd gzip
+
     # Hand browser WebSockets straight to the backend
     @ws path /ws /ws/*
     handle @ws {
@@ -146,13 +148,23 @@ app.example.com {
         }
     }
 
-    # Everything else goes to the frontend, which forwards API and login requests
+    # Route API traffic straight to the backend instead of hopping through Next.js
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else goes to the frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }
 }
 
 api.example.com {
+    encode zstd gzip
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1
     }
@@ -164,9 +176,15 @@ api.example.com {
 
 ```text
 multica.example.com {
+    encode zstd gzip
+
     # CLI reachability probe: `multica setup` GETs <server-url>/health and
     # needs a 200 — older web releases don't forward it, so route it directly
     handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /readyz {
         reverse_proxy 127.0.0.1:8080
     }
 
@@ -186,7 +204,16 @@ multica.example.com {
         }
     }
 
-    # Everything else goes to the frontend, which forwards API and login requests
+    # Route API traffic straight to the backend instead of hopping through Next.js
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else goes to the frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }

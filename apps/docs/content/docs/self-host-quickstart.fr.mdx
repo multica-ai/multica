@@ -138,6 +138,8 @@ Configurez ensuite le DNS et placez Caddy en proxy devant les ports locaux. Cadd
 
 ```text
 app.example.com {
+    encode zstd gzip
+
     # Transmettre directement les WebSockets du navigateur au backend
     @ws path /ws /ws/*
     handle @ws {
@@ -146,13 +148,23 @@ app.example.com {
         }
     }
 
-    # Tout le reste va au frontend, qui relaie les requêtes d'API et de connexion
+    # Router directement le trafic API vers le backend sans passer par Next.js
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Tout le reste va au frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }
 }
 
 api.example.com {
+    encode zstd gzip
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1
     }
@@ -164,9 +176,15 @@ api.example.com {
 
 ```text
 multica.example.com {
+    encode zstd gzip
+
     # Sonde d'accessibilité du CLI : `multica setup` envoie un GET à <server-url>/health et
     # attend un 200 ; les anciennes versions web ne le relaient pas, il faut donc le router directement
     handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /readyz {
         reverse_proxy 127.0.0.1:8080
     }
 
@@ -186,7 +204,16 @@ multica.example.com {
         }
     }
 
-    # Tout le reste va au frontend, qui relaie les requêtes d'API et de connexion
+    # Router directement le trafic API vers le backend sans passer par Next.js
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Tout le reste va au frontend
     handle {
         reverse_proxy 127.0.0.1:3000
     }

@@ -138,6 +138,8 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 ```text
 app.example.com {
+    encode zstd gzip
+
     # ブラウザの WebSocket は backend へ直接渡す
     @ws path /ws /ws/*
     handle @ws {
@@ -146,13 +148,23 @@ app.example.com {
         }
     }
 
-    # 残りのパスは frontend へ。API とログインのリクエストを転送する
+    # API トラフィックは Next.js を経由せず backend へ直接ルーティングする
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 残りのパスは frontend へ
     handle {
         reverse_proxy 127.0.0.1:3000
     }
 }
 
 api.example.com {
+    encode zstd gzip
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1
     }
@@ -164,9 +176,15 @@ api.example.com {
 
 ```text
 multica.example.com {
+    encode zstd gzip
+
     # CLI の到達確認: `multica setup` は <server-url>/health に GET を送り 200 を要求する。
     # 古い frontend はこのパスを転送しないため、backend に直接ルーティングする
     handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /readyz {
         reverse_proxy 127.0.0.1:8080
     }
 
@@ -185,7 +203,16 @@ multica.example.com {
         }
     }
 
-    # 残りのパスは frontend へ。API とログインのリクエストを転送する
+    # API トラフィックは Next.js を経由せず backend へ直接ルーティングする
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 残りのパスは frontend へ
     handle {
         reverse_proxy 127.0.0.1:3000
     }
