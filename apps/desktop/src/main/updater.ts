@@ -13,6 +13,7 @@ import {
 } from "./updater-preferences";
 import type { DaemonInstallPrep } from "./update-install-gate";
 import { classifyUpdaterError } from "./updater-errors";
+import { createUpdaterDiagnostics } from "./updater-diagnostics";
 import { type DialogLocale, resolveDialogLocale } from "./dialog-locale";
 
 // Silent background updates: electron-updater downloads on its own as soon
@@ -227,6 +228,7 @@ export function setupAutoUpdater(
       // when a provider does not emit an error event for that failure.
       void result?.downloadPromise?.catch((err) => {
         console.error("Failed to download update:", err);
+        if (downloadState.status === "downloading") record?.("updater-error");
         reportDownloadFailure(err);
       });
       return result;
@@ -240,7 +242,12 @@ export function setupAutoUpdater(
   // Only Windows locks a running executable against replacement; macOS and
   // Linux keep their existing update path untouched.
   const daemonGate = platform === "win32" ? (options.daemonGate ?? null) : null;
-  const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
+  const userDataPath = app.getPath("userData");
+  const record = platform === "win32"
+    ? createUpdaterDiagnostics(userDataPath, app.getVersion())
+    : undefined;
+  record?.("startup");
+  const preferencesFilePath = updaterPreferencesPath(userDataPath);
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
   let startupCheckElapsed = false;
@@ -257,6 +264,7 @@ export function setupAutoUpdater(
     void preferencesReady
       .then(() => {
         if (!automaticUpdatesEnabled) return;
+        record?.("automatic-check");
         return checkForUpdatesOnce();
       })
       .catch((err) => {
@@ -311,6 +319,7 @@ export function setupAutoUpdater(
     if (!install) autoUpdater.autoInstallOnAppQuit = false;
     setTimeout(() => {
       if (appQuitting) return;
+      record?.("install-quit-timeout");
       finishing = false;
       quitRequested = false;
       autoUpdater.autoInstallOnAppQuit = previousAutoInstall;
@@ -347,9 +356,13 @@ export function setupAutoUpdater(
   };
 
   if (daemonGate) {
-    app.on("will-quit", () => { appQuitting = true; });
+    app.on("will-quit", () => {
+      appQuitting = true;
+      record?.("app-will-quit");
+    });
     app.on("before-quit", (event) => {
       if (finishing || !updateReadyToInstall || !autoUpdater.autoInstallOnAppQuit) return;
+      record?.("install-on-quit");
       event.preventDefault();
       quitRequested = true;
       void installWithDaemonGate(false).catch((err) => {
@@ -375,6 +388,7 @@ export function setupAutoUpdater(
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    record?.("update-downloaded");
     updateReadyToInstall = true;
     setDownloadState({ status: "downloaded", version: info.version });
     broadcast("updater:update-downloaded", {
@@ -384,6 +398,7 @@ export function setupAutoUpdater(
   });
 
   autoUpdater.on("error", (err) => {
+    record?.("updater-error");
     console.error("Auto-updater error:", err);
     reportDownloadFailure(err);
   });
@@ -397,6 +412,7 @@ export function setupAutoUpdater(
   });
 
   ipcMain.handle("updater:install", async () => {
+    record?.("install-requested");
     if (!daemonGate) {
       autoUpdater.quitAndInstall(false, true);
       return;

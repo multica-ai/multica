@@ -24,6 +24,7 @@ const ctx = vi.hoisted(() => ({
   finishStart: null as null | (() => void),
   quit: vi.fn(),
   install: vi.fn(),
+  recordUpdate: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -55,6 +56,10 @@ vi.mock("electron-updater", () => ({
       ctx.updaterListeners.set(name, [...(ctx.updaterListeners.get(name) ?? []), fn]);
     },
   },
+}));
+
+vi.mock("./updater-diagnostics", () => ({
+  createUpdaterDiagnostics: () => ctx.recordUpdate,
 }));
 
 vi.mock("./updater-preferences", () => ({
@@ -163,6 +168,7 @@ beforeEach(() => {
   ctx.health = { status: "running", pid: 4242, active_task_count: 0, cli_version: "0.7.0" };
   ctx.quit.mockReset().mockImplementation(emitQuit);
   ctx.install.mockReset();
+  ctx.recordUpdate.mockClear();
   // Never probe or signal a real process.
   vi.spyOn(process, "kill").mockImplementation(() => {
     if (ctx.processAlive) return true;
@@ -176,6 +182,19 @@ afterEach(() => {
 });
 
 describe("Windows update and daemon lifecycle coordination", () => {
+  it("records a staged update separately from the quit that applies it", async () => {
+    await setupRealGate();
+    downloaded();
+    expect(ctx.recordUpdate.mock.calls).toEqual([["startup"], ["update-downloaded"]]);
+
+    emitQuit();
+    expect(ctx.recordUpdate).toHaveBeenLastCalledWith("install-on-quit");
+    await vi.advanceTimersByTimeAsync(1_000);
+    ctx.processAlive = false;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(ctx.recordUpdate).toHaveBeenLastCalledWith("app-will-quit");
+  });
+
   it("blocks repeated quits and legacy autoStop until the original PID exits", async () => {
     ctx.autoStop = true;
     await setupRealGate();

@@ -314,7 +314,7 @@ describe("setupAutoUpdater", () => {
 
   it("handles a rejected download promise even without an updater error event", async () => {
     const { win, send } = makeWindow();
-    setupAutoUpdater(() => [win]);
+    setupAutoUpdater(() => [win], { platform: "win32" });
     ctx.checkForUpdates.mockImplementationOnce(async () => {
       emitUpdater("update-available", { version: "0.3.18" });
       return {
@@ -325,6 +325,9 @@ describe("setupAutoUpdater", () => {
     await invokeIpc("updater:check");
     await vi.advanceTimersByTimeAsync(0);
     expect(send).toHaveBeenCalledWith("updater:download-state", { status: "error", reason: "unknown" });
+    const diagnostics = readFileSync(join(ctx.userDataPath, "updater.log"), "utf8");
+    expect(diagnostics).toMatch(/updater-error\n$/);
+    expect(diagnostics).not.toContain("download failed");
   });
 
   it("coalesces concurrent manual checks", async () => {

@@ -102,6 +102,8 @@ Updates are distributed per OS and CPU architecture:
 - on Linux, auto-update only works for `.AppImage`; update `.deb` and `.rpm` by installing a new package over the old one;
 - if auto-update fails, likewise install over the top with the matching installer from the downloads page.
 
+If Desktop closes while checking for or applying a Windows update, check `%APPDATA%\Multica\updater.log`. It records the running Desktop version and update events across launches.
+
 ## Connecting to a self-hosted instance
 
 Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory with this content:
