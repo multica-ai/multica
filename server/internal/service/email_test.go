@@ -10,6 +10,7 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -505,12 +506,14 @@ type testSMTPServer struct {
 
 	// Auth mechs advertised in EHLO response (e.g. "LOGIN" or "PLAIN LOGIN")
 	AuthMechs string
-	// If true, AUTH PLAIN returns 504; otherwise it succeeds
-	RejectPlain  bool
-	ExpectedUser string
-	ExpectedPass string
+	// If true, AUTH PLAIN returns RejectPlainMsg (or default 504 5.7.4); otherwise it succeeds
+	RejectPlain    bool
+	RejectPlainMsg string
+	ExpectedUser   string
+	ExpectedPass   string
 	// If true, advertise STARTTLS in EHLO
 	AdvertiseSTARTTLS bool
+	OnPlainAttempt    func()
 }
 
 func startTestSMTPServer(t *testing.T, cfg testSMTPServer) (*testSMTPServer, func()) {
@@ -587,8 +590,15 @@ func (s *testSMTPServer) handleConn(conn net.Conn) {
 
 		switch {
 		case strings.HasPrefix(upper, "AUTH PLAIN") || strings.HasPrefix(upper, "AUTH PLAIN "):
+			if s.OnPlainAttempt != nil {
+				s.OnPlainAttempt()
+			}
 			if s.RejectPlain {
-				writeLine("504 5.7.4 Unrecognized authentication type")
+				msg := s.RejectPlainMsg
+				if msg == "" {
+					msg = "504 5.7.4 Unrecognized authentication type"
+				}
+				writeLine("%s", msg)
 				continue
 			}
 			writeLine("235 2.7.0 Auth succeeded")
@@ -726,5 +736,118 @@ func TestSendSMTP_LoginAuthRejectsUnencryptedRemote(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unencrypted connection") {
 		t.Errorf("expected 'unencrypted connection' error, got: %v", err)
+	}
+}
+
+func TestSMTPAuthWithFallback_FallsBackToLoginOnFerozoStyle504(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "textproto 504 error",
+			err: &textproto.Error{
+				Code: 504,
+				Msg:  `"PLAIN authentication mechanism not supported"`,
+			},
+		},
+		{
+			name: "plain 504 error string",
+			err:  errors.New(`504 "PLAIN authentication mechanism not supported"`),
+		},
+		{
+			name: "wrapped textproto 504 error",
+			err: fmt.Errorf("smtp: %w", &textproto.Error{
+				Code: 504,
+				Msg:  "Command parameter not implemented",
+			}),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeSMTPAuthClient{
+				authErrs: []error{tc.err},
+				authLine: "LOGIN",
+			}
+			fallback, err := smtpAuthWithFallback(client, "c2341491.ferozo.com", "user", "pass")
+			if !fallback {
+				t.Fatalf("expected LOGIN fallback for %v", tc.err)
+			}
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected original error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSMTPAuthWithFallback_DoesNotFallbackOn535BadCredentials(t *testing.T) {
+	wantErr := &textproto.Error{
+		Code: 535,
+		Msg:  "5.7.8 Authentication credentials invalid",
+	}
+	client := &fakeSMTPAuthClient{
+		authErrs: []error{wantErr},
+		authLine: "PLAIN LOGIN",
+	}
+	fallback, err := smtpAuthWithFallback(client, "smtp.example.com", "user", "wrongpass")
+	if fallback {
+		t.Fatalf("did not expect LOGIN fallback on 535 credential error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected original 535 error, got %v", err)
+	}
+}
+
+func TestSendSMTP_UsesLoginDirectlyWhenOnlyLoginAdvertised(t *testing.T) {
+	var plainAttempted atomic.Bool
+	srv, cleanup := startTestSMTPServer(t, testSMTPServer{
+		AuthMechs:      "LOGIN",
+		RejectPlain:    true,
+		RejectPlainMsg: `504 "PLAIN authentication mechanism not supported"`,
+		ExpectedUser:   "testuser",
+		ExpectedPass:   "testpass",
+		OnPlainAttempt: func() { plainAttempted.Store(true) },
+	})
+	defer cleanup()
+	host, port, _ := net.SplitHostPort(srv.Addr)
+
+	s := &EmailService{
+		fromEmail:    "from@example.com",
+		smtpHost:     host,
+		smtpPort:     port,
+		smtpUsername: "testuser",
+		smtpPassword: "testpass",
+	}
+
+	if err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>"); err != nil {
+		t.Fatalf("sendSMTP failed for LOGIN-only server: %v", err)
+	}
+	if plainAttempted.Load() {
+		t.Fatalf("expected sendSMTP to select LOGIN directly without attempting AUTH PLAIN")
+	}
+}
+
+func TestSendSMTP_FallbackOnFerozo504UnsupportedPlain(t *testing.T) {
+	srv, cleanup := startTestSMTPServer(t, testSMTPServer{
+		AuthMechs:      "PLAIN LOGIN",
+		RejectPlain:    true,
+		RejectPlainMsg: `504 "PLAIN authentication mechanism not supported"`,
+		ExpectedUser:   "testuser",
+		ExpectedPass:   "testpass",
+	})
+	defer cleanup()
+	host, port, _ := net.SplitHostPort(srv.Addr)
+
+	s := &EmailService{
+		fromEmail:    "from@example.com",
+		smtpHost:     host,
+		smtpPort:     port,
+		smtpUsername: "testuser",
+		smtpPassword: "testpass",
+	}
+
+	if err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>"); err != nil {
+		t.Fatalf("sendSMTP failed on 504 fallback: %v", err)
 	}
 }
