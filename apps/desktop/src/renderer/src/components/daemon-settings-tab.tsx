@@ -12,8 +12,13 @@ import {
   SettingsTab,
 } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
+import { SegmentedToggle } from "@multica/views/common/segmented-toggle";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
-import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
+import type {
+  DaemonPrefs,
+  DaemonStatus,
+  PreventSleepMode,
+} from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
   formatUptime,
@@ -50,7 +55,11 @@ function DiagnosticsRow({
 
 export function DaemonSettingsTab() {
   const { t } = useT("settings");
-  const [prefs, setPrefs] = useState<DaemonPrefs>({ autoStart: true, autoStop: false });
+  const [prefs, setPrefs] = useState<DaemonPrefs>({
+    autoStart: true,
+    autoStop: false,
+    preventSleep: "off",
+  });
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
@@ -70,7 +79,7 @@ export function DaemonSettingsTab() {
   }, [t]);
 
   const updatePref = useCallback(
-    async (key: keyof DaemonPrefs, value: boolean) => {
+    async <K extends keyof DaemonPrefs>(key: K, value: DaemonPrefs[K]) => {
       setSaving(true);
       try {
         const updated = await window.daemonAPI.setPrefs({ [key]: value });
@@ -96,6 +105,7 @@ export function DaemonSettingsTab() {
   // its process. Auto-start/auto-stop can't work, so disable them and say why
   // rather than letting the toggles silently no-op. See #3916.
   const externallyManaged = status.externallyManaged === true;
+  const preventSleepLabel = t(($) => $.desktop.daemon.prevent_sleep_title);
 
   return (
     <SettingsTab
@@ -158,6 +168,26 @@ export function DaemonSettingsTab() {
             onCheckedChange={(checked) => updatePref("autoStop", checked)}
             disabled={saving || externallyManaged}
           />
+        </SettingsRow>
+
+        <SettingsRow
+          label={preventSleepLabel}
+          description={t(($) => $.desktop.daemon.prevent_sleep_description)}
+        >
+          <div role="group" aria-label={preventSleepLabel}>
+            <SegmentedToggle<PreventSleepMode>
+              value={prefs.preventSleep}
+              onChange={(mode) => {
+                if (!saving) void updatePref("preventSleep", mode);
+              }}
+              buttonClassName="px-3 py-1 text-label"
+              options={[
+                ["on", t(($) => $.desktop.daemon.prevent_sleep_on)],
+                ["agent", t(($) => $.desktop.daemon.prevent_sleep_agent)],
+                ["off", t(($) => $.desktop.daemon.prevent_sleep_off)],
+              ]}
+            />
+          </div>
         </SettingsRow>
 
         <SettingsRow

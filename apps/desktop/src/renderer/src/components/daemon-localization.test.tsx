@@ -21,8 +21,8 @@ function installDaemonAPI(status: DaemonStatus) {
   Object.defineProperty(window, "daemonAPI", {
     configurable: true,
     value: {
-      getPrefs: vi.fn().mockResolvedValue({ autoStart: true, autoStop: false }),
-      setPrefs: vi.fn().mockResolvedValue({ autoStart: true, autoStop: false }),
+      getPrefs: vi.fn().mockResolvedValue({ autoStart: true, autoStop: false, preventSleep: "off" }),
+      setPrefs: vi.fn().mockResolvedValue({ autoStart: true, autoStop: false, preventSleep: "off" }),
       isCliInstalled: vi.fn().mockResolvedValue(true),
       getStatus: vi.fn().mockResolvedValue(status),
       onStatusChange: vi.fn(() => () => {}),

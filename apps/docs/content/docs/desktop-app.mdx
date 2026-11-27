@@ -88,6 +88,8 @@ It never reads or overwrites the default profile you use in the terminal. If you
 
 You can check runtime status and logs in Desktop's settings. If a tool isn't detected, first confirm it runs in a regular terminal and is logged in, then restart Desktop's daemon.
 
+To keep long tasks from being cut off when the computer idles into sleep, set **Settings → Daemon → Prevent computer sleep**. **On** blocks idle sleep while Desktop is open, **Agent** blocks it only while agents are running tasks on this device, and **Off** (the default) leaves sleep alone. The display can still turn off, and closing the lid still puts the computer to sleep.
+
 ## Updating Desktop
 
 Auto-update is on by default. The app checks for and downloads new versions in the background; once a download finishes you can restart to install immediately or let it install on the next quit. Under **Settings → Updates** you can turn off automatic checks or check for new versions manually.

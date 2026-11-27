@@ -35,11 +35,27 @@ export interface DaemonStatus {
    * never disables the toggles for a normally-managed native daemon. See #3916.
    */
   externallyManaged?: boolean;
+  /** Tasks the daemon has claimed and not finished. Only set while running. */
+  activeTaskCount?: number;
 }
+
+export const PREVENT_SLEEP_MODES = ["on", "agent", "off"] as const;
+
+/**
+ * When Desktop blocks system idle sleep: always ("on"), only while the local
+ * daemon has tasks in flight ("agent"), or never ("off").
+ */
+export type PreventSleepMode = (typeof PREVENT_SLEEP_MODES)[number];
 
 export interface DaemonPrefs {
   autoStart: boolean;
   autoStop: boolean;
+  preventSleep: PreventSleepMode;
+}
+
+/** Falls back to "off" for a missing or unrecognized stored value. */
+export function normalizePreventSleepMode(value: unknown): PreventSleepMode {
+  return PREVENT_SLEEP_MODES.find((mode) => mode === value) ?? "off";
 }
 
 export type LocalRuntimeProbe =
