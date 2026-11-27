@@ -9140,6 +9140,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}(ctx)
 
 	taskCtx = execenv.ApplyPreparedSkillNames(taskCtx, env.PreparedSkillNames)
+	taskCtx.Logger = taskLog
+	taskCtx.CodexHome = env.CodexHome
 	// usesCustomProfileCommand is the same provenance the backend receives as
 	// agent.Config.BuiltinRuntime: it separates the provider's own discovered
 	// binary from an arbitrary command speaking its protocol. Reused here so

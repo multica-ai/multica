@@ -5613,9 +5613,9 @@ func TestBuildMetaSkillContentEmitsRequestingUser(t *testing.T) {
 
 	// Section must sit between agent identity and available commands so
 	// the agent reads "who am I" → "who is asking" → "what can I do".
-	identityIdx := strings.Index(content, "## Agent Identity")
-	requestingIdx := strings.Index(content, "## Requesting User")
-	commandsIdx := strings.Index(content, "## Available Commands")
+	identityIdx := headingIndex(content, "## Agent Identity")
+	requestingIdx := headingIndex(content, "## Requesting User")
+	commandsIdx := headingIndex(content, "## Available Commands")
 	if !(identityIdx >= 0 && identityIdx < requestingIdx && requestingIdx < commandsIdx) {
 		t.Errorf("section order wrong: identity=%d requesting=%d commands=%d", identityIdx, requestingIdx, commandsIdx)
 	}

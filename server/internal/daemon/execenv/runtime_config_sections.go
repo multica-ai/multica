@@ -41,6 +41,19 @@ import (
 // below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
+const briefCompleteMarker = "<!-- MULTICA-RUNTIME-BRIEF-COMPLETE -->"
+
+// writeTruncationGuard tells the model how to recover if a runtime silently
+// cuts this file at a size cap (Codex 32 KiB default, Antigravity 24,000 B).
+// Keep this short: it must itself fit in the surviving prefix.
+func writeTruncationGuard(b *strings.Builder) {
+	fmt.Fprintf(b, "This brief ends with the closing marker `%s`. If you do not see that marker, or you see a `<truncated N bytes>` marker, the runtime has cut this file. Read the remainder (for example `tail -c <N> AGENTS.md`) and apply every unread platform rule before starting.\n\n", briefCompleteMarker)
+}
+
+func writeBriefClosingMarker(b *strings.Builder) {
+	b.WriteString(briefCompleteMarker + "\n")
+}
+
 func writeHeader(b *strings.Builder) {
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -568,7 +581,7 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
-// workflow below" guardrail. Caller gates on kind == kindIssue.
+// workflow above" guardrail. Caller gates on kind == kindIssue.
 //
 // This section owns the single enumeration of the actions Agent Identity can
 // forbid. It and workflow step 3 were added together in #3802 and each carried
@@ -579,7 +592,7 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 // role's "stop once the delegation is delivered" rule.
 func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("## Instruction Precedence\n\n")
-	b.WriteString("Agent Identity instructions have priority over the issue workflow below. ")
+	b.WriteString("Agent Identity instructions have priority over the issue workflow above. ")
 	b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 	b.WriteString("The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.\n\n")
 }
@@ -1096,31 +1109,24 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// every resume; they now travel in the per-turn user message
 	// (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
+	writeTruncationGuard(&b)
 	writeBackgroundTaskSafetySlim(&b, provider)
-	writeAgentIdentity(&b, ctx)
-	writeRequestingUser(&b, ctx)
-	writeWorkspaceContext(&b, ctx)
 
-	switch kind {
-	case kindQuickCreate:
-		writeAvailableCommandsQuickCreate(&b)
-	default:
-		writeAvailableCommands(&b, ctx)
+	// Behavior-critical platform rules come before user-controlled blocks
+	// (agent instructions, workspace context, project description) and the
+	// command catalogue. Codex and Antigravity truncate AGENTS.md at a hard
+	// byte cap, and the cut previously landed on Mentions, Output, and the
+	// "always use the CLI" / delivery rules. See #11480.
+	writeAlwaysUseCLI(&b)
+	if kind == kindIssue || kind == kindDocComment {
+		writeMentions(&b, ctx.DocsEnabled)
 	}
-	writeIssueBodyFormatting(&b)
-
+	writeOutput(&b, kind, ctx)
+	// Keep the delivery rule with the rest of the critical prefix. Workflow
+	// step 4 points at this section, and a size cap would otherwise cut it
+	// off near the tail. See #11480 / #11543.
 	if kind == kindIssue {
 		writeCommentFormatting(&b)
-	}
-
-	if kind != kindQuickCreate {
-		writeRepositories(&b, ctx)
-	}
-
-	writeProjectContext(&b, ctx)
-
-	if kind == kindIssue {
-		writeInstructionPrecedence(&b)
 	}
 
 	writeWorkflowHeader(&b)
@@ -1137,6 +1143,27 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeWorkflowIssue(&b, ctx)
 	}
 
+	if kind == kindIssue {
+		writeInstructionPrecedence(&b)
+	}
+
+	writeAgentIdentity(&b, ctx)
+	writeRequestingUser(&b, ctx)
+	writeWorkspaceContext(&b, ctx)
+	writeProjectContext(&b, ctx)
+
+	switch kind {
+	case kindQuickCreate:
+		writeAvailableCommandsQuickCreate(&b)
+	default:
+		writeAvailableCommands(&b, ctx)
+	}
+	writeIssueBodyFormatting(&b)
+
+	if kind != kindQuickCreate {
+		writeRepositories(&b, ctx)
+	}
+
 	if kind.hasIssueContext() && ctx.IssueID != "" {
 		writeSubIssueCreation(&b, ctx)
 	}
@@ -1147,15 +1174,10 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeSkills(&b, provider, ctx)
 
 	if kind == kindIssue {
-		writeMentions(&b, ctx.DocsEnabled)
 		writeAttachments(&b)
 	}
-	if kind == kindDocComment {
-		writeMentions(&b, ctx.DocsEnabled)
-	}
 
-	writeAlwaysUseCLI(&b)
-	writeOutput(&b, kind, ctx)
+	writeBriefClosingMarker(&b)
 
 	return b.String()
 }

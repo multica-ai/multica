@@ -256,6 +256,14 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+	// Logger receives execenv warnings that belong on the task, such as a
+	// runtime instruction file exceeding the provider's size cap. It is not
+	// rendered into the brief.
+	Logger *slog.Logger
+	// CodexHome is the per-task CODEX_HOME directory, used only to read the
+	// effective project_doc_max_bytes when warning about AGENTS.md size. It
+	// is not rendered into the brief.
+	CodexHome string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
