@@ -285,7 +285,8 @@ type ContentEditorProps = ContentEditorBaseProps & ContentEditorValueProps;
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
-  focus: () => void;
+  /** Focus the editor; `"end"` also moves the caret past the last character. */
+  focus: (position?: "end") => void;
   /**
    * Focus and place the caret at the document position under the given
    * viewport coordinates. Used by readonly-first hosts so the click that
@@ -1016,8 +1017,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // start (0 clamps to the first text position).
         editor.commands.setTextSelection(0);
       },
-      focus: () => {
-        if (editor) editor.commands.focus();
+      focus: (position?: "end") => {
+        if (editor) editor.commands.focus(position);
         // Editor not mounted yet — defer the focus to `onCreate`.
         else focusOnReadyRef.current = true;
       },

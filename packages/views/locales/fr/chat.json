@@ -108,7 +108,9 @@
     "quick_actions_heading": "Questions de suivi",
     "quick_actions_aria": "Suggestions pour continuer",
     "quick_actions_regenerate": "Régénérer les suggestions",
-    "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer."
+    "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer.",
+    "quick_actions_edit": "Modifier avant d'envoyer",
+    "quick_actions_edit_aria": "Modifier avant d'envoyer : {{label}}"
   },
   "session_history": {
     "untitled": "Sans titre",

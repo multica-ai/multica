@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
-import type { Attachment, TaskMessagePayload } from "@multica/core/types";
+import type { Attachment, ChatQuickAction, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import zhHansAgents from "../../locales/zh-Hans/agents.json";
@@ -48,6 +48,9 @@ vi.mock("react-virtuoso", () => ({
     );
   },
 }));
+
+const mockCopyText = vi.hoisted(() => vi.fn(async () => true));
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mockCopyText }));
 
 import { ChatMessageList } from "./chat-message-list";
 
@@ -687,6 +690,89 @@ describe("ChatMessageList quick actions", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+});
+
+describe("ChatMessageList quick action edit and copy (#11756)", () => {
+  const action = {
+    label: "Implement it",
+    prompt: "Help me implement this approach",
+    primary: true,
+  };
+
+  function renderWithAction(props: {
+    onQuickAction?: (quickAction: ChatQuickAction) => void;
+    onEditQuickAction?: (quickAction: ChatQuickAction) => void;
+  }) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "assistant-1",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "The plan is ready.",
+              task_id: null,
+              created_at: "2026-07-22T00:00:00Z",
+              quick_actions: [action],
+            }]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={props.onQuickAction ?? vi.fn()}
+            onEditQuickAction={props.onEditQuickAction}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("edits the full prompt without sending it", async () => {
+    const onQuickAction = vi.fn();
+    const onEditQuickAction = vi.fn();
+    renderWithAction({ onQuickAction, onEditQuickAction });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit before sending: Implement it" }),
+    );
+    expect(onEditQuickAction).toHaveBeenCalledWith(action);
+    expect(onQuickAction).not.toHaveBeenCalled();
+  });
+
+  it("offers edit and copy from the suggestion's context menu", async () => {
+    mockCopyText.mockClear();
+    const onQuickAction = vi.fn();
+    const onEditQuickAction = vi.fn();
+    renderWithAction({ onQuickAction, onEditQuickAction });
+
+    const pill = await screen.findByRole("button", { name: "Implement it" });
+    fireEvent.contextMenu(pill);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy" }));
+    await waitFor(() => expect(mockCopyText).toHaveBeenCalledWith(action.prompt));
+
+    fireEvent.contextMenu(pill);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit before sending" }));
+    expect(onEditQuickAction).toHaveBeenCalledWith(action);
+    expect(onQuickAction).not.toHaveBeenCalled();
+  });
+
+  it("still sends the prompt when the suggestion itself is clicked", async () => {
+    const onQuickAction = vi.fn();
+    const onEditQuickAction = vi.fn();
+    renderWithAction({ onQuickAction, onEditQuickAction });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Implement it" }));
+    expect(onQuickAction).toHaveBeenCalledWith(action);
+    expect(onEditQuickAction).not.toHaveBeenCalled();
+  });
+
+  it("omits the edit button where the surface has no composer to edit in", async () => {
+    renderWithAction({});
+
+    expect(await screen.findByRole("button", { name: "Implement it" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Edit before sending: Implement it" }),
+    ).not.toBeInTheDocument();
   });
 });
 

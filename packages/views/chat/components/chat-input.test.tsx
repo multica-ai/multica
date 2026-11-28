@@ -82,6 +82,7 @@ const editorState = vi.hoisted(() => ({
   cleared: 0,
   blurred: 0,
   focused: 0,
+  focusedAt: [] as (string | undefined)[],
   adopted: [] as string[],
 }));
 
@@ -137,8 +138,9 @@ vi.mock("../../editor", async () => ({
       blur: () => {
         editorState.blurred += 1;
       },
-      focus: () => {
+      focus: (position?: string) => {
         editorState.focused += 1;
+        editorState.focusedAt.push(position);
       },
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
@@ -273,6 +275,7 @@ beforeEach(() => {
   editorState.cleared = 0;
   editorState.blurred = 0;
   editorState.focused = 0;
+  editorState.focusedAt = [];
   editorState.adopted = [];
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
@@ -1969,5 +1972,54 @@ describe("ChatInput send disabled reason", () => {
 
     expect(sendButton()).toBeDisabled();
     expect(sendButton()).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("ChatInput draft insert request", () => {
+  const request = { id: 1, content: "Help me implement this approach" };
+
+  beforeEach(() => {
+    insertMarkdownSpy.mockClear();
+  });
+
+  it("puts the text into an empty draft and focuses its end without sending", async () => {
+    const onDraftInsertApplied = vi.fn();
+    const { onSend } = renderInput({ draftInsertRequest: request, onDraftInsertApplied });
+
+    await act(async () => {});
+    expect(editorState.adopted).toEqual([request.content]);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe(request.content);
+    expect(editorState.focusedAt).toContain("end");
+    expect(onDraftInsertApplied).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("appends to an existing draft instead of replacing it", async () => {
+    const onSend = vi.fn();
+    const { rerender } = renderInput({ onSend });
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "unfinished local text" },
+    });
+    rerender(element({ onSend, draftInsertRequest: request }));
+
+    await act(async () => {});
+    expect(editorState.adopted).toEqual([]);
+    expect(insertMarkdownSpy).toHaveBeenCalledWith(request.content);
+    expect(useChatStore.getState().inputDrafts["__draft_new__"]).toBe(
+      `unfinished local text\n\n${request.content}`,
+    );
+    expect(editorState.focusedAt).toContain("end");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("applies each request only once across rerenders", async () => {
+    const onDraftInsertApplied = vi.fn();
+    const { rerender } = renderInput({ draftInsertRequest: request, onDraftInsertApplied });
+    rerender(element({ draftInsertRequest: request, onDraftInsertApplied }));
+
+    await act(async () => {});
+    expect(editorState.adopted).toEqual([request.content]);
+    expect(insertMarkdownSpy).not.toHaveBeenCalled();
+    expect(onDraftInsertApplied).toHaveBeenCalledTimes(1);
   });
 });

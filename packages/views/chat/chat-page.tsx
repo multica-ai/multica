@@ -430,6 +430,7 @@ export function ChatPage() {
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
+          onEditQuickAction={(action) => c.insertIntoDraft(action.prompt)}
           quickActionsDisabled={
             !!c.pendingTaskId ||
             c.isSessionArchived ||
@@ -491,6 +492,8 @@ export function ChatPage() {
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}
+        draftInsertRequest={c.draftInsertRequest}
+        onDraftInsertApplied={c.handleDraftInsertApplied}
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
         uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
         onStop={c.handleStop}

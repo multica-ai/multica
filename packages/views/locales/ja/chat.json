@@ -103,7 +103,9 @@
     "quick_actions_heading": "フォローアップ質問",
     "quick_actions_aria": "フォローアップの候補",
     "quick_actions_regenerate": "候補を再生成",
-    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。"
+    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。",
+    "quick_actions_edit": "編集してから送信",
+    "quick_actions_edit_aria": "編集してから送信: {{label}}"
   },
   "session_history": {
     "untitled": "無題",
