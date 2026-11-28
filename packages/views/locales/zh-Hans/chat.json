@@ -46,6 +46,8 @@
     "project_context": "项目上下文",
     "change_project_context": "更改项目上下文",
     "remove_project_context": "移除项目上下文",
+    "draft_attachments": "草稿附件",
+    "remove_attachment": "移除 {{filename}}",
     "no_projects": "还没有项目",
     "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级"
   },

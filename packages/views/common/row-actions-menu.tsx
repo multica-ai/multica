@@ -17,6 +17,7 @@ export interface RowActionItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  render?: ReactNode;
 }
 
 /**
@@ -129,14 +130,16 @@ function RowActionGroups({ groups }: { groups: RowActionItem[][] }) {
     <Fragment key={group[0]!.key}>
       {index > 0 && <DropdownMenuSeparator />}
       {group.map((item) => (
-        <DropdownMenuItem
-          key={item.key}
-          variant={item.danger ? "destructive" : "default"}
-          onClick={item.onSelect}
-        >
-          {item.icon}
-          {item.label}
-        </DropdownMenuItem>
+        item.render ?? (
+          <DropdownMenuItem
+            key={item.key}
+            variant={item.danger ? "destructive" : "default"}
+            onClick={item.onSelect}
+          >
+            {item.icon}
+            {item.label}
+          </DropdownMenuItem>
+        )
       ))}
     </Fragment>
   ));

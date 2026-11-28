@@ -9,14 +9,22 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  FolderKanban,
   Link2,
   Loader2,
   Pencil,
   Pin,
   PinOff,
+  Plus,
   Square,
   Trash2,
 } from "@multica/ui/icons";
+import {
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
@@ -34,10 +42,11 @@ import {
   useDeleteChatSession,
   useSetChatSessionArchived,
   useSetChatSessionPinned,
+  useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, ChatSession, PendingChatTasksResponse, Project } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import {
@@ -101,6 +110,8 @@ export function ChatThreadList({
   onSelectSession,
   onArchive,
   onPrefetchSession,
+  projects = [],
+  onNewProjectChat,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
@@ -112,6 +123,8 @@ export function ChatThreadList({
   onArchive: (session: ChatSession) => void;
   /** Warm a session's messages and context on pointer hover or keyboard focus. */
   onPrefetchSession?: (sessionId: string) => void;
+  projects?: Project[];
+  onNewProjectChat?: (projectId: string) => void;
 }) {
   const { t } = useT("chat");
   const { t: tLayout } = useT("layout");
@@ -147,6 +160,7 @@ export function ChatThreadList({
   // (last chat unarchived / deleted) so we never strand the user on an empty
   // archive.
   const [view, setView] = useState<"history" | "archived">("history");
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (view === "archived" && archivedSessions.length === 0) setView("history");
   }, [view, archivedSessions.length]);
@@ -164,6 +178,7 @@ export function ChatThreadList({
   });
   const deleteSession = useDeleteChatSession();
   const setPinned = useSetChatSessionPinned();
+  const setProject = useSetChatSessionProject();
   const setArchived = useSetChatSessionArchived();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
@@ -294,6 +309,34 @@ export function ChatThreadList({
     if (view === "archived") return [];
     const href = sessionHref(session.id);
     return [
+      ...(projects.length > 0
+        ? [{
+            key: "project",
+            icon: <FolderKanban className="size-3.5" />,
+            label: t(($) => $.input.change_project_context),
+            onSelect: () => undefined,
+            render: (
+              <DropdownMenuSub key="project">
+                <DropdownMenuSubTrigger>
+                  <FolderKanban className="size-3.5" />
+                  {t(($) => $.input.change_project_context)}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-72 w-auto min-w-48 overflow-y-auto">
+                  {session.project_id && (
+                    <DropdownMenuItem onClick={() => setProject.mutate({ sessionId: session.id, projectId: null })}>
+                      {t(($) => $.input.remove_project_context)}
+                    </DropdownMenuItem>
+                  )}
+                  {projects.filter((project) => project.id !== session.project_id && !project.archived_at).map((project) => (
+                    <DropdownMenuItem key={project.id} onClick={() => setProject.mutate({ sessionId: session.id, projectId: project.id })}>
+                      {project.icon ?? "📁"} {project.title}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ),
+          }]
+        : []),
       {
         key: "rename",
         icon: <Pencil className="size-3.5" />,
@@ -646,6 +689,16 @@ export function ChatThreadList({
     </button>
   );
 
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const ungroupedSessions = historySessions.filter((session) => !session.project_id || !projectById.has(session.project_id));
+  const groupedSessions = projects
+    .filter((project) => !project.archived_at)
+    .map((project) => ({
+      project,
+      sessions: historySessions.filter((session) => session.project_id === project.id),
+    }))
+    .filter(({ sessions }) => sessions.length > 0);
+
   if (historySessions.length === 0) {
     return (
       <>
@@ -659,13 +712,27 @@ export function ChatThreadList({
 
   return (
     <>
-      <SessionHistoryList
-        key="history"
-        sessions={historySessions}
-        renderRow={renderRow}
-        footer={archivedEntry}
-        animateExit
-      />
+      {ungroupedSessions.length > 0 && <SessionHistoryList key="history" sessions={ungroupedSessions} renderRow={renderRow} animateExit />}
+      {groupedSessions.map(({ project, sessions }) => {
+        const collapsed = collapsedProjects[project.id] ?? sessions.length > 5;
+        return (
+          <section key={project.id} className="mt-2">
+            <div className="flex items-center gap-1 px-2">
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                onClick={() => setCollapsedProjects((current) => ({ ...current, [project.id]: !collapsed }))}
+                className="min-w-0 flex-1 truncate rounded-md px-1 py-1 text-left text-caption font-semibold text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              >
+                {project.icon ?? "📁"} {project.title} <span className="font-normal">({sessions.length})</span>
+              </button>
+              {onNewProjectChat && <button type="button" aria-label={t(($) => $.window.new_chat_tooltip)} onClick={() => onNewProjectChat(project.id)} className="rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-accent/50"><Plus className="size-3.5" /></button>}
+            </div>
+            {!collapsed && <SessionHistoryList sessions={sessions} renderRow={renderRow} animateExit />}
+          </section>
+        );
+      })}
+      {archivedEntry}
       {rowContextMenu}
     </>
   );

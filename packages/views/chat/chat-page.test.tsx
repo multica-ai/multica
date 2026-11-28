@@ -35,6 +35,7 @@ const mockAdvanceSelectionAfterArchive = vi.hoisted(() =>
 );
 const mockArchiveSession = vi.hoisted(() => vi.fn());
 const mockSelectSession = vi.hoisted(() => vi.fn());
+const mockHandleProjectChange = vi.hoisted(() => vi.fn());
 
 // These tests target the page-level URL wiring (`?agent=` / `?session=`), so
 // the conversation internals are stubbed and the controller is replaced with
@@ -70,10 +71,12 @@ vi.mock("./components/chat-thread-list", () => ({
     activeSessionId,
     onSelectSession,
     onArchive,
+    onNewProjectChat,
   }: {
     activeSessionId: string | null;
     onSelectSession: (s: { id: string; agent_id: string }) => void;
     onArchive: (s: { id: string; agent_id: string }) => void;
+    onNewProjectChat?: (projectId: string) => void;
   }) => (
     <div>
       <button
@@ -89,6 +92,9 @@ vi.mock("./components/chat-thread-list", () => ({
         }
       >
         archive-active-thread
+      </button>
+      <button type="button" onClick={() => onNewProjectChat?.("project-1")}>
+        new-project-chat
       </button>
     </div>
   ),
@@ -239,6 +245,7 @@ vi.mock("./components/use-chat-controller", async () => {
       handleUploadFile: vi.fn(),
       handleNewChat: vi.fn(),
       handleStartNewChat: mockStartNewChat,
+      handleProjectChange: mockHandleProjectChange,
       handleSelectSession: mockSelectSession,
       advanceSelectionAfterArchive: mockAdvanceSelectionAfterArchive,
       archiveSession: mockArchiveSession,
@@ -522,6 +529,18 @@ describe("ChatPage ?agent= deep link", () => {
     expect(mockStartNewChat).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
     expect(screen.getByText("chat-input")).toBeInTheDocument();
+  });
+});
+
+describe("ChatPage project chat entry", () => {
+  it("keeps the selected project when starting a project chat", () => {
+    renderPage("");
+    mockStartNewChat.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "new-project-chat" }));
+
+    expect(mockHandleProjectChange).toHaveBeenCalledWith("project-1");
+    expect(mockStartNewChat).not.toHaveBeenCalled();
   });
 });
 

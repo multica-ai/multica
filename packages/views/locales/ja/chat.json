@@ -46,6 +46,8 @@
     "project_context": "プロジェクトコンテキスト",
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
+    "draft_attachments": "下書きの添付ファイル",
+    "remove_attachment": "{{filename}}を削除",
     "no_projects": "プロジェクトがまだありません",
     "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
   },

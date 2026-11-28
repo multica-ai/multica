@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
-import { Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { FileImage, FileText, Loader2, Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -370,6 +370,7 @@ export function ChatInput({
     uploads: draftUploads,
     attachments: draftAttachments,
     handleUpload,
+    removeUpload,
     gate,
     storageRefusal,
     dismissStorageRefusal,
@@ -377,6 +378,12 @@ export function ChatInput({
     resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
     liveRegistryKey: `chat:${loadedDraftKey}`,
   });
+  const hasUnfinishedDraftUpload = draftUploads.some((upload) => upload.status !== "uploaded");
+  const submitUploadGate = {
+    ...gate,
+    uploading: gate.uploading || hasUnfinishedDraftUpload,
+    isBlocked: () => gate.isBlocked() || hasUnfinishedDraftUpload,
+  };
 
   // Move the editor from the draft it holds to the draft that is selected.
   //
@@ -506,7 +513,7 @@ export function ChatInput({
 
   const { submitting, submit } = useComposerSubmit({
     editorRef,
-    uploadGate: gate,
+    uploadGate: submitUploadGate,
     containerRef: composerRef,
     // Chat keeps the caret in the box after a send (the next turn is typed in
     // the same place), except when the commit left the editor alone — see
@@ -733,6 +740,25 @@ export function ChatInput({
     disabled: !!disabled || !!noAgent,
   });
 
+  const draftUploadPreviewUrl = (upload: DraftUpload): string | null => {
+    if (upload.status !== "uploaded") return null;
+    const attachment = upload.attachment;
+    return attachment.thumbnail_url || attachment.download_url || attachment.markdown_url || attachment.url || null;
+  };
+
+  const draftUploadStatus = (upload: DraftUpload): string => {
+    switch (upload.status) {
+      case "uploaded":
+        return "Uploaded";
+      case "uploading":
+        return tEditor(($) => $.upload.uploading_label, { filename: upload.filename });
+      case "failed":
+        return tEditor(($) => $.upload.failed_label, { filename: upload.filename });
+      case "interrupted":
+        return tEditor(($) => $.upload.interrupted);
+    }
+  };
+
   return (
     <>
     {annotationSlot?.composer?.render(canSubmitNow ? {
@@ -866,6 +892,64 @@ export function ChatInput({
             )}
           </div>
         )}
+        {draftUploads.length > 0 && (
+          <div
+            data-testid="chat-input-draft-uploads"
+            aria-label={t(($) => $.input.draft_attachments)}
+            className="flex min-w-0 flex-nowrap gap-2 overflow-x-auto px-3 pb-1 pt-2 [scrollbar-width:thin]"
+          >
+            {draftUploads.map((upload) => {
+              const previewUrl = draftUploadPreviewUrl(upload);
+              const contentType = upload.status === "uploaded"
+                ? upload.attachment.content_type
+                : upload.contentType;
+              const isImage = !!previewUrl && contentType?.startsWith("image/");
+              return (
+                <div
+                  key={upload.clientUploadId}
+                  data-slot="chat-input-draft-upload"
+                  className="flex min-w-52 max-w-64 shrink-0 flex-nowrap items-center gap-2 rounded-md border border-surface-border bg-surface-raised px-2 py-1.5"
+                >
+                  {isImage ? (
+                    <img
+                      src={previewUrl}
+                      alt={upload.filename}
+                      className="size-9 shrink-0 rounded-md object-cover"
+                    />
+                  ) : upload.status === "uploading" ? (
+                    <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  ) : contentType?.startsWith("image/") ? (
+                    <FileImage aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-caption font-medium" title={upload.filename}>
+                      {upload.filename}
+                    </p>
+                    <p
+                      className={cn(
+                        "truncate text-caption text-muted-foreground",
+                        upload.status === "failed" && "text-destructive",
+                      )}
+                    >
+                      {draftUploadStatus(upload)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={t(($) => $.input.remove_attachment, { filename: upload.filename })}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => removeUpload(upload.clientUploadId)}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div ref={editorAreaRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editor identity
@@ -956,7 +1040,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={submit}
-            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
+            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent || hasUnfinishedDraftUpload}
             loading={submitting}
             busy={gate.uploading}
             // Queue-capable runs reuse this one action slot: an empty composer

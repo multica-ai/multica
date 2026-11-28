@@ -48,6 +48,8 @@
     "project_context": "Contexto del proyecto",
     "change_project_context": "Cambiar contexto del proyecto",
     "remove_project_context": "Quitar contexto del proyecto",
+    "draft_attachments": "Archivos adjuntos del borrador",
+    "remove_attachment": "Quitar {{filename}}",
     "no_projects": "Aún no hay proyectos",
     "project_context_unsupported": "La descripción del proyecto no se aplicará: el daemon de este agente necesita una actualización"
   },

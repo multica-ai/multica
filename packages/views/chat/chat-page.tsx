@@ -13,6 +13,7 @@ import { getCurrentSlug } from "@multica/core/platform";
 import { useChatStore } from "@multica/core/chat";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -82,6 +83,10 @@ export function ChatPage() {
   const isSurfaceActive = isCurrentChatRoute && getCurrentSlug() === workspaceSlug;
   const c = useChatController({
     isActive: isSurfaceActive,
+  });
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(c.wsId ?? ""),
+    enabled: !!c.wsId && isSurfaceActive,
   });
   const prefetchSession = useChatSessionPrefetch({
     wsId: c.wsId,
@@ -326,6 +331,11 @@ export function ChatPage() {
         onSelectSession={handleSelect}
         onArchive={handleArchive}
         onPrefetchSession={prefetchSession}
+        projects={projects}
+        onNewProjectChat={(projectId) => {
+          c.handleProjectChange(projectId);
+          setComposingNew(true);
+        }}
       />
     </div>
   );

@@ -46,6 +46,8 @@
     "project_context": "프로젝트 컨텍스트",
     "change_project_context": "프로젝트 컨텍스트 변경",
     "remove_project_context": "프로젝트 컨텍스트 제거",
+    "draft_attachments": "임시 첨부 파일",
+    "remove_attachment": "{{filename}} 제거",
     "no_projects": "아직 프로젝트가 없습니다",
     "project_context_unsupported": "프로젝트 설명이 적용되지 않습니다 — 이 에이전트의 데몬 업그레이드가 필요합니다"
   },

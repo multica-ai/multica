@@ -1,0 +1,3 @@
+services:
+  frontend:
+    image: ghcr.io/multica-ai/multica-web:v0.13.0-phase1
