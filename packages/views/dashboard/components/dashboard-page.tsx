@@ -896,6 +896,14 @@ export function DashboardPage() {
                   groupBy={leaderboardGroupBy}
                   onGroupByChange={setLeaderboardGroupBy}
                   allowSquadGroup={squadFilterParam === null && squads.length > 0}
+                  loading={
+                    leaderboardGroupBy === "model"
+                      ? modelRunTimeQuery.isLoading
+                      : leaderboardGroupBy === "runtime" &&
+                        (byRuntimeQuery.isLoading ||
+                          runtimeDurationQuery.isLoading ||
+                          runtimesQuery.isLoading)
+                  }
                   selectedSquad={selectedSquad}
                 />
               </>

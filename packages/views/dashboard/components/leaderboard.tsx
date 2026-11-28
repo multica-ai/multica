@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight, EyeOff, Trash2 } from "@multica/ui/icons";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";
@@ -51,6 +52,9 @@ const LEADERBOARD_GRID_STYLE = {
 
 const LEADERBOARD_GRID = "grid items-center gap-3";
 
+// Placeholder rows shown while a lazily fetched view's rollup loads.
+const LOADING_ROW_COUNT = 3;
+
 type LeaderboardSquad = {
   id: string;
   name: string;
@@ -71,6 +75,7 @@ export function Leaderboard({
   groupBy = "agent",
   onGroupByChange,
   allowSquadGroup = false,
+  loading = false,
   selectedSquad = null,
 }: {
   rows: AgentDashboardRow[];
@@ -87,6 +92,10 @@ export function Leaderboard({
   /** Whether "Squads" is offered. Off when the page is filtered to a squad,
    *  or the workspace has none; a selected squad view then shows agents. */
   allowSquadGroup?: boolean;
+  /** The Model / Runtime view's own rollup is still loading. Those views
+   *  fetch only once selected, so without this the first switch shows an
+   *  empty list, or model rows with no time yet. */
+  loading?: boolean;
   /** When the page is filtered to a single Squad, the Agent view renders that
    *  Squad's member breakdown. */
   selectedSquad?: LeaderboardSquad | null;
@@ -100,6 +109,7 @@ export function Leaderboard({
   const effectiveGroupBy: LeaderboardGroupBy =
     groupBy === "squad" && !allowSquadGroup ? "agent" : groupBy;
   const isEntityView = effectiveGroupBy === "model" || effectiveGroupBy === "runtime";
+  const showLoading = loading && isEntityView;
 
   const sortOptions = useMemo(
     () => [
@@ -478,9 +488,9 @@ export function Leaderboard({
             options={sortOptions}
           />
           <span className="text-caption text-muted-foreground">
-            {captionText}
+            {showLoading ? null : captionText}
           </span>
-          {activeRows.length > LEADERBOARD_LIMIT ? (
+          {!showLoading && activeRows.length > LEADERBOARD_LIMIT ? (
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
@@ -493,7 +503,7 @@ export function Leaderboard({
           ) : null}
         </div>
       </div>
-      {activeRows.length === 0 ? (
+      {activeRows.length === 0 && !showLoading ? (
         <p className="px-4 py-8 text-center text-caption text-muted-foreground">
           {t(($) => $.leaderboard.no_data)}
         </p>
@@ -526,8 +536,29 @@ export function Leaderboard({
                 {t(($) => $.leaderboard.header_tasks)}
               </span>
             </div>
-            <ul aria-label={t(($) => $.leaderboard.title)} className="divide-y">
-              {isEntityView ? visibleEntityRows.map(renderEntityRow) : null}
+            <ul
+              aria-label={t(($) => $.leaderboard.title)}
+              aria-busy={showLoading || undefined}
+              className="divide-y"
+            >
+              {showLoading
+                ? Array.from({ length: LOADING_ROW_COUNT }, (_, i) => (
+                    <li
+                      key={i}
+                      className={`${LEADERBOARD_GRID} px-4 py-2`}
+                      style={LEADERBOARD_GRID_STYLE}
+                    >
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-2 rounded-full" />
+                      <Skeleton className="ml-auto h-3 w-12" />
+                      <Skeleton className="ml-auto h-3 w-12" />
+                      <Skeleton className="ml-auto h-3 w-10" />
+                      <Skeleton className="ml-auto h-3 w-6" />
+                    </li>
+                  ))
+                : isEntityView
+                  ? visibleEntityRows.map(renderEntityRow)
+                  : null}
               {effectiveGroupBy === "agent"
                 ? visibleAgentRows.map((row) =>
                     renderAgentRow(row, {

@@ -20,6 +20,8 @@ const enabledQueryKeys = vi.hoisted(() => [] as unknown[][]);
 // Squads in the workspace plus the leaderboard's Model / Runtime fixtures.
 // Off by default so the other tests keep their single-agent arithmetic.
 const leaderboardViewsRef = vi.hoisted(() => ({ current: false }));
+// Keeps the Model / Runtime rollups in flight, as on a first switch to a view.
+const leaderboardViewsLoadingRef = vi.hoisted(() => ({ current: false }));
 const dashboardDataRef = vi.hoisted(() => ({ current: false }));
 // Swaps the per-agent fixtures for ones with enough agents to exercise the
 // top-offenders and leaderboard caps. Kept off by default so the other tests
@@ -183,6 +185,14 @@ vi.mock("@tanstack/react-query", async () => {
             isLoading: false,
             isSuccess: true,
           };
+        }
+        if (
+          leaderboardViewsLoadingRef.current &&
+          ["model-runtime", "usage-by-runtime", "runtime-duration"].includes(
+            opts.queryKey[2] as string,
+          )
+        ) {
+          return { data: undefined, isLoading: true };
         }
         if (leaderboardViewsRef.current) {
           const views = leaderboardViewFixture(opts.queryKey);
@@ -1146,6 +1156,28 @@ describe("DashboardPage — leaderboard Agent / Squad / Model / Runtime control"
 
   afterEach(() => {
     leaderboardViewsRef.current = false;
+    leaderboardViewsLoadingRef.current = false;
+  });
+
+  it("shows placeholder rows while a view's rollup loads, not an empty or half-filled list", async () => {
+    leaderboardViewsLoadingRef.current = true;
+    const user = userEvent.setup();
+    renderDashboard();
+
+    for (const view of ["Models", "Runtimes"]) {
+      await user.click(groupControl().getByRole("button", { name: view }));
+      const list = screen.getByRole("list", { name: "Leaderboard" });
+      expect(list).toHaveAttribute("aria-busy", "true");
+      // Model rows would otherwise render from the daily rows with no time.
+      expect(within(list).queryByText("auto")).not.toBeInTheDocument();
+      expect(within(list).getAllByRole("listitem").length).toBeGreaterThan(0);
+      expect(screen.queryByText("No agent activity in this window.")).not.toBeInTheDocument();
+    }
+
+    await user.click(groupControl().getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("list", { name: "Leaderboard" })).not.toHaveAttribute(
+      "aria-busy",
+    );
   });
 
   const groupControl = () =>

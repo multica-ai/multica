@@ -115,13 +115,14 @@ describe("leaderboard Model and Runtime view queries", () => {
   ] as const;
 
   it.each(viewBuilders)("keys %s on the history limit and the squad", (buildOptions) => {
-    const key = buildOptions("ws-1", 30, null, "UTC", 30, "squad-1").queryKey;
-    expect(key).toContain(30);
-    expect(key).toContain("squad-1");
+    // days 7 and limit 30, so the limit segment cannot be the day range.
+    const key = buildOptions("ws-1", 7, null, "UTC", 30, "squad-1").queryKey;
+    expect(key[6]).toBe(30);
+    expect(key[7]).toBe("squad-1");
     expect(key).not.toEqual(
-      buildOptions("ws-1", 30, null, "UTC", 30, "squad-2").queryKey,
+      buildOptions("ws-1", 7, null, "UTC", 30, "squad-2").queryKey,
     );
-    expect(key).not.toEqual(buildOptions("ws-1", 30, null, "UTC", 30).queryKey);
+    expect(key).not.toEqual(buildOptions("ws-1", 7, null, "UTC", 30).queryKey);
   });
 
   it("gives each view endpoint its own key", () => {
