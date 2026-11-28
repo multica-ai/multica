@@ -276,3 +276,35 @@ func TestListAgentTasksUsageAndAgentScopeAcrossPages(t *testing.T) {
 		t.Fatalf("cross-agent cursor changed ownership scope: %+v", tasks)
 	}
 }
+
+func TestListAgentTasksStatusFilter(t *testing.T) {
+	runtimeID := dbfx.Runtime(t, "status filter runtime")
+	agentID := dbfx.Agent(t, "status filter agent", runtimeID)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	runningID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "created_at": now})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "completed", "created_at": now.Add(-time.Minute)})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "failed", "created_at": now.Add(-2 * time.Minute)})
+
+	read := func(query string, wantStatus int) []AgentTaskResponse {
+		t.Helper()
+		req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID+"/tasks"+query, nil), "id", agentID)
+		var tasks []AgentTaskResponse
+		response := testutil.Call(t, testHandler.ListAgentTasks, req).Want(wantStatus)
+		if wantStatus == http.StatusOK {
+			response.JSON(&tasks)
+		}
+		return tasks
+	}
+
+	if tasks := read("", http.StatusOK); len(tasks) != 3 {
+		t.Fatalf("no filter: got %d tasks, want 3", len(tasks))
+	}
+	if tasks := read("?status=running", http.StatusOK); len(tasks) != 1 || tasks[0].ID != runningID || tasks[0].Status != "running" {
+		t.Fatalf("status=running: got %+v", tasks)
+	}
+	if tasks := read("?status=completed", http.StatusOK); len(tasks) != 1 || tasks[0].Status != "completed" {
+		t.Fatalf("status=completed: got %+v", tasks)
+	}
+	// An unknown status is a client error, not a silent empty page.
+	read("?status=bogus", http.StatusBadRequest)
+}
