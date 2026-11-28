@@ -106,13 +106,10 @@ func TestPrepareHermesHomeMemoryStorePersistsAcrossTasks(t *testing.T) {
 	}
 
 	// The link must point at the store, not hold a copy — otherwise the next
-	// task's writes would diverge from it.
-	fi, err := os.Lstat(filepath.Join(secondTask, "memories"))
-	if err != nil {
-		t.Fatalf("lstat memories: %v", err)
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("memories is not a link (mode %v)", fi.Mode())
+	// task's writes would diverge from it. A junction on Windows hosts without
+	// symlink privilege counts; only a copy does not (issue #8926).
+	if !linkedTo(t, store, filepath.Join(secondTask, "memories")) {
+		t.Fatalf("memories is not linked to the store %s", store)
 	}
 }
 
