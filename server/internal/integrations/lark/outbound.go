@@ -149,6 +149,7 @@ type PatcherQueries interface {
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
+	TaskCreatedActiveChatWakeup(ctx context.Context, arg db.TaskCreatedActiveChatWakeupParams) (bool, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
 	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error)
@@ -386,11 +387,38 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
+		mention := mentionOpenID(binding)
+		if mention != "" && p.turnReportsBackLater(ctx, chatSessionID, taskID) {
+			mention = ""
+		}
+		return p.sendChatReply(ctx, creds, binding, mention, inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+// turnReportsBackLater reports whether this turn left an active chat wakeup,
+// i.e. the agent promised to come back with a result. Its reply is then only
+// an acknowledgement ("created MUL-1, I'll tell you when it's done"), and
+// mentioning the asker on it reads as "done" to everyone in the group
+// (#11447). The wakeup's own turn copies this turn's delivery snapshot, so the
+// report it sends later carries the mention instead. A failed lookup keeps the
+// mention: a mention too early beats none at all.
+func (p *Patcher) turnReportsBackLater(ctx context.Context, chatSessionID, taskID pgtype.UUID) bool {
+	pending, err := p.queries.TaskCreatedActiveChatWakeup(ctx, db.TaskCreatedActiveChatWakeupParams{
+		ChatSessionID: chatSessionID,
+		SourceTaskID:  taskID,
+	})
+	if err != nil {
+		p.cfg.Logger.Warn("lark: chat wakeup lookup failed; mentioning the sender",
+			"task_id", uuidString(taskID),
+			"chat_session_id", uuidString(chatSessionID),
+			"error", err,
+		)
+		return false
+	}
+	return pending
 }
 
 // sweepTypingForTask uses the frozen trigger message. Session deletion carries

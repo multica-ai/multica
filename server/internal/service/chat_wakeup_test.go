@@ -333,6 +333,42 @@ func TestChatWakeupLimitsCancelAndArchive(t *testing.T) {
 	}
 }
 
+// TaskCreatedActiveChatWakeup tells the IM patcher that a turn's reply is
+// only an acknowledgement, so it holds the @-mention for the report (#11447).
+func TestTaskCreatedActiveChatWakeupFollowsTheCreatingTurn(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	pending := func(taskID pgtype.UUID) bool {
+		t.Helper()
+		got, err := f.q.TaskCreatedActiveChatWakeup(ctx, db.TaskCreatedActiveChatWakeupParams{
+			ChatSessionID: f.source.ChatSessionID, SourceTaskID: taskID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if pending(f.source.ID) {
+		t.Fatal("a turn that created no wakeup reports one")
+	}
+	w := f.create(t, ChatWakeupInput{AfterSeconds: 3600})
+	if !pending(f.source.ID) {
+		t.Fatal("the turn that created an active wakeup does not report it")
+	}
+	other := util.MustParseUUID(f.fx.Task(t, util.UUIDToString(f.source.AgentID), testutil.Cols{
+		"runtime_id": util.UUIDToString(f.source.RuntimeID), "chat_session_id": f.session, "status": "running",
+	}))
+	if pending(other) {
+		t.Fatal("another turn in the conversation reports this turn's wakeup")
+	}
+	if _, err := f.svc.Cancel(ctx, f.source.ChatSessionID, w.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if pending(f.source.ID) {
+		t.Fatal("a cancelled wakeup still holds the mention")
+	}
+}
+
 func TestChatWakeupAnswersTheSenderNotTheSessionOwner(t *testing.T) {
 	f := newChatWakeupFixture(t)
 	sender := f.fx.User(t, "Group sender", fmt.Sprintf("sender-%d@example.test", time.Now().UnixNano()))
