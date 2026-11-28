@@ -52,11 +52,17 @@ var allowedWSOrigins atomic.Value // holds []string
 var trustedProxies atomic.Value   // holds []netip.Prefix
 
 func init() {
-	allowedWSOrigins.Store(loadAllowedOrigins())
+	allowedWSOrigins.Store(LoadAllowedOrigins())
 	trustedProxies.Store(loadTrustedProxies())
 }
 
-func loadAllowedOrigins() []string {
+// LoadAllowedOrigins resolves the WebSocket origin allowlist from the
+// environment. ALLOWED_ORIGINS wins; when it is unset the list falls back to
+// CORS_ALLOWED_ORIGINS and then FRONTEND_ORIGIN, so a single-origin deployment
+// keeps working without extra configuration. Exported so cmd/server reuses the
+// same priority chain instead of re-deriving a CORS-only list and overwriting
+// this one at router startup (which made ALLOWED_ORIGINS silently ineffective).
+func LoadAllowedOrigins() []string {
 	raw := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
