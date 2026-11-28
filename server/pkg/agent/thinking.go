@@ -998,6 +998,10 @@ var thinkingDynamicCatalogProviders = map[string]bool{
 	// server does not maintain a provider-wide fixed enum. The daemon applies
 	// the selected effort with `--effort`, not session/set_config_option.
 	"grok":     true,
+	// Doubao advertises each model's effort catalog through session/new and
+	// applies the selected effort with its process-level `--effort` flag, not
+	// session/set_config_option — the same delivery model as grok.
+	"doubao":   true,
 	"opencode": true,
 	"kimi":     true,
 	// Kiro's model command options advertise per-model effortLevels. Its

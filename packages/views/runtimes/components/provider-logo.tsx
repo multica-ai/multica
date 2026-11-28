@@ -471,6 +471,10 @@ export function ProviderLogo({
       return <TraeLogo className={className} />;
     case "grok":
       return <GrokLogo className={className} />;
+    case "doubao":
+      // No dedicated Doubao mark yet; the generic monitor glyph is the
+      // neutral fallback used by every unlisted provider.
+      return <Monitor className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
     case "qwenpaw":

@@ -21,6 +21,7 @@ var MinVersions = map[string]string{
 	"codex":       "0.100.0",   // app-server --listen stdio:// added in 0.100.0
 	"copilot":     "1.0.0",     // --output-format json envelope stable from 1.0.x
 	"grok":        "0.2.89",    // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
+	"doubao":      "2.38.2",    // ACP v1 (`doubao acp serve`) + session/load and --permission-mode/--effort/--model, verified against 2.38.2
 	"qwen":        "0.20.0",    // stream-json protocol captured and verified against Qwen Code 0.20.0
 	"droid":       "1.8.0",     // native exec stream-json envelope verified against the official executable
 	"dim":         "0.3.10",    // cross-run session/load: per-process lock releases on graceful exit

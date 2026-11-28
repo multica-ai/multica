@@ -219,6 +219,15 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				grokHome = filepath.Join(home, ".grok")
 			}
 			providerRoot = filepath.Join(grokHome, "skills")
+		case "doubao":
+			// DOUBAO_HOME replaces the default ~/.doubao home; user-level
+			// skills live under its skills/ directory, mirroring the
+			// project-level .doubao/skills layout.
+			doubaoHome := strings.TrimSpace(os.Getenv("DOUBAO_HOME"))
+			if doubaoHome == "" {
+				doubaoHome = filepath.Join(home, ".doubao")
+			}
+			providerRoot = filepath.Join(doubaoHome, "skills")
 		case "qwen":
 			// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
 			// settings, sessions, credentials and personal skills; project

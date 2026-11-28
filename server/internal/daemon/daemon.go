@@ -6973,6 +6973,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
+	"doubao":     "Doubao",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
@@ -7031,7 +7032,10 @@ func providerDisplayName(name string) string {
 // was run for 1.5.2.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli", "qwenpaw":
+	case "openclaw", "kimi", "traecli", "qwenpaw", "doubao":
+		// doubao is included until it is confirmed to read AGENTS.md from the
+		// workdir; inline delivery is correct either way and the file is still
+		// written for visibility (see execenv.runtimeConfigPath).
 		return true
 	default:
 		return false

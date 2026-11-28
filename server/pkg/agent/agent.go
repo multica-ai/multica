@@ -382,7 +382,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, dim, zeroclaw)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, doubao, qwen, qwenpaw, mcode, muse, dim, zeroclaw)
 	CLIVersion     string            // detected version paired with ExecutablePath; vendor-specific usage semantics also require BuiltinRuntime
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -421,7 +421,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "muse".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "doubao", "qwen", "qwenpaw", "mcode", "muse".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -430,15 +430,16 @@ type Config struct {
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
 // migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
-// add mcode, migration 370 to add dim, migration 403 to add zeroclaw, and
-// migration 441 to add codearts): a custom runtime profile may
-// only be based on a backend Multica officially supports.
+// add mcode, migration 370 to add dim, migration 403 to add zeroclaw,
+// migration 441 to add codearts, and migration 758 to add doubao): a custom
+// runtime profile may only be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
 // lets the daemon auto-detect and register the international and China-region
 // binaries independently. traecli (Trae) has a New backend, launch
 // header and provider branding but was previously missing from this whitelist,
 // so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
-// ACP backend (`grok agent --always-approve stdio`). qwen is Qwen Code's
+// ACP backend (`grok agent --always-approve stdio`). doubao is ByteDance's
+// Doubao CLI, driven over ACP v1 (`doubao acp serve`). qwen is Qwen Code's
 // native `qwen -p <prompt> --output-format stream-json` backend.
 var SupportedTypes = []string{
 	"claude",
@@ -461,6 +462,7 @@ var SupportedTypes = []string{
 	"qoderclicn",
 	"traecli",
 	"grok",
+	"doubao",
 	"qwen",
 	"qwenpaw",
 	"droid",
@@ -571,6 +573,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &traecliBackend{cfg: cfg}, nil
 	case "grok":
 		return &grokBackend{cfg: cfg}, nil
+	case "doubao":
+		return &doubaoBackend{cfg: cfg}, nil
 	case "qwen":
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
@@ -633,6 +637,7 @@ var launchHeaders = map[string]string{
 	"qoderclicn":  "qoderclicn --acp",
 	"traecli":     "traecli acp serve",
 	"grok":        "grok agent stdio",
+	"doubao":      "doubao acp serve",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
 	"droid":       "droid exec (stream-json)",

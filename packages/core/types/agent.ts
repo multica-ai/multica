@@ -140,6 +140,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qoderclicn",
   "traecli",
   "grok",
+  "doubao",
   "qwen",
   "qwenpaw",
   "droid",

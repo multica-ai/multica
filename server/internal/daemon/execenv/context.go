@@ -451,6 +451,12 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "doubao":
+		// Doubao CLI follows the same project-local convention as the other
+		// ByteDance CLIs: .doubao/skills/ under the task workdir. Verify with
+		// `doubao --help` on the target build if skill discovery is reported
+		// missing; the .agent_context fallback remains available.
+		return filepath.Join(workDir, ".doubao", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")
