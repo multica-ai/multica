@@ -9,7 +9,7 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { qoderOptions, type QoderConnection } from "@multica/core/runtimes/qoder";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import type { AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   agentListOptions,
   memberListOptions,
@@ -79,6 +79,34 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   };
 }
 
+function makeAgent(overrides: Partial<Agent> = {}): Agent {
+  return {
+    id: "agent-1",
+    workspace_id: WS,
+    runtime_id: "rt-claude",
+    name: "Agent",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: "user-1",
+    skills: [],
+    created_at: new Date(NOW - 60_000).toISOString(),
+    updated_at: new Date(NOW - 60_000).toISOString(),
+    archived_at: null,
+    archived_by: null,
+    ...overrides,
+  };
+}
+
 function qoder(overrides: Partial<QoderConnection> = {}): QoderConnection {
   return {
     configured: false,
@@ -101,12 +129,14 @@ function qoder(overrides: Partial<QoderConnection> = {}): QoderConnection {
 
 function renderPage({
   runtimes = [makeRuntime()],
+  agents = [],
   connection = qoder(),
   desktop = false,
   cloudRuntimeEnabled = false,
 }: {
   /** `null` leaves the runtime list unseeded, so the page renders loading. */
   runtimes?: AgentRuntime[] | null;
+  agents?: Agent[];
   connection?: QoderConnection;
   desktop?: boolean;
   cloudRuntimeEnabled?: boolean;
@@ -116,7 +146,7 @@ function renderPage({
   });
   if (runtimes) qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
   qc.setQueryData(runtimeProfileListOptions(WS).queryKey, []);
-  qc.setQueryData(agentListOptions(WS).queryKey, []);
+  qc.setQueryData(agentListOptions(WS).queryKey, agents);
   qc.setQueryData(memberListOptions(WS).queryKey, []);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
   qc.setQueryData(chatSessionsOptions(WS).queryKey, []);
@@ -335,5 +365,32 @@ describe("RuntimesPage", () => {
       ).toHaveTextContent(connection.configured ? "2" : "1");
       unmount();
     }
+  });
+
+  it("leaves archived agents out of the agent counts", () => {
+    const qoderRuntime = makeRuntime({
+      id: "rt-qoder",
+      daemon_id: "qoder-managed-ws-test",
+      name: "Qoder Cloud Agents",
+      provider: "qoder_cloud",
+      runtime_mode: "cloud",
+      device_info: "",
+    });
+    const archived = { archived_at: new Date(NOW).toISOString(), archived_by: "user-1" };
+    renderPage({
+      runtimes: [makeRuntime(), qoderRuntime],
+      agents: [
+        makeAgent({ id: "a-active" }),
+        makeAgent({ id: "a-archived", ...archived }),
+        makeAgent({ id: "q-active", runtime_id: "rt-qoder" }),
+        makeAgent({ id: "q-archived", runtime_id: "rt-qoder", ...archived }),
+      ],
+      connection: qoder({ configured: true, enabled: true, status: "online" }),
+    });
+
+    const machineRow = screen.getByRole("row", { name: /dev-machine\.local/ });
+    expect(within(machineRow).getAllByRole("gridcell")[2]).toHaveTextContent(/^1$/);
+    const qoderRow = screen.getByRole("row", { name: /Qoder Cloud Agents/ });
+    expect(within(qoderRow).getAllByRole("gridcell")[2]).toHaveTextContent(/^1$/);
   });
 });
