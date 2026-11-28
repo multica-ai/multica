@@ -563,6 +563,51 @@ func (q *Queries) GetDelegatedFailureRecoveryExhaustionComment(ctx context.Conte
 	return i, err
 }
 
+const getLastAgentCommentForTask = `-- name: GetLastAgentCommentForTask :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids FROM comment
+WHERE source_task_id = $1 AND author_type = 'agent' AND deleted_at IS NULL
+  AND created_at < $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastAgentCommentForTaskParams struct {
+	SourceTaskID pgtype.UUID        `json:"source_task_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+// The most recent comment the agent itself authored during one task run
+// (source_task_id pins it to the run). @before excludes the synthetic
+// completion fallback: the platform writes it after the completed_at flip and
+// it is #8922's territory, not a comment "the run posted".
+func (q *Queries) GetLastAgentCommentForTask(ctx context.Context, arg GetLastAgentCommentForTaskParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLastAgentCommentForTask, arg.SourceTaskID, arg.CreatedAt)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+		&i.ViaPluginID,
+		&i.Revision,
+		&i.RecoverySettledAt,
+		&i.DeletedAt,
+		&i.SuppressedAgentIds,
+	)
+	return i, err
+}
+
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids FROM comment
 WHERE issue_id = $1

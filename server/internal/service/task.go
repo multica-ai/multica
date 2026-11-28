@@ -6861,6 +6861,10 @@ type delegatedFailureRecoveryTarget struct {
 	issue   db.Issue
 	agent   db.Agent
 	comment db.Comment
+	// evidenceKind tags the dispatch's trigger evidence: delegated_failure for
+	// the recovery outbox, delegated_completion for the zero-route completion
+	// wake (#9720). It keys attempt counting and the trigger row's attribution.
+	evidenceKind attribution.EvidenceKind
 	// leaderSquad is set when the failure goes to a direct-handoff squad's
 	// leader instead of the member that handed the work over; agent is then
 	// that leader and the recovery run carries its leader role.
@@ -6948,7 +6952,8 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID || agent.ID == failed.AgentID {
 		return nil, nil
 	}
-	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent, leaderSquad: leaderSquad}, nil
+	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent, leaderSquad: leaderSquad,
+		evidenceKind: attribution.EvidenceDelegatedFailure}, nil
 }
 
 // canDispatchDelegatedFailureRecovery matches the lifecycle predicate in
@@ -7245,11 +7250,28 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			return delegatedFailureRecoveryCovered, nil
 		}
 
-		recoveryTasks, err := s.Queries.CountDelegatedFailureRecoveryTasks(ctx, target.failed.ID)
+		recoveryTasks, err := s.Queries.CountDelegatedRecoveryTasks(ctx, db.CountDelegatedRecoveryTasksParams{
+			EvidenceKind: pgtype.Text{String: string(target.evidenceKind), Valid: true},
+			RefID:        target.failed.ID,
+		})
 		if err != nil {
-			return delegatedFailureRecoveryCovered, fmt.Errorf("count delegated failure recovery tasks: %w", err)
+			return delegatedFailureRecoveryCovered, fmt.Errorf("count delegated recovery tasks: %w", err)
 		}
-		if recoveryTasks >= delegatedFailureRecoveryMaxTaskAttempts {
+		// A completion wake has no durable outbox to settle: its cap is the
+		// one-hop budget and the covered outcome is final, not a bounded-stop
+		// explanation owed to a human.
+		maxAttempts := int64(delegatedFailureRecoveryMaxTaskAttempts)
+		if target.evidenceKind == attribution.EvidenceDelegatedCompletion {
+			maxAttempts = delegatedCompletionWakeMaxChainHops
+		}
+		if recoveryTasks >= maxAttempts {
+			if target.evidenceKind == attribution.EvidenceDelegatedCompletion {
+				slog.Warn("delegated completion wake budget already spent",
+					"worker_task_id", util.UUIDToString(target.failed.ID),
+					"coordinator_agent_id", util.UUIDToString(target.agent.ID),
+				)
+				return delegatedFailureRecoveryCovered, nil
+			}
 			exhausted, err := s.exhaustDelegatedFailureRecovery(ctx, target)
 			if err != nil {
 				return delegatedFailureRecoveryCovered, err
@@ -7318,7 +7340,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			OriginatorSource:     pgtype.Text{String: string(source), Valid: true},
 			DelegatedFromTaskID:  target.failed.ID,
 			RuleVersionID:        ruleVersionID,
-			TriggerEvidenceKind:  pgtype.Text{String: string(attribution.EvidenceDelegatedFailure), Valid: true},
+			TriggerEvidenceKind:  pgtype.Text{String: string(target.evidenceKind), Valid: true},
 			TriggerEvidenceRefID: target.failed.ID,
 			HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, target.issue.ID)),
 		})
@@ -7369,6 +7391,101 @@ func (s *TaskService) recoverDelegatedTaskFailure(ctx context.Context, failed db
 	}
 	_, err = s.dispatchDelegatedFailureRecovery(ctx, target, pgtype.UUID{})
 	return true, err
+}
+
+// delegatedCompletionWakeMaxChainHops caps how far a completion wake may
+// propagate up a delegation chain. One hop is the designed behavior (worker →
+// its direct delegator); the count exists as a belt-and-braces bound beside the
+// evidence-kind propagation stop.
+const delegatedCompletionWakeMaxChainHops = 1
+
+// loadDelegatedCompletionWakeTarget resolves the coordinator that a completed
+// delegated worker's zero-route closing comment must hand control back to
+// (#9720). Nil means "no wake owed": the chain would propagate past one hop,
+// an autopilot run owns either end, the delegator is unusable (archived, no
+// runtime, different workspace), or a wake for this worker task already
+// exists — the concrete "no new work since handoff" definition from the issue.
+func loadDelegatedCompletionWakeTarget(ctx context.Context, q *db.Queries, worker db.AgentTaskQueue) (*delegatedFailureRecoveryTarget, error) {
+	if worker.Status != "completed" || !worker.DelegatedFromTaskID.Valid || worker.AutopilotRunID.Valid ||
+		(worker.TriggerEvidenceKind.Valid && worker.TriggerEvidenceKind.String == string(attribution.EvidenceDelegatedCompletion)) {
+		return nil, nil
+	}
+	source, err := q.GetAgentTask(ctx, worker.DelegatedFromTaskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load delegator task: %w", err)
+	}
+	// Propagation stop: a coordinator run that itself was spawned as a
+	// completion wake never triggers a further completion wake — this is what
+	// caps every A→B→A ping-pong at one hop (#8753 concern).
+	if source.AutopilotRunID.Valid || !source.IssueID.Valid || source.AgentID == worker.AgentID ||
+		(source.TriggerEvidenceKind.Valid && source.TriggerEvidenceKind.String == string(attribution.EvidenceDelegatedCompletion)) {
+		return nil, nil
+	}
+	issue, err := q.GetIssue(ctx, source.IssueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load delegator issue: %w", err)
+	}
+	agent, err := q.GetAgent(ctx, source.AgentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load delegator agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
+		return nil, nil
+	}
+	// One-shot: the first zero-route closing comment already delivered the
+	// completion to the coordinator; later comments carry no new handoff
+	// obligation. Merged folds (below) don't create a row, so a pending fold
+	// still counts as delivered via the coverage check.
+	wakes, err := q.CountDelegatedRecoveryTasks(ctx, db.CountDelegatedRecoveryTasksParams{
+		EvidenceKind: pgtype.Text{String: string(attribution.EvidenceDelegatedCompletion), Valid: true},
+		RefID:        worker.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("count completion wakeups: %w", err)
+	}
+	if wakes >= delegatedCompletionWakeMaxChainHops {
+		return nil, nil
+	}
+	return &delegatedFailureRecoveryTarget{failed: worker, source: source, issue: issue, agent: agent,
+		evidenceKind: attribution.EvidenceDelegatedCompletion}, nil
+}
+
+// WakeDelegatorForCompletedWorker hands a completed delegated worker's
+// zero-route closing comment to its direct delegator: fold it into the
+// coordinator's pending task if one exists, else enqueue one wake task with
+// the comment as trigger. Dispatched synchronously from the completion
+// transition (the daemon's terminal callback won the status CAS): a crash in
+// the narrow post-commit window drops the wake and leaves the chain where it
+// is today — the status quo ante, not a regression (#10060 review, option 1).
+func (s *TaskService) WakeDelegatorForCompletedWorker(ctx context.Context, worker db.AgentTaskQueue, closingComment db.Comment) (bool, error) {
+	target, err := loadDelegatedCompletionWakeTarget(ctx, s.Queries, worker)
+	if err != nil || target == nil {
+		return false, err
+	}
+	target.comment = closingComment
+	// Reuse the failure-side dispatch machinery: it already implements the
+	// coverage check (no duplicate wake), pending-merge fold, wake-task
+	// creation with attribution, and the dispatched-slot planned-comment
+	// registration. Its eligibility gates (issue lifecycle) apply identically:
+	// a backlog/triage/done issue owes no coordinator run.
+	dispatched, err := s.dispatchDelegatedFailureRecovery(ctx, target, pgtype.UUID{})
+	if err != nil {
+		slog.Warn("delegated completion wake failed",
+			"worker_task_id", util.UUIDToString(worker.ID),
+			"delegated_from_task_id", util.UUIDToString(worker.DelegatedFromTaskID),
+			"error", err)
+		return false, err
+	}
+	return dispatched == delegatedFailureRecoveryReplayed, nil
 }
 
 // RecoverPendingDelegatedFailures replays the durable recovery outbox. The

@@ -5214,6 +5214,11 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// input is not silently dropped. Agent replays are restricted to explicit
 	// mentions and recorded worker inputs; see reconcileCommentsOnCompletion.
 	h.reconcileCommentsOnCompletion(r.Context(), task)
+	// #9720: a delegated worker whose closing comment routed to nobody must
+	// hand control back to its direct delegator once, checked on the completion
+	// transition — agents post the closing comment seconds before the status
+	// flip, so a comment-time check gated on a completed worker never fires.
+	h.maybeWakeDelegatorOnCompletion(r.Context(), task)
 	// The terminal transaction and completion reconciliation are committed.
 	// Wake the owning runtime now so queued work that was blocked by this
 	// task's agent capacity or serialization key is re-claimed immediately.
@@ -5273,6 +5278,67 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 		taskContext.Provider,
 		durationMS,
 	))
+}
+
+// maybeWakeDelegatorOnCompletion hands a completed delegated worker's
+// zero-route closing comment back to its direct delegator once (#9720). The
+// run's last agent-authored comment is re-evaluated through the normal trigger
+// resolution: zero triggers (no explicit mention, no squad fallback) is the
+// silent stall the platform now catches. Cases that already route today keep
+// their behavior; a run that posted no comment of its own is left to the
+// platform fallback (#8922's territory). Dispatch is synchronous in the
+// terminal callback and one-shot via the delegated_completion evidence count,
+// so a daemon replay cannot wake twice.
+func (h *Handler) maybeWakeDelegatorOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
+	if task == nil || !task.IssueID.Valid || !task.DelegatedFromTaskID.Valid || !task.CompletedAt.Valid {
+		return
+	}
+	comment, err := h.Queries.GetLastAgentCommentForTask(ctx, db.GetLastAgentCommentForTaskParams{
+		SourceTaskID: task.ID,
+		CreatedAt:    task.CompletedAt,
+	})
+	if err != nil {
+		if !isNotFound(err) {
+			slog.WarnContext(ctx, "delegated completion wake: load last agent comment failed",
+				"task_id", uuidToString(task.ID), "error", err)
+		}
+		return
+	}
+	if isNoteComment(comment.Content) {
+		return
+	}
+	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		if !isNotFound(err) {
+			slog.WarnContext(ctx, "delegated completion wake: load issue failed",
+				"issue_id", uuidToString(task.IssueID), "error", err)
+		}
+		return
+	}
+	var parentComment *db.Comment
+	if comment.ParentID.Valid {
+		if parent, err := h.Queries.GetComment(ctx, comment.ParentID); err == nil {
+			parentComment = &parent
+		}
+	}
+	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, "agent", uuidToString(task.AgentID), commentTriggerComputeOptions{
+		ExcludeTriggerCommentID: comment.ID,
+		AuthoringTaskID:         comment.SourceTaskID,
+		handoffPlan:             &squadHandoffPlan{},
+	})
+	if len(triggers) > 0 || len(targets) > 0 {
+		// Something already routed (explicit mention or a squad fallback): the
+		// current behavior stands and the wake must never double-fire.
+		return
+	}
+	if _, err := h.TaskService.WakeDelegatorForCompletedWorker(ctx, *task, comment); err != nil {
+		// The completion itself is committed; a failed wake is also logged by
+		// the service and must not fail the terminal callback.
+		slog.WarnContext(ctx, "delegated completion wake failed",
+			"task_id", uuidToString(task.ID),
+			"issue_id", uuidToString(task.IssueID),
+			"error", err)
+	}
 }
 
 // reconcileCommentsOnCompletion replays qualifying comments absent from this
