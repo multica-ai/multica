@@ -22,6 +22,11 @@ files:
   # because the first arch writes into dist/ mid-run before the second is
   # packaged.
   - "!dist/**"
+  # Dev/test-only files. The renderer's libraries are devDependencies
+  # (electron-vite bundles them into out/), so app.asar carries out/,
+  # resources/ and only the main process's runtime dependencies.
+  - "!{test,scripts}/**"
+  - "!{vitest.config.ts,eslint.config.mjs,.env.*}"
 # Ship the license and attribution notices inside the packaged app, so the
 # NOTICE obligations travel with the installer rather than only the git repo.
 extraResources:

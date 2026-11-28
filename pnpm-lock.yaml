@@ -312,6 +312,16 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@electron-toolkit/utils':
+        specifier: ^4.0.0
+        version: 4.0.0(electron@44.9.3)
+      electron-updater:
+        specifier: ^6.8.3
+        version: 6.8.3
+      fix-path:
+        specifier: ^5.0.0
+        version: 5.0.0
+    devDependencies:
       '@dnd-kit/core':
         specifier: 'catalog:'
         version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -327,9 +337,9 @@ importers:
       '@electron-toolkit/preload':
         specifier: ^3.0.2
         version: 3.0.2(electron@44.9.3)
-      '@electron-toolkit/utils':
-        specifier: ^4.0.0
-        version: 4.0.0(electron@44.9.3)
+      '@electron-toolkit/tsconfig':
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@25.5.0)
       '@fontsource-variable/geist-mono':
         specifier: ^5.3.0
         version: 5.3.0
@@ -348,61 +358,27 @@ importers:
       '@multica/ee':
         specifier: workspace:*
         version: link:../../packages/ee
-      '@multica/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../../packages/views
-      '@tanstack/react-query':
-        specifier: 'catalog:'
-        version: 5.96.2(react@19.2.3)
-      electron-updater:
-        specifier: ^6.8.3
-        version: 6.8.3
-      fix-path:
-        specifier: ^5.0.0
-        version: 5.0.0
-      motion:
-        specifier: 'catalog:'
-        version: 12.38.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      react:
-        specifier: 'catalog:'
-        version: 19.2.3
-      react-dom:
-        specifier: 'catalog:'
-        version: 19.2.3(react@19.2.3)
-      react-router-dom:
-        specifier: ^7.6.0
-        version: 7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      shadcn:
-        specifier: 'catalog:'
-        version: 4.1.0(@types/node@25.5.0)(@typescript/typescript6@6.0.2)
-      sonner:
-        specifier: 'catalog:'
-        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      tw-animate-css:
-        specifier: 'catalog:'
-        version: 1.4.0
-      zustand:
-        specifier: 'catalog:'
-        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
-    devDependencies:
-      '@electron-toolkit/tsconfig':
-        specifier: ^2.0.0
-        version: 2.0.0(@types/node@25.5.0)
       '@multica/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../../packages/views
       '@multica/vitest-setup':
         specifier: workspace:*
         version: link:../../packages/vitest-setup
       '@tailwindcss/vite':
         specifier: 'catalog:'
         version: 4.2.2(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1))
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.96.2(react@19.2.3)
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.9.1
@@ -439,18 +415,42 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 29.0.1(@noble/hashes@1.8.0)
+      motion:
+        specifier: 'catalog:'
+        version: 12.38.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.3(react@19.2.3)
+      react-router-dom:
+        specifier: ^7.6.0
+        version: 7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      shadcn:
+        specifier: 'catalog:'
+        version: 4.1.0(@types/node@25.5.0)(@typescript/typescript6@6.0.2)
       sherpa-onnx-node:
         specifier: 2.0.1
         version: 2.0.1
+      sonner:
+        specifier: 'catalog:'
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       tailwindcss:
         specifier: 'catalog:'
         version: 4.2.2
+      tw-animate-css:
+        specifier: 'catalog:'
+        version: 1.4.0
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(happy-dom@21.0.4)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(@typescript/typescript6@6.0.2))(vite@8.0.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1))
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
 
   apps/docs:
     dependencies:
@@ -15661,7 +15661,9 @@ snapshots:
       metro-runtime: 0.84.6
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
