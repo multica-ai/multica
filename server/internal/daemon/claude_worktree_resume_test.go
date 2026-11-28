@@ -138,72 +138,85 @@ func TestRunTask_ClaudeWorktreeResumeUsesCustomConfigDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script agent fixture is POSIX-only")
 	}
-	home, configDir := t.TempDir(), t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "inherited-config"))
-	repo := createDaemonTestRepo(t)
-	captureFile := filepath.Join(t.TempDir(), "args.txt")
-	fakeBin := filepath.Join(t.TempDir(), "claude")
-	writeTestExecutable(t, fakeBin, []byte(`#!/bin/sh
+	for _, overLimit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "resume", true: "fresh above context limit"}[overLimit], func(t *testing.T) {
+			home, configDir := t.TempDir(), t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "inherited-config"))
+			repo := createDaemonTestRepo(t)
+			captureFile := filepath.Join(t.TempDir(), "args.txt")
+			fakeBin := filepath.Join(t.TempDir(), "claude")
+			writeTestExecutable(t, fakeBin, []byte(`#!/bin/sh
 printf '%s\n' "$@" > "$CAPTURE_FILE"
 printf '%s\n' "$CLAUDE_CONFIG_DIR" "$HOME" >> "$CAPTURE_FILE"
 printf 'first turn work\n' > task-work.txt
-IFS= read -r _
+IFS= read -r request
+printf '%s\n' "$request" > "$CAPTURE_FILE.prompt"
 printf '%s\n' '{"type":"system","session_id":"session-custom-config"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-custom-config","result":"done"}'
 `))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	t.Cleanup(srv.Close)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	d := &Daemon{
-		client: NewClient(srv.URL), logger: logger, localPathLocks: NewLocalPathLocker(),
-		workspaces: make(map[string]*workspaceState), activeEnvRoots: make(map[string]int),
-		cfg: Config{
-			DaemonID: "daemon-config", WorkspacesRoot: t.TempDir(), AgentTimeout: 5 * time.Second,
-			ServerBaseURL: srv.URL, Agents: map[string]AgentEntry{"claude": {Path: fakeBin}},
-		},
-	}
-	ref, err := json.Marshal(localDirectoryRef{LocalPath: repo, DaemonID: d.cfg.DaemonID, ExecutionMode: localDirectoryModeWorktree})
-	if err != nil {
-		t.Fatal(err)
-	}
-	task := Task{
-		ID: "task-config-first", WorkspaceID: "ws-config", IssueID: "issue-config", IssueIdentifier: "MUL-8413",
-		RuntimeID: "runtime-config", AgentID: "agent-config", AuthToken: "mat_config_test",
-		Agent: &AgentData{ID: "agent-config", Name: "config-agent", CustomEnv: map[string]string{
-			"CLAUDE_CONFIG_DIR": configDir, "HOME": filepath.Join(home, "blocked-home"), "CAPTURE_FILE": captureFile,
-		}},
-		ProjectResources: []ProjectResourceData{{ID: "repo-config", ResourceType: localDirectoryResourceType, ResourceRef: ref}},
-	}
-	first, err := d.runTask(context.Background(), task, "claude", 0, logger)
-	if err != nil || first.Status != "completed" || first.BranchName == "" {
-		t.Fatalf("first turn = %+v, %v", first, err)
-	}
-	if _, err := os.Stat(first.WorkDir); !os.IsNotExist(err) {
-		t.Fatalf("prior worktree was not removed: %v", err)
-	}
-	src := filepath.Join(configDir, "projects", encodeClaudeCwd(first.WorkDir), first.SessionID+".jsonl")
-	if err := os.MkdirAll(filepath.Dir(src), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	const transcript = "{\"type\":\"user\",\"message\":{\"content\":\"prior discussion\"}}\n"
-	if err := os.WriteFile(src, []byte(transcript), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	task.ID, task.PriorSessionID, task.PriorWorkDir = "task-config-second", first.SessionID, first.WorkDir
-	second, err := d.runTask(context.Background(), task, "claude", 0, logger)
-	if err != nil || second.Status != "completed" || second.BranchName != first.BranchName {
-		t.Fatalf("second turn = %+v, %v", second, err)
-	}
-	args, err := os.ReadFile(captureFile)
-	if err != nil || !strings.Contains(string(args), "--resume\n"+first.SessionID+"\n") || !strings.HasSuffix(string(args), configDir+"\n"+home+"\n") {
-		t.Fatalf("second turn did not receive the resume and effective env: %s, %v", args, err)
-	}
-	dst := filepath.Join(configDir, "projects", encodeClaudeCwd(second.WorkDir), first.SessionID+".jsonl")
-	if data, err := os.ReadFile(dst); err != nil || string(data) != transcript {
-		t.Fatalf("second turn transcript = %q, %v", data, err)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(srv.Close)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			d := &Daemon{
+				client: NewClient(srv.URL), logger: logger, localPathLocks: NewLocalPathLocker(),
+				workspaces: make(map[string]*workspaceState), activeEnvRoots: make(map[string]int),
+				cfg: Config{
+					DaemonID: "daemon-config", WorkspacesRoot: t.TempDir(), AgentTimeout: 5 * time.Second,
+					ServerBaseURL: srv.URL, Agents: map[string]AgentEntry{"claude": {Path: fakeBin}},
+					ClaudeResumeContextLimit: DefaultClaudeResumeContextLimit,
+				},
+			}
+			ref, err := json.Marshal(localDirectoryRef{LocalPath: repo, DaemonID: d.cfg.DaemonID, ExecutionMode: localDirectoryModeWorktree})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := Task{
+				ID: "task-config-first", WorkspaceID: "ws-config", IssueID: "issue-config", IssueIdentifier: "MUL-8413",
+				RuntimeID: "runtime-config", AgentID: "agent-config", AuthToken: "mat_config_test",
+				Agent: &AgentData{ID: "agent-config", Name: "config-agent", CustomEnv: map[string]string{
+					"CLAUDE_CONFIG_DIR": configDir, "HOME": filepath.Join(home, "blocked-home"), "CAPTURE_FILE": captureFile,
+				}},
+				ProjectResources: []ProjectResourceData{{ID: "repo-config", ResourceType: localDirectoryResourceType, ResourceRef: ref}},
+			}
+			first, err := d.runTask(context.Background(), task, "claude", 0, logger)
+			if err != nil || first.Status != "completed" || first.BranchName == "" {
+				t.Fatalf("first turn = %+v, %v", first, err)
+			}
+			if _, err := os.Stat(first.WorkDir); !os.IsNotExist(err) {
+				t.Fatalf("prior worktree was not removed: %v", err)
+			}
+			src := filepath.Join(configDir, "projects", encodeClaudeCwd(first.WorkDir), first.SessionID+".jsonl")
+			if err := os.MkdirAll(filepath.Dir(src), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			transcript := "{\"type\":\"user\",\"message\":{\"content\":\"prior discussion\"}}\n"
+			if overLimit {
+				transcript += `{"type":"assistant","message":{"usage":{"input_tokens":1001,"cache_read_input_tokens":299000,"cache_creation_input_tokens":0}}}` + "\n"
+			}
+			if err := os.WriteFile(src, []byte(transcript), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			task.ID, task.PriorSessionID, task.PriorWorkDir = "task-config-second", first.SessionID, first.WorkDir
+			second, err := d.runTask(context.Background(), task, "claude", 0, logger)
+			if err != nil || second.Status != "completed" || second.BranchName != first.BranchName {
+				t.Fatalf("second turn = %+v, %v", second, err)
+			}
+			args, err := os.ReadFile(captureFile)
+			if err != nil || (strings.Contains(string(args), "--resume\n"+first.SessionID+"\n") == overLimit) || !strings.HasSuffix(string(args), configDir+"\n"+home+"\n") {
+				t.Fatalf("second turn did not receive the resume and effective env: %s, %v", args, err)
+			}
+			prompt, err := os.ReadFile(captureFile + ".prompt")
+			if err != nil || strings.Contains(string(prompt), "## Session Continuity Notice") != overLimit {
+				t.Fatalf("continuity notice mismatch for overLimit=%v: %s, %v", overLimit, prompt, err)
+			}
+			dst := filepath.Join(configDir, "projects", encodeClaudeCwd(second.WorkDir), first.SessionID+".jsonl")
+			if data, err := os.ReadFile(dst); err != nil || string(data) != transcript {
+				t.Fatalf("second turn transcript = %q, %v", data, err)
+			}
+		})
 	}
 }

@@ -9165,6 +9165,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// conversation Codex will silently restart from scratch.
 	if resumeReachable {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+		gateClaudeResumeToContextSize(&task, &taskCtx, provider, env.WorkDir, sanitizeAgentEnv(agentEnvOverrides), d.cfg.ClaudeResumeContextLimit, taskLog)
 	}
 
 	// Build the runtime brief and inject it into the provider-specific
