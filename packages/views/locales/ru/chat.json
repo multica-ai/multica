@@ -52,6 +52,8 @@
     "project_context": "Контекст проекта",
     "change_project_context": "Изменить контекст проекта",
     "remove_project_context": "Удалить контекст проекта",
+    "draft_attachments": "Вложения черновика",
+    "remove_attachment": "Удалить {{filename}}",
     "no_projects": "Пока нет проектов",
     "project_context_unsupported": "Описание проекта не применится — демону этого агента нужно обновление"
   },

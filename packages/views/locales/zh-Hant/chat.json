@@ -46,6 +46,8 @@
     "project_context": "專案上下文",
     "change_project_context": "更改專案上下文",
     "remove_project_context": "移除專案上下文",
+    "draft_attachments": "草稿附件",
+    "remove_attachment": "移除 {{filename}}",
     "no_projects": "還沒有專案",
     "project_context_unsupported": "專案描述不會生效——該 AI 代理的守護程序版本過舊，需要升級"
   },
