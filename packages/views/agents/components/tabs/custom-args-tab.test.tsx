@@ -51,12 +51,13 @@ const runtimeDevice = {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  runtime = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={runtimeDevice}
+        runtimeDevice={runtime}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -66,6 +67,17 @@ function renderTab(
 }
 
 describe("CustomArgsTab", () => {
+  it.each([
+    [[], "opencode acp"],
+    [["--agent", "research"], "opencode run (json) --agent research"],
+  ])("previews OpenCode with arguments %j", (args, command) => {
+    renderTab({ custom_args: args as string[] }, undefined, {
+      ...runtimeDevice,
+      provider: "opencode",
+      launch_header: "opencode acp",
+    });
+    expect(screen.getByText(command as string)).toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
