@@ -8233,6 +8233,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		Type:         commentType,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
+		Metadata:     []byte("{}"),
 	})
 	if err != nil {
 		return

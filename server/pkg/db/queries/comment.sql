@@ -516,6 +516,9 @@ WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1);
 -- Centralizing this here means every comment entrypoint inherits both
 -- guarantees regardless of what a caller passes. The "Updated date" sort and
 -- the daemon GC TTL both read updated_at, so this consistency is load-bearing.
+-- metadata carries the structured payload for typed comments. A nil argument
+-- falls back to '{}' so callers that predate the column keep inserting plain
+-- comments without having to know about it.
 WITH touched_issue AS (
     UPDATE issue SET
         updated_at = now(),
@@ -524,8 +527,8 @@ WITH touched_issue AS (
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
-    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, suppressed_agent_ids, id)
-    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), sqlc.narg(suppressed_agent_ids)::uuid[], COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, suppressed_agent_ids, metadata, id)
+    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), sqlc.narg(suppressed_agent_ids)::uuid[], COALESCE(sqlc.arg(metadata)::jsonb, '{}'::jsonb), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
     FROM touched_issue ti
     RETURNING *
 )
@@ -641,6 +644,18 @@ SET revision = revision + 1,
     updated_at = now()
 WHERE id = @id
   AND workspace_id = @workspace_id
+RETURNING *;
+
+-- name: UpdateCommentAnswer :one
+-- Records the answer for an ask_user_question comment by setting the
+-- metadata.ask_user_question.answer object. Uses jsonb_set so the rest of the
+-- payload (question, options, target_user, source_user) is preserved. The
+-- handler is responsible for idempotency (rejecting if an answer already
+-- exists) — this query unconditionally overwrites.
+UPDATE comment SET
+    metadata = jsonb_set(metadata, '{ask_user_question,answer}', @answer::jsonb, true),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: HasAgentCommentedSince :one

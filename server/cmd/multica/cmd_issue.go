@@ -827,6 +827,17 @@ func init() {
 	issueCommentAddCmd.Flags().String("idempotency-key", "", "Key that makes resending this comment safe: a retry with the same key returns the comment already posted instead of posting it again. Inside an agent run the CLI derives one from the run, issue, parent, content and attachments")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
+	// ask_user_question: an agent poses a structured multiple-choice question at
+	// a specific human, rendered as a selectable card. Keep the flag list and
+	// JSON shape in sync with buildAskUserQuestionMeta below and the server
+	// handler validation (comment_ask_user_question.go).
+	issueCommentAddCmd.Flags().String("type", "", "Comment type. Use 'ask_user_question' to post a structured question (requires --target-user, --question, --options-json)")
+	issueCommentAddCmd.Flags().String("target-user", "", "For --type ask_user_question: the human being asked (user UUID, name, or email)")
+	issueCommentAddCmd.Flags().String("question", "", "For --type ask_user_question: the question text shown to the target user")
+	issueCommentAddCmd.Flags().String("options-json", "", "For --type ask_user_question: JSON array of options, e.g. '[{\"label\":\"A\",\"description\":\"...\"}]'")
+	issueCommentAddCmd.Flags().Bool("multi-select", false, "For --type ask_user_question: allow the user to pick multiple options (default single-select)")
+	issueCommentAddCmd.Flags().Bool("allow-custom", false, "For --type ask_user_question: append an 'Other' choice with a free-text input")
+
 	// issue comment update
 	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (preserves literal text. Use --content-stdin or --content-file for multi-line input)")
 	issueCommentUpdateCmd.Flags().Bool("content-stdin", false, "Read new comment content from stdin (preserves multi-line content verbatim)")
@@ -3000,11 +3011,17 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
+	commentType, _ := cmd.Flags().GetString("type")
+	isAskUserQuestion := commentType == "ask_user_question"
+
 	content, hasContent, err := resolveTextFlag(cmd, "content")
 	if err != nil {
 		return err
 	}
-	if !hasContent {
+	// For ask_user_question, content is optional — a human-readable fallback is
+	// generated from the question + options below. For every other type content
+	// is required as before.
+	if !hasContent && !isAskUserQuestion {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
 	attachments, err := issueAttachmentPaths(cmd)
@@ -3039,6 +3056,20 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 	issueID := issueRef.ID
+
+	// Build the ask_user_question metadata + fallback content up front so a bad
+	// payload fails before we upload any attachments.
+	var askMeta map[string]any
+	if isAskUserQuestion {
+		meta, fallback, buildErr := buildAskUserQuestionMeta(ctx, client, cmd)
+		if buildErr != nil {
+			return buildErr
+		}
+		askMeta = meta
+		if !hasContent {
+			content = fallback
+		}
+	}
 
 	steerTargets, err := resolveSteerTargets(ctx, client, issueID, steerInputs, steerActive)
 	if err != nil {
@@ -3086,6 +3117,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	content = applyAttachmentLinks(os.Stderr, content, "comment body", pending, uploaded)
 
 	body := map[string]any{"content": content}
+	if commentType != "" {
+		body["type"] = commentType
+	}
+	if askMeta != nil {
+		body["metadata"] = askMeta
+	}
 	if len(steerTargets) > 0 {
 		steerTaskIDs := make([]string, len(steerTargets))
 		for i, target := range steerTargets {
@@ -3139,6 +3176,122 @@ func finishIssueCommentAdd(cmd *cobra.Command, issueDisplay string, steerTargets
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// askUserQuestionOption mirrors the server's option shape for --options-json.
+type askUserQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// buildAskUserQuestionMeta validates the ask_user_question flags and returns the
+// metadata payload (for body["metadata"]) plus a human-readable Markdown
+// fallback used as content when --content is not supplied. source_user is set
+// server-side from the authenticated agent, so it is not included here.
+func buildAskUserQuestionMeta(ctx context.Context, client *cli.APIClient, cmd *cobra.Command) (map[string]any, string, error) {
+	targetInput, _ := cmd.Flags().GetString("target-user")
+	question, _ := cmd.Flags().GetString("question")
+	optionsJSON, _ := cmd.Flags().GetString("options-json")
+
+	if strings.TrimSpace(targetInput) == "" {
+		return nil, "", fmt.Errorf("--target-user is required for --type ask_user_question")
+	}
+	if strings.TrimSpace(question) == "" {
+		return nil, "", fmt.Errorf("--question is required for --type ask_user_question")
+	}
+	if strings.TrimSpace(optionsJSON) == "" {
+		return nil, "", fmt.Errorf("--options-json is required for --type ask_user_question")
+	}
+
+	var options []askUserQuestionOption
+	if err := json.Unmarshal([]byte(optionsJSON), &options); err != nil {
+		return nil, "", fmt.Errorf("invalid --options-json: %w", err)
+	}
+	if len(options) == 0 {
+		return nil, "", fmt.Errorf("--options-json must contain at least one option")
+	}
+	for i, o := range options {
+		if strings.TrimSpace(o.Label) == "" {
+			return nil, "", fmt.Errorf("option %d: label is required", i)
+		}
+		if strings.TrimSpace(o.Description) == "" {
+			return nil, "", fmt.Errorf("option %d: description is required", i)
+		}
+	}
+
+	targetUserID, err := resolveMemberUserID(ctx, client, targetInput)
+	if err != nil {
+		return nil, "", err
+	}
+
+	multiSelect, _ := cmd.Flags().GetBool("multi-select")
+	allowCustom, _ := cmd.Flags().GetBool("allow-custom")
+
+	meta := map[string]any{
+		"ask_user_question": map[string]any{
+			"target_user":  targetUserID,
+			"question":     question,
+			"options":      options,
+			"multi_select": multiSelect,
+			"allow_custom": allowCustom,
+		},
+	}
+
+	// Human-readable fallback so clients that don't understand the type (mobile,
+	// old builds) still show the question and options.
+	var b strings.Builder
+	hint := ""
+	if multiSelect && allowCustom {
+		hint = "(多选,可自定义)"
+	} else if multiSelect {
+		hint = "(多选)"
+	} else if allowCustom {
+		hint = "(可自定义)"
+	}
+	fmt.Fprintf(&b, "**%s**%s\n", question, hint)
+	for _, o := range options {
+		fmt.Fprintf(&b, "- **%s** — %s\n", o.Label, o.Description)
+	}
+	if allowCustom {
+		fmt.Fprintf(&b, "- **其他** — 自定义输入\n")
+	}
+	return meta, b.String(), nil
+}
+
+// resolveMemberUserID resolves a --target-user input (user UUID, name, or email)
+// to a workspace member's user_id. A valid UUID is returned as-is; otherwise the
+// workspace member list is fetched and matched case-insensitively on name/email.
+func resolveMemberUserID(ctx context.Context, client *cli.APIClient, input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if _, err := util.ParseUUID(input); err == nil {
+		return input, nil
+	}
+	if client.WorkspaceID == "" {
+		return "", fmt.Errorf("cannot resolve --target-user %q: no workspace selected", input)
+	}
+	var members []struct {
+		UserID string `json:"user_id"`
+		Name   string `json:"name"`
+		Email  string `json:"email"`
+	}
+	if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(client.WorkspaceID)+"/members", &members); err != nil {
+		return "", fmt.Errorf("list members to resolve --target-user: %w", err)
+	}
+	lower := strings.ToLower(input)
+	var matches []string
+	for _, m := range members {
+		if strings.ToLower(m.Name) == lower || strings.ToLower(m.Email) == lower {
+			matches = append(matches, m.UserID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no workspace member matches --target-user %q", input)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("--target-user %q is ambiguous (%d members match); pass a user UUID instead", input, len(matches))
+	}
 }
 
 // lookupIdempotentComment reports the comment already saved under key, if the

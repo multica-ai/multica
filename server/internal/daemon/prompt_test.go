@@ -1704,8 +1704,15 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	// Formatting` for the posting mechanism instead of restating it, so the
 	// assembled cross-thread prompt carries no `comment add` example commands
 	// at all — the `--parent` targets plus the pointer are the whole recipe.
-	if strings.Contains(out, "multica issue comment add") {
-		t.Errorf("cross-thread prompt re-grew embedded comment-add commands (mechanism lives in ## Comment Formatting — MUL-5825), got:\n%s", out)
+	// Scope the check to the text before the ask_user_question hint: that hint
+	// deliberately teaches the `--type ask_user_question` form and is appended
+	// after the fan-out block.
+	fanout := out
+	if i := strings.Index(out, "## Asking the user a question"); i >= 0 {
+		fanout = out[:i]
+	}
+	if strings.Contains(fanout, "multica issue comment add") {
+		t.Errorf("cross-thread prompt re-grew embedded comment-add commands (mechanism lives in ## Comment Formatting — MUL-5825), got:\n%s", fanout)
 	}
 	if !strings.Contains(out, "`## Comment Formatting`") {
 		t.Errorf("cross-thread prompt must point at the brief's Comment Formatting mechanism, got:\n%s", out)
@@ -2352,4 +2359,40 @@ func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
 			t.Errorf("%s prompt renders a parent block:\n%s", name, out)
 		}
 	}
+}
+
+// TestAskUserQuestionHintInjected verifies both the comment-triggered and the
+// assignment-triggered prompts teach the agent to ask structured questions via
+// `--type ask_user_question` rather than in prose.
+func TestAskUserQuestionHintInjected(t *testing.T) {
+	issue := "11111111-1111-1111-1111-111111111111"
+	mustContain := []string{
+		"--type ask_user_question",
+		"--target-user",
+		"--options-json",
+		"--multi-select",
+		"--allow-custom",
+	}
+
+	t.Run("comment-triggered", func(t *testing.T) {
+		out := BuildPrompt(Task{
+			IssueID:               issue,
+			TriggerCommentID:      "22222222-2222-2222-2222-222222222222",
+			TriggerCommentContent: "please decide X",
+		}, "claude")
+		for _, s := range mustContain {
+			if !strings.Contains(out, s) {
+				t.Errorf("comment prompt missing %q", s)
+			}
+		}
+	})
+
+	t.Run("assignment-triggered", func(t *testing.T) {
+		out := BuildPrompt(Task{IssueID: issue}, "claude")
+		for _, s := range mustContain {
+			if !strings.Contains(out, s) {
+				t.Errorf("assignment prompt missing %q", s)
+			}
+		}
+	})
 }

@@ -780,6 +780,7 @@ type Comment struct {
 	RecoverySettledAt  pgtype.Timestamptz `json:"recovery_settled_at"`
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
 	SuppressedAgentIds []pgtype.UUID      `json:"suppressed_agent_ids"`
+	Metadata           []byte             `json:"metadata"`
 }
 
 type CommentIdempotencyReceipt struct {

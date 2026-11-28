@@ -1,4 +1,4 @@
-import type { CommentAuthorType, CommentSupplementReceipt, Reaction } from "./comment";
+import type { CommentAuthorType, CommentMetadata, CommentSupplementReceipt, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
 export interface TimelineEntry {
@@ -19,6 +19,9 @@ export interface TimelineEntry {
   updated_at?: string;
   revision?: number;
   comment_type?: string;
+  /** Structured payload for typed comments (currently ask_user_question).
+   *  Omitted for ordinary comments and activities. */
+  metadata?: CommentMetadata | null;
   /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
   quick_action_id?: string | null;
   reactions?: Reaction[];

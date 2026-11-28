@@ -1145,6 +1145,18 @@
     "row_todo_label": "Todo",
     "row_todo_hint": "inicia el agente"
   },
+  "ask_user_question": {
+    "prompt": "Selecciona una opción para la pregunta a continuación:",
+    "submit": "Confirmar",
+    "ignore": "Ignorar",
+    "submitted": "Seleccionado",
+    "ignored": "Ignorado",
+    "submit_failed": "No se pudo enviar la selección",
+    "ignore_failed": "No se pudo ignorar",
+    "other": "Otro",
+    "custom_placeholder": "Escribe tu respuesta…",
+    "multi_hint": "(selección múltiple)"
+  },
   "save_view": {
     "scope_label_workspace": "Tipo de asignado",
     "scope_label_my": "Relación conmigo",

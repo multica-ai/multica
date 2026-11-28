@@ -46,6 +46,9 @@ type TimelineEntry struct {
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
 	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
 	SourceTaskID   *string              `json:"source_task_id,omitempty"`
+	// Metadata carries the structured payload for typed comments (currently
+	// ask_user_question). Omitted for ordinary comments and activities.
+	Metadata *CommentMetadata `json:"metadata,omitempty"`
 	// Set only on a tombstone: a comment deleted while it still had replies.
 	DeletedAt *string `json:"deleted_at,omitempty"`
 	// Supplements lists every running turn this comment steered; the single
@@ -317,6 +320,12 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		commentType := c.Type
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
+		// Surface structured metadata only when it carries a known payload, so
+		// ordinary comments keep their existing timeline shape.
+		var metadata *CommentMetadata
+		if m := parseCommentMetadata(c.Metadata); m.AskUserQuestion != nil {
+			metadata = &m
+		}
 		out[i] = TimelineEntry{
 			Type:           "comment",
 			ID:             cid,
@@ -335,6 +344,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedByType: textToPtr(c.ResolvedByType),
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
+			Metadata:       metadata,
 			DeletedAt:      timestampToPtr(c.DeletedAt),
 		}
 		if receipts := supplements[cid]; len(receipts) > 0 {

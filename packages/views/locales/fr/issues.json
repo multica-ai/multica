@@ -1231,6 +1231,18 @@
     "row_todo_label": "À faire",
     "row_todo_hint": "démarre l'agent"
   },
+  "ask_user_question": {
+    "prompt": "Veuillez répondre à la question ci-dessous :",
+    "submit": "Confirmer",
+    "ignore": "Ignorer",
+    "submitted": "Sélectionné",
+    "ignored": "Ignoré",
+    "submit_failed": "Échec de l'envoi de la sélection",
+    "ignore_failed": "Impossible d'ignorer",
+    "other": "Autre",
+    "custom_placeholder": "Saisissez votre réponse…",
+    "multi_hint": "(choix multiple)"
+  },
   "save_view": {
     "scope_label_workspace": "Type d'assigné",
     "scope_label_my": "Relation avec moi",

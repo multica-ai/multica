@@ -54,6 +54,10 @@ type CommentResponse struct {
 	QuickActionID *string              `json:"quick_action_id,omitempty"`
 	Reactions     []ReactionResponse   `json:"reactions"`
 	Attachments   []AttachmentResponse `json:"attachments"`
+	// Metadata carries structured payloads keyed by type. For
+	// ask_user_question comments it holds the question/options/answer object.
+	// Omitted when empty so ordinary comments keep their existing response shape.
+	Metadata *CommentMetadata `json:"metadata,omitempty"`
 	// Orientation stats — populated only on the roots_only path and omitted in
 	// every other mode, so the default response shape stays byte-identical for
 	// existing callers. ReplyCount is the number of descendants in the thread;
@@ -116,6 +120,12 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	if attachments == nil {
 		attachments = []AttachmentResponse{}
 	}
+	// Surface the structured metadata only when it carries a known payload, so
+	// ordinary comments keep their existing response shape (metadata omitted).
+	var metadata *CommentMetadata
+	if m := parseCommentMetadata(c.Metadata); m.AskUserQuestion != nil {
+		metadata = &m
+	}
 	return CommentResponse{
 		ID:             uuidToString(c.ID),
 		IssueID:        uuidToString(c.IssueID),
@@ -135,6 +145,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		QuickActionID:  uuidToPtr(c.QuickActionID),
 		Reactions:      reactions,
 		Attachments:    attachments,
+		Metadata:       metadata,
 	}
 }
 
@@ -1444,6 +1455,10 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	// Metadata carries the structured payload for typed comments. For
+	// ask_user_question it holds the question/options/target_user object;
+	// ignored for ordinary comments.
+	Metadata json.RawMessage `json:"metadata"`
 	// SteerTaskIDs are the running turns the author chose to add this comment
 	// to, instead of starting a follow-up run for their agents. A turn that
 	// has ended, or cannot take additional input, is never swapped for another
@@ -1749,6 +1764,44 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		steer = commentSteerRequest{}
 	}
 
+	// ask_user_question: an agent poses a structured multiple-choice question at
+	// a specific human. Validate the payload, force source_user to the resolved
+	// author (never trust a client-supplied value), and store it in metadata.
+	// metadata defaults to '{}' for ordinary comments — the column is NOT NULL.
+	metadataBytes := []byte("{}")
+	if req.Type == commentMetadataKey {
+		if authorType != "agent" {
+			writeError(w, http.StatusBadRequest, "ask_user_question comments must be posted by an agent")
+			return
+		}
+		parsed := parseCommentMetadata(req.Metadata)
+		if err := validateAskUserQuestionMeta(parsed.AskUserQuestion); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// target_user must be a real member of this workspace.
+		targetUUID, err := util.ParseUUID(parsed.AskUserQuestion.TargetUser)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "target_user is not a valid user id")
+			return
+		}
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      targetUUID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "target_user is not a member of this workspace")
+			return
+		}
+		parsed.AskUserQuestion.SourceUser = authorID
+		parsed.AskUserQuestion.Answer = nil
+		encoded, err := json.Marshal(parsed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode metadata")
+			return
+		}
+		metadataBytes = encoded
+	}
+
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
 	// originator inheritance chain (resolveOriginatorFromTriggerComment →
@@ -1870,6 +1923,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
+		Metadata:     metadataBytes,
 		// The author's "don't start" choices outlive this call: completion
 		// replay skips the agents it names.
 		SuppressedAgentIds: suppressAgentIDs,
@@ -2001,6 +2055,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 var clientAuthorableCommentTypes = map[string]struct{}{
 	"comment":         {},
 	"progress_update": {},
+	// ask_user_question is agent-only in practice: CreateComment rejects it
+	// unless the resolved author is an agent. It is listed here so the type
+	// passes the authorable-type gate; the agent-only + payload validation
+	// happens in the ask_user_question block below.
+	"ask_user_question": {},
 }
 
 func isClientAuthorableCommentType(t string) bool {

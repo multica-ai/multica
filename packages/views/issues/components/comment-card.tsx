@@ -43,6 +43,7 @@ import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput, type ReplyInputHandle } from "./reply-input";
 import { VirtualThreadRow, shouldVirtualizeThreadRows } from "./virtual-thread-row";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import { AskUserQuestionCard } from "./ask-user-question-card";
 import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
@@ -1022,18 +1023,31 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div tabIndex={currentUserId ? 0 : undefined} role="group"
-            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
-          <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
-            <SteerReceipts issueId={issueId} entry={entry} />
-            {entry.actor_type === "agent" && entry.source_task_id && (
-              <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
-            )}
-          </div>
+          {entry.comment_type === "ask_user_question" && entry.metadata?.ask_user_question ? (
+            <div className="mt-1.5 pl-12 pr-4">
+              <AskUserQuestionCard
+                issueId={issueId}
+                commentId={entry.id}
+                meta={entry.metadata.ask_user_question}
+                currentUserId={currentUserId}
+              />
+            </div>
+          ) : (
+            <>
+              <div tabIndex={currentUserId ? 0 : undefined} role="group"
+                aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+                data-comment-content={entry.id} data-find-unit={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+                <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+              </div>
+              <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
+              <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
+                <SteerReceipts issueId={issueId} entry={entry} />
+                {entry.actor_type === "agent" && entry.source_task_id && (
+                  <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                )}
+              </div>
+            </>
+          )}
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
@@ -1669,18 +1683,31 @@ function CommentCardImpl({
               </div>
             ) : !noticeRun && (
               <>
-                <div tabIndex={currentUserId ? 0 : undefined} role="group"
-            aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
-                <div className="pl-8 max-md:pl-0">
-                  <SteerReceipts issueId={issueId} entry={entry} />
-                  {entry.actor_type === "agent" && entry.source_task_id && (
-                    <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
-                  )}
-                </div>
+                {entry.comment_type === "ask_user_question" && entry.metadata?.ask_user_question ? (
+                  <div className="mt-1.5 pl-8 max-md:pl-0">
+                    <AskUserQuestionCard
+                      issueId={issueId}
+                      commentId={entry.id}
+                      meta={entry.metadata.ask_user_question}
+                      currentUserId={currentUserId}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div tabIndex={currentUserId ? 0 : undefined} role="group"
+                      aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
+                      data-comment-content={entry.id} data-find-unit={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+                      <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                    </div>
+                    <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
+                    <div className="pl-8 max-md:pl-0">
+                      <SteerReceipts issueId={issueId} entry={entry} />
+                      {entry.actor_type === "agent" && entry.source_task_id && (
+                        <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                      )}
+                    </div>
+                  </>
+                )}
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}

@@ -2601,6 +2601,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/resolve", h.UnresolveComment)
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
+				r.Post("/answer", h.AnswerAskUserQuestion)
 			})
 
 			// Agents

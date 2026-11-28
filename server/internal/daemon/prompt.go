@@ -409,6 +409,7 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 	// treat the read as mandatory)", which read as if comment-triggered turns
 	// did not (MUL-6984).
 	fmt.Fprintf(&b, "For comment history, workflow step 2 applies. Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	b.WriteString(execenv.BuildAskUserQuestionHint(task.IssueID))
 	return b.String()
 }
 
@@ -716,6 +717,7 @@ func buildCommentPromptWithOptions(task Task, provider string, opts promptOpts) 
 	} else {
 		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID, taskIsSquadLeader(task)))
 	}
+	b.WriteString(execenv.BuildAskUserQuestionHint(task.IssueID))
 	return b.String()
 }
 
