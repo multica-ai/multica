@@ -1824,6 +1824,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
     timeline, loading: timelineLoading, dataUpdatedAt: timelineUpdatedAt,
+    error: timelineError, refetch: refetchTimeline, fetching: timelineFetching,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id, activeDeliverableJump?.commentId);
@@ -4530,6 +4531,20 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 first commit. Without this null guard Virtuoso falls back to
                 its own scroller, grabs 0 height inside overflow-y-auto, and
                 miscomputes total-height on first paint. */}
+            {timelineError && (
+              <div role="alert" className="mt-4 flex items-center gap-2 text-body">
+                <span className="text-destructive">{t(($) => $.inline_run.load_failed)}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={timelineFetching}
+                  aria-busy={timelineFetching}
+                  onClick={() => void refetchTimeline()}
+                >
+                  {t(($) => $.inline_run.try_again)}
+                </Button>
+              </div>
+            )}
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
             ) : (
