@@ -1644,6 +1644,7 @@
       "restarting": "Redémarrage du démon",
       "restarting_description": "Les runtimes seront de nouveau en ligne dans quelques secondes.",
       "view_logs": "Voir les journaux",
+      "start_local": "Démarrer le daemon local",
       "managed_externally": "Géré en dehors de l'application",
       "restart": "Redémarrer",
       "stop": "Arrêter",

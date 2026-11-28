@@ -9,6 +9,7 @@ const translations = {
       view_logs: "查看日志",
       managed_externally: "由应用外部管理",
       start: "启动",
+      start_local: "启动本地守护进程",
       restart: "重启",
       stop: "停止",
     },
@@ -81,6 +82,16 @@ describe("DaemonRuntimeActions — externally managed daemon (#3916)", () => {
     expect(
       screen.queryByText("由应用外部管理"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("DaemonRuntimeActions — recovery after external health loss", () => {
+  it("identifies the external daemon and labels the start action as local", async () => {
+    stubDaemonAPI({ state: "stopped", externallyManaged: true });
+    render(<DaemonRuntimeActions />);
+
+    expect(await screen.findByText("由应用外部管理")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "启动本地守护进程" })).toBeEnabled();
   });
 });
 
