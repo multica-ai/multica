@@ -126,6 +126,22 @@ describe("InlineCommentRun", () => {
     expect(await screen.findByTestId("step-body")).toHaveTextContent("Checking the PR changes. Reviewing migration safety.");
   });
 
+  it("says a tool call's details are hidden instead of opening empty bodies", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "Bash", details_hidden: true },
+      { task_id: id, issue_id: "issue", seq: 2, type: "tool_result", tool: "Bash", output: "", details_hidden: true },
+    ]);
+    setup(task());
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const hidden = await screen.findByText("Hidden");
+    const summary = hidden.closest("summary")!;
+    expect(summary).toHaveTextContent("Bash");
+    fireEvent.click(summary, { detail: 0 });
+    expect(await screen.findByText("Tool input and output are hidden")).toBeInTheDocument();
+    expect(screen.getByText("Only this agent's owner and workspace admins can see them.")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
+  });
+
   it("shows the first file in a collapsed Grok read_file group and retains its step count", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(
       ["queries.sql", "models.go", "schema.sql", "migrations.go"].flatMap((file, index) => [
