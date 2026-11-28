@@ -34,6 +34,34 @@ export function splitTimeline(items: ChatTimelineItem[]): {
 }
 
 /**
+ * Lift the latest non-blank narration out of a streaming fold. While a tool
+ * is still running (no trailing answer yet), the agent's most recent text is
+ * usually the line the user needs — a question or an instruction — so it
+ * renders below the fold as prose. Earlier narration stays inside the fold as
+ * history, and whitespace-only text never counts as narration.
+ */
+export function liftLatestNarration(middle: ChatTimelineItem[]): {
+  fold: ChatTimelineItem[];
+  narration: ChatTimelineItem[];
+} {
+  let scan = middle.length;
+  while (scan > 0) {
+    let start = scan;
+    while (start > 0 && middle[start - 1]!.type === "text") start--;
+    if (start === scan) {
+      scan--;
+      continue;
+    }
+    const run = middle.slice(start, scan);
+    if (run.some((item) => (item.content ?? "").trim().length > 0)) {
+      return { fold: [...middle.slice(0, start), ...middle.slice(scan)], narration: run };
+    }
+    scan = start;
+  }
+  return { fold: middle, narration: [] };
+}
+
+/**
  * Canonical completed answer from the persisted chat message. Surface-specific
  * transforms still apply so hidden protocols stay out of the rendered and
  * copied answer.

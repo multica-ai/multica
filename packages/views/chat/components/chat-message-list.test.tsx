@@ -105,6 +105,21 @@ function renderList(qc: QueryClient) {
   );
 }
 
+function sessionView(qc: QueryClient) {
+  return function view(
+    messages: Parameters<typeof ChatMessageList>[0]["messages"],
+    pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+  ) {
+    return (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={messages} pendingTask={pendingTask} availability="online" />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+  };
+}
+
 function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
   // Mirrors useRealtimeSync's task:message handler: a new array lands in the
   // shared task-messages cache on every streamed message.
@@ -179,27 +194,96 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(document.contains(foldTrigger)).toBe(true);
   });
 
-  it("keeps the process fold closed by the user across streamed messages", async () => {
+  it("keeps a manually expanded streaming fold open across messages and collapses it on settle", async () => {
     const qc = new QueryClient();
-    renderList(qc);
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), INITIAL_MESSAGES);
+    const view = sessionView(qc);
+    const { rerender } = render(view([], { task_id: TASK_ID, status: "running" }));
 
-    // Streaming defaults the fold open; the user closes it.
     const foldTrigger = await screen.findByText("2 steps");
-    expect(screen.getByText("Bash")).toBeInTheDocument();
+    expect(foldTrigger.closest("button")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Bash result: ok")).not.toBeInTheDocument();
     act(() => {
       foldTrigger.click();
     });
-    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.getByText("Bash result: ok")).toBeInTheDocument();
 
     pushTaskMessage(
       qc,
       taskMsg(3, "tool_use", { tool: "Read", input: { file_path: "/tmp/x" } }),
     );
 
-    // Before the fix the footer remounted, useState re-seeded defaultOpen and
-    // the fold sprang back open on every streamed message.
-    await screen.findByText("3 steps");
-    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    // A streamed message must not reset the user's expanded state.
+    const updatedTrigger = await screen.findByText("3 steps");
+    expect(updatedTrigger.closest("button")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Bash result: ok")).toBeInTheDocument();
+
+    // Settling collapses the fold again.
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Done.",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+    const settledTrigger = await screen.findByText("3 steps");
+    expect(settledTrigger.closest("button")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Bash result: ok")).not.toBeInTheDocument();
+  });
+
+  it("keeps the tool summary in the fold header after an unnamed empty result", async () => {
+    const qc = new QueryClient();
+    renderList(qc);
+    pushTaskMessage(qc, taskMsg(3, "tool_use", {
+      tool: "exec_command",
+      input: { command: "git diff --quiet" },
+    }));
+    pushTaskMessage(qc, taskMsg(4, "tool_result", { output: "" }));
+
+    const fold = (await screen.findByText("4 steps")).closest("button");
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(fold).toHaveTextContent(/exec_command.*git diff --quiet/);
+    expect(fold).not.toHaveTextContent("Result");
+  });
+
+  it("lifts only the latest narration below the fold while a tool runs", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Let me check the workspace configuration first." }),
+      taskMsg(2, "tool_use", { tool: "Bash", input: { command: "pnpm run build" } }),
+      taskMsg(3, "text", { content: "Please approve the sample request, then I can continue." }),
+      taskMsg(4, "tool_use", { tool: "Bash", input: { command: "pnpm run synthetic-check" } }),
+    ]);
+    render(sessionView(qc)([], { task_id: TASK_ID, status: "running" }));
+
+    // One collapsed fold with the running step in its header; latest narration below.
+    const fold = (await screen.findByText("4 steps")).closest("button")!;
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(fold).toHaveTextContent(/Bash.*pnpm run synthetic-check/);
+    const narration = screen.getByText("Please approve the sample request, then I can continue.");
+    // The fold sits above the lifted narration; earlier narration stays folded away.
+    expect(fold.compareDocumentPosition(narration) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      screen.queryByText("Let me check the workspace configuration first."),
+    ).not.toBeInTheDocument();
+
+    // Once the trailing answer starts streaming, the narration rejoins the fold.
+    pushTaskMessage(qc, taskMsg(5, "text", { content: "All checks passed." }));
+    expect(await screen.findByText("All checks passed.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Please approve the sample request, then I can continue."),
+    ).not.toBeInTheDocument();
+
+    // Expanding the fold keeps both earlier narrations readable as history.
+    fireEvent.click(await screen.findByText("5 steps"));
+    expect(
+      screen.getByText("Let me check the workspace configuration first."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Please approve the sample request, then I can continue."),
+    ).toBeInTheDocument();
   });
 
   it("applies an embedded surface content transform to streamed text", async () => {
@@ -364,26 +448,14 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
       taskMsg(3, "text", { content: "Stable final answer" }),
     ]);
 
-    const view = (
-      messages: Parameters<typeof ChatMessageList>[0]["messages"],
-      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
-    ) => (
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <QueryClientProvider client={qc}>
-          <ChatMessageList
-            messages={messages}
-            pendingTask={pendingTask}
-            availability="online"
-          />
-        </QueryClientProvider>
-      </I18nProvider>
-    );
-
+    const view = sessionView(qc);
     const { rerender } = render(
       view([], { task_id: TASK_ID, status: "running" }),
     );
     const answerBefore = await screen.findByText("Stable final answer");
-    expect(screen.getByText("3 steps")).toBeInTheDocument();
+    const streamingFold = screen.getByText("3 steps").closest("button");
+    expect(streamingFold).toHaveAttribute("aria-expanded", "false");
+    expect(streamingFold).toHaveTextContent("Checking the result");
 
     rerender(view([{
       id: "persisted-answer",
@@ -543,20 +615,50 @@ describe("ChatMessageList command tool rows", () => {
         </I18nProvider>
       </TooltipProvider>,
     );
-    const label = await screen.findByText(tool);
+    fireEvent.click(await screen.findByText("1 step"));
+    const trigger = screen.getByRole("button", { name: /^mcp__company-knowledge-base__search_documents_with_filters/ });
+    const label = trigger.querySelector<HTMLElement>("span.font-medium")!;
     label.style.overflowX = "hidden";
     Object.defineProperties(label, {
       scrollWidth: { value: 360 },
       clientWidth: { value: 120 },
     });
 
-    const trigger = screen.getByRole("button", { name: /mcp__company-knowledge-base__search_documents_with_filters/ });
     await act(async () => { trigger.focus(); });
     expect(trigger).toHaveFocus();
     expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("reveals the full fold header summary in a tooltip when the header truncates", async () => {
+    const tool = "mcp__company-knowledge-base__search_documents_with_filters";
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool, input: { query: "release checklist" } }),
+    ]);
+    render(
+      <TooltipProvider>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={qc}>
+            <ChatMessageList messages={[]} pendingTask={{ task_id: TASK_ID, status: "running" }} availability="online" />
+          </QueryClientProvider>
+        </I18nProvider>
+      </TooltipProvider>,
+    );
+    const trigger = (await screen.findByText("1 step")).closest("button")!;
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    const label = trigger.querySelector<HTMLElement>("span.truncate")!;
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { value: 360 },
+      clientWidth: { value: 120 },
+    });
+
+    await act(async () => { trigger.focus(); });
+    expect(trigger).toHaveFocus();
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
   });
 
   it("shows a command line by line, not as escaped JSON", async () => {
@@ -580,7 +682,8 @@ describe("ChatMessageList command tool rows", () => {
       </I18nProvider>,
     );
 
-    fireEvent.click(await screen.findByText("Bash"));
+    fireEvent.click(await screen.findByText("1 step"));
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
 
     // Match the raw text: the default matcher collapses the newline that this
     // test is about.

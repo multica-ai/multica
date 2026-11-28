@@ -5,6 +5,7 @@ import type { ChatTimelineItem } from "@multica/core/chat";
 import {
   canonicalAnswerText,
   extractCopyText,
+  liftLatestNarration,
   splitTimeline,
 } from "./copy-text";
 
@@ -83,6 +84,39 @@ describe("splitTimeline", () => {
     expect(out.preface).toEqual([p]);
     expect(out.middle).toEqual([u]);
     expect(out.final).toEqual([f]);
+  });
+});
+
+describe("liftLatestNarration", () => {
+  it("lifts the latest contiguous text run and keeps the rest in order", () => {
+    const t1 = thinking(1);
+    const early = text(2, "early narration");
+    const u1 = tool(3);
+    const latest = text(4, "latest instruction");
+    const latestContinued = text(5, " continued");
+    const u2 = tool(6);
+    expect(
+      liftLatestNarration([t1, early, u1, latest, latestContinued, u2]),
+    ).toEqual({
+      fold: [t1, early, u1, u2],
+      narration: [latest, latestContinued],
+    });
+  });
+
+  it("skips a whitespace-only trailing run and lifts the earlier non-blank one", () => {
+    const u1 = tool(1);
+    const latest = text(2, "latest instruction");
+    const u2 = tool(3);
+    const blank = text(4, "  \n ");
+    expect(liftLatestNarration([u1, latest, u2, blank])).toEqual({
+      fold: [u1, u2, blank],
+      narration: [latest],
+    });
+  });
+
+  it("returns the input unchanged when no non-blank text exists", () => {
+    const items = [thinking(1), tool(2), text(3, "   ")];
+    expect(liftLatestNarration(items)).toEqual({ fold: items, narration: [] });
   });
 });
 
