@@ -4,8 +4,11 @@ import {
   dashboardAgentRunTimeOptions,
   dashboardFailuresByAgentOptions,
   dashboardFailuresDailyOptions,
+  dashboardModelRunTimeOptions,
   dashboardRunTimeDailyOptions,
+  dashboardRuntimeDurationOptions,
   dashboardUsageByAgentOptions,
+  dashboardUsageByRuntimeOptions,
   dashboardUsageDailyOptions,
 } from "./queries";
 
@@ -38,6 +41,9 @@ const optionBuilders = [
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  dashboardUsageByRuntimeOptions,
+  dashboardRuntimeDurationOptions,
+  dashboardModelRunTimeOptions,
 ] as const;
 
 describe("dashboard range placeholders", () => {
@@ -98,5 +104,30 @@ describe("dashboard history limit in queries", () => {
     expect(buildOptions("ws-1", 30, null, "UTC", 30).queryKey).not.toEqual(
       buildOptions("ws-1", 30, null, "UTC", 90).queryKey,
     );
+  });
+});
+
+describe("leaderboard Model and Runtime view queries", () => {
+  const viewBuilders = [
+    dashboardUsageByRuntimeOptions,
+    dashboardRuntimeDurationOptions,
+    dashboardModelRunTimeOptions,
+  ] as const;
+
+  it.each(viewBuilders)("keys %s on the history limit and the squad", (buildOptions) => {
+    const key = buildOptions("ws-1", 30, null, "UTC", 30, "squad-1").queryKey;
+    expect(key).toContain(30);
+    expect(key).toContain("squad-1");
+    expect(key).not.toEqual(
+      buildOptions("ws-1", 30, null, "UTC", 30, "squad-2").queryKey,
+    );
+    expect(key).not.toEqual(buildOptions("ws-1", 30, null, "UTC", 30).queryKey);
+  });
+
+  it("gives each view endpoint its own key", () => {
+    const keys = viewBuilders.map(
+      (buildOptions) => buildOptions("ws-1", 30, null, "UTC", null).queryKey,
+    );
+    expect(new Set(keys.map((key) => JSON.stringify(key))).size).toBe(3);
   });
 });

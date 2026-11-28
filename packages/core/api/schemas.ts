@@ -2305,6 +2305,43 @@ const DashboardSquadRunTimeSchema = DashboardAgentRunTimeSchema.extend({
 
 export const DashboardSquadRunTimeListSchema = z.array(DashboardSquadRunTimeSchema);
 
+// Leaderboard Runtime and Model views. Same leniency as the agent rollups
+// above; runtime_id may be the "__restricted_runtimes__" sentinel.
+const DashboardUsageByRuntimeSchema = z.object({
+  runtime_id: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
+}).loose();
+
+export const DashboardUsageByRuntimeListSchema = z.array(DashboardUsageByRuntimeSchema);
+
+const DashboardRuntimeDurationSchema = z.object({
+  runtime_id: z.string().default(""),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  metered_task_count: z.number().optional().catch(undefined),
+  failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
+}).loose();
+
+export const DashboardRuntimeDurationListSchema = z.array(DashboardRuntimeDurationSchema);
+
+const DashboardModelRunTimeSchema = z.object({
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
+}).loose();
+
+export const DashboardModelRunTimeListSchema = z.array(DashboardModelRunTimeSchema);
+
 const DashboardRunTimeDailySchema = z.object({
   date: z.string().default(""),
   total_seconds: z.number().default(0),

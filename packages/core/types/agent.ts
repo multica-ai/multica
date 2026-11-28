@@ -1259,6 +1259,49 @@ export interface DashboardAgentRunTime {
   cancelled_count: number;
 }
 
+// Per-(runtime, provider, model) token totals for the leaderboard's Runtime
+// view. Same cost split as DashboardUsageByAgent, without task_count: run
+// counts come from DashboardRuntimeDuration. The server folds every runtime
+// the viewer cannot read onto runtime_id "__restricted_runtimes__".
+export interface DashboardUsageByRuntime {
+  runtime_id: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
+// Per-runtime terminal-task run-time + counts for the leaderboard's Runtime
+// view. Same semantics as DashboardAgentRunTime, keyed by runtime instead.
+export interface DashboardRuntimeDuration {
+  runtime_id: string;
+  total_seconds: number;
+  task_count: number;
+  metered_task_count?: number;
+  failed_count: number;
+  cancelled_count: number;
+}
+
+// Per-(provider, model) terminal-task run-time + counts for the leaderboard's
+// Model view. `provider` is lowercased by the server, matching
+// DashboardUsageDaily. A task that used several models counts in full on
+// each of them, so these totals can exceed the workspace run time.
+export interface DashboardModelRunTime {
+  provider: string;
+  model: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+  cancelled_count: number;
+}
+
 // One (date) bucket of terminal-task run-time + counts for the workspace
 // dashboard. Powers the Time and Tasks metrics on the daily-trend toggle
 // — same toggle as Tokens / Cost, anchored on completed_at so day buckets

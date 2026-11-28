@@ -25,7 +25,10 @@ type DashboardKeyPart =
   | "runtime-daily"
   | "failures-daily"
   | "failures-by-agent"
-  | "failures-by-squad";
+  | "failures-by-squad"
+  | "usage-by-runtime"
+  | "runtime-duration"
+  | "model-runtime";
 
 const dashboardKey = (
   wsId: string,
@@ -114,6 +117,30 @@ export const dashboardKeys = {
     historyLimit?: DashboardHistoryLimitParam,
     squadId: string | null = null,
   ) => dashboardKey(wsId, "failures-by-squad", days, projectId, tz, historyLimit, squadId),
+  usageByRuntime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "usage-by-runtime", days, projectId, tz, historyLimit, squadId),
+  runtimeDuration: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "runtime-duration", days, projectId, tz, historyLimit, squadId),
+  modelRunTime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "model-runtime", days, projectId, tz, historyLimit, squadId),
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -373,6 +400,66 @@ export function dashboardFailuresBySquadOptions(
   return dashboardOptions(
     "failures-by-squad",
     (params) => api.getDashboardFailuresBySquad(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardUsageByRuntimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "usage-by-runtime",
+    (params) => api.getDashboardUsageByRuntime(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardRuntimeDurationOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "runtime-duration",
+    (params) => api.getDashboardRuntimeDuration(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardModelRunTimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "model-runtime",
+    (params) => api.getDashboardModelRunTime(params),
     wsId,
     days,
     projectId,

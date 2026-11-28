@@ -120,6 +120,9 @@ import type {
   DashboardAgentRunTime,
   DashboardSquadRunTime,
   DashboardRunTimeDaily,
+  DashboardUsageByRuntime,
+  DashboardRuntimeDuration,
+  DashboardModelRunTime,
   DashboardFailureDaily,
   DashboardFailureByAgent,
   DashboardFailureBySquad,
@@ -372,6 +375,9 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardSquadRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
+  DashboardUsageByRuntimeListSchema,
+  DashboardRuntimeDurationListSchema,
+  DashboardModelRunTimeListSchema,
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureBySquadListSchema,
@@ -3290,6 +3296,33 @@ export class ApiClient {
       params,
       DashboardFailureBySquadListSchema,
       "GET /api/dashboard/failures/by-squad",
+    );
+  }
+
+  async getDashboardUsageByRuntime(params: DashboardRequestParams): Promise<DashboardUsageByRuntime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-runtime",
+      params,
+      DashboardUsageByRuntimeListSchema,
+      "GET /api/dashboard/usage/by-runtime",
+    );
+  }
+
+  async getDashboardRuntimeDuration(params: DashboardRequestParams): Promise<DashboardRuntimeDuration[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/runtime-duration",
+      params,
+      DashboardRuntimeDurationListSchema,
+      "GET /api/dashboard/runtime-duration",
+    );
+  }
+
+  async getDashboardModelRunTime(params: DashboardRequestParams): Promise<DashboardModelRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/model-runtime",
+      params,
+      DashboardModelRunTimeListSchema,
+      "GET /api/dashboard/model-runtime",
     );
   }
 
