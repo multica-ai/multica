@@ -877,7 +877,10 @@
     "members_empty": "Aucun membre de l'espace de travail à choisir",
     "composio_switch_hint": "Attention : cet agent dispose d'applications connectées activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
     "trigger_members_count_one": "{{count}} personne",
-    "trigger_members_count_other": "{{count}} personnes"
+    "trigger_members_count_other": "{{count}} personnes",
+    "run_logs_title": "Journaux d'exécution",
+    "restrict_tool_details_label": "Restreindre les détails des outils",
+    "restrict_tool_details_desc": "Seuls le propriétaire de l'agent et les administrateurs de l'espace de travail peuvent voir les entrées et sorties des outils dans ses exécutions. Les autres voient quels outils ont été lancés et leur durée."
   },
   "profile_card": {
     "unavailable": "Agent indisponible",
@@ -1033,7 +1036,12 @@
     "context_receipt_package": "Paquet",
     "context_receipt_instruction_file_bytes": "Fichiers d’instructions : {{size}}",
     "context_receipt_skill_package_bytes": "Paquets de skills : {{size}}",
-    "context_receipt_other_file_bytes": "Autres fichiers : {{size}}"
+    "context_receipt_other_file_bytes": "Autres fichiers : {{size}}",
+    "tool_details_hidden_value": "Masqué",
+    "tool_details_hidden_title": "L'entrée et la sortie de l'outil sont masquées",
+    "tool_details_hidden_body": "Seuls le propriétaire de cet agent et les administrateurs de l'espace de travail peuvent les voir.",
+    "tool_details_hidden_toolbar": "Détails des outils masqués",
+    "tool_details_restricted_toolbar": "Détails des outils visibles par le propriétaire et les administrateurs uniquement"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",

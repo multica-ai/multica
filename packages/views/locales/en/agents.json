@@ -877,7 +877,10 @@
     "members_empty": "No workspace members to choose from",
     "composio_switch_hint": "Heads up — this agent has connected apps enabled. Sharing it lets anyone with access use those apps through this agent.",
     "trigger_members_count_one": "{{count}} person",
-    "trigger_members_count_other": "{{count}} people"
+    "trigger_members_count_other": "{{count}} people",
+    "run_logs_title": "Run logs",
+    "restrict_tool_details_label": "Restrict tool details",
+    "restrict_tool_details_desc": "Only the agent's owner and workspace admins can see tool inputs and outputs in its runs. Everyone else sees which tools ran and how long they took."
   },
   "profile_card": {
     "unavailable": "Agent unavailable",
@@ -1033,7 +1036,12 @@
     "context_receipt_package": "Package",
     "context_receipt_instruction_file_bytes": "Instruction files: {{size}}",
     "context_receipt_skill_package_bytes": "Skill packages: {{size}}",
-    "context_receipt_other_file_bytes": "Other files: {{size}}"
+    "context_receipt_other_file_bytes": "Other files: {{size}}",
+    "tool_details_hidden_value": "Hidden",
+    "tool_details_hidden_title": "Tool input and output are hidden",
+    "tool_details_hidden_body": "Only this agent's owner and workspace admins can see them.",
+    "tool_details_hidden_toolbar": "Tool details hidden",
+    "tool_details_restricted_toolbar": "Tool details visible to owner and admins only"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

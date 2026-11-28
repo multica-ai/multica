@@ -37,6 +37,7 @@ import (
 type progressTurn struct {
 	boundTurn
 	installer pgtype.UUID
+	agent     pgtype.UUID
 	sender    string
 	pool      *pgxpool.Pool
 
@@ -50,8 +51,8 @@ func seedProgressTurn(t *testing.T, pool *pgxpool.Pool) *progressTurn {
 	turn := &progressTurn{boundTurn: seedBoundTurn(t, pool), pool: pool}
 	var workspaceID string
 	if err := pool.QueryRow(ctx,
-		`SELECT installer_user_id, workspace_id::text FROM channel_installation WHERE id = $1`,
-		turn.instID).Scan(&turn.installer, &workspaceID); err != nil {
+		`SELECT installer_user_id, agent_id, workspace_id::text FROM channel_installation WHERE id = $1`,
+		turn.instID).Scan(&turn.installer, &turn.agent, &workspaceID); err != nil {
 		t.Fatalf("seed: read installation: %v", err)
 	}
 	turn.sender = "SENDER_" + strings.ReplaceAll(turn.chatID, "CHAT_", "")
@@ -145,7 +146,7 @@ func (r *progressReplica) ask(t *testing.T, turn *progressTurn) {
 		t.Fatalf("parse session: %v", err)
 	}
 	r.typing.OnIngested(context.Background(),
-		engine.ResolvedInstallation{ID: r.instID, InstallerUserID: turn.installer},
+		engine.ResolvedInstallation{ID: r.instID, AgentID: turn.agent, InstallerUserID: turn.installer},
 		channel.InboundMessage{
 			Text:   "S270 的价格",
 			Source: channel.Source{ChannelType: TypeWecom, ChatID: turn.chatID, ChatType: channel.ChatTypeP2P, SenderID: turn.sender},

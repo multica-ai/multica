@@ -852,7 +852,10 @@
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "注意：该智能体已启用已连接应用。共享后，所有有权限运行该智能体的成员都可以通过它使用这些应用。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "run_logs_title": "运行日志",
+    "restrict_tool_details_label": "限制查看工具详情",
+    "restrict_tool_details_desc": "开启后，只有智能体的所有者和工作区管理员能查看其运行中的工具输入与输出，其他成员只能看到调用了哪些工具及耗时。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",
@@ -1003,7 +1006,12 @@
     "context_receipt_package": "包总量",
     "context_receipt_instruction_file_bytes": "指令文件：{{size}}",
     "context_receipt_skill_package_bytes": "skill 包：{{size}}",
-    "context_receipt_other_file_bytes": "其他文件：{{size}}"
+    "context_receipt_other_file_bytes": "其他文件：{{size}}",
+    "tool_details_hidden_value": "已隐藏",
+    "tool_details_hidden_title": "工具输入与输出已隐藏",
+    "tool_details_hidden_body": "只有该智能体的所有者和工作区管理员可以查看。",
+    "tool_details_hidden_toolbar": "工具详情已隐藏",
+    "tool_details_restricted_toolbar": "工具详情仅所有者和管理员可见"
   },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",

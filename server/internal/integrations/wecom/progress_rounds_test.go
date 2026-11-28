@@ -48,6 +48,13 @@ import (
 type fakeIdentityLookup struct {
 	bindings map[identityKey]db.ChannelUserBinding
 	calls    int
+	// toolDetails is what the agent says about its tool details; the zero
+	// value is an agent that does not restrict them.
+	toolDetails db.GetAgentToolDetailsReadersRow
+}
+
+func (f *fakeIdentityLookup) GetAgentToolDetailsReaders(context.Context, pgtype.UUID) (db.GetAgentToolDetailsReadersRow, error) {
+	return f.toolDetails, nil
 }
 
 type identityKey struct {
@@ -676,6 +683,16 @@ func TestAChatThatIsNotThePrincipalsShowsNoSteps(t *testing.T) {
 			who:   "an unknown sender",
 			setUp: func(rig *progressRig) { delete(rig.identities.bindings, identityKey{rig.instID, bubbleSender}) },
 		},
+		{
+			name: "the principal, for an agent that keeps its tool details from them",
+			who:  "a principal outside the agent's tool details audience",
+			setUp: func(rig *progressRig) {
+				rig.identities.toolDetails = db.GetAgentToolDetailsReadersRow{
+					ToolDetailsVisibility: "restricted",
+					Readers:               []pgtype.UUID{{Bytes: [16]byte{9, 9, 9}, Valid: true}},
+				}
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -691,6 +708,24 @@ func TestAChatThatIsNotThePrincipalsShowsNoSteps(t *testing.T) {
 					"and the tenant's archive keeps it.", tc.who, len(got), got[0])
 			}
 		})
+	}
+}
+
+// An agent that restricts its tool details still shows them to the people it
+// restricts them to, and a principal who is one of them keeps their steps.
+func TestAPrincipalAllowedTheAgentsToolDetailsSeesSteps(t *testing.T) {
+	t.Parallel()
+	rig := newProgressRig(t)
+	rig.identities.toolDetails = db.GetAgentToolDetailsReadersRow{
+		ToolDetailsVisibility: "restricted",
+		Readers:               []pgtype.UUID{rig.installer},
+	}
+	rig.running(t, "REQ-A", "task-1")
+
+	rig.toolCall(t, "task-1", "Read", map[string]any{"file_path": "/srv/app/handler.go"})
+
+	if got := len(rig.refreshes(t)); got != 1 {
+		t.Fatalf("a principal who may read the agent's tool details was shown %d step frames, want 1", got)
 	}
 }
 

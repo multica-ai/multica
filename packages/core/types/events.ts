@@ -386,6 +386,12 @@ export interface TaskMessagePayload {
    */
   output_truncated?: boolean;
   created_at?: string;
+  /**
+   * The agent restricts its tool inputs and outputs and this reader is not
+   * allowed them: `input`, `output` and `content` were removed from this
+   * tool_use/tool_result by the server, not empty to begin with.
+   */
+  details_hidden?: boolean;
 }
 
 export interface TaskQueuedPayload {

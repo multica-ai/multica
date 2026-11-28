@@ -40,6 +40,13 @@ type Event struct {
 	// realtime layer delivers it only to that user's connections bound to
 	// WorkspaceID.
 	MemberPrivateUserID string
+
+	// ToolDetailsRestricted marks a task:message from an agent that restricts
+	// its tool inputs and outputs to ToolDetailReaders (user ids). Every other
+	// recipient, and every consumer that cannot tell recipients apart, must
+	// use protocol.TaskMessagePayload.WithoutToolDetails().
+	ToolDetailsRestricted bool
+	ToolDetailReaders     map[string]bool
 }
 
 // Handler is a function that processes an event.
