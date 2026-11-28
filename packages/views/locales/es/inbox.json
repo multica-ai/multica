@@ -8,6 +8,14 @@
     "archive_all_read": "Archivar todo lo leído",
     "archive_completed": "Archivar lo completado"
   },
+  "sort": {
+    "sort_by": "Ordenar por",
+    "date": "Fecha",
+    "priority": "Prioridad",
+    "unread": "No leídos primero",
+    "asc": "Ascendente",
+    "desc": "Descendente"
+  },
   "filters": {
     "tooltip": "Filtrar bandeja",
     "active_count_one": "{{count}} filtro activo",

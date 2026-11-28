@@ -297,6 +297,8 @@ const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
   unstarted: "bg-muted-foreground/70",
   started: "bg-warning",
   done: "bg-info",
+  // Archived is a key, not a category: it resolves through
+  // BUILT_IN_STATUS_CATEGORY to `closed` and inherits this colour.
   closed: "bg-muted-foreground/40",
 };
 

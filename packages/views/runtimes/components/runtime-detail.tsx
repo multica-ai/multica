@@ -5,7 +5,9 @@ import {
   Bot,
   ChevronRight,
   Lock,
+  CirclePause,
   MoreHorizontal,
+  Play,
   Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -19,6 +21,7 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { useResumeRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
   isRuntimeUsableForUser,
@@ -31,6 +34,7 @@ import {
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -52,6 +56,7 @@ import {
 } from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
+import { formatHoldUntil } from "../utils";
 import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
@@ -198,6 +203,7 @@ export function RuntimeDetail({
             cliVersion={cliVersion}
             canEditVisibility={!!isRuntimeOwner}
             canEditRuntime={!!canEditRuntime}
+            canDelete={!!canDelete}
           />
         }
       >
@@ -320,6 +326,7 @@ function RuntimeProperties({
   cliVersion,
   canEditVisibility,
   canEditRuntime,
+  canDelete,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -335,11 +342,14 @@ function RuntimeProperties({
   canEditVisibility: boolean;
   /** Runtime owner or workspace admin; gates the concurrency cap. */
   canEditRuntime: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tLayout } = useT("layout");
   const healthLabel = useHealthLabel();
   const daemonShort = shortDaemonId(runtime.daemon_id);
+  const wsId = useWorkspaceId();
+  const resumeMutation = useResumeRuntime(wsId);
 
   return (
     <div className="space-y-5">
@@ -349,6 +359,36 @@ function RuntimeProperties({
           <span className="truncate">
             {health === "online" ? healthLabel(health) : `${healthLabel(health)} · ${lastSeen}`}
           </span>
+          {runtime.hold_until && (
+            <span className="flex items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning">
+              <CirclePause className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">
+                {t(($) => $.health.on_hold.label)} —{" "}
+                {t(($) => $.health.on_hold.resumes_in, {
+                  time: formatHoldUntil(runtime.hold_until)!,
+                })}
+              </span>
+              {canDelete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
+                  disabled={resumeMutation.isPending}
+                  onClick={() =>
+                    resumeMutation.mutate(runtime.id, {
+                      onSuccess: () =>
+                        toast.success(t(($) => $.health.on_hold.resume_toast)),
+                      onError: () =>
+                        toast.error(t(($) => $.health.on_hold.resume_failed)),
+                    })
+                  }
+                >
+                  <Play className="h-3 w-3" />
+                  {t(($) => $.health.on_hold.resume_button)}
+                </Button>
+              )}
+            </span>
+          )}
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.fact_owner)}>
           {ownerMember ? (

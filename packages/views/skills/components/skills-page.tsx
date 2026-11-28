@@ -29,6 +29,8 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
+import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -226,14 +228,25 @@ function SourceCell({
   );
 }
 
-function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
+function CreatorCell({
+  creator,
+  gravatarEnabled,
+}: {
+  creator: MemberWithUser | null;
+  gravatarEnabled: boolean;
+}) {
   if (!creator) return null;
   return (
     <>
       <ActorAvatar
         name={creator.name}
         initials={creator.name.slice(0, 2).toUpperCase()}
-        avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
+        avatarUrl={resolveAvatarUrl({
+          avatarUrl: creator.avatar_url,
+          email: creator.email,
+          gravatarEnabled,
+          resolvePublicFileUrl,
+        })}
         size="sm"
       />
       <span className="min-w-0 truncate">{creator.name}</span>
@@ -250,6 +263,9 @@ export default function SkillsPage() {
   const navigation = useNavigation();
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  // One read for the whole list: CreatorCell renders per row, and a
+  // per-row hook would re-subscribe every visible row to the same boolean.
+  const { enabled: gravatarEnabled } = useGravatarSettings();
 
   const {
     data: skills = [],
@@ -413,7 +429,9 @@ export default function SkillsPage() {
         header: t(($) => $.table.created_by),
         width: 144,
         hideable: true,
-        cell: (row) => <CreatorCell creator={row.creator} />,
+        cell: (row) => (
+          <CreatorCell creator={row.creator} gravatarEnabled={gravatarEnabled} />
+        ),
       },
       {
         key: "updated",

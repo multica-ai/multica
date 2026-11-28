@@ -238,6 +238,40 @@ WHERE workspace_id = $1
 GROUP BY squad_id, agent_id, LOWER(provider), model
 ORDER BY squad_id NULLS LAST, agent_id, LOWER(provider), model;
 
+-- name: ListDashboardUsageByRuntime :many
+-- Per-(runtime, provider, model) token aggregates from `task_usage_hourly`,
+-- the token half of the leaderboard's Runtime view. Same filters, cost split
+-- and LOWER(provider) normalisation as ListDashboardUsageByAgent; no
+-- task_count, because the hourly one over-counts and the client reads task
+-- counts from ListDashboardRuntimeDuration.
+--
+-- @since is the EXACT N-day cutoff: rows carry no date, so the client cannot
+-- trim a surplus day (MUL-5551).
+SELECT
+    runtime_id,
+    LOWER(provider) AS provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND squad_id IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND squad_id = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY runtime_id, LOWER(provider), model
+ORDER BY runtime_id, LOWER(provider), model;
+
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"
@@ -363,6 +397,138 @@ WHERE a.workspace_id = $1
   )
 GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id
 ORDER BY total_seconds DESC;
+
+-- name: ListDashboardRuntimeDuration :many
+-- Per-runtime terminal-task run time and task counts, the Time / Runs half of
+-- the leaderboard's Runtime view. ListDashboardAgentRunTime's filters and
+-- counters verbatim, grouped by the runtime the task ran on instead.
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed', 'cancelled')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC;
+
+-- name: ListDashboardModelRunTime :many
+-- Per-(provider, model) task run time and task count, the Time / Runs half of
+-- the leaderboard's Model view (its tokens and cost come from
+-- ListDashboardUsageDaily, folded client-side). Derived by joining task_usage
+-- with agent_task_queue on task_id. A task that uses multiple models
+-- contributes its full duration to each model — total_seconds may exceed
+-- the workspace total for workspaces where tasks call multiple models.
+-- The key is (LOWER(provider), model), matching ListDashboardUsageDaily, so
+-- a bare model id shared across providers (Cursor's `auto`) stays two rows.
+-- The dedup subquery collapses to one row per (task_id, provider, model)
+-- before joining, so a task is counted once per row even when task_usage
+-- holds case variants of the same provider. COUNT(DISTINCT) avoids
+-- inflating the task count for multi-model tasks.
+--
+-- The terminal-task filter is ListDashboardAgentRunTime's filter verbatim,
+-- cancelled runs and the squad scope included: a run the user stopped
+-- mid-flight burned real agent time, and excluding it here while the agent
+-- view counted it made the Time column change as the user switched views.
+-- cancelled_count rides along so the client splits the count the same way
+-- it does for an agent. metered_task_count is deliberately absent — every
+-- row here comes from a `task_usage` row existing, so it would always equal
+-- task_count; ListDashboardRuntimeDuration is the one that can report a
+-- terminal run that never reported usage.
+--
+-- The workspace / window / project / squad predicates are evaluated INSIDE
+-- the dedup subquery, not only in the outer join. Filtering only outside made
+-- the DISTINCT run over every usage row on the platform before discarding
+-- them, sorting on a wide key (`Sort Key: (model, atq.id)`) and spilling to
+-- a temp file at larger table sizes. Scoping the subquery means the DISTINCT
+-- runs over the windowed terminal-task set instead: the wide sort and its
+-- spill are gone and the query measures 3-5x faster.
+--
+-- What that does NOT buy is an index-driven read of task_usage. Past roughly
+-- 1k rows the planner stops preferring the task_id index and hash-joins the
+-- whole table against the small scoped set instead, so the read stays
+-- O(platform total) however small the window is. Measured on an inflated
+-- table (scoped set pinned at 600 rows, ANALYZE at each size,
+-- EXPLAIN (ANALYZE, BUFFERS)):
+--
+--     rows      before                 after
+--     1,000     seq  15.8ms             index  0.9ms
+--     201,000   seq  93ms    spill      seq  33ms   no spill
+--     701,000   seq  518ms   spill      seq  96ms   spill 2r/2w
+--
+-- Read the middle row as the real one: the index path is a small-table win,
+-- not a scaling property. The residual scan is acceptable because this
+-- query is opt-in — the client requests it only while the Model view is
+-- selected, so it is not on the default dashboard load — and a mounted tab
+-- re-polls it on REFETCH_INTERVAL, not per render.
+--
+-- Removing the scan needs a pre-aggregated per-(model, bucket) duration
+-- rollup, which does not exist: task_usage_hourly carries tokens and cost
+-- but no duration, and duration only exists on the terminal
+-- agent_task_queue row. That is a real project, not a rewrite of this query,
+-- so do not read the scoped subquery as a step towards it.
+--
+-- @since is the viewer's local start-of-day-(N), EXACT N days: this
+-- response carries no date, so the client cannot trim the surplus calendar
+-- day (MUL-5551).
+WITH scoped_task AS (
+    SELECT
+        atq.id,
+        atq.status,
+        atq.started_at,
+        atq.completed_at
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE a.workspace_id = $1
+      AND atq.status IN ('completed', 'failed', 'cancelled')
+      AND atq.started_at IS NOT NULL
+      AND atq.completed_at IS NOT NULL
+      AND atq.completed_at >= @since::timestamptz
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+      AND (
+          sqlc.arg('squad_scope')::text = ''
+          OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+          OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
+      )
+)
+SELECT
+    tu.provider::text AS provider,
+    tu.model,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (scoped_task.completed_at - scoped_task.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(DISTINCT scoped_task.id)::int AS task_count,
+    COUNT(DISTINCT scoped_task.id) FILTER (WHERE scoped_task.status = 'failed')::int AS failed_count,
+    COUNT(DISTINCT scoped_task.id) FILTER (WHERE scoped_task.status = 'cancelled')::int AS cancelled_count
+FROM (
+    SELECT DISTINCT tu.task_id, LOWER(tu.provider) AS provider, tu.model
+    FROM task_usage tu
+    JOIN scoped_task ON scoped_task.id = tu.task_id
+) tu
+JOIN scoped_task ON scoped_task.id = tu.task_id
+GROUP BY 1, 2
+ORDER BY total_seconds DESC, 1, 2;
 
 -- name: ListDashboardFailuresDaily :many
 -- Daily per-(date, failure_reason) terminal-task counts for the workspace,

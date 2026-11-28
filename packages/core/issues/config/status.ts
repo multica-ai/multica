@@ -30,8 +30,13 @@ export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
   "blocked",
   "done",
   "cancelled",
+  "archived",
 ];
 
+// Archived is the fork's M-11 terminal status (migration 119). It has no
+// issue_status catalog row, so it is not a category of its own; it presents as
+// Closed, which is what the board and every category-keyed consumer expect of a
+// terminal status.
 export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCategory> = {
   backlog: "unstarted",
   todo: "unstarted",
@@ -40,6 +45,7 @@ export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCat
   blocked: "started",
   done: "done",
   cancelled: "closed",
+  archived: "closed",
 };
 
 export const BUILT_IN_STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
@@ -50,6 +56,7 @@ export const BUILT_IN_STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
   blocked: "Blocked",
   done: "Done",
   cancelled: "Cancelled",
+  archived: "Archived",
 };
 
 export const STATUS_CONFIG: Record<
@@ -65,5 +72,8 @@ export const STATUS_CONFIG: Record<
   unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
   started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10", dividerColor: "bg-warning", columnBg: "bg-muted/40" },
   done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-muted/40" },
+  // Archived, Cancelled and Blocked are KEYS, not categories, so they take
+  // their presentation from BUILT_IN_STATUS_CATEGORY above rather than
+  // getting an entry of their own here. Archived resolves to Closed.
   closed: { label: "Closed", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };

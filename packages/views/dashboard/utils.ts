@@ -8,6 +8,9 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   DashboardFailureBySquad,
+  DashboardModelRunTime,
+  DashboardUsageByRuntime,
+  DashboardRuntimeDuration,
 } from "@multica/core/types";
 import {
   FAILURE_CLASSES,
@@ -358,6 +361,160 @@ export function bucketUnknownAgentRows(
 // or the card claims more agents (or more deletions) than it is showing.
 export function isSyntheticAgentRow(agentId: string): boolean {
   return agentId === DELETED_AGENTS_ROW_ID || agentId === RESTRICTED_AGENTS_ROW_ID;
+}
+
+// ---------------------------------------------------------------------------
+// Leaderboard Model and Runtime views
+// ---------------------------------------------------------------------------
+
+// One row of the leaderboard's Model or Runtime view. Same coverage fields as
+// AgentDashboardRow, so both views share the agent row's cell formatting.
+// `key` is unique per row: `provider\u0000model` for models, the runtime id
+// for runtimes. `model` / `provider` are set on model rows only.
+export interface LeaderboardEntityRow {
+  key: string;
+  model?: string;
+  provider?: string;
+  tokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+  unreportedTaskCount: number;
+  hasReportedUsage: boolean;
+  hasUsageTotals: boolean;
+}
+
+const modelKey = (provider: string, model: string) => `${provider}\u0000${model}`;
+
+const sortEntityRows = (rows: Iterable<LeaderboardEntityRow>) =>
+  Array.from(rows).toSorted((a, b) => {
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return b.seconds - a.seconds;
+  });
+
+// Model view rows, keyed by (provider, model) like `usage/daily` so a bare id
+// shared by two providers (Cursor's `auto`) stays two rows and prices right.
+//
+// Tokens and cost fold the SAME in-window daily rows the Cost/Tokens KPIs
+// use, through the same `estimateCost`, so the column sums to the KPI by
+// construction. Time and runs come from `model-runtime`; a task that used
+// several models counts in full on each, so they can exceed the Run time KPI.
+// The token rows' task_count (one per day a task touched) is only a fallback
+// for a model with no terminal run yet.
+//
+// Every model-runtime row comes from task_usage, so a model is never
+// "unreported"; a model with run time but no daily rows is rollup lag and
+// renders as unavailable (hasUsageTotals: false), as mergeAgentDashboardRows
+// does for agents.
+export function aggregateModelRows(
+  dailyInWindow: DashboardUsageDaily[],
+  runTime: DashboardModelRunTime[],
+): LeaderboardEntityRow[] {
+  const rows = new Map<string, LeaderboardEntityRow>();
+  for (const u of dailyInWindow) {
+    const key = modelKey(u.provider, u.model);
+    const row = rows.get(key) ?? {
+      key,
+      model: u.model,
+      provider: u.provider,
+      tokens: 0,
+      cost: 0,
+      seconds: 0,
+      taskCount: 0,
+      unreportedTaskCount: 0,
+      hasReportedUsage: true,
+      hasUsageTotals: true,
+    };
+    row.tokens +=
+      u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+    row.cost += estimateCost(u);
+    row.taskCount += u.task_count;
+    rows.set(key, row);
+  }
+  for (const rt of runTime) {
+    const key = modelKey(rt.provider, rt.model);
+    const row = rows.get(key);
+    if (row) {
+      row.seconds = rt.total_seconds;
+      row.taskCount = rt.task_count;
+      continue;
+    }
+    rows.set(key, {
+      key,
+      model: rt.model,
+      provider: rt.provider,
+      tokens: 0,
+      cost: 0,
+      seconds: rt.total_seconds,
+      taskCount: rt.task_count,
+      unreportedTaskCount: 0,
+      hasReportedUsage: true,
+      hasUsageTotals: false,
+    });
+  }
+  return sortEntityRows(rows.values());
+}
+
+// Synthetic runtime_id the SERVER sends for every runtime the viewer may not
+// read (private runtimes, admins included). Mirrors `restrictedRuntimesRowID`
+// in server/internal/handler/dashboard.go — the two strings must stay in sync.
+// The client also folds deleted runtimes into it, rendered as "Other runtimes".
+export const RESTRICTED_RUNTIMES_ROW_ID = "__restricted_runtimes__";
+
+// Runtime view rows: per-(runtime, provider, model) usage folded per runtime,
+// merged with per-runtime run time. Coverage follows mergeAgentDashboardRows,
+// using `metered_task_count` from the duration rollup.
+//
+// Runtimes missing from `knownRuntimeIds` (deleted since) fold together with
+// the server's sentinel into one "Other runtimes" row, keeping every sum
+// intact — fold, don't drop. `null` (list still loading) passes rows through,
+// like bucketUnknownAgentRows.
+export function aggregateRuntimeRows(
+  usage: DashboardUsageByRuntime[],
+  duration: DashboardRuntimeDuration[],
+  knownRuntimeIds: ReadonlySet<string> | null,
+): LeaderboardEntityRow[] {
+  const bucketOf = (runtimeId: string) =>
+    knownRuntimeIds === null || knownRuntimeIds.has(runtimeId)
+      ? runtimeId
+      : RESTRICTED_RUNTIMES_ROW_ID;
+  const blank = (key: string): LeaderboardEntityRow => ({
+    key,
+    tokens: 0,
+    cost: 0,
+    seconds: 0,
+    taskCount: 0,
+    unreportedTaskCount: 0,
+    hasReportedUsage: false,
+    hasUsageTotals: false,
+  });
+  const rows = new Map<string, LeaderboardEntityRow>();
+  const rowFor = (runtimeId: string) => {
+    const key = bucketOf(runtimeId);
+    const row = rows.get(key) ?? blank(key);
+    rows.set(key, row);
+    return row;
+  };
+  for (const u of usage) {
+    const row = rowFor(u.runtime_id);
+    row.tokens +=
+      u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+    row.cost += estimateCost(u);
+    row.hasUsageTotals = true;
+    row.hasReportedUsage = true;
+  }
+  for (const d of duration) {
+    const row = rowFor(d.runtime_id);
+    row.seconds += d.total_seconds;
+    row.taskCount += d.task_count;
+    // An older server omits metered_task_count: keep the all-reported
+    // presentation for runtimes with usage, as mergeAgentDashboardRows does.
+    if (d.metered_task_count !== undefined) {
+      row.unreportedTaskCount += Math.max(0, d.task_count - d.metered_task_count);
+      row.hasReportedUsage ||= d.metered_task_count > 0;
+    }
+  }
+  return sortEntityRows(rows.values());
 }
 
 // Weekly fold for run-time + tasks. Mirrors `aggregateByWeek` in

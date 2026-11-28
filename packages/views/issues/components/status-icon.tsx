@@ -139,6 +139,21 @@ function CancelledIcon() {
   );
 }
 
+function ArchivedIcon() {
+  return (
+    <ProgressCircle progress={0}>
+      <path
+        d="M5 7 L9 7 M7 5 L7 9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+    </ProgressCircle>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Renderer map
 
 const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
@@ -149,6 +164,7 @@ const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,
+  archived: ArchivedIcon,
 };
 
 const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
@@ -176,6 +192,10 @@ const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
   done: "text-status-done",
   blocked: "text-status-blocked",
   cancelled: "text-status-cancelled",
+  // Archived is the fork's M-11 terminal status. It presents as the `closed`
+  // category, so it takes Cancelled's muted tone rather than inventing a
+  // second "terminal" colour the palette does not have.
+  archived: "text-status-cancelled",
 };
 
 // Public component

@@ -75,7 +75,8 @@
       "in_review": "Livré, en attente d'une relecture humaine. Clôt l'exécution de l'autopilote.",
       "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
       "done": "Terminé.",
-      "cancelled": "Abandonné."
+      "cancelled": "Abandonné.",
+      "archived": "Mis de côté sans être supprimé. État terminal — se comporte comme « vu »."
     },
     "pr_auto_complete_badge": "Définie à la fusion des PR",
     "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner.",
@@ -1127,8 +1128,10 @@
     "deleting": "Suppression..."
   },
   "labs": {
-    "section_placeholder_title": "Aucune expérimentation pour l'instant",
-    "section_placeholder_description": "Les fonctionnalités expérimentales apparaîtront ici dès qu'elles seront disponibles.",
+    "experiments_title": "Expérimentations",
+    "experiments_description": "Essayez les nouvelles fonctionnalités avant leur disponibilité générale. Ces réglages sont expérimentaux et peuvent changer.",
+    "gravatar_title": "Prise en charge de Gravatar",
+    "gravatar_description": "Afficher les images Gravatar pour les utilisateurs sans avatar personnalisé. Utilise le hachage SHA-256 de leur adresse e-mail.",
     "toast_failed": "Échec de la mise à jour du réglage"
   },
   "github": {

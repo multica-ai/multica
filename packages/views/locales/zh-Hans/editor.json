@@ -259,5 +259,11 @@
   "plain_text": {
     "notice": "内容过长，以纯文本显示。",
     "download": "下载为 .txt"
+  },
+  "details_block": {
+    "summary_default": "详情",
+    "summary_aria_label": "摘要",
+    "body_placeholder": "正文 (Markdown)",
+    "body_aria_label": "详情正文 (Markdown)"
   }
 }

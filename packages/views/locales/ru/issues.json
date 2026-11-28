@@ -146,7 +146,8 @@
     "in_review": "На проверке",
     "done": "Готово",
     "blocked": "Заблокировано",
-    "cancelled": "Отменено"
+    "cancelled": "Отменено",
+    "archived": "Архивировано"
   },
   "status_category": {
     "unstarted": "Не начато",

@@ -20,6 +20,13 @@ import (
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
+// The leaderboard's Model and Runtime views add three more, each fetched only
+// while its view is selected: model-runtime (per-(provider, model) run time +
+// task counts; the Model view's tokens come from usage/daily),
+// usage/by-runtime (per-(runtime, model) token rows) and runtime-duration
+// (per-runtime run time + task counts). The two runtime reads fold the
+// runtimes the caller may not read; see dashboardRestrictedRuntimes.
+//
 // All of them accept ?days=N (defaults to 30, at most 371 so a 365-day weekly
 // chart can round up to whole weeks) and an optional ?project_id=<uuid> to
 // scope the rollup to a single project. With no project_id the data spans the
@@ -731,6 +738,295 @@ func foldRestrictedSquadRunTime(
 			return dst
 		},
 	)
+}
+
+// restrictedRuntimesRowID is the synthetic runtime_id the per-runtime rollups
+// fold every runtime the caller may not read onto. Like restrictedAgentsRowID
+// it is deliberately not a UUID.
+const restrictedRuntimesRowID = "__restricted_runtimes__"
+
+// dashboardRestrictedRuntimes resolves the workspace runtimes this request may
+// not read. Per-runtime data sits behind requireRuntimeReadAccess, whose
+// RuntimeAllowsUser gate holds for owners and admins too, so a private machine
+// stays unnamed in the leaderboard for everyone it is not shared with. On
+// failure it writes a 500 and returns ok=false: an unfolded rollup is never
+// the fallback.
+func (h *Handler) dashboardRestrictedRuntimes(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID string,
+	member db.Member,
+) (map[string]struct{}, bool) {
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve runtime access")
+		return nil, false
+	}
+	restricted := make(map[string]struct{})
+	for _, rt := range runtimes {
+		if !canUseRuntimeForAgent(member, rt) {
+			restricted[uuidToString(rt.ID)] = struct{}{}
+		}
+	}
+	return restricted, true
+}
+
+// DashboardUsageByRuntimeResponse is one (runtime, provider, model) row, the
+// token half of the leaderboard's Runtime view. Same cost split as
+// DashboardUsageByAgentResponse; no task count, which comes from
+// DashboardRuntimeDurationResponse.
+type DashboardUsageByRuntimeResponse struct {
+	RuntimeID                string `json:"runtime_id"`
+	Provider                 string `json:"provider"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadTokens          int64  `json:"cache_read_tokens"`
+	CacheWriteTokens         int64  `json:"cache_write_tokens"`
+	CostUSDTicks             int64  `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64  `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64  `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64  `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64  `json:"uncosted_cache_write_tokens"`
+}
+
+// GetDashboardUsageByRuntime returns per-(runtime, provider, model) token
+// aggregates over the exact N-day window, with the runtimes the caller may not
+// read folded onto restrictedRuntimesRowID. The response has no agent
+// dimension, so restricted agents need no fold: like usage/daily it is a
+// workspace total.
+func (h *Handler) GetDashboardUsageByRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedRuntimes(w, r, workspaceID, member)
+	if !ok {
+		return
+	}
+	// Exact N-day cutoff: the rows carry no date (MUL-5551).
+	window := h.dashboardCutoff(w, r, workspaceID, h.resolveViewingTZ(r), 1)
+
+	rows, err := h.Queries.ListDashboardUsageByRuntime(r.Context(), db.ListDashboardUsageByRuntimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       window.since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list usage by runtime")
+		return
+	}
+	resp := make([]DashboardUsageByRuntimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardUsageByRuntimeResponse{
+			RuntimeID:                uuidToString(row.RuntimeID),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+		}
+	}
+	writeJSON(w, http.StatusOK, foldRestrictedUsageByRuntime(resp, restricted))
+}
+
+// The restricted bucket keeps its (provider, model) split so the client can
+// still price it; see providerModelKey.
+func foldRestrictedUsageByRuntime(
+	rows []DashboardUsageByRuntimeResponse,
+	restricted map[string]struct{},
+) []DashboardUsageByRuntimeResponse {
+	return foldRestrictedAgents(
+		rows,
+		restricted,
+		func(row DashboardUsageByRuntimeResponse) string { return row.RuntimeID },
+		func(row DashboardUsageByRuntimeResponse) (DashboardUsageByRuntimeResponse, providerModelKey) {
+			key := providerModelKey{provider: row.Provider, model: row.Model}
+			row.RuntimeID = restrictedRuntimesRowID
+			return row, key
+		},
+		func(dst, src DashboardUsageByRuntimeResponse) DashboardUsageByRuntimeResponse {
+			dst.InputTokens += src.InputTokens
+			dst.OutputTokens += src.OutputTokens
+			dst.CacheReadTokens += src.CacheReadTokens
+			dst.CacheWriteTokens += src.CacheWriteTokens
+			dst.CostUSDTicks += src.CostUSDTicks
+			dst.UncostedInputTokens += src.UncostedInputTokens
+			dst.UncostedOutputTokens += src.UncostedOutputTokens
+			dst.UncostedCacheReadTokens += src.UncostedCacheReadTokens
+			dst.UncostedCacheWriteTokens += src.UncostedCacheWriteTokens
+			return dst
+		},
+	)
+}
+
+// DashboardRuntimeDurationResponse is one runtime's terminal-task run time
+// and counts over the window, the Time / Runs half of the Runtime view. Same
+// counters as DashboardAgentRunTimeResponse.
+type DashboardRuntimeDurationResponse struct {
+	RuntimeID        string `json:"runtime_id"`
+	TotalSeconds     int64  `json:"total_seconds"`
+	TaskCount        int32  `json:"task_count"`
+	MeteredTaskCount int32  `json:"metered_task_count"`
+	FailedCount      int32  `json:"failed_count"`
+	CancelledCount   int32  `json:"cancelled_count"`
+}
+
+// GetDashboardRuntimeDuration returns per-runtime terminal-task run time and
+// counts over the exact N-day window, folding unreadable runtimes like
+// GetDashboardUsageByRuntime.
+func (h *Handler) GetDashboardRuntimeDuration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedRuntimes(w, r, workspaceID, member)
+	if !ok {
+		return
+	}
+	window := h.dashboardCutoff(w, r, workspaceID, h.resolveViewingTZ(r), 1)
+
+	rows, err := h.Queries.ListDashboardRuntimeDuration(r.Context(), db.ListDashboardRuntimeDurationParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       window.since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtime duration")
+		return
+	}
+	resp := make([]DashboardRuntimeDurationResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardRuntimeDurationResponse{
+			RuntimeID:        uuidToString(row.RuntimeID),
+			TotalSeconds:     row.TotalSeconds,
+			TaskCount:        row.TaskCount,
+			MeteredTaskCount: row.MeteredTaskCount,
+			FailedCount:      row.FailedCount,
+			CancelledCount:   row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, foldRestrictedRuntimeDuration(resp, restricted))
+}
+
+// No dimension besides the runtime, so every restricted row merges into one.
+func foldRestrictedRuntimeDuration(
+	rows []DashboardRuntimeDurationResponse,
+	restricted map[string]struct{},
+) []DashboardRuntimeDurationResponse {
+	return foldRestrictedAgents(
+		rows,
+		restricted,
+		func(row DashboardRuntimeDurationResponse) string { return row.RuntimeID },
+		func(row DashboardRuntimeDurationResponse) (DashboardRuntimeDurationResponse, struct{}) {
+			row.RuntimeID = restrictedRuntimesRowID
+			return row, struct{}{}
+		},
+		func(dst, src DashboardRuntimeDurationResponse) DashboardRuntimeDurationResponse {
+			dst.TotalSeconds += src.TotalSeconds
+			dst.TaskCount += src.TaskCount
+			dst.MeteredTaskCount += src.MeteredTaskCount
+			dst.FailedCount += src.FailedCount
+			dst.CancelledCount += src.CancelledCount
+			return dst
+		},
+	)
+}
+
+// DashboardModelRunTimeResponse is one (provider, model) row of terminal-task
+// run time and counts, the Time / Runs half of the leaderboard's Model view.
+// A task that used several models counts in full on each of them, so the
+// rows can add up to more than the Run time KPI; within one row a task counts
+// once.
+type DashboardModelRunTimeResponse struct {
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
+}
+
+// GetDashboardModelRunTime returns per-(provider, model) terminal-task run
+// time and counts over the exact N-day window. The response names neither an
+// agent nor a runtime, so there is nothing to fold: like usage/daily it is a
+// workspace total.
+func (h *Handler) GetDashboardModelRunTime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	// Exact N-day cutoff: the rows carry no date (MUL-5551).
+	window := h.dashboardCutoff(w, r, workspaceID, h.resolveViewingTZ(r), 1)
+
+	rows, err := h.Queries.ListDashboardModelRunTime(r.Context(), db.ListDashboardModelRunTimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       window.since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model run time")
+		return
+	}
+	resp := make([]DashboardModelRunTimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardModelRunTimeResponse{
+			Provider:       row.Provider,
+			Model:          row.Model,
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run

@@ -75,7 +75,8 @@
       "in_review": "已交付，等待人工審查。會結束自動化執行。",
       "blocked": "被外部依賴阻塞。",
       "done": "已完成。",
-      "cancelled": "決定不做。"
+      "cancelled": "決定不做。",
+      "archived": "歸檔但不刪除。終態 — 行為與「決定不做」相同。"
     },
     "pr_auto_complete_badge": "PR 合併後自動進入",
     "built_in_locked": "內建狀態驅動系統行為，不能編輯或歸檔，但可以調整順序。",
@@ -1117,9 +1118,11 @@
     "deleting": "刪除中..."
   },
   "labs": {
-    "section_placeholder_title": "暫無實驗",
-    "section_placeholder_description": "實驗性功能推出後會顯示於此。",
-    "toast_failed": "更新設定失敗"
+    "toast_failed": "更新設定失敗",
+    "experiments_title": "實驗功能",
+    "experiments_description": "在正式發佈前試用新功能。這些設定是實驗性的，可能會發生變化。",
+    "gravatar_title": "Gravatar 支援",
+    "gravatar_description": "為沒有自訂頭像的使用者顯示 Gravatar 圖片。使用其電子郵件地址的 SHA-256 雜湊值。"
   },
   "github": {
     "master_description_off": "GitHub 功能已暫停，已有資料保留。",

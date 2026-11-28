@@ -331,7 +331,7 @@ var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
 	Long: "Change an issue's status. The argument is a status KEY, not its display name.\n" +
-		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled.\n" +
+		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled, archived.\n" +
 		"A workspace may define custom statuses on top of these; their keys are shown in\n" +
 		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.\n\n" +
 		"To cancel an issue because it duplicates another, mark it instead of only cancelling:\n" +
@@ -548,7 +548,7 @@ var issueSearchCmd = &cobra.Command{
 // so this is the list shown in help text and error messages, not the set of
 // accepted values — see validateIssueStatus.
 var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled", "archived",
 }
 
 var validIssuePriorities = []string{

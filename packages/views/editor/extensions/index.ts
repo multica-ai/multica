@@ -71,6 +71,7 @@ import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
+import { DetailsBlockExtension } from "./details";
 import { HighlightExtension } from "./highlight";
 import { codeLowlight } from "../syntax-highlight";
 
@@ -214,6 +215,7 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
+    DetailsBlockExtension,
     HighlightExtension,
     Markdown.configure({ ...MARKDOWN_OPTIONS, marked: createMarkedInstance() }),
     // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain

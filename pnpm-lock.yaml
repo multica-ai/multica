@@ -896,6 +896,9 @@ importers:
       '@formatjs/intl-localematcher':
         specifier: 'catalog:'
         version: 0.8.4
+      '@noble/hashes':
+        specifier: ^1.8.0
+        version: 1.8.0
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)

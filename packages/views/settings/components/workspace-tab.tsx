@@ -7,6 +7,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,7 @@ import {
   useHasOnboarded,
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
+import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
 import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
@@ -162,6 +164,30 @@ export function WorkspaceTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  const gravatar = deriveGravatarSettings(workspace);
+  const [gravatarSaving, setGravatarSaving] = useState(false);
+
+  // The backend stores `settings` as a raw JSON blob with no allowlist, so a
+  // new key persists without a server change. Merge rather than assign: the
+  // blob is shared with the other settings writes.
+  const persistGravatar = async (next: boolean) => {
+    if (gravatarSaving) return;
+    setGravatarSaving(true);
+    try {
+      const merged = {
+        ...((workspace?.settings as Record<string, unknown>) ?? {}),
+        gravatar_enabled: next,
+      };
+      const updated = await api.updateWorkspace(workspace?.id ?? "", { settings: merged });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.labs.toast_failed));
+    } finally {
+      setGravatarSaving(false);
+    }
+  };
   // Mirror the backend invariant (server/internal/handler/workspace.go:569):
   // a workspace must always have at least one owner, so the sole owner can't
   // leave. Pre-flight here instead of letting the 400 round-trip become a
@@ -486,6 +512,29 @@ export function WorkspaceTab() {
       </SettingsSection>
 
       {membersFetched && isOwner ? <PrivateProjectsSection /> : null}
+
+      {/* Experiments. Opt-in behaviour a workspace can be the first to run, so
+          it stays admin-gated and defaults off. */}
+      <SettingsSection
+        title={t(($) => $.labs.experiments_title)}
+        description={t(($) => $.labs.experiments_description)}
+        anchor="experiments"
+      >
+        <SettingsCard>
+          <SettingsRow
+            anchor="gravatar"
+            label={t(($) => $.labs.gravatar_title)}
+            description={t(($) => $.labs.gravatar_description)}
+          >
+            <Switch
+              checked={gravatar.enabled}
+              disabled={!canManageWorkspace || gravatarSaving}
+              onCheckedChange={persistGravatar}
+              aria-label={t(($) => $.labs.gravatar_title)}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
 
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in

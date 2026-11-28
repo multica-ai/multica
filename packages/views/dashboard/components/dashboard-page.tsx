@@ -22,6 +22,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent, Squad } from "@multica/core/types";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import {
   dashboardKeys,
   dashboardUsageDailyOptions,
@@ -33,6 +34,9 @@ import {
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
   dashboardFailuresBySquadOptions,
+  dashboardModelRunTimeOptions,
+  dashboardRuntimeDurationOptions,
+  dashboardUsageByRuntimeOptions,
   useDashboardHistoryLimit,
 } from "@multica/core/dashboard";
 import { toast } from "sonner";
@@ -60,6 +64,8 @@ import {
   aggregateDailyTokens,
   aggregateFailureClasses,
   aggregateFailureReasons,
+  aggregateModelRows,
+  aggregateRuntimeRows,
   aggregateSquadDashboardRows,
   aggregateSquadFailures,
   aggregateWeeklyErrors,
@@ -103,6 +109,10 @@ const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_SQUAD_RUNTIME: import("@multica/core/types").DashboardSquadRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
+const EMPTY_MODEL_RUNTIME: import("@multica/core/types").DashboardModelRunTime[] = [];
+const EMPTY_BY_RUNTIME: import("@multica/core/types").DashboardUsageByRuntime[] = [];
+const EMPTY_RUNTIME_DURATION: import("@multica/core/types").DashboardRuntimeDuration[] =
+  [];
 const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
   [];
 const EMPTY_FAILURE_BY_SQUAD: import("@multica/core/types").DashboardFailureBySquad[] =
@@ -378,6 +388,49 @@ export function DashboardPage() {
       squadFilterParam === null,
   });
 
+  // The leaderboard's Model and Runtime views each read their own rollup,
+  // fetched only while that view is shown.
+  const modelRunTimeQuery = useQuery({
+    ...dashboardModelRunTimeOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId && historyLimit !== undefined && leaderboardGroupBy === "model",
+  });
+  const byRuntimeQuery = useQuery({
+    ...dashboardUsageByRuntimeOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId && historyLimit !== undefined && leaderboardGroupBy === "runtime",
+  });
+  const runtimeDurationQuery = useQuery({
+    ...dashboardRuntimeDurationOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId && historyLimit !== undefined && leaderboardGroupBy === "runtime",
+  });
+  const runtimesQuery = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!wsId && leaderboardGroupBy === "runtime",
+  });
+
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
   const bySquadUsage = bySquadQuery.data ?? EMPTY_BY_SQUAD;
@@ -398,7 +451,10 @@ export function DashboardPage() {
     runTimeDailyQuery.isFetching ||
     failuresDailyQuery.isFetching ||
     failuresByAgentQuery.isFetching ||
-    failuresBySquadQuery.isFetching;
+    failuresBySquadQuery.isFetching ||
+    modelRunTimeQuery.isFetching ||
+    byRuntimeQuery.isFetching ||
+    runtimeDurationQuery.isFetching;
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: dashboardKeys.all(wsId) });
   };
@@ -631,6 +687,30 @@ export function DashboardPage() {
     [agentRows, knownAgentIds],
   );
 
+  // Model view tokens and cost fold the same in-window daily rows as the KPIs.
+  const modelRows = useMemo(
+    () =>
+      aggregateModelRows(
+        dailyUsageInWindow,
+        modelRunTimeQuery.data ?? EMPTY_MODEL_RUNTIME,
+      ),
+    [dailyUsageInWindow, modelRunTimeQuery.data],
+  );
+  const runtimes = runtimesQuery.data;
+  const runtimeNames = useMemo(
+    () => (runtimes ?? []).map((r) => ({ id: r.id, name: runtimeDisplayLabel(r) })),
+    [runtimes],
+  );
+  const runtimeRows = useMemo(
+    () =>
+      aggregateRuntimeRows(
+        byRuntimeQuery.data ?? EMPTY_BY_RUNTIME,
+        runtimeDurationQuery.data ?? EMPTY_RUNTIME_DURATION,
+        runtimes ? new Set(runtimes.map((r) => r.id)) : null,
+      ),
+    [byRuntimeQuery.data, runtimeDurationQuery.data, runtimes],
+  );
+
   const allowedDims = dimsForDays(days);
   const lessThanMinuteLabel = t(($) => $.duration.less_than_minute);
 
@@ -810,11 +890,19 @@ export function DashboardPage() {
                   lessThanMinuteLabel={lessThanMinuteLabel}
                   squadRows={squadDashboardRows}
                   squads={squads}
+                  modelRows={modelRows}
+                  runtimeRows={runtimeRows}
+                  runtimes={runtimeNames}
                   groupBy={leaderboardGroupBy}
-                  onGroupByChange={
-                    squadFilterParam === null && squads.length > 0
-                      ? setLeaderboardGroupBy
-                      : undefined
+                  onGroupByChange={setLeaderboardGroupBy}
+                  allowSquadGroup={squadFilterParam === null && squads.length > 0}
+                  loading={
+                    leaderboardGroupBy === "model"
+                      ? modelRunTimeQuery.isLoading
+                      : leaderboardGroupBy === "runtime" &&
+                        (byRuntimeQuery.isLoading ||
+                          runtimeDurationQuery.isLoading ||
+                          runtimesQuery.isLoading)
                   }
                   selectedSquad={selectedSquad}
                 />

@@ -20,6 +20,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
+import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -92,11 +94,17 @@ export function AccountMenu() {
   const language = useLanguageSwitch();
   const modeValue = (mode ?? "system") as (typeof THEMES)[number]["value"];
   const name = user?.name ?? "";
+  const { enabled: gravatarEnabled } = useGravatarSettings();
   const avatar = (size: "md" | "lg") => (
     <ActorAvatar
       name={name}
       initials={(name || "U").charAt(0).toUpperCase()}
-      avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
+      avatarUrl={resolveAvatarUrl({
+        avatarUrl: user?.avatar_url,
+        email: user?.email,
+        gravatarEnabled,
+        resolvePublicFileUrl,
+      })}
       size={size}
     />
   );

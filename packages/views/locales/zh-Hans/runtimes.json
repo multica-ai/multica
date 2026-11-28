@@ -145,6 +145,14 @@
     "long_offline": {
       "label": "长期离线",
       "description": "已断开超过 6 天。如果这台机器不会恢复，请将关联智能体改绑到其他运行时，或删除此运行时。"
+    },
+    "on_hold": {
+      "label": "暂停中",
+      "resumes_in": "{{time}}恢复",
+      "tooltip": "此运行时已暂停 — 任务已排队，将在恢复后自动运行。",
+      "resume_button": "恢复",
+      "resume_toast": "运行时已恢复",
+      "resume_failed": "恢复运行时失败"
     }
   },
   "detail": {

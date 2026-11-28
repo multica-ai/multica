@@ -75,7 +75,8 @@
       "in_review": "已交付，等待人工审核。会结束自动化运行。",
       "blocked": "被外部依赖阻塞。",
       "done": "已完成。",
-      "cancelled": "决定不做。"
+      "cancelled": "决定不做。",
+      "archived": "归档但不删除。终态 — 行为与\"决定不做\"相同。"
     },
     "pr_auto_complete_badge": "PR 合并后自动进入",
     "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。",
@@ -1117,8 +1118,10 @@
     "deleting": "删除中..."
   },
   "labs": {
-    "section_placeholder_title": "暂无实验",
-    "section_placeholder_description": "实验性功能推出后会显示在这里。",
+    "experiments_title": "实验功能",
+    "experiments_description": "在正式发布前试用新功能。这些设置是实验性的，可能会发生变化。",
+    "gravatar_title": "Gravatar 支持",
+    "gravatar_description": "为没有自定义头像的用户显示 Gravatar 图片。使用其邮箱地址的 SHA-256 哈希值。",
     "toast_failed": "更新设置失败"
   },
   "github": {

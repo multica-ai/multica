@@ -144,7 +144,8 @@
     "in_review": "レビュー中",
     "done": "完了",
     "blocked": "ブロック中",
-    "cancelled": "キャンセル済み"
+    "cancelled": "キャンセル済み",
+    "archived": "アーカイブ済み"
   },
   "status_category": {
     "unstarted": "未着手",

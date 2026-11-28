@@ -22,11 +22,14 @@ func TestPrivateProjectDashboardsKeepWorkspaceTotals(t *testing.T) {
 	agentID := createHandlerTestAgent(t, f.marker+"-dash", []byte("[]"))
 	runtimeID := handlerTestRuntimeID(t)
 	for _, status := range []string{"completed", "failed"} {
-		dbfx.Task(t, agentID, testutil.Cols{
+		taskID := dbfx.Task(t, agentID, testutil.Cols{
 			"runtime_id": runtimeID, "issue_id": f.secretIssue, "status": status,
 			"failure_reason": "agent_error.process_failure",
 			"started_at":     testutil.Raw("now() - interval '2 minutes'"),
 			"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+		})
+		dbfx.Insert(t, "task_usage", testutil.Cols{
+			"task_id": taskID, "provider": "anthropic", "model": f.marker, "input_tokens": 10,
 		})
 	}
 	dbfx.InsertNoID(t, "task_usage_hourly", testutil.Cols{
@@ -78,6 +81,9 @@ func TestPrivateProjectDashboardsKeepWorkspaceTotals(t *testing.T) {
 		{"/api/dashboard/runtime/daily", testHandler.GetDashboardRunTimeDaily, false, "task_count"},
 		{"/api/dashboard/failures/daily", testHandler.GetDashboardFailuresDaily, false, "task_count"},
 		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, true, "task_count"},
+		{"/api/dashboard/usage/by-runtime", testHandler.GetDashboardUsageByRuntime, false, "input_tokens"},
+		{"/api/dashboard/runtime-duration", testHandler.GetDashboardRuntimeDuration, false, "task_count"},
+		{"/api/dashboard/model-runtime", testHandler.GetDashboardModelRunTime, false, "task_count"},
 	} {
 		t.Run(ep.path, func(t *testing.T) {
 			share := sum(get(ep.h, ep.path, f.insider, secret), ep.count)

@@ -259,5 +259,11 @@
   "plain_text": {
     "notice": "내용이 너무 길어 일반 텍스트로 표시합니다.",
     "download": ".txt로 다운로드"
+  },
+  "details_block": {
+    "summary_default": "세부 정보",
+    "summary_aria_label": "요약",
+    "body_placeholder": "본문 (Markdown)",
+    "body_aria_label": "세부 정보 본문 (Markdown)"
   }
 }

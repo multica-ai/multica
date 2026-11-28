@@ -146,6 +146,8 @@ describe("IssueFilterMenu status section", () => {
       "Human Review",
       "Done",
       "Cancelled",
+      // Fork note: "Archived" (M-11) rides as an 8th built-in in this menu.
+      "Archived",
     ]);
   });
 

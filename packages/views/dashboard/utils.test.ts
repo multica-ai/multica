@@ -6,6 +6,9 @@ import {
   anonymizeUnresolvedAgentRows,
   UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
+  aggregateModelRows,
+  aggregateRuntimeRows,
+  RESTRICTED_RUNTIMES_ROW_ID,
   aggregateDailyCost,
   aggregateDailyErrors,
   aggregateDailyTasks,
@@ -1041,5 +1044,148 @@ describe("aggregateSquadFailures & sortSquadFailures", () => {
       "squad-a",
       "squad-b",
     ]);
+  });
+});
+
+describe("aggregateModelRows", () => {
+  const daily = (
+    provider: string,
+    model: string,
+    input: number,
+    date = "2026-05-10",
+  ) => ({
+    date,
+    provider,
+    model,
+    input_tokens: input,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    task_count: 1,
+  });
+  const runTime = (provider: string, model: string, seconds: number, tasks: number) => ({
+    provider,
+    model,
+    total_seconds: seconds,
+    task_count: tasks,
+    failed_count: 0,
+    cancelled_count: 0,
+  });
+
+  it("folds days per (provider, model) and its cost matches the KPI total", () => {
+    const rows = [
+      daily("claude", "claude-sonnet-4-6", 1_000_000, "2026-05-09"),
+      daily("claude", "claude-sonnet-4-6", 2_000_000, "2026-05-10"),
+      daily("codex", "gpt-5", 500_000),
+    ];
+    const result = aggregateModelRows(rows, []);
+
+    expect(result.map((r) => r.model)).toEqual(["claude-sonnet-4-6", "gpt-5"]);
+    expect(result[0]).toMatchObject({ provider: "claude", tokens: 3_000_000, taskCount: 2 });
+    const cost = result.reduce((sum, r) => sum + r.cost, 0);
+    expect(cost).toBeCloseTo(computeDailyTotals(rows).cost, 10);
+  });
+
+  it("keeps the same model id under two providers apart", () => {
+    const result = aggregateModelRows(
+      [daily("cursor", "auto", 100), daily("other", "auto", 200)],
+      [runTime("cursor", "auto", 60, 1), runTime("other", "auto", 120, 3)],
+    );
+
+    expect(result).toHaveLength(2);
+    expect(new Set(result.map((r) => r.key)).size).toBe(2);
+    const other = result.find((r) => r.provider === "other");
+    expect(other).toMatchObject({ model: "auto", tokens: 200, seconds: 120, taskCount: 3 });
+  });
+
+  it("takes the run count from the run-time rows when they exist", () => {
+    const [row] = aggregateModelRows(
+      [daily("claude", "claude-sonnet-4-6", 100), daily("claude", "claude-sonnet-4-6", 100, "2026-05-09")],
+      [runTime("claude", "claude-sonnet-4-6", 30, 1)],
+    );
+    expect(row).toMatchObject({ taskCount: 1, seconds: 30, unreportedTaskCount: 0 });
+  });
+
+  it("shows a model with run time but no usage rows as unavailable", () => {
+    const [row] = aggregateModelRows([], [runTime("claude", "claude-opus-4-7", 90, 2)]);
+    expect(row).toMatchObject({
+      model: "claude-opus-4-7",
+      tokens: 0,
+      cost: 0,
+      seconds: 90,
+      taskCount: 2,
+      hasUsageTotals: false,
+      unreportedTaskCount: 0,
+    });
+  });
+});
+
+describe("aggregateRuntimeRows", () => {
+  const usage = (runtimeId: string, model: string, input: number) => ({
+    runtime_id: runtimeId,
+    provider: "claude",
+    model,
+    input_tokens: input,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  });
+  const duration = (runtimeId: string, seconds: number, tasks: number, metered = tasks) => ({
+    runtime_id: runtimeId,
+    total_seconds: seconds,
+    task_count: tasks,
+    metered_task_count: metered,
+    failed_count: 0,
+    cancelled_count: 0,
+  });
+
+  it("merges per-model usage with run time, one row per runtime", () => {
+    const result = aggregateRuntimeRows(
+      [usage("rt-1", "claude-sonnet-4-6", 100), usage("rt-1", "claude-opus-4-7", 50)],
+      [duration("rt-1", 120, 4, 3)],
+      new Set(["rt-1"]),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({
+        key: "rt-1",
+        tokens: 150,
+        seconds: 120,
+        taskCount: 4,
+        unreportedTaskCount: 1,
+        hasUsageTotals: true,
+        hasReportedUsage: true,
+      }),
+    ]);
+  });
+
+  it("folds unknown runtimes and the server sentinel into one bucket", () => {
+    const usageRows = [
+      usage("rt-1", "claude-sonnet-4-6", 100),
+      usage("rt-deleted", "claude-sonnet-4-6", 40),
+      usage(RESTRICTED_RUNTIMES_ROW_ID, "claude-sonnet-4-6", 60),
+    ];
+    const durationRows = [
+      duration("rt-1", 10, 1),
+      duration("rt-deleted", 20, 2),
+      duration(RESTRICTED_RUNTIMES_ROW_ID, 30, 3),
+    ];
+    const result = aggregateRuntimeRows(usageRows, durationRows, new Set(["rt-1"]));
+
+    expect(result.map((r) => r.key).toSorted()).toEqual(
+      [RESTRICTED_RUNTIMES_ROW_ID, "rt-1"].toSorted(),
+    );
+    const bucket = result.find((r) => r.key === RESTRICTED_RUNTIMES_ROW_ID);
+    expect(bucket).toMatchObject({ tokens: 100, seconds: 50, taskCount: 5 });
+    const passthrough = aggregateRuntimeRows(usageRows, durationRows, null);
+    const sum = (rows: typeof result, pick: (r: (typeof result)[number]) => number) =>
+      rows.reduce((acc, r) => acc + pick(r), 0);
+    expect(sum(result, (r) => r.tokens)).toBe(sum(passthrough, (r) => r.tokens));
+    expect(sum(result, (r) => r.cost)).toBeCloseTo(sum(passthrough, (r) => r.cost), 10);
+    expect(sum(result, (r) => r.seconds)).toBe(sum(passthrough, (r) => r.seconds));
+  });
+
+  it("passes rows through while the runtime list is loading", () => {
+    const result = aggregateRuntimeRows([usage("rt-x", "m", 1)], [], null);
+    expect(result.map((r) => r.key)).toEqual(["rt-x"]);
   });
 });

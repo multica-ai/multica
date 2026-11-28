@@ -303,7 +303,14 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     workspaceDefault = DEFAULT;
     renderWithI18n(<StatusPicker status="todo" onUpdate={() => {}} open onOpenChange={() => {}} />);
     // Cancelled is the built-in stand-in for a category the fixture omits.
-    expect(rows()).toEqual(["Todo", "In Review", "QA", "已合并", "Done", "Cancelled"]);
+    // Fork note: useStatusOptions (33a02d8690) also appends every built-in
+    // whose category the catalog does not supply a row for — Backlog,
+    // In Progress, Blocked and M-11's Archived — so a status the API accepts
+    // is always reachable from the picker even without a catalog row.
+    expect(rows()).toEqual([
+      "Todo", "Backlog", "In Review", "QA", "已合并",
+      "In Progress", "Blocked", "Done", "Cancelled", "Archived",
+    ]);
   });
 
   it("offers the whole catalog while Default is unknown", () => {
@@ -312,6 +319,11 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
       <StatusPicker status="todo" projectId={null} onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
     // Cancelled is the built-in stand-in for a category the fixture omits.
-    expect(rows()).toEqual(["Todo", "In Review", "QA", "已合并", "Done", "Cancelled"]);
+    // Fork note: see above — built-ins without a catalog row are offered too
+    // (33a02d8690), which is exactly how M-11's Archived stays reachable.
+    expect(rows()).toEqual([
+      "Todo", "Backlog", "In Review", "QA", "已合并",
+      "In Progress", "Blocked", "Done", "Cancelled", "Archived",
+    ]);
   });
 });

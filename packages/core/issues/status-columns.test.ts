@@ -19,12 +19,19 @@ describe("concrete status columns", () => {
     ] as IssueStatusEntry[]);
     expect(statusColumnKeys(ordered)).toEqual([
       "backlog", "todo", "in_review", "qa", "blocked", "in_progress", "done", "cancelled",
+      // Fork note: "archived" (M-11) is a built-in with no issue_status catalog
+      // row, so statusColumnKeys contributes it from BUILT_IN_STATUS_ORDER for the
+      // closed category. It is a column like any other terminal status.
+      "archived",
     ]);
   });
   it("keeps active keys independent and removes archived columns", () => {
     expect(statusColumnKeys(catalog)).toEqual([
       "backlog", "todo", "in_progress", "in_review", "blocked",
       "awaiting_response", "done", "cancelled",
+      // Fork note: "archived" (M-11), contributed from BUILT_IN_STATUS_ORDER —
+      // it has no catalog row, so it survives the archived-column filter below.
+      "archived",
     ]);
   });
   it("allows explicitly inspecting historical archived work without restoring the column by default", () => {
@@ -41,6 +48,12 @@ describe("concrete status columns", () => {
   it("'status is not' keeps the everyday board minus the excluded keys", () => {
     expect(visibleStatusKeys(["done", "cancelled"], ["backlog"], catalog, true)).toEqual([
       "todo", "in_progress", "in_review", "blocked", "awaiting_response",
+      // Fork note: "archived" (M-11) is a built-in column like any other
+      // terminal status — statusColumnKeys contributes it from
+      // BUILT_IN_STATUS_ORDER (it has no catalog row to filter on), so it
+      // stays on the board until the caller excludes it, same as done and
+      // cancelled are only gone because the caller named them above.
+      "archived",
     ]);
     // Excluding a key never brings back an archived column.
     expect(visibleStatusKeys(["done"], [], catalog, true)).not.toContain("old_review");

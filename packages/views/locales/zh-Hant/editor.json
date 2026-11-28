@@ -173,6 +173,12 @@
     "export_svg": "下載 SVG",
     "export_source": "下載 .mmd"
   },
+  "details_block": {
+    "summary_default": "詳情",
+    "summary_aria_label": "摘要",
+    "body_placeholder": "內文 (Markdown)",
+    "body_aria_label": "詳情內文 (Markdown)"
+  },
   "table": {
     "reset_widths": "重置列寬",
     "expand": "展開表格",

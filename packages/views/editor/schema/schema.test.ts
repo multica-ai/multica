@@ -73,6 +73,12 @@ describe("schema-only extensions", () => {
       "![alt](https://example.com/a.png)",
       "",
       "!file[report.pdf](https://example.com/report.pdf)",
+      "",
+      "<details>",
+      "<summary>More</summary>",
+      "",
+      "- hidden",
+      "</details>",
     ].join("\n");
     const element = document.createElement("div");
     document.body.appendChild(element);
@@ -110,6 +116,11 @@ describe("document codec", () => {
     expect(codec.serialize(codec.parse(saved))).toBe(saved);
     expect(saved).not.toMatch(/^ {4,}\S/m);
     expect(JSON.stringify(codec.parse(markdown))).not.toMatch(/"text":" /);
+  });
+
+  it("round-trips a <details> block through a Y.Doc", () => {
+    const markdown = "Intro\n\n<details open>\n<summary>Logs</summary>\n\n```\nok\n```\n</details>";
+    expect(codec.ydocToMarkdown(codec.createYDoc(markdown))).toBe(markdown);
   });
 
   it("keeps an empty document editable", () => {

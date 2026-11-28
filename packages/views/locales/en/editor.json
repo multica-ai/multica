@@ -263,5 +263,11 @@
   "plain_text": {
     "notice": "Too long to format, shown as plain text.",
     "download": "Download as .txt"
+  },
+  "details_block": {
+    "summary_default": "Details",
+    "summary_aria_label": "Summary",
+    "body_placeholder": "Body (Markdown)",
+    "body_aria_label": "Details body (Markdown)"
   }
 }

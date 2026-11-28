@@ -75,7 +75,8 @@
       "in_review": "전달 완료, 리뷰 대기. 오토파일럿 실행을 마무리합니다.",
       "blocked": "외부 의존성으로 중단됨.",
       "done": "완료.",
-      "cancelled": "진행하지 않기로 함."
+      "cancelled": "진행하지 않기로 함.",
+      "archived": "삭제하지 않고 보관. 종결 상태 — 진행하지 않기로 함과 동일하게 동작합니다."
     },
     "pr_auto_complete_badge": "PR 병합 시 자동 설정",
     "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다.",
@@ -1117,8 +1118,10 @@
     "deleting": "삭제하는 중..."
   },
   "labs": {
-    "section_placeholder_title": "아직 실험 기능이 없습니다",
-    "section_placeholder_description": "실험적 기능이 출시되면 여기에 표시됩니다.",
+    "experiments_title": "실험 기능",
+    "experiments_description": "새 기능을 정식 출시 전에 사용해 볼 수 있습니다. 이 설정은 실험적이며 변경될 수 있습니다.",
+    "gravatar_title": "Gravatar 지원",
+    "gravatar_description": "사용자 지정 아바타가 없는 사용자에게 Gravatar 이미지를 표시합니다. 이메일 주소의 SHA-256 해시를 사용합니다.",
     "toast_failed": "설정을 업데이트하지 못했습니다"
   },
   "github": {

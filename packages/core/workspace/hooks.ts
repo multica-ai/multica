@@ -14,6 +14,12 @@ import { resolvePublicFileUrl } from "./avatar-url";
 import { useFeatureEnabled } from "../config";
 import { PLUGINS_V1_FLAG } from "../feature-flags";
 import { pluginInstallationsOptions } from "../plugins";
+import { resolveAvatarUrl } from "../gravatar";
+import { deriveGravatarSettings } from "../gravatar/settings";
+// The hook module directly, matching `useWorkspaceId` above: the `paths`
+// barrel re-exports members that view tests routinely mock down to the one or
+// two they render, and this hook must not inherit those partial mocks.
+import { useCurrentWorkspace } from "../paths/hooks";
 
 // Stable empties for the still-loading directory queries. A fresh `= []`
 // default allocates a new array on every render while `data` is undefined,
@@ -93,6 +99,7 @@ export function buildActorNameResolver(directories: {
 
 export function useActorName() {
   const wsId = useWorkspaceId();
+  const gravatarEnabled = deriveGravatarSettings(useCurrentWorkspace()).enabled;
   const { data: memberData } = useQuery(memberListOptions(wsId));
   const { data: agentData } = useQuery(agentListOptions(wsId));
   const { data: squadData } = useQuery(squadListOptions(wsId));
@@ -141,11 +148,19 @@ export function useActorName() {
   );
 
   const getActorAvatarUrl = useCallback((type: string, id: string): string | null => {
-    if (type === "member") return resolvePublicFileUrl(members.find((m) => m.user_id === id)?.avatar_url);
+    if (type === "member") {
+      const m = members.find((m) => m.user_id === id);
+      return resolveAvatarUrl({
+        avatarUrl: m?.avatar_url,
+        email: m?.email,
+        gravatarEnabled,
+        resolvePublicFileUrl,
+      });
+    }
     if (type === "agent") return resolvePublicFileUrl(agents.find((a) => a.id === id)?.avatar_url);
     if (type === "squad") return resolvePublicFileUrl(squads.find((s) => s.id === id)?.avatar_url);
     return null;
-  }, [agents, members, squads]);
+  }, [agents, members, squads, gravatarEnabled]);
 
   const hasActor = useCallback(
     (type: string, id: string): boolean | undefined => {

@@ -16,6 +16,7 @@
   "local_directory_missing",
   "invalid_task_identity",
   "runtime_access_denied",
+  "session_limit",
   "agent_error.provider_auth_or_access",
   "agent_error.provider_quota_limit",
   "agent_error.provider_capacity_or_rate_limit",

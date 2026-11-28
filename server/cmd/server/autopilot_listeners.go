@@ -52,6 +52,8 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		// that needs a catalog read, so non-built-in keys pass and
 		// SyncRunFromIssue normalizes the
 		// stored row. (MUL-6243)
+		// Note: the fork's "archived" status (M-11) is not a server-side
+		// built-in, so it passes this gate and SyncRunFromIssue fails the run.
 		if issuestatus.IsBuiltIn(status) &&
 			status != "done" && status != "in_review" &&
 			status != "cancelled" {

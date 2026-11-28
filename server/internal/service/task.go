@@ -1204,6 +1204,8 @@ func taskErrorType(reason string) string {
 		return "agent_output"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
+	case "session_limit":
+		return "session_limit"
 	default:
 		return "agent_error"
 	}
@@ -3901,10 +3903,11 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		t0 = time.Now()
 		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
-			AgentID:          agentID,
-			RuntimeID:        claimRuntimeID,
-			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
-			RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+			AgentID:                 agentID,
+			RuntimeID:               claimRuntimeID,
+			PrepareLeaseSecs:        prepareLeaseDuration.Seconds(),
+			RuntimeStaleSecs:        RuntimeClaimFreshnessSeconds,
+			HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
@@ -4070,7 +4073,10 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
 
 	t0 := time.Now()
-	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
+	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, db.ListQueuedClaimCandidatesByRuntimeParams{
+		RuntimeID:               runtimeID,
+		HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
+	})
 	listMs = time.Since(t0).Milliseconds()
 	listCount = len(tasks)
 	if err != nil {
@@ -5703,6 +5709,14 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	s.captureTaskFailed(ctx, task)
 	s.publishRequeuedChatTasks(ctx, queuedChat)
 
+	// Session limit: place the runtime on hold before auto-retry so the
+	// retried task won't be claimed until the hold lifts. When the reset time
+	// is unparseable no hold is placed, and MaybeRetryFailedTask then declines
+	// to retry (gated on runtimeOnHold) so the task can't hot-loop.
+	if failureReason == "session_limit" && task.RuntimeID.Valid {
+		s.HoldRuntimeIfSessionLimit(ctx, task.RuntimeID, task.ID, errMsg)
+	}
+
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for the
@@ -5810,6 +5824,7 @@ var retryableReasons = map[string]bool{
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonSessionLimit):           true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -6003,6 +6018,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
+		return nil, nil
+	}
+	// session_limit is only safe to auto-retry once the runtime is on hold.
+	// The retry clone carries the same runtime_id, and every claim path skips
+	// held runtimes, so the retry waits for the reset instead of being
+	// re-dispatched immediately. If the runtime is not held — e.g. the reset
+	// time was unparseable so HoldRuntimeIfSessionLimit placed no hold — the
+	// retry would be claimed at once and hot-loop the task until max_attempts.
+	if reason == "session_limit" && !s.runtimeOnHold(ctx, parent.RuntimeID) {
+		slog.Warn("session_limit auto-retry skipped: runtime not on hold",
+			"task_id", util.UUIDToString(parent.ID),
+			"runtime_id", util.UUIDToString(parent.RuntimeID),
+		)
 		return nil, nil
 	}
 	// Use the reason-aware ceiling, not the raw max_attempts column, so an

@@ -25,8 +25,13 @@ import {
   deduplicateInboxItems,
   deduplicateArchivedInboxItems,
   findSnoozedInboxIssue,
+  sortInboxItems,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
+import {
+  useInboxSortStore,
+  type InboxSortField,
+} from "@multica/core/inbox/store";
 import {
   useMarkInboxRead,
   useMarkInboxUnread,
@@ -69,6 +74,9 @@ import {
   BookCheck,
   ListChecks,
   AlarmClock,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -84,7 +92,11 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
+  DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
@@ -188,7 +200,34 @@ export function InboxPage() {
   // The live list never loaded (a refresh that fails keeps the loaded one).
   // An empty list is not an empty Inbox then.
   const liveFailed = !isArchivedView && inboxListLoad(inboxQuery) === "failed";
-  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+  // Sort preference (persisted, workspace-aware). Select primitives
+  // individually so each selector returns a stable reference.
+  const sortField = useInboxSortStore((s) => s.sortField);
+  const sortDirection = useInboxSortStore((s) => s.sortDirection);
+  const setSortField = useInboxSortStore((s) => s.setSortField);
+  const toggleSort = useInboxSortStore((s) => s.toggleSort);
+  // The paginated endpoint guarantees the projection, including on empty pages.
+  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
+  const prioritySortingSupported = priorityFilterSupport === "supported";
+  // A legacy backend omits issue_priority from every row, which would score them
+  // all equal and leave the list date-ordered while the menu claimed Priority.
+  // Reuse the filter's capability probe rather than a second signal: keep the
+  // stored preference but apply date until the projection is proven, the way
+  // inboxFiltersForPrioritySupport holds a stale priority filter dormant.
+  const effectiveSortField: InboxSortField =
+    sortField === "priority" && !prioritySortingSupported ? "date" : sortField;
+
+  // Main-view only, guarded here rather than at the control: the archived list
+  // is cursor-paginated, so ordering it client-side would rank the pages loaded
+  // so far and read as a sorted list while leaving the rest out of order. The
+  // invariant then holds whatever the render path does.
+  const items = useMemo(
+    () =>
+      isArchivedView
+        ? []
+        : sortInboxItems(deduplicateInboxItems(rawItems), effectiveSortField, sortDirection),
+    [isArchivedView, rawItems, effectiveSortField, sortDirection],
+  );
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
   const archived = useArchivedInboxRows(wsId, isArchivedView);
@@ -205,9 +244,6 @@ export function InboxPage() {
   const archivedError = archiveQuery.isError && !archiveQuery.data;
   const snoozed = useSnoozedInboxRows(wsId, isSnoozedView || isCompact);
   const viewItems = isArchivedView ? archivedItems : items;
-  // The paginated endpoint guarantees the priority projection, including on
-  // empty pages.
-  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
   const issueFieldsSupport = isArchivedView ? archiveIssueFields : inboxIssueFieldsSupport(rawItems);
   const activeFilters = useMemo(
     () => effectiveInboxFilters(filters, { priority: priorityFilterSupport, issueFields: issueFieldsSupport }),
@@ -239,10 +275,15 @@ export function InboxPage() {
     [agentFilterIssueIds, pinnedUnreadKey, pinnedAgentKey],
   );
   const filterRows = isArchivedView ? archivedItems : activeRows;
-  const filteredItems = useMemo(
-    () => filterInboxItems(filterRows, effectiveFilters, filterContext),
-    [filterRows, effectiveFilters, filterContext],
-  );
+  // Main view only: the archived list is cursor-paginated, so ordering it
+  // client-side would rank the pages loaded far out of order (the items memo
+  // short-circuits for the same reason). Sorting the filtered rows keeps the
+  // filter dimensions reading every notification while the rows the user sees
+  // honour the persisted preference.
+  const filteredItems = useMemo(() => {
+    const rows = filterInboxItems(filterRows, effectiveFilters, filterContext);
+    return isArchivedView ? rows : sortInboxItems(rows, effectiveSortField, sortDirection);
+  }, [filterRows, effectiveFilters, filterContext, isArchivedView, effectiveSortField, sortDirection]);
   const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   // A deep link can point beyond every loaded page. Resolve its group directly
@@ -902,42 +943,105 @@ export function InboxPage() {
           archived={isArchivedView}
         />
       )}
-      {/* Batch actions are the live Inbox's only. Every entry archives from it,
-          so offering them while another list is on screen reads as "archive
-          all of these" and does the opposite of what it looks like. */}
+      {/* Sort and batch actions are the live Inbox's only. The archive is
+          paginated, so a client-side sort would only order the pages loaded
+          so far; and every batch entry archives from the live Inbox, so
+          offering them while another list is on screen reads as "archive all
+          of these" and does the opposite of what it looks like. */}
       {tab === "inbox" && (
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <IconButton
-              label={tCommon(($) => $.more_actions)}
-              tooltipSide="bottom"
-              className="text-muted-foreground"
-            />
+      <div className="flex items-center gap-0.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <IconButton
+                label={t(($) => $.sort.sort_by)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+                data-testid="inbox-sort-trigger"
+              />
+            }
+          >
+            <ArrowUpDown className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t(($) => $.sort.sort_by)}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={effectiveSortField}
+                onValueChange={(value) => setSortField(value as InboxSortField)}
+              >
+                <DropdownMenuRadioItem value="date">
+                  {t(($) => $.sort.date)}
+                </DropdownMenuRadioItem>
+                {/* Absent on a backend that predates the projection: offering
+                    it would check a sort that cannot order anything. */}
+                {prioritySortingSupported ? (
+                  <DropdownMenuRadioItem value="priority">
+                    {t(($) => $.sort.priority)}
+                  </DropdownMenuRadioItem>
+                ) : null}
+                <DropdownMenuRadioItem value="unread">
+                  {t(($) => $.sort.unread)}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* One direction button instead of a second radio group: the toolbar
+            pattern in skill-list-toolbar.tsx. Its title names the direction it
+            switches to, so the control is labelled without a second group
+            label, and it is the live caller for the store's toggleSort. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          data-testid="inbox-sort-direction"
+          onClick={() => toggleSort(sortField)}
+          title={
+            sortDirection === "asc"
+              ? t(($) => $.sort.desc)
+              : t(($) => $.sort.asc)
           }
         >
-          <MoreHorizontal className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={handleMarkAllRead}>
-            <CheckCheck className="h-4 w-4" />
-            {t(($) => $.menu.mark_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
-            <Archive className="h-4 w-4" />
-            {t(($) => $.menu.archive_all)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveAllRead}>
-            <BookCheck className="h-4 w-4" />
-            {t(($) => $.menu.archive_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveCompleted}>
-            <ListChecks className="h-4 w-4" />
-            {t(($) => $.menu.archive_completed)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {sortDirection === "asc" ? (
+            <ArrowUp className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <IconButton
+                label={tCommon(($) => $.more_actions)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={handleMarkAllRead}>
+              <CheckCheck className="h-4 w-4" />
+              {t(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
+              <Archive className="h-4 w-4" />
+              {t(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveAllRead}>
+              <BookCheck className="h-4 w-4" />
+              {t(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <ListChecks className="h-4 w-4" />
+              {t(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       )}
     </PanelHeader>
   );

@@ -8,6 +8,7 @@ import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useCommandBarContextStore } from "@multica/core/command-bar";
+import { useInboxSortStore } from "@multica/core/inbox/store";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({
@@ -91,6 +92,16 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
 }));
 
+// Stand-in for the real sortInboxItems, whose ordering matrix is pinned in
+// core/inbox/queries.test.ts. It records what the page asked for and returns
+// the items untouched for every field except "priority", which it reverses so
+// a test can tell the sort's result apart from the raw list.
+const sortInboxItems = vi.hoisted(() =>
+  vi.fn((items: InboxItem[], field: string) =>
+    field === "priority" ? [...items].reverse() : [...items],
+  ),
+);
+
 vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
@@ -98,6 +109,7 @@ vi.mock("@multica/core/inbox/queries", () => ({
   snoozedInboxOptions: () => ({ queryKey: ["inbox", "workspace-1", "snoozed"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
+  sortInboxItems,
   useInboxUnreadCount: () => 2,
   findSnoozedInboxIssue: (rows: Array<{ issue_id: string }> | undefined, issueId: string | null) =>
     rows?.find((row) => row.issue_id === issueId),
@@ -265,7 +277,36 @@ vi.mock("./inbox-archive-all-dialog", async (importOriginal) => {
     },
   };
 });
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
+// The page's other tests lean on every key resolving to one shared string, so
+// every button there shares an accessible name. The sort labels are the
+// exception: the control has to tell Priority apart from Date and Unread, and
+// the direction button's title is its only accessible name. Resolving the
+// selectors against a sort-only bundle returns undefined for anything that is
+// not a sort key, which keeps the shared string everywhere else.
+vi.mock("../../i18n", async () => {
+  const sort = (await import("../../locales/en/inbox.json")).default.sort as Record<
+    string,
+    string
+  >;
+  // Any other key path walks into this and never yields a string, so
+  // everything outside the sort labels keeps the shared "Inbox".
+  const opaque: unknown = new Proxy(() => {}, {
+    get: () => opaque,
+    apply: () => opaque,
+  });
+  const bundle = new Proxy({ sort } as Record<string, unknown>, {
+    get: (target, key: string) => (key in target ? target[key] : opaque),
+  });
+  return {
+    useT: () => ({
+      t: (select: (ns: unknown) => unknown) => {
+        const label = select(bundle);
+        return typeof label === "string" ? label : "Inbox";
+      },
+    }),
+    useLocale: () => "en",
+  };
+});
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -328,6 +369,8 @@ function reset() {
   issueDetailProps.length = 0;
   layout.width = PHONE;
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  useInboxSortStore.setState({ sortField: "date", sortDirection: "desc" });
+  sortInboxItems.mockClear();
 }
 
 function inboxCommands() {
@@ -840,18 +883,26 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("list")).toBeNull();
   });
 
-  it("hides the batch-actions menu in the archived view", () => {
-    // Every batch action archives from the MAIN inbox; offering them over the
-    // archived list would read as "archive all of these" and do the opposite.
+  it("hides the sort and batch-actions controls in the archived view", () => {
+    // The archived list is paginated, so a client-side sort would only order
+    // the pages loaded so far; and every batch action archives from the MAIN
+    // inbox, so offering them over the archived list would read as "archive
+    // all of these" and do the opposite. Named by test id rather than by
+    // counting menus, so another header menu cannot silently satisfy this.
     reset();
     listData.archived = [item({ id: "archived-1", archived: true })];
-    const batchMenu = '[aria-haspopup="menu"]';
-    const { container: mainView } = render(<InboxPage />);
-    expect(mainView.querySelector(batchMenu)).not.toBeNull();
+
+    const mainView = render(<InboxPage />);
+    expect(screen.getByTestId("inbox-sort-trigger")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-sort-direction")).toBeInTheDocument();
+    expect(mainView.container.querySelector(':not(h1) > [aria-haspopup="menu"]')).not.toBeNull();
+    mainView.unmount();
 
     searchParams = new URLSearchParams("view=archived");
-    const { container: archivedView } = render(<InboxPage />);
-    expect(archivedView.querySelector(batchMenu)).toBeNull();
+    const archivedView = render(<InboxPage />);
+    expect(screen.queryByTestId("inbox-sort-trigger")).toBeNull();
+    expect(screen.queryByTestId("inbox-sort-direction")).toBeNull();
+    expect(archivedView.container.querySelector(':not(h1) > [aria-haspopup="menu"]')).toBeNull();
   });
 
   it("ignores a carried-over idle selection in the archive", () => {
@@ -868,7 +919,170 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("archived-busy");
     expect(screen.getByTestId("filter-chips").dataset.agent).toBe("");
   });
+  // The ordering matrix itself belongs to core/inbox/queries.test.ts and the
+  // store's persistence to core/inbox/store.test.ts. This layer owns the
+  // wiring: the persisted preference reaches the sort, and the list renders
+  // whatever the sort returns.
+  describe("inbox sorting", () => {
+    // The dropdown is a real Base UI menu, so its content only exists once the
+    // trigger is opened. The page's other tests never stand one up, so this is
+    // the only place that drives one.
+    function openSortMenu() {
+      fireEvent.click(screen.getByTestId("inbox-sort-trigger"));
+    }
 
+    it("sorts the deduplicated list with the persisted field and direction", () => {
+      reset();
+      listData.active = [
+        item({ id: "active-a", issue_id: "issue-a" }),
+        item({ id: "active-b", issue_id: "issue-b" }),
+      ];
+      useInboxSortStore.setState({ sortField: "priority", sortDirection: "asc" });
+
+      render(<InboxPage />);
+
+      expect(sortInboxItems).toHaveBeenLastCalledWith(
+        [expect.objectContaining({ id: "active-a" }), expect.objectContaining({ id: "active-b" })],
+        "priority",
+        "asc",
+      );
+      expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual([
+        "active-b",
+        "active-a",
+      ]);
+    });
+
+    it("re-sorts the list when the persisted preference changes", () => {
+      reset();
+      listData.active = [
+        item({ id: "active-a", issue_id: "issue-a" }),
+        item({ id: "active-b", issue_id: "issue-b" }),
+      ];
+
+      const { rerender } = render(<InboxPage />);
+      expect(sortInboxItems).toHaveBeenLastCalledWith(expect.any(Array), "date", "desc");
+      expect(screen.getAllByTestId("row")[0]).toHaveTextContent("active-a");
+
+      act(() => {
+        useInboxSortStore.getState().setSortField("priority");
+      });
+      rerender(<InboxPage />);
+
+      expect(sortInboxItems).toHaveBeenLastCalledWith(expect.any(Array), "priority", "desc");
+      expect(screen.getAllByTestId("row")[0]).toHaveTextContent("active-b");
+    });
+
+    it("never sorts the archived list", () => {
+      // The archived list is paginated: sorting the pages loaded so far would
+      // read as a sorted list while silently leaving the rest out of order. The
+      // memo short-circuits, so the sort is not invoked at all rather than
+      // invoked over a partial page set and discarded.
+      reset();
+      searchParams = new URLSearchParams("view=archived");
+      listData.archived = [item({ id: "archived-1", archived: true })];
+      useInboxSortStore.setState({ sortField: "priority", sortDirection: "desc" });
+
+      render(<InboxPage />);
+
+      expect(sortInboxItems).not.toHaveBeenCalled();
+      expect(screen.getByTestId("row")).toHaveTextContent("archived-1");
+    });
+
+    // A backend that predates the projection omits issue_priority from every
+    // row. Ranking them all equal would leave the list date-ordered while the
+    // menu still claimed Priority, so the option is withheld and a retained
+    // preference sorts by date until the projection shows up.
+    describe("on a backend without the issue_priority projection", () => {
+      function legacyItems() {
+        const withPriority = item({ id: "has-priority", issue_id: "issue-1", issue_priority: "urgent" });
+        const withoutProjection = item({ id: "legacy", issue_id: "issue-2" });
+        delete withoutProjection.issue_priority;
+        listData.active = [withPriority, withoutProjection];
+      }
+
+      it("withholds the Priority option", () => {
+        reset();
+        legacyItems();
+
+        render(<InboxPage />);
+        openSortMenu();
+
+        expect(screen.getAllByRole("menuitemradio")).toHaveLength(2);
+        expect(screen.queryByRole("menuitemradio", { name: "Priority" })).toBeNull();
+        expect(screen.getByRole("menuitemradio", { name: "Date" })).toBeInTheDocument();
+        expect(
+          screen.getByRole("menuitemradio", { name: "Unread first" }),
+        ).toBeInTheDocument();
+      });
+
+      it("sorts by date while a stale priority preference is retained", () => {
+        reset();
+        legacyItems();
+        useInboxSortStore.setState({ sortField: "priority", sortDirection: "desc" });
+
+        render(<InboxPage />);
+        openSortMenu();
+
+        // The stored field is kept (so it returns when the backend does), but
+        // the field handed to the sort is date, so the list is honestly ordered
+        // rather than claiming a priority sort it cannot perform.
+        expect(useInboxSortStore.getState().sortField).toBe("priority");
+        expect(sortInboxItems).toHaveBeenLastCalledWith(expect.any(Array), "date", "desc");
+        expect(screen.queryByRole("menuitemradio", { name: "Priority" })).toBeNull();
+        // The radio group shows the field that is actually applied.
+        expect(screen.getByRole("menuitemradio", { name: "Date" })).toHaveAttribute(
+          "aria-checked",
+          "true",
+        );
+      });
+
+      it("offers Priority again once the projection is proven", () => {
+        reset();
+        legacyItems();
+        listData.active = listData.active.map((entry) => ({
+          ...entry,
+          issue_priority: "low",
+        }));
+
+        render(<InboxPage />);
+        openSortMenu();
+
+        expect(
+          screen.getByRole("menuitemradio", { name: "Priority" }),
+        ).toBeInTheDocument();
+        expect(screen.getAllByRole("menuitemradio")).toHaveLength(3);
+      });
+    });
+
+    it("flips the direction from a single titled button", () => {
+      // One direction button rather than a second radio group: its title names
+      // the direction it switches to, so it is labelled without a second group
+      // label. It is also the live caller for the store's toggleSort.
+      reset();
+      listData.active = [item({ id: "active-a", issue_id: "issue-a" })];
+
+      render(<InboxPage />);
+
+      // The title names the direction the button switches to, so it is the
+      // control's accessible name and it moves with the state.
+      const button = screen.getByTestId("inbox-sort-direction");
+      expect(button).toHaveAttribute("title", "Ascending");
+      fireEvent.click(button);
+
+      expect(useInboxSortStore.getState().sortDirection).toBe("asc");
+      expect(screen.getByTestId("inbox-sort-direction")).toHaveAttribute(
+        "title",
+        "Descending",
+      );
+
+      fireEvent.click(screen.getByTestId("inbox-sort-direction"));
+      expect(useInboxSortStore.getState().sortDirection).toBe("desc");
+      expect(screen.getByTestId("inbox-sort-direction")).toHaveAttribute(
+        "title",
+        "Ascending",
+      );
+    });
+  });
   it("keeps the archive open when it is empty", () => {
     reset();
     searchParams = new URLSearchParams("view=archived");

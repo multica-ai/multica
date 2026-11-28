@@ -119,7 +119,14 @@ func TestRuntimeAccessGatesQueuedTaskClaims(t *testing.T) {
 			}
 			q := db.New(fixture.pool)
 
-			candidates, err := q.ListQueuedClaimCandidatesByRuntime(ctx, fixture.runtimeID)
+			// The fork parameterises the hold-expiry margin (see
+			// HoldExpiryMargin) so the sweeper and both claim paths cannot
+			// drift; upstream's single-argument form does not compile here.
+			// These fixtures never set hold_until, so the margin is inert.
+			candidates, err := q.ListQueuedClaimCandidatesByRuntime(ctx, db.ListQueuedClaimCandidatesByRuntimeParams{
+				RuntimeID:               fixture.runtimeID,
+				HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
+			})
 			if err != nil {
 				t.Fatalf("list singular candidates: %v", err)
 			}

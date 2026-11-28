@@ -148,6 +148,14 @@
     "long_offline": {
       "label": "Desconectada desde hace tiempo",
       "description": "Desconectado durante más de 6 días. Si esta máquina no volverá a conectarse, reasigna sus agentes a otro runtime o elimina este runtime."
+    },
+    "on_hold": {
+      "label": "En pausa",
+      "resumes_in": "Se reanuda en {{time}}",
+      "tooltip": "Este runtime está en pausa — las tareas se encolan y se reanudarán automáticamente.",
+      "resume_button": "Reanudar",
+      "resume_toast": "Runtime reanudado",
+      "resume_failed": "Error al reanudar el runtime"
     }
   },
   "detail": {

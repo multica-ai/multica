@@ -8,6 +8,14 @@
     "archive_all_read": "歸檔全部已讀",
     "archive_completed": "歸檔已完成"
   },
+  "sort": {
+    "sort_by": "排序方式",
+    "date": "日期",
+    "priority": "優先級",
+    "unread": "未讀優先",
+    "asc": "升序",
+    "desc": "降序"
+  },
   "filters": {
     "tooltip": "篩選收件箱",
     "active_count_other": "{{count}} 個篩選條件",

@@ -187,6 +187,7 @@ var (
 		"failed":    "failed",
 		"cancelled": "cancelled",
 		"blocked":   "blocked",
+		"archived":  "archived",
 		"other":     "other",
 	}
 	knownTokenTypes = map[string]string{

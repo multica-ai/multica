@@ -3,6 +3,9 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
+import { workspaceListOptions } from "@/data/queries/workspaces";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
+import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
 
 /**
  * Resolve actor (member / agent / squad) name + avatar URL from the
@@ -14,6 +17,12 @@ import { squadListOptions } from "@/data/queries/squads";
  */
 export function useActorLookup() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  // Use select to derive only the gravatar setting — avoids re-renders
+  // when unrelated workspace data changes.
+  const gravatarEnabled = useQuery({
+    ...workspaceListOptions(),
+    select: (data) => deriveGravatarSettings(data.find((w) => w.id === wsId) ?? null).enabled,
+  }).data ?? false;
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
@@ -40,7 +49,12 @@ export function useActorLookup() {
   ): string | null => {
     if (!type || !id) return null;
     if (type === "member") {
-      return members.find((m) => m.user_id === id)?.avatar_url ?? null;
+      const m = members.find((m) => m.user_id === id);
+      return resolveAvatarUrl({
+        avatarUrl: m?.avatar_url,
+        email: m?.email,
+        gravatarEnabled,
+      });
     }
     if (type === "agent") {
       return agents.find((a) => a.id === id)?.avatar_url ?? null;

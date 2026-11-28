@@ -42,6 +42,14 @@
     "delete": "삭제",
     "unsubscribe_archive": "구독 해제 후 보관"
   },
+  "sort": {
+    "sort_by": "정렬 기준",
+    "date": "날짜",
+    "priority": "우선순위",
+    "unread": "읽지 않음 우선",
+    "asc": "오름차순",
+    "desc": "내림차순"
+  },
   "list": {
     "loading_selection": "알림을 불러오는 중…",
     "empty": "알림이 없습니다",

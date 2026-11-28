@@ -1062,6 +1062,7 @@
       "runtime_cli_timeout": "Délai du CLI du runtime local dépassé",
       "environment_prepare_failed": "Impossible de préparer l'environnement d'exécution",
       "runtime_access_denied": "Cet agent ne peut pas s'exécuter sur son runtime privé et n'a donc pas pu répondre. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
+      "session_limit": "Limite de session du fournisseur atteinte",
       "invalid_task_identity": "Identité d'exécution incohérente",
       "agent_error_provider_auth_or_access": "Échec de l'authentification auprès du fournisseur",
       "agent_error_provider_quota_limit": "Quota du fournisseur épuisé",

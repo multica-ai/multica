@@ -38,6 +38,9 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
 });
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
+vi.mock("@multica/core/gravatar/use-gravatar-settings", () => ({
+  useGravatarSettings: () => ({ enabled: false }),
+}));
 vi.mock("../common/use-language-switch", () => ({
   useLanguageSwitch: () => ({
     currentLocale: "en",
