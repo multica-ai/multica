@@ -124,6 +124,7 @@
     "runtime_access_denied": "This agent's private runtime isn't accessible, so it couldn't reply. Make the runtime public, or bind the agent to an accessible runtime.",
     "runtime_access_revoked": "Runtime access was revoked. Bind the agent to an accessible runtime before starting another run.",
     "invalid_task_identity": "Run identity mismatch",
+    "session_limit": "Provider session limit reached",
     "agent_error_provider_auth_or_access": "Provider auth failed",
     "agent_error_provider_quota_limit": "Provider quota exhausted",
     "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",
