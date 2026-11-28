@@ -24,6 +24,7 @@ export const TOOLS: { name: string; resume: boolean; mcp: boolean; model: boolea
   { name: "Devin CLI", resume: true, mcp: true, model: true },
   { name: "OpenClaw", resume: true, mcp: true, model: true },
   { name: "OpenCode", resume: true, mcp: true, model: true },
+  { name: "San", resume: true, mcp: true, model: false },
   { name: "Pi", resume: true, mcp: true, model: true },
   { name: "Oh-My-Pi", resume: true, mcp: true, model: true },
   { name: "Qoder CLI", resume: true, mcp: true, model: true },

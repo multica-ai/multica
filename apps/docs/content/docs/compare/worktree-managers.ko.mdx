@@ -24,7 +24,7 @@ Conductor, Claude Squad, Orca는 개발자 한 명이 여러 코딩 에이전트
 | 작업 단위 | 공유 보드의 태스크 | 워크스페이스(worktree와 브랜치) | 세션(tmux와 worktree) | worktree | 의존성을 가진 bead(태스크) |
 | 병렬 작업 충돌 방지 | 실행마다 저장소 체크아웃이 담긴 전용 디렉터리. 로컬 디렉터리의 격리된 worktree도 사용 가능 | 워크스페이스마다 git worktree | 세션마다 git worktree | 태스크마다 git worktree | 실행은 하지 않음. 태스크를 원자적으로 확보 |
 | 에이전트가 실행되는 곳 | 연결한 어떤 컴퓨터든. 동료와 런타임 공유 가능 | 여러분의 Mac. 클라우드 워크스페이스도 있음 | 여러분의 터미널 | 여러분의 머신, SSH 호스트, 원격 Orca 서버, 클라우드 VM | 에이전트가 실행되는 곳 어디든 |
-| 도구 | [31가지 AI 코딩 도구](/providers) | Claude Code, Codex, Cursor Agent, OpenCode | Claude Code, Codex, OpenCode, Amp 등 터미널 에이전트 | 자신의 Claude Code, Codex, Grok, Antigravity 등 CLI | 그 CLI를 호출할 수 있는 모든 에이전트 |
+| 도구 | [32가지 AI 코딩 도구](/providers) | Claude Code, Codex, Cursor Agent, OpenCode | Claude Code, Codex, OpenCode, Amp 등 터미널 에이전트 | 자신의 Claude Code, Codex, Grok, Antigravity 등 CLI | 그 CLI를 호출할 수 있는 모든 에이전트 |
 | 팀 공유 | 가능: 태스크, 에이전트, 런타임, 스킬, 역할, 에이전트별 Access 공유 | — | — | 봇이 Slack, Linear, GitHub의 요청을 받아 소유자의 에이전트로 실행 | Dolt 원격 저장소로 동기화 |
 | 앱 안에서 diff 리뷰 | 없음. 리뷰는 pull request에서 하고, 실행 로그는 태스크에 남음 | 있음 | 있음 | 있음 | — |
 | 반복 작업과 트리거 | [오토파일럿](/autopilots)이 일정이나 webhook으로 실행 | — | — | 봇 일정과 트리거(pull request, 체크 실패, webhook), 예약 자동화 | — |

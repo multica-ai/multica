@@ -207,7 +207,7 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 ## 対応するエージェント CLI
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+32 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
 デーモンはマシン上の対応 CLI をすべて検出し、同じワークスペース内でもエージェントごとに別の CLI を使えます。
 
 | プロバイダー | CLI | プロバイダー | CLI |
@@ -227,7 +227,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
 | Amp | `amp` | Factory Droid | `droid` |
-| ZCode | `zcode` / ZCode Desktop | | |
+| ZCode | `zcode` / ZCode Desktop | San | `san` |
 
 Gemini CLI には対応していません。組み込みツールから削除されました。
 
