@@ -1787,6 +1787,8 @@ func TestCaptureUserSnapshotExcludesMulticaSidecars(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, ".agent_context", "brief.md"), "another task's brief\n")
 	writeFile(t, filepath.Join(repo, "sub", ".multica", "state.json"), "{}\n")
+	writeFile(t, filepath.Join(repo, "sub", ".agents", "plugins", "multica", "mcp_config.json"), "{}\n")
+	writeFile(t, filepath.Join(repo, ".agents", "skills", "user", "SKILL.md"), "---\nname: user\n")
 	writeFile(t, filepath.Join(repo, "real.txt"), "the user's file\n")
 
 	head := gitRun(t, repo, "rev-parse", "HEAD")
@@ -1795,12 +1797,12 @@ func TestCaptureUserSnapshotExcludesMulticaSidecars(t *testing.T) {
 		t.Fatalf("captureUserSnapshot: %v", err)
 	}
 	listed := gitRun(t, repo, "ls-tree", "-r", "--name-only", snapshot)
-	for _, unwanted := range []string{".agent_context/brief.md", "sub/.multica/state.json"} {
+	for _, unwanted := range []string{".agent_context/brief.md", "sub/.multica/state.json", "sub/.agents/plugins/multica/mcp_config.json"} {
 		if strings.Contains(listed, unwanted) {
 			t.Errorf("snapshot carries the sidecar %s:\n%s", unwanted, listed)
 		}
 	}
-	if !strings.Contains(listed, "real.txt") {
+	if !strings.Contains(listed, "real.txt") || !strings.Contains(listed, ".agents/skills/user/SKILL.md") {
 		t.Errorf("snapshot dropped the user's own file:\n%s", listed)
 	}
 }

@@ -82,6 +82,9 @@ var agentGitExcludePatterns = []string{
 	".pi",
 	".omp",
 	".zcode",
+	// Only the managed Antigravity MCP plugin, which can carry credentials;
+	// a repository's own .agents/skills and .agents/rules stay visible.
+	".agents/plugins/multica",
 }
 
 const repoCacheGitTimeout = 10 * time.Minute

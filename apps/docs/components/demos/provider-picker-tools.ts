@@ -6,7 +6,7 @@
 // (server/pkg/agent/models.go). Keep in step with the "Supported tools"
 // table on the providers page; provider-picker-tools.test.ts checks every locale.
 export const TOOLS: { name: string; resume: boolean; mcp: boolean; model: boolean }[] = [
-  { name: "Antigravity", resume: true, mcp: false, model: true },
+  { name: "Antigravity", resume: true, mcp: true, model: true },
   { name: "Claude Code", resume: true, mcp: true, model: true },
   { name: "CodeBuddy", resume: true, mcp: true, model: true },
   { name: "CodeArts", resume: true, mcp: true, model: true },

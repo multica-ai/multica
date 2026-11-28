@@ -1287,11 +1287,12 @@ func seedSnapshotIndex(gitRoot, path string) bool {
 // Matched at any depth, because an in_place resource may point at a
 // subdirectory of this repo.
 func snapshotExcludes() []string {
-	specs := make([]string, 0, len(multicaSidecarDirNames))
+	specs := make([]string, 0, len(multicaSidecarDirNames)+1)
 	for _, name := range multicaSidecarDirNames {
 		specs = append(specs, ":(exclude,glob)**/"+name+"/**")
 	}
-	return specs
+	// The managed Antigravity MCP plugin holds credentials.
+	return append(specs, ":(exclude,glob)**/.agents/plugins/multica/**")
 }
 
 // branchOwner is the conversation a task branch belongs to. Recorded with the

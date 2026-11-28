@@ -185,6 +185,7 @@ beforeEach(() => {
 
 describe("AgentAdvancedSettings MCP section visibility", () => {
   it.each([
+    ["Antigravity", "antigravity"],
     ["Claude", "claude"],
     ["Codex", "codex"],
     ["Cursor", "cursor"],

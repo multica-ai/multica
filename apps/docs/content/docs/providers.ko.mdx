@@ -21,7 +21,7 @@ Multica는 31개 AI 코딩 도구를 지원합니다. 사용 중인 도구를 �
 
 | 도구 | 감지 명령 | 세션 복원 | Multica의 MCP 관리 | Multica에서 모델 선택 | 스킬 주입 위치 |
 |---|---|---:|---:|---:|---|
-| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Antigravity | `agy` | ✓ | ✓ | ✓ | `.agents/skills/` |
 | Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
 | CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
 | CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
@@ -134,7 +134,7 @@ Multica는 도구가 반환한 세션 식별자를 저장합니다. 다음에 �
 
 ## MCP 설정
 
-Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, ZeroClaw는 현재 에이전트의 MCP 설정을 읽지 않으므로 에이전트를 만들 때 이 항목이 표시되지 않습니다.
+Amp, Factory Droid, GitHub Copilot CLI, DevEco Code, Muse Code, ZeroClaw는 현재 에이전트의 MCP 설정을 읽지 않으므로 에이전트를 만들 때 이 항목이 표시되지 않습니다.
 
 Pi에 관리형 MCP 설정을 전달하려면 Pi 0.99.0 이상이 필요합니다. 이전 Pi 버전에서도 MCP 설정이 없는 에이전트는 계속 실행할 수 있습니다.
 
