@@ -190,10 +190,9 @@ type Cache struct {
 // transport deadline expires.
 var ErrRepoBusy = errors.New("repository is busy")
 
-// ErrCheckoutPathTaken means the checkout's target path already holds a
-// Multica checkout of a different repository with the same directory name.
-// CreateWorktree reports it before touching that checkout.
-var ErrCheckoutPathTaken = errors.New("checkout path holds another repository")
+// ErrCheckoutPathTaken means an existing file, directory, or checkout of a
+// different repository occupies the target path.
+var ErrCheckoutPathTaken = errors.New("checkout path is already in use")
 
 // Activity is the path-free repository coordination state exposed through the
 // daemon health endpoint. It is diagnostic only.
@@ -1022,7 +1021,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// branch below rewrites what it finds there — origin, reset, clean — so
 	// another repository's checkout must be refused before any of them runs.
 	if other := otherRepoCheckout(ctx, barePath, worktreePath); other != "" {
-		return nil, fmt.Errorf("%w: %s already holds %s, not %s; run the checkout from a different directory",
+		return nil, fmt.Errorf("%w: %s already holds %s, not %s",
 			ErrCheckoutPathTaken, worktreePath, other, redact.Text(params.RepoURL))
 	}
 
@@ -1222,8 +1221,8 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return nil, err
 		}
 	}
-	if _, err := os.Stat(checkoutPath); err == nil {
-		return nil, fmt.Errorf("checkout path already exists and is not a Multica isolated checkout: %s", checkoutPath)
+	if _, err := os.Lstat(checkoutPath); err == nil {
+		return nil, fmt.Errorf("%w: %s is not a Multica isolated checkout", ErrCheckoutPathTaken, checkoutPath)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("stat checkout path: %w", err)
 	}
@@ -1600,8 +1599,8 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 	// misclassified as a branch collision, causing the retry to leak branches
 	// into the bare repo. Fail cleanly here instead. The caller is expected
 	// to route reused workdirs through updateExistingWorktreeContext via isGitWorktree.
-	if _, err := os.Stat(worktreePath); err == nil {
-		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
+	if _, err := os.Lstat(worktreePath); err == nil {
+		return "", fmt.Errorf("%w: %s is not a valid git worktree", ErrCheckoutPathTaken, worktreePath)
 	}
 
 	branchExisted, err := worktreeBranchExistsContext(ctx, gitRoot, branchName)

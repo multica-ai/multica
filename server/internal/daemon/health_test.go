@@ -909,6 +909,69 @@ func TestRepoCheckoutOfSameNamedRepoInsideCheckoutLeavesItAlone(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutOccupiedPathReportsConflict(t *testing.T) {
+	t.Parallel()
+	for _, mode := range repoCheckoutModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createNamedDaemonTestRepo(t, "source")
+			h := newRepoCheckoutHarness(t, mode.isolated, sourceRepo)
+			occupied := filepath.Join(h.root, "repo")
+			if err := os.Mkdir(occupied, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			note := filepath.Join(occupied, "local-work.txt")
+			if err := os.WriteFile(note, []byte("keep local work"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			status, _, body := h.checkout(t, sourceRepo, h.root, true)
+			if status != http.StatusConflict || !strings.Contains(body, "run the checkout from a different directory") {
+				t.Fatalf("occupied checkout: got %d %s, want 409 with recovery instructions", status, body)
+			}
+			if data, err := os.ReadFile(note); err != nil || string(data) != "keep local work" {
+				t.Fatalf("checkout changed the existing files: %q, %v", data, err)
+			}
+
+			alternate := filepath.Join(h.root, "another-checkout")
+			if err := os.Mkdir(alternate, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			h.mustCheckout(t, sourceRepo, alternate)
+		})
+	}
+}
+
+func TestRepoCheckoutDanglingSymlinkReportsConflict(t *testing.T) {
+	t.Parallel()
+	for _, mode := range repoCheckoutModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createNamedDaemonTestRepo(t, "source")
+			h := newRepoCheckoutHarness(t, mode.isolated, sourceRepo)
+			destination := filepath.Join(h.root, "repo")
+			missingTarget := filepath.Join(h.root, "missing")
+			if err := os.Symlink(missingTarget, destination); err != nil {
+				if runtime.GOOS == "windows" {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+
+			status, _, body := h.checkout(t, sourceRepo, h.root, true)
+			if status != http.StatusConflict || !strings.Contains(body, "run the checkout from a different directory") {
+				t.Errorf("dangling checkout link: got %d %s, want 409 with recovery instructions", status, body)
+			}
+			if got, err := os.Readlink(destination); err != nil || got != missingTarget {
+				t.Fatalf("checkout changed the destination link: got %q (%v), want %q", got, err, missingTarget)
+			}
+			if _, err := os.Stat(missingTarget); !os.IsNotExist(err) {
+				t.Fatalf("checkout should leave the target absent, got %v", err)
+			}
+		})
+	}
+}
+
 func TestRepoCheckoutExplicitRefOverridesProjectDefault(t *testing.T) {
 	t.Parallel()
 
