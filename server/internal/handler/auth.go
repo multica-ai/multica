@@ -30,11 +30,16 @@ import (
 // SignupError represents signup restriction errors
 type SignupError struct {
 	Message string
+	// cause lets a SignupError with a tailored message still match one of
+	// the sentinel errors below via errors.Is.
+	cause error
 }
 
 func (e SignupError) Error() string {
 	return e.Message
 }
+
+func (e SignupError) Unwrap() error { return e.cause }
 
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
@@ -265,7 +270,51 @@ func signupSourceFromRequest(r *http.Request) string {
 	return decoded
 }
 
+// strictEmailAllowlist reports whether EMAIL_ALLOWLIST_STRICT is in effect:
+// the flag is on and at least one allowlist is configured.
+func (h *Handler) strictEmailAllowlist() bool {
+	return h.cfg.EmailAllowlistStrict && (len(h.cfg.AllowedEmails) > 0 || len(h.cfg.AllowedEmailDomains) > 0)
+}
+
+// checkStrictEmailAllowlist rejects an email outside the configured
+// allowlists when EMAIL_ALLOWLIST_STRICT is in effect. It returns nil when
+// strict mode is off. The error names the allowed domains but never the
+// entries of ALLOWED_EMAILS.
+func (h *Handler) checkStrictEmailAllowlist(email string) error {
+	if !h.strictEmailAllowlist() {
+		return nil
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	domain := ""
+	if at := strings.Index(email, "@"); at > 0 {
+		domain = email[at+1:]
+	}
+	if contains(h.cfg.AllowedEmails, email) || contains(h.cfg.AllowedEmailDomains, domain) {
+		return nil
+	}
+	if len(h.cfg.AllowedEmailDomains) == 0 {
+		return SignupError{
+			Message: "email address not allowed on this instance; contact your administrator",
+			cause:   ErrEmailNotAllowed,
+		}
+	}
+	domains := make([]string, 0, len(h.cfg.AllowedEmailDomains))
+	for _, d := range h.cfg.AllowedEmailDomains {
+		domains = append(domains, "@"+strings.ToLower(d))
+	}
+	return SignupError{
+		Message: "email address not allowed on this instance; allowed domains: " + strings.Join(domains, ", "),
+		cause:   ErrEmailNotAllowed,
+	}
+}
+
 func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUser bool) error {
+	// Strict mode: the allowlist is the whole decision, for new and existing
+	// users alike, and pending invitations do not bypass it.
+	if h.strictEmailAllowlist() {
+		return h.checkStrictEmailAllowlist(email)
+	}
+
 	if !isNewUser {
 		return nil // existing users always allowed to log in
 	}
@@ -355,14 +404,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// User already exists → always allowed to login
+		// User already exists → allowed to log in unless
+		// EMAIL_ALLOWLIST_STRICT rejects the address below.
 		if auth.IsTemporarilyDisabledUser(uuidToString(existingUser.ID), existingUser.Email) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 			return
 		}
 		isNewUser := false
 		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
-			// This should rarely happen, but handle it anyway
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
@@ -549,7 +598,13 @@ func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, ErrSignupProhibited):
 		writeErrorCode(w, http.StatusForbidden, googleLoginCodeSignupProhibited, ErrSignupProhibited.Error())
 	case errors.Is(err, ErrEmailNotAllowed):
-		writeErrorCode(w, http.StatusForbidden, googleLoginCodeEmailNotAllowed, ErrEmailNotAllowed.Error())
+		// Keep the tailored EMAIL_ALLOWLIST_STRICT message when there is one.
+		message := ErrEmailNotAllowed.Error()
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			message = signupErr.Error()
+		}
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeEmailNotAllowed, message)
 	default:
 		var signupErr SignupError
 		if !errors.As(err, &signupErr) {

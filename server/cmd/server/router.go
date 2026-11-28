@@ -455,6 +455,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowSignup:                    os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:                  splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:            splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		EmailAllowlistStrict:           envBool("EMAIL_ALLOWLIST_STRICT", false),
 		DisableWorkspaceCreation:       os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		WorkspaceCreationAllowedEmails: splitAndTrim(os.Getenv("WORKSPACE_CREATION_ALLOWED_EMAILS")),
 		VCSIntegrationEnabled:          os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
@@ -475,6 +476,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMDisableThinking:             opts.LLMDisableThinking,
 		ServerVersion:                  normalizeServerVersion(version),
 		GitExtraCACerts:                gitca.Load(slog.Default()),
+	}
+	if signupConfig.EmailAllowlistStrict && len(signupConfig.AllowedEmails) == 0 && len(signupConfig.AllowedEmailDomains) == 0 {
+		slog.Warn("EMAIL_ALLOWLIST_STRICT has no effect because ALLOWED_EMAILS and ALLOWED_EMAIL_DOMAINS are both empty")
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()

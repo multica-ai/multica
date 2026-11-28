@@ -145,6 +145,8 @@ Google Console 與 `GOOGLE_REDIRECT_URI` 中的地址必須完全一致，包括
 4. 否則，如果該信箱有待接受且未過期的工作區邀請，允許；
 5. 其他情況均拒絕。
 
+已有使用者不經過這項檢查。如需讓白名單同樣約束已有使用者和邀請，見[嚴格白名單](#strict-allowlist)。
+
 常見配置：
 
 ```dotenv
@@ -169,6 +171,29 @@ ALLOWED_EMAILS=partner@example.net
 普通受邀人無需再加入 `ALLOWED_EMAILS`，也無需重啟伺服器。帳號建立後，仍需透過正常邀請流程接受邀請才能加入工作區。
 
 撤銷邀請不會刪除透過該邀請建立的帳號，也不會阻止該已有帳號登入。
+
+## 嚴格白名單 [#strict-allowlist]
+
+預設情況下，白名單只過濾新註冊。設定 `EMAIL_ALLOWLIST_STRICT=true` 後，`ALLOWED_EMAILS` 和 `ALLOWED_EMAIL_DOMAINS` 對所有帳號生效：
+
+- 申請登入碼、校驗登入碼和 Google 登入都會拒絕兩個名單都未命中的信箱，包括已有帳號的信箱。檢查發生在傳送登入碼或建立會話之前。
+- 待接受的邀請不再允許名單外的信箱註冊。
+- 邀請名單外的信箱加入工作區會回傳 403。
+- 命中任一名單的信箱在 `ALLOW_SIGNUP=false` 時仍可註冊。
+
+```dotenv
+EMAIL_ALLOWLIST_STRICT=true
+ALLOWED_EMAIL_DOMAINS=company.com
+ALLOWED_EMAILS=partner@example.net
+```
+
+兩個名單都為空時，這個開關不起作用，伺服器會在啟動時打出警告。
+
+錯誤訊息會列出 `ALLOWED_EMAIL_DOMAINS` 中的網域，但不會列出 `ALLOWED_EMAILS` 中的條目。只配置了 `ALLOWED_EMAILS` 時，錯誤訊息會提示使用者聯絡管理員。Google 登入保留 `email_not_allowed` 錯誤碼，Web 端照常顯示該錯誤碼對應的提示。
+
+<Callout type="warning">
+開啟這個開關，或從名單中移除某個信箱，都不會撤銷此前簽發的會話或個人訪問令牌。會話會滑動續期，持續使用的會話會一直續下去。發給名單外信箱的待接受邀請也不會被刪除，只是不能再用來註冊。如需立即切斷這些使用者的存取，請將他們移出所在工作區。
+</Callout>
 
 ## 登入有效期
 

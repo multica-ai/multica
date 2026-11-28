@@ -145,6 +145,8 @@ Google Console과 `GOOGLE_REDIRECT_URI`의 주소는 프로토콜, 포트, 마�
 4. 그 외에도 해당 이메일에 대기 중이며 만료되지 않은 워크스페이스 초대가 있으면 허용합니다.
 5. 나머지는 거부합니다.
 
+기존 사용자는 이 확인을 거치지 않습니다. allowlist를 기존 사용자와 초대에도 적용하려면 [엄격한 allowlist](#strict-allowlist)를 참고하세요.
+
 일반적인 설정:
 
 ```dotenv
@@ -169,6 +171,29 @@ ALLOWED_EMAILS=partner@example.net
 일반 초대 사용자를 `ALLOWED_EMAILS`에 추가하거나 서버를 다시 시작할 필요가 없습니다. 워크스페이스에 참여하려면 계정을 만든 뒤에도 정상 초대 흐름에서 초대를 수락해야 합니다.
 
 초대를 취소해도 해당 초대로 이미 만든 계정은 삭제되지 않으며 기존 계정의 로그인도 차단되지 않습니다.
+
+## 엄격한 allowlist [#strict-allowlist]
+
+기본적으로 allowlist는 새 가입만 걸러냅니다. `EMAIL_ALLOWLIST_STRICT=true`로 설정하면 `ALLOWED_EMAILS`와 `ALLOWED_EMAIL_DOMAINS`가 모든 계정에 적용됩니다.
+
+- 로그인 코드 요청, 코드 확인, Google 로그인 모두 두 목록 어디에도 일치하지 않는 이메일을 거부하며, 이미 계정이 있는 이메일도 마찬가지입니다. 이 확인은 코드를 보내거나 세션을 만들기 전에 이루어집니다.
+- 대기 중인 초대가 있어도 목록 밖의 이메일은 더 이상 가입할 수 없습니다.
+- 목록 밖의 이메일을 워크스페이스에 초대하면 403을 반환합니다.
+- 어느 한 목록에 일치하는 이메일은 `ALLOW_SIGNUP=false`여도 계속 가입할 수 있습니다.
+
+```dotenv
+EMAIL_ALLOWLIST_STRICT=true
+ALLOWED_EMAIL_DOMAINS=company.com
+ALLOWED_EMAILS=partner@example.net
+```
+
+두 목록이 모두 비어 있으면 이 스위치는 효과가 없으며, 이 경우 서버가 시작 시 경고를 기록합니다.
+
+오류 메시지는 `ALLOWED_EMAIL_DOMAINS`의 도메인을 보여 주지만 `ALLOWED_EMAILS`의 항목은 보여 주지 않습니다. `ALLOWED_EMAILS`만 설정한 경우에는 관리자에게 문의하라고 안내합니다. Google 로그인은 `email_not_allowed` 오류 코드를 유지하며, Web 앱은 이 코드에 대한 기존 메시지를 표시합니다.
+
+<Callout type="warning">
+스위치를 켜거나 목록에서 이메일을 제거해도 이전에 발급된 세션이나 개인 액세스 토큰은 취소되지 않습니다. 세션은 슬라이딩 갱신되므로 계속 사용 중인 세션은 계속 갱신됩니다. 목록 밖 이메일로 보낸 대기 중인 초대도 삭제되지 않으며, 가입에 사용할 수 없게 될 뿐입니다. 즉시 접근을 끊어야 한다면 해당 사용자를 워크스페이스에서 제거하세요.
+</Callout>
 
 ## 로그인 유효 기간
 

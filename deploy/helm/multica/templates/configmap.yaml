@@ -20,6 +20,7 @@ data:
   ALLOW_SIGNUP: {{ .Values.backend.config.allowSignup | quote }}
   ALLOWED_EMAILS: {{ .Values.backend.config.allowedEmails | quote }}
   ALLOWED_EMAIL_DOMAINS: {{ .Values.backend.config.allowedEmailDomains | quote }}
+  EMAIL_ALLOWLIST_STRICT: {{ .Values.backend.config.emailAllowlistStrict | quote }}
   DISABLE_WORKSPACE_CREATION: {{ .Values.backend.config.disableWorkspaceCreation | quote }}
   WORKSPACE_CREATION_ALLOWED_EMAILS: {{ .Values.backend.config.workspaceCreationAllowedEmails | quote }}
   DO_NOT_TRACK: {{ .Values.backend.config.doNotTrack | quote }}

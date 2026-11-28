@@ -150,6 +150,9 @@ backend:
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
+    # Set true to apply allowedEmails / allowedEmailDomains to existing users
+    # and invitations too, not just new signups. No effect while both are empty.
+    emailAllowlistStrict: false
     # Self-host gate (#3433): set true to make POST /api/workspaces 403 for
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
