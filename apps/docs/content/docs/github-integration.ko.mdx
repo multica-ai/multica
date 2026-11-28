@@ -161,6 +161,7 @@ Repository permissions:
 다음 이벤트를 구독합니다.
 
 - **Pull request**
+- 연결된 미완료 이슈에 리뷰 피드백과 인라인 코멘트를 동기화하고 담당 개발 에이전트를 깨울 **Pull request reviews**, **Pull request review comments** (사람의 개입 없이는 PR당 연속 최대 2라운드까지 자동 실행)
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
 PR snapshot은 Pull requests, Checks 및 Commit statuses REST API로 가져옵니다. Contents 권한은 필요하지 않습니다. 선택 사항인 Actions 권한을 부여하면 해당 커밋의 워크플로 실행도 읽습니다. 부여하지 않으면 같은 워크플로의 새 실행이 통과해도 취소된 이전 실행은 실패로 계산됩니다.

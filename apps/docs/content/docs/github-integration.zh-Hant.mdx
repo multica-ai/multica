@@ -163,6 +163,7 @@ Repository permissions：
 訂閱以下事件：
 
 - **Pull request**；
+- **Pull request reviews** 和 **Pull request review comments**，用於將可操作的審查意見與行級評論同步到已關聯的未完結工單，並喚醒負責該 PR 的開發智慧體（同一 PR 無人工介入時最多連續自動觸發 2 輪）；
 - **Check suite**、**Check run** 和 **Status**，用於觸發 CI 與可合併性重新整理。
 
 PR 快照透過 Pull requests、Checks 和 Commit statuses 的 REST API 獲取，不需要 Contents 權限。授予可選的 Actions 權限後，還會讀取該提交的工作流執行記錄；未授予時，即使同一工作流的新執行已通過，被取消的舊執行仍按失敗計算。

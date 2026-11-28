@@ -1058,6 +1058,29 @@ type GithubPendingInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubPrReviewDelivery struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	PullRequestID   pgtype.UUID        `json:"pull_request_id"`
+	EventType       string             `json:"event_type"`
+	GithubEventID   int64              `json:"github_event_id"`
+	CommentID       pgtype.UUID        `json:"comment_id"`
+	TriggeredTaskID pgtype.UUID        `json:"triggered_task_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type GithubPrReviewWakeupState struct {
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	PullRequestID       pgtype.UUID        `json:"pull_request_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ConsecutiveRounds   int32              `json:"consecutive_rounds"`
+	ActiveRoundTaskID   pgtype.UUID        `json:"active_round_task_id"`
+	ActiveRoundReviewID pgtype.Int8        `json:"active_round_review_id"`
+	LastTriggeredAt     pgtype.Timestamptz `json:"last_triggered_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubPullRequest struct {
 	ID                  pgtype.UUID        `json:"id"`
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`

@@ -466,6 +466,12 @@ deleted_github_check_suites AS (
 deleted_pending_github_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
+deleted_github_pr_review_deliveries AS (
+    DELETE FROM github_pr_review_delivery WHERE workspace_id = $1
+),
+deleted_github_pr_review_wakeup_states AS (
+    DELETE FROM github_pr_review_wakeup_state WHERE workspace_id = $1
+),
 deleted_channel_task_deliveries AS (
     DELETE FROM channel_task_delivery
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)

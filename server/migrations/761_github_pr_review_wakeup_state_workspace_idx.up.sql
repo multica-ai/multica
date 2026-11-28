@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_github_pr_review_wakeup_state_workspace ON github_pr_review_wakeup_state (workspace_id);

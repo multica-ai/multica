@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_github_pr_review_delivery_workspace;
