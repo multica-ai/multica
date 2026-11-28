@@ -2109,8 +2109,73 @@ func TestGateResumeToReachableSession(t *testing.T) {
 	}
 }
 
+func TestCodexResumeAfterReadOnlyLocalWorktreeTurn(t *testing.T) {
+	repo := createGCGitRepo(t)
+	workspacesRoot := t.TempDir()
+	t.Setenv("CODEX_HOME", t.TempDir())
+	taskCtx := execenv.TaskContextForEnv{IssueID: "issue-1", AgentID: "agent-1"}
+	prepare := func(taskID string) *execenv.Environment {
+		t.Helper()
+		env, err := execenv.Prepare(execenv.PrepareParams{
+			WorkspacesRoot:  workspacesRoot,
+			WorkspaceID:     "workspace-1",
+			TaskID:          taskID,
+			IssueIdentifier: "TEST-1",
+			AgentName:       "Test",
+			Provider:        "codex",
+			LocalWorktree:   &execenv.LocalWorktreeParams{LocalPath: repo},
+			Task:            taskCtx,
+		}, slog.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(env.ReleaseLock)
+		return env
+	}
+
+	const sessionID = "session-1"
+	first := prepare("aaaa1111-2222-3333-4444-5555666677aa")
+	rollout := filepath.Join(first.CodexHome, "sessions", "rollout-2026-10-13T00-00-00-"+sessionID+".jsonl")
+	if err := os.WriteFile(rollout, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := execenv.CleanupSidecars(first.RootDir); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := first.LocalWorktree.Finalize(slog.Default())
+	if err != nil || outcome.Branch != "" {
+		t.Fatalf("read-only worktree finalization = %+v, %v", outcome, err)
+	}
+	if _, err := os.Stat(first.WorkDir); !os.IsNotExist(err) {
+		t.Fatalf("first worktree still exists or is inaccessible: %v", err)
+	}
+
+	second := prepare("bbbb1111-2222-3333-4444-5555666677bb")
+	t.Cleanup(func() { second.LocalWorktree.Discard(slog.Default()) })
+	if second.LocalWorktree.Continued || second.WorkDir == first.WorkDir {
+		t.Fatal("follow-up did not get a fresh worktree")
+	}
+	if !execenv.CodexResumeRolloutPresent(second.CodexHome, sessionID) {
+		t.Fatal("follow-up cannot see the first turn's rollout")
+	}
+
+	task := Task{PriorSessionID: sessionID, PriorWorkDir: first.WorkDir, PriorReadOnlyWorktreeDir: repo}
+	taskCtx.PriorSessionResumed = true
+	store := execenv.CodexSessionStorePath("", taskCtx)
+	assignment := &localDirectoryAssignment{AbsPath: repo}
+	if gateResumeToReachableSession(&task, &taskCtx, "codex", second.WorkDir, true, false,
+		codexWorktreeResumeEligible(second, store, assignment, task.PriorReadOnlyWorktreeDir), false, slog.Default()) {
+		gateCodexResumeToRolloutPresence(&task, &taskCtx, "codex", second.CodexHome, slog.Default())
+	}
+	if task.PriorSessionID != sessionID || !taskCtx.PriorSessionResumed || taskCtx.PriorSessionResumeUnavailable {
+		t.Fatalf("follow-up dropped the first turn's session %q", sessionID)
+	}
+}
+
 func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 	priorDir, workDir, codexHome := t.TempDir(), t.TempDir(), t.TempDir()
+	localDir := t.TempDir()
+	assignment := &localDirectoryAssignment{AbsPath: localDir}
 	rollout := filepath.Join(codexHome, "sessions", "2026", "10", "13", "rollout-2026-10-13T00-00-00-session-1.jsonl")
 	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
 		t.Fatal(err)
@@ -2128,9 +2193,13 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 		sameWorkdir    bool
 		rolloutPresent bool
 		wantResume     bool
+		readOnlyDir    string
 	}{
 		{name: "continued branch and rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true, wantResume: true},
-		{name: "new branch", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "new branch after prior branch was replaced", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "read-only prior turn in a different directory", provider: "codex", localWorktree: &execenv.LocalWorktree{}, readOnlyDir: t.TempDir(), stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "read-only prior turn without exact rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{}, readOnlyDir: localDir, stableStore: true, codexHome: true},
+		{name: "read-only prior turn without conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{}, readOnlyDir: localDir, codexHome: true, rolloutPresent: true},
 		{name: "missing conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, codexHome: true, rolloutPresent: true},
 		{name: "missing Codex home", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, rolloutPresent: true},
 		{name: "missing rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true},
@@ -2140,7 +2209,11 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 		{name: "other provider", provider: "cursor", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			sessionID := "session-1"
+			if !tt.rolloutPresent {
+				sessionID = "missing-session"
+			}
+			task := Task{PriorSessionID: sessionID, PriorWorkDir: priorDir, PriorReadOnlyWorktreeDir: tt.readOnlyDir}
 			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
 			if tt.stableStore {
 				taskCtx.IssueID = "issue-1"
@@ -2153,13 +2226,9 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 				env.WorkDir = priorDir
 			}
 			store := execenv.CodexSessionStorePath("test", taskCtx)
-			eligible := codexWorktreeResumeEligible(env, store)
+			eligible := codexWorktreeResumeEligible(env, store, assignment, task.PriorReadOnlyWorktreeDir)
 			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, false, slog.Default()); got {
-				if tt.provider == "codex" && !tt.rolloutPresent {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
-				} else {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
-				}
+				gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
 			}
 			if got := task.PriorSessionID != ""; got != tt.wantResume {
 				t.Fatalf("resume=%v, want %v", got, tt.wantResume)

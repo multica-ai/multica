@@ -3707,6 +3707,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
+					// Finalization sets DurableWorkDir on a removed local
+					// worktree. An empty branch then identifies a read-only turn.
+					if prior.Status == "completed" && prior.BranchName.String == "" {
+						resp.PriorReadOnlyWorktreeDir = prior.DurableWorkDir.String
+					}
 					resumedRunStartedAt = prior.StartedAt
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned

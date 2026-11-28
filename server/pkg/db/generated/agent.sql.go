@@ -4691,7 +4691,7 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason,
+        t.session_id, t.work_dir, t.durable_work_dir, t.branch_name, t.runtime_id, t.status, t.failure_reason,
         -- Counts in the adapter summary are not upstream HTTP statuses.
         -- Keep this pattern aligned with taskfailure.WithoutCodebuddyProtocolSummary.
         regexp_replace(COALESCE(t.error, ''), '^\[codebuddy protocol: exit_code=-?[0-9]+ stdout_bytes=[0-9]+ stderr_bytes=[0-9]+ event_count=[0-9]+ invalid_event_count=[0-9]+ assistant_event_count=[0-9]+ tool_use_count=[0-9]+ saw_result=(true|false) result_is_error=(true|false) result_bytes=[0-9]+ last_assistant_bytes=[0-9]+ scanner_error=(true|false)\]$', '', 'gn') AS error,
@@ -4704,7 +4704,7 @@ WITH retired_sessions AS (
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
 )
-SELECT session_id, work_dir, runtime_id, status, started_at, issue_snapshot FROM latest_per_session
+SELECT session_id, work_dir, durable_work_dir, branch_name, runtime_id, status, started_at, issue_snapshot FROM latest_per_session
 WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   AND (
     status IN ('completed', 'cancelled')
@@ -4754,12 +4754,14 @@ type GetLastTaskSessionParams struct {
 }
 
 type GetLastTaskSessionRow struct {
-	SessionID     pgtype.Text        `json:"session_id"`
-	WorkDir       pgtype.Text        `json:"work_dir"`
-	RuntimeID     pgtype.UUID        `json:"runtime_id"`
-	Status        string             `json:"status"`
-	StartedAt     pgtype.Timestamptz `json:"started_at"`
-	IssueSnapshot []byte             `json:"issue_snapshot"`
+	SessionID      pgtype.Text        `json:"session_id"`
+	WorkDir        pgtype.Text        `json:"work_dir"`
+	DurableWorkDir pgtype.Text        `json:"durable_work_dir"`
+	BranchName     pgtype.Text        `json:"branch_name"`
+	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	Status         string             `json:"status"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	IssueSnapshot  []byte             `json:"issue_snapshot"`
 }
 
 // Find resume context for an agent/issue from completed, failed, or cancelled
@@ -4792,6 +4794,8 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 	err := row.Scan(
 		&i.SessionID,
 		&i.WorkDir,
+		&i.DurableWorkDir,
+		&i.BranchName,
 		&i.RuntimeID,
 		&i.Status,
 		&i.StartedAt,
