@@ -367,7 +367,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
+		} else if exitErr != nil && scanResult.status == "completed" && !scanResult.sawTerminalSignal {
+			// A productive terminal 1.x stream can survive a teardown failure.
+			// On 2.x, step closure is intermediate and the process exit remains
+			// authoritative, so sawTerminalSignal stays false there.
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
 		} else if exitErr != nil && scanResult.noTerminalSignal {
