@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
@@ -12,6 +13,7 @@ const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
   create: vi.fn(),
   edit: vi.fn(),
+  rename: vi.fn(),
   remove: vi.fn(),
   canManage: vi.fn(() => true),
   setVisibility: vi.fn(),
@@ -91,6 +93,24 @@ beforeEach(() => {
 });
 
 describe("ViewsSection", () => {
+  it.each(["Enter", "Escape"])("leaves IME keys to the sidebar input until ordinary %s", (key) => {
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view: SAVED_VIEW }];
+    actions.rename.mockClear();
+    useIssueViewRenameStore.setState({ target: { viewId: "v1", surface: "sidebar" } });
+    renderSection();
+    const input = screen.getByRole("textbox", { name: "Rename" });
+    fireEvent.change(input, { target: { value: "xiang" } });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(input).toHaveFocus();
+    expect(actions.rename).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "项目" } });
+    fireEvent.keyDown(input, { key });
+    expect(screen.queryByRole("textbox", { name: "Rename" })).toBeNull();
+    expect(actions.rename).toHaveBeenCalledTimes(key === "Enter" ? 1 : 0);
+    if (key === "Enter") expect(actions.rename).toHaveBeenCalledWith(SAVED_VIEW, "项目");
+  });
+
   it("collapses from the section label", async () => {
     renderSection();
     expect(screen.getByText("All views")).toBeInTheDocument();

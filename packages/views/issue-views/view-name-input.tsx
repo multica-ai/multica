@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { isImeComposing } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 
@@ -47,6 +48,7 @@ export function ViewNameInput({
       onBlur={() => finish(true)}
       onKeyDown={(event) => {
         event.stopPropagation();
+        if (isImeComposing(event)) return;
         if (event.key === "Enter") finish(true, true);
         else if (event.key === "Escape") finish(false);
       }}
