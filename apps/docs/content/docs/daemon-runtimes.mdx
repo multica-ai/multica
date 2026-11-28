@@ -277,6 +277,7 @@ The table lists the variables that custom runtimes can use today. It is intentio
 | `MULTICA_TASK_SLOT` | Slot in the daemon-wide concurrency pool; useful for slot-indexed resources such as GPUs | Informational |
 | `MULTICA_REPO_CHECKOUT_MODE` | Set to `isolated` only in Codex runs on Linux and Windows, so `multica repo checkout` creates a standalone clone with `.git` inside the work directory; unset in other runs | Informational |
 | `TMPDIR` | Private temporary directory for the active task; also supplied as `TMP` and `TEMP` except on Windows, where tasks inherit the user's temp paths for Git Bash's shared `/tmp`; Windows Claude Code defaults `CLAUDE_CODE_TMPDIR` to the task temp directory | Informational |
+| `CLAUDE_CODE_ENTRYPOINT` | `multica` in Claude Code runs, so Claude Code reports Multica as its caller instead of the headless default `sdk-cli`; an agent's custom environment can override it | Informational |
 
 The server determines authorship for requests made with `MULTICA_TOKEN`; writes such as issue comments are attributed to the assigned agent and active task. For the token's complete binding, permissions, attribution, 24-hour maximum lifetime, and cleanup behavior, see [Temporary tokens for agent runs](/auth-tokens#temporary-tokens-for-agent-runs).
 

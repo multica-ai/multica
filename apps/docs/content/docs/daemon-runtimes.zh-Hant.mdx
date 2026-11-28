@@ -278,6 +278,7 @@ Codex 原生子 AI 代理同樣預設關閉：父執行緒結束時，Multica �
 | `MULTICA_TASK_SLOT` | 守護程序全域性併發池中的槽位，可用於 GPU 等按槽位編號的資源 | 僅供參考 |
 | `MULTICA_REPO_CHECKOUT_MODE` | 只在 Linux 和 Windows 的 Codex 執行中設為 `isolated`，讓 `multica repo checkout` 生成 `.git` 在工作目錄內的獨立克隆；其他執行不設定 | 僅供參考 |
 | `TMPDIR` | 當前 task 的私有臨時目錄；也會以 `TMP` 和 `TEMP` 提供，但在 Windows 上 task 會繼承使用者臨時路徑以維持 Git Bash 的共享 `/tmp`；Windows 上的 Claude Code 會將 `CLAUDE_CODE_TMPDIR` 預設設為 task 臨時目錄 | 僅供參考 |
+| `CLAUDE_CODE_ENTRYPOINT` | Claude Code 執行中為 `multica`，讓 Claude Code 將呼叫方回報為 Multica，而非 headless 模式預設的 `sdk-cli`；agent 的自訂環境變數可以覆寫它 | 僅供參考 |
 
 使用 `MULTICA_TOKEN` 發起請求時，作者身份由服務端決定；任務評論等寫入操作會歸屬到被指派的 AI 代理和當前 task。令牌的完整繫結關係、權限、歸屬方式、最長 24 小時的有效期和清理規則見[AI 代理執行的臨時令牌](/auth-tokens#ai-代理執行的臨時令牌)。
 

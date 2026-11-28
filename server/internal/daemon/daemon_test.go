@@ -669,6 +669,37 @@ func TestTaskMulticaEnvironmentRespectsClaudeTempOverride(t *testing.T) {
 	}
 }
 
+func TestTaskMulticaEnvironmentClaudeEntrypoint(t *testing.T) {
+	for _, provider := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
+		t.Run(provider, func(t *testing.T) {
+			env := taskMulticaEnvironment(Task{}, provider, "", "", "", "", "", 0, 0, "/task/tmp")
+			got, ok := env["CLAUDE_CODE_ENTRYPOINT"]
+			if provider == "claude" && got != "multica" {
+				t.Fatalf("CLAUDE_CODE_ENTRYPOINT = %q, want %q", got, "multica")
+			}
+			if provider != "claude" && ok {
+				t.Fatalf("only Claude Code tasks get CLAUDE_CODE_ENTRYPOINT, got %q", got)
+			}
+		})
+	}
+}
+
+func TestTaskMulticaEnvironmentRespectsClaudeEntrypointOverride(t *testing.T) {
+	for _, key := range []string{"CLAUDE_CODE_ENTRYPOINT", "claude_code_entrypoint"} {
+		custom := map[string]string{key: "my-wrapper"}
+		env := taskMulticaEnvironment(Task{Agent: &AgentData{CustomEnv: custom}}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
+		layerCustomEnvAndHermesHome(env, custom, "", nil)
+		if env[key] != "my-wrapper" {
+			t.Fatalf("custom %s = %q, want user's %q", key, env[key], "my-wrapper")
+		}
+		for name := range env {
+			if strings.EqualFold(name, key) && name != key {
+				t.Errorf("duplicate entrypoint key %q conflicts with user's %q", name, key)
+			}
+		}
+	}
+}
+
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.

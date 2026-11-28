@@ -277,6 +277,7 @@ Codex のネイティブサブエージェントも既定でオフです。Multi
 | `MULTICA_TASK_SLOT` | デーモン全体の同時実行プール内のスロット。GPU などスロット番号付きリソースに使用可能 | 参考情報 |
 | `MULTICA_REPO_CHECKOUT_MODE` | Linux と Windows の Codex 実行でだけ `isolated` になり、`multica repo checkout` が作業ディレクトリ内に `.git` を持つ独立したクローンを作る。ほかの実行では設定されない | 参考情報 |
 | `TMPDIR` | 実行中の作業専用の一時ディレクトリ。`TMP` と `TEMP` でも提供しますが、Windows では Git Bash の共有 `/tmp` のため作業はユーザーの一時パスを継承します。Windows の Claude Code は `CLAUDE_CODE_TMPDIR` の既定値を作業の一時ディレクトリに設定 | 参考情報 |
+| `CLAUDE_CODE_ENTRYPOINT` | Claude Code の実行では `multica`。Claude Code は呼び出し元を、ヘッドレス実行の既定値 `sdk-cli` ではなく Multica として報告します。エージェントのカスタム環境変数で上書き可能 | 参考情報 |
 
 `MULTICA_TOKEN` を使ったリクエストの作成者はサーバーが決定し、タスクへのコメントなどの書き込みは、割り当てられたエージェントと実行中の作業に帰属します。認証情報の完全な紐付け、権限、帰属、最長 24 時間の有効期間、クリーンアップについては、[エージェント実行用の一時トークン](/auth-tokens#エージェント実行用の一時トークン)を参照してください。
 
