@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -12,10 +12,14 @@ import {
   type CreateMode,
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
-import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import { ManualCreatePanel, manualDialogContentClass, type RecoveryProjectAvailability } from "./create-issue";
 import { sourceContextPreviewOptions } from "@multica/core/issues/queries";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { getCurrentWsId } from "@multica/core/platform";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived } from "@multica/core/projects";
+import type { IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -66,6 +70,18 @@ export function CreateIssueDialog({
       />
     );
   }
+  const recovery = data?.quick_create_recovery;
+  if (isQuickCreateRecovery(recovery)) {
+    return (
+      <QuickCreateRecoveryDialog
+        key={recovery.workspaceId + ":" + recovery.notificationId}
+        open={open}
+        onClose={onClose}
+        onOpenChangeComplete={onOpenChangeComplete}
+        recovery={recovery}
+      />
+    );
+  }
   return (
     <CreateIssueDialogBody
       open={open}
@@ -73,6 +89,80 @@ export function CreateIssueDialog({
       onOpenChangeComplete={onOpenChangeComplete}
       initialMode={initialMode}
       data={data}
+    />
+  );
+}
+
+interface QuickCreateRecovery {
+  notificationId: string;
+  workspaceId: string;
+  description: string;
+  projectId?: string;
+  agentId?: string;
+}
+
+function isQuickCreateRecovery(value: unknown): value is QuickCreateRecovery {
+  if (!value || typeof value !== "object") return false;
+  return "notificationId" in value && typeof value.notificationId === "string"
+    && "workspaceId" in value && typeof value.workspaceId === "string"
+    && "description" in value && typeof value.description === "string"
+    && (!("projectId" in value) || value.projectId === undefined || typeof value.projectId === "string")
+    && (!("agentId" in value) || value.agentId === undefined || typeof value.agentId === "string");
+}
+
+function QuickCreateRecoveryDialog({ open, onClose, onOpenChangeComplete, recovery }: {
+  open: boolean;
+  onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
+  recovery: QuickCreateRecovery;
+}) {
+  const wsId = useWorkspaceId();
+  const [ready, setReady] = useState(false);
+  const backup = useRef<IssueCreateDraft | undefined>(undefined);
+  const storedBackup = useIssueDraftStore((s) => s.isolatedDraftBackup);
+  const close = useRef(onClose);
+  const projects = useQuery({ ...projectListOptions(recovery.workspaceId), enabled: wsId === recovery.workspaceId });
+  const activeIds = useMemo(() => projects.isSuccess && !projects.isFetching
+    ? new Set(projects.data.filter((project) => !isProjectArchived(project)).map((project) => project.id))
+    : null, [projects.data, projects.isFetching, projects.isSuccess]);
+
+  useLayoutEffect(() => { close.current = onClose; }, [onClose]);
+  useLayoutEffect(() => {
+    if (wsId !== recovery.workspaceId) return;
+    useIssueDraftStore.getState().beginIsolatedDraft();
+    backup.current = useIssueDraftStore.getState().isolatedDraftBackup;
+    useIssueDraftStore.getState().setShared({ projectId: recovery.projectId });
+    useIssueDraftStore.getState().setManual({
+      description: recovery.description,
+      assigneeType: recovery.agentId ? "agent" : undefined,
+      assigneeId: recovery.agentId,
+    });
+    useIssueDraftStore.getState().setActiveMode("manual");
+    setReady(true);
+    return () => {
+      if (backup.current && getCurrentWsId() === recovery.workspaceId
+        && useIssueDraftStore.getState().isolatedDraftBackup === backup.current) {
+        useIssueDraftStore.getState().endIsolatedDraft();
+      }
+    };
+  }, [recovery, wsId]);
+  const sameWorkspace = wsId === recovery.workspaceId;
+  const ownsDraft = ready && sameWorkspace && storedBackup === backup.current;
+  useLayoutEffect(() => {
+    if (ownsDraft || (!ready && sameWorkspace)) return;
+    if (open) close.current();
+    // There is no safe popup to animate after losing draft ownership.
+    else onOpenChangeComplete?.(false);
+  }, [open, onOpenChangeComplete, ownsDraft, ready, sameWorkspace]);
+
+  if (!ownsDraft) return null;
+  return (
+    <CreateIssueDialogBody
+      open={open}
+      onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
+      initialMode="manual"
+      recoveryProjects={{ activeIds, failed: projects.isError, retry: () => { void projects.refetch(); } }}
     />
   );
 }
@@ -137,6 +227,7 @@ function CreateIssueDialogBody({
   data,
   sourceContextData,
   sourceContextExpanded = false,
+  recoveryProjects,
 }: {
   open: boolean;
   onClose: () => void;
@@ -145,6 +236,7 @@ function CreateIssueDialogBody({
   data?: Record<string, unknown> | null;
   sourceContextData?: Record<string, unknown>;
   sourceContextExpanded?: boolean;
+  recoveryProjects?: RecoveryProjectAvailability;
 }) {
   const prefersReducedMotion = useReducedMotion();
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -229,6 +321,7 @@ function CreateIssueDialogBody({
         >
           {mode === "agent" ? (
             <AgentCreatePanel
+              recoveryProjects={recoveryProjects}
               onClose={onClose}
               onSwitchMode={switchTo("manual")}
               data={effectiveData}
@@ -237,6 +330,7 @@ function CreateIssueDialogBody({
             />
           ) : (
             <ManualCreatePanel
+              recoveryProjects={recoveryProjects}
               onClose={onClose}
               onSwitchMode={switchTo("agent")}
               data={effectiveData}

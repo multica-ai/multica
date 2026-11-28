@@ -374,6 +374,9 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
           lastAssigneeType: persisted.lastAssigneeType,
           lastAssigneeId: persisted.lastAssigneeId,
           draft: migrateDraft(persisted.draft),
+          // A backup belongs to the workspace it was captured in. It must
+          // never survive rehydration and later overwrite another workspace.
+          isolatedDraftBackup: undefined,
           // A rehydrate replaces the draft (fresh load or workspace switch), so
           // the in-memory continuation snapshot no longer describes it.
           batchContinuationBaseline: undefined,

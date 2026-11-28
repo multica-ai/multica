@@ -204,6 +204,7 @@
     "toast_link_subissues_partial": "{{total}} 個子任務中有 {{failed}} 個關聯失敗",
     "toast_link_labels_failed": "關聯標籤失敗",
     "toast_set_properties_failed": "有 {{count}} 個自定義屬性設定失敗",
+    "recovery_projects_error": "無法載入專案。",
     "unavailable_property_removed": "一個已不可用的自定義屬性已從草稿移除，請確認後重新提交。",
     "switch_to_agent": "切換到 AI 代理",
     "switch_to_agent_tooltip": "切換到透過 AI 代理建立——一句話描述，讓它替你建",

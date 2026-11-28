@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { useIssueDraftStore } from "./draft-store";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
 import { resetAllRegisteredDrafts } from "../../drafts/cleanup-registry";
@@ -197,6 +197,40 @@ describe("issue draft store — last assignee", () => {
     clearDraft();
 
     expect(useIssueDraftStore.getState().draft.manual.propertyValues).toEqual({});
+  });
+
+  it("does not restore an isolated backup into a different workspace", async () => {
+    onTestFinished(async () => {
+      useIssueDraftStore.setState({ isolatedDraftBackup: undefined });
+      setCurrentWorkspace(null, null);
+      await flush();
+      defaultStorage.removeItem("multica_issue_draft:recovery-origin");
+      defaultStorage.removeItem("multica_issue_draft:recovery-other");
+    });
+    setCurrentWorkspace("recovery-origin", "ws-origin");
+    await flush();
+    useIssueDraftStore.getState().setShared({ projectId: "ordinary-project-b" });
+    useIssueDraftStore.getState().setManual({ title: "Ordinary draft B" });
+    const ordinary = useIssueDraftStore.getState().draft;
+    useIssueDraftStore.getState().beginIsolatedDraft();
+    useIssueDraftStore.getState().setShared({ projectId: "recovered-project-a" });
+    useIssueDraftStore.getState().setManual({ description: "Recovered request A" });
+
+    setCurrentWorkspace("recovery-other", "ws-other");
+    await flush();
+    await useIssueDraftStore.persist.rehydrate();
+    const otherWorkspaceDraft = useIssueDraftStore.getState().draft;
+    // Cleanup of the old dialog must not resurrect origin-workspace content.
+    useIssueDraftStore.getState().endIsolatedDraft();
+    expect(useIssueDraftStore.getState().draft).toEqual(otherWorkspaceDraft);
+    expect(useIssueDraftStore.getState().isolatedDraftBackup).toBeUndefined();
+
+    setCurrentWorkspace("recovery-origin", "ws-origin");
+    await flush();
+    await useIssueDraftStore.persist.rehydrate();
+    expect(useIssueDraftStore.getState().draft).toEqual(ordinary);
+    setCurrentWorkspace(null, null);
+    await flush();
   });
 
   it("isolates a source-context create draft and restores the ordinary draft", () => {
