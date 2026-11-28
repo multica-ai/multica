@@ -120,7 +120,7 @@ AI 代理自身返回的錯誤通常不會自動重試。鑑權失效、額度�
 
 | 原因 | 含義 | 處理 |
 | --- | --- | --- |
-| `provider_auth_or_access` | 模型服務認證失敗或無訪問權限（401/403） | 在該 AI 程式設計工具中重新登入，或檢查 API key |
+| `provider_auth_or_access` | 模型服務認證失敗或無存取權限 | 檢查模型帳號的登入狀態、API key 和所需資源的存取權限 |
 | `provider_quota_limit` | 配額或餘額用盡 | 充值或更換帳號 |
 | `provider_capacity_or_rate_limit` | 限流或容量不足 | 稍後重試 |
 | `provider_server_error` | 模型服務端錯誤（5xx） | 稍後重試 |

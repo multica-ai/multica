@@ -299,7 +299,7 @@
       "environment_prepare_failed": "環境準備失敗",
       "runtime_access_denied": "無執行時權限",
       "local_directory_missing": "資料夾不存在",
-      "agent_error_provider_auth_or_access": "認證失敗",
+      "agent_error_provider_auth_or_access": "認證或存取失敗",
       "agent_error_provider_quota_limit": "配額已用盡",
       "agent_error_provider_capacity_or_rate_limit": "觸發限流",
       "agent_error_provider_server_error": "提供商出錯",
