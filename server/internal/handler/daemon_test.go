@@ -2797,6 +2797,7 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 type claimRuntimeGuardTask struct {
 	PriorSessionID                string          `json:"prior_session_id"`
 	PriorWorkDir                  string          `json:"prior_work_dir"`
+	PriorReadOnlyWorktreeDir      string          `json:"prior_read_only_worktree_dir"`
 	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
 	ChatMessage                   string          `json:"chat_message"`
 	ThreadName                    string          `json:"thread_name"`
@@ -3021,9 +3022,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
-			session_id, work_dir
+			session_id, work_dir, durable_work_dir
 		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-runtime-session', '/tmp/old-runtime-workdir')
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-runtime-session', '/tmp/old-runtime-workdir', '/tmp/old-runtime-local-dir')
 	`, agentID, oldRuntimeID, skipIssueID)
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3039,6 +3040,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
 		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
+	}
+	if task.PriorReadOnlyWorktreeDir != "" {
+		t.Fatalf("runtime mismatch exposed prior read-only directory %q", task.PriorReadOnlyWorktreeDir)
 	}
 	if task.ThreadName != "runtime-session-skip fixture" {
 		t.Fatalf("issue task thread_name = %q, want issue title", task.ThreadName)
@@ -3058,9 +3062,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
-			session_id, work_dir
+			session_id, work_dir, durable_work_dir, branch_name
 		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir')
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir', '/tmp/local-dir-with-branch', 'agent/test/han-81204')
 	`, agentID, runtimeID, resumeIssueID)
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3077,6 +3081,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/same-runtime-workdir" {
 		t.Fatalf("runtime match: expected PriorWorkDir='/tmp/same-runtime-workdir', got %q", task.PriorWorkDir)
 	}
+	if task.PriorReadOnlyWorktreeDir != "" {
+		t.Fatalf("prior run delivered a branch but claim treated its worktree as read-only: %q", task.PriorReadOnlyWorktreeDir)
+	}
 
 	commentIssueID := dbfx.Issue(t, "comment-triggered-session-skip fixture", testutil.Cols{
 		"status": "in_progress",
@@ -3088,9 +3095,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
-			session_id, work_dir
+			session_id, work_dir, durable_work_dir
 		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir')
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir', '/tmp/read-only-local-dir')
 	`, agentID, runtimeID, commentIssueID)
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3108,6 +3115,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/comment-prior-workdir" {
 		t.Fatalf("comment trigger: expected PriorWorkDir='/tmp/comment-prior-workdir', got %q", task.PriorWorkDir)
+	}
+	if task.PriorReadOnlyWorktreeDir != "/tmp/read-only-local-dir" {
+		t.Fatalf("comment trigger: PriorReadOnlyWorktreeDir = %q, want /tmp/read-only-local-dir", task.PriorReadOnlyWorktreeDir)
 	}
 	dbfx.Exec(t, `
 		UPDATE agent_task_queue

@@ -7091,12 +7091,15 @@ func sameExistingDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-// codexWorktreeResumeEligible permits a changed cwd only when the prepared
-// local_directory worktree continues this conversation's branch and Codex has
-// a stable conversation-scoped session store. In-place and managed tasks keep
-// the existing same-directory rule.
-func codexWorktreeResumeEligible(env *execenv.Environment, store string) bool {
-	return env != nil && env.LocalWorktree != nil && env.LocalWorktree.Continued && env.CodexHome != "" && store != ""
+// codexWorktreeResumeEligible requires a conversation-scoped session store
+// and either a continued branch or a prior read-only turn on the same local
+// directory. A branch that was delivered and later replaced lacks that proof.
+func codexWorktreeResumeEligible(env *execenv.Environment, store string, assignment *localDirectoryAssignment, priorReadOnlyWorktreeDir string) bool {
+	if env == nil || env.LocalWorktree == nil || env.CodexHome == "" || store == "" {
+		return false
+	}
+	return env.LocalWorktree.Continued ||
+		(assignment != nil && sameExistingDir(assignment.AbsPath, priorReadOnlyWorktreeDir))
 }
 
 // encodeClaudeCwd mirrors Claude Code's on-disk projects directory naming: it
@@ -9154,12 +9157,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		&task, &taskCtx, provider, env.WorkDir,
 		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
-		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
+		provider == "codex" && codexWorktreeResumeEligible(
+			env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx), localAssignment, task.PriorReadOnlyWorktreeDir,
+		),
 		claudeResumeReady,
 		taskLog,
 	)
-	// A reachable workdir or continued local worktree is not sufficient for a
-	// Codex resume: the prior thread's rollout must be in this task's CODEX_HOME
+	// Codex also requires the prior thread's rollout in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
 	// generated below if it isn't, so we never tell the agent it is continuing a
 	// conversation Codex will silently restart from scratch.
