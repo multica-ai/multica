@@ -1603,8 +1603,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Use(h.PluginSurfaceHostBoundary)
 	r.Use(middleware.ContentSecurityPolicy)
 
-	// Share allowed origins with WebSocket origin checker.
-	realtime.SetAllowedOrigins(origins)
+	// Share allowed origins with WebSocket origin checker. Use the realtime
+	// package's resolution (ALLOWED_ORIGINS -> CORS_ALLOWED_ORIGINS ->
+	// FRONTEND_ORIGIN) instead of the CORS-only list above: the router's
+	// allowedOrigins() deliberately omits ALLOWED_ORIGINS, so passing it here
+	// overwrote the correct init() value and made ALLOWED_ORIGINS silently
+	// ineffective for WebSocket origin checks. HTTP CORS is unchanged.
+	realtime.SetAllowedOrigins(realtime.LoadAllowedOrigins())
 
 	// Share the same trusted-proxy CIDRs (MULTICA_TRUSTED_PROXIES) so the
 	// WebSocket origin check honors X-Forwarded-Host only from trusted proxies,
