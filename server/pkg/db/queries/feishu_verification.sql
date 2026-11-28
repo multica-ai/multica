@@ -18,6 +18,16 @@ SET config = jsonb_set(config, '{bot_union_id}', to_jsonb(sqlc.arg('bot_union_id
     updated_at = now()
 WHERE id = sqlc.arg('id') AND channel_type = 'feishu';
 
+-- name: SetFeishuInstallationGroupSenderPolicy :one
+-- Patches only the policy key so concurrent receipt / union_id writes survive.
+UPDATE channel_installation
+SET config = jsonb_set(config, '{group_sender_policy}', to_jsonb(sqlc.arg('group_sender_policy')::text)),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND channel_type = 'feishu'
+RETURNING *;
+
 -- name: BackfillLegacyFeishuInboundReceipts :execrows
 -- Session routes are positive receipt evidence only for the current binding.
 -- Materialize the candidate timestamp; recheck eligibility after any concurrent

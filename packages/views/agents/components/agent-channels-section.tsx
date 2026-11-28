@@ -2,9 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent } from "@multica/core/types";
+import { toast } from "sonner";
+import type { Agent, LarkInstallation } from "@multica/core/types";
+import { useFeatureEnabled } from "@multica/core/config";
+import { LARK_OPEN_GROUP_ACCESS_FLAG } from "@multica/core/feature-flags";
+import { useUpdateLarkGroupSenderPolicy } from "@multica/core/lark";
 import { dingtalkAgentGroupsOptions } from "@multica/core/dingtalk";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { ExternalLink, MoreHorizontal, Plus } from "@multica/ui/icons";
 import {
@@ -198,6 +203,7 @@ function AgentChannelRow({
   const timeAgo = useTimeAgo();
   const { channel, installation } = connection;
   const [confirm, setConfirm] = useState(false);
+  const openGroupAccess = useFeatureEnabled(LARK_OPEN_GROUP_ACCESS_FLAG, false);
   const groups = useQuery({
     ...dingtalkAgentGroupsOptions(
       installation.workspace_id,
@@ -333,6 +339,9 @@ function AgentChannelRow({
           </DropdownMenu>
         ) : null}
       </div>
+      {connection.channel === "lark" && canManage && openGroupAccess ? (
+        <LarkGroupAccess installation={connection.installation} />
+      ) : null}
       {missingChatPermission && canManage ? (
         <p role="status" className="mt-2 text-caption text-muted-foreground">
           {t(($) => $.dingtalk.bot_permission_tooltip_prefix)}{" "}
@@ -374,6 +383,49 @@ function AgentChannelRow({
         open={confirm}
         onOpenChange={setConfirm}
       />
+    </div>
+  );
+}
+
+function LarkGroupAccess({ installation }: { installation: LarkInstallation }) {
+  const { t } = useT("settings");
+  const update = useUpdateLarkGroupSenderPolicy(installation.workspace_id);
+  const stored = installation.group_sender_policy === "anyone_in_chat";
+  const checked = update.isPending
+    ? update.variables.policy === "anyone_in_chat"
+    : stored;
+  const switchId = `lark-group-access-${installation.id}`;
+  return (
+    <div className="mt-3 flex items-start gap-3">
+      <Switch
+        id={switchId}
+        size="sm"
+        className="mt-0.5"
+        checked={checked}
+        disabled={update.isPending}
+        aria-describedby={`${switchId}-description`}
+        onCheckedChange={(next) => {
+          update
+            .mutateAsync({
+              installationId: installation.id,
+              policy: next ? "anyone_in_chat" : "members_only",
+            })
+            .then(undefined, () =>
+              toast.error(t(($) => $.lark.group_access_failed)),
+            );
+        }}
+      />
+      <div className="min-w-0">
+        <label htmlFor={switchId} className="text-caption font-medium">
+          {t(($) => $.lark.group_access_label)}
+        </label>
+        <p
+          id={`${switchId}-description`}
+          className="text-caption text-muted-foreground"
+        >
+          {t(($) => $.lark.group_access_description)}
+        </p>
+      </div>
     </div>
   );
 }

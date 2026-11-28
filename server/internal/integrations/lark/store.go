@@ -59,6 +59,7 @@ type Installation struct {
 	UpdatedAt              pgtype.Timestamptz
 	BotUnionID             pgtype.Text
 	Region                 string
+	GroupSenderPolicy      GroupSenderPolicy
 }
 
 // UserBinding is the flat view of a channel_user_binding row. ChannelUserID is
@@ -143,6 +144,7 @@ type feishuInstallConfig struct {
 	BotOpenID              string     `json:"bot_open_id,omitempty"`
 	BotUnionID             string     `json:"bot_union_id,omitempty"`
 	Region                 string     `json:"region,omitempty"`
+	GroupSenderPolicy      string     `json:"group_sender_policy,omitempty"`
 }
 
 // feishuBindingConfig is the JSON shape of channel_user_binding.config.
@@ -163,6 +165,7 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 	if err != nil {
 		return Installation{}, fmt.Errorf("decode app_secret_encrypted: %w", err)
 	}
+	groupSenders, _ := ParseGroupSenderPolicy(cfg.GroupSenderPolicy)
 	return Installation{
 		BindingGeneration:      cfg.BindingGeneration,
 		FirstMessageReceivedAt: cfg.FirstMessageReceivedAt,
@@ -182,6 +185,7 @@ func installationFromRow(row db.ChannelInstallation) (Installation, error) {
 		UpdatedAt:              row.UpdatedAt,
 		BotUnionID:             textOrNull(cfg.BotUnionID),
 		Region:                 cfg.Region,
+		GroupSenderPolicy:      groupSenders,
 	}, nil
 }
 
@@ -196,6 +200,7 @@ func encodeInstallConfig(inst Installation) ([]byte, error) {
 		BotOpenID:              inst.BotOpenID,
 		BotUnionID:             inst.BotUnionID.String,
 		Region:                 inst.Region,
+		GroupSenderPolicy:      string(inst.GroupSenderPolicy),
 	}
 	if len(inst.AppSecretEncrypted) > 0 {
 		cfg.AppSecretEncrypted = base64.StdEncoding.EncodeToString(inst.AppSecretEncrypted)

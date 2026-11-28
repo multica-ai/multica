@@ -288,6 +288,7 @@ export type {
 } from "./vcs";
 export type {
   LarkInstallation,
+  LarkGroupSenderPolicy,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,

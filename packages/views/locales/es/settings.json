@@ -1294,7 +1294,10 @@
     "inbound_pending": "Vinculado: pendiente de verificar la recepción de mensajes",
     "inbound_verified": "Recepción de mensajes verificada",
     "inbound_pending_hint": "Envía un mensaje a este bot en Feishu/Lark para verificar la recepción. Si no llega, comprueba el modo de conexión persistente, la suscripción im.message.receive_v1 y la publicación o aprobación de la app. Puede que las vinculaciones existentes aún no tengan una verificación registrada.",
-    "inbound_verified_hint": "Esta vinculación ha recibido un mensaje válido. Esto no confirma la conectividad continua, la ejecución del agente ni las respuestas."
+    "inbound_verified_hint": "Esta vinculación ha recibido un mensaje válido. Esto no confirma la conectividad continua, la ejecución del agente ni las respuestas.",
+    "group_access_label": "Cualquier persona de un chat grupal puede usar este bot",
+    "group_access_description": "Los miembros del grupo que no están en este espacio de trabajo ejecutan el agente como la persona que conectó el bot, con sus permisos. Los mensajes directos siguen requiriendo un miembro del espacio de trabajo.",
+    "group_access_failed": "No se pudo actualizar quién puede usar este bot"
   },
   "slack": {
     "section_title": "Slack",

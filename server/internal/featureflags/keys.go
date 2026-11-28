@@ -57,6 +57,12 @@ const (
 	// as off, so a newer client never offers 365 days to a server that would
 	// read days=371 as the default 30.
 	DashboardHistory365d = "dashboard_history_365d"
+	// LarkOpenGroupAccess lets a Feishu/Lark installation serve group senders
+	// who are not bound workspace members, as its installer (#11437). Off by
+	// default; FF_LARK_OPEN_GROUP_ACCESS=true turns it on for a deployment. It
+	// is a GLOBAL kill switch: turning it off makes every installation members
+	// only again without touching the stored per-installation policy.
+	LarkOpenGroupAccess = "lark_open_group_access"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -82,6 +88,7 @@ var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	PluginsV1,
 	DocsV1,
+	LarkOpenGroupAccess,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -106,6 +113,10 @@ func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bo
 
 func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DocsV1, false)
+}
+
+func LarkOpenGroupAccessEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, LarkOpenGroupAccess, false)
 }
 
 func IssueDescriptionLiveEnabled(ctx context.Context, flags *featureflag.Service) bool {

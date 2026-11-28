@@ -196,6 +196,20 @@ func (s *ChannelStore) SetLarkInstallationBotUnionID(ctx context.Context, arg Se
 	})
 }
 
+// SetLarkInstallationGroupSenderPolicy patches only the policy key, scoped to
+// the workspace, and returns the updated row. ErrNoRows means no installation.
+func (s *ChannelStore) SetLarkInstallationGroupSenderPolicy(ctx context.Context, id, workspaceID pgtype.UUID, policy GroupSenderPolicy) (Installation, error) {
+	row, err := s.Queries.SetFeishuInstallationGroupSenderPolicy(ctx, db.SetFeishuInstallationGroupSenderPolicyParams{
+		ID:                id,
+		WorkspaceID:       workspaceID,
+		GroupSenderPolicy: string(policy),
+	})
+	if err != nil {
+		return Installation{}, err
+	}
+	return installationFromRow(row)
+}
+
 func (s *ChannelStore) BackfillLarkInstallationRegionToLark(ctx context.Context) (int64, error) {
 	return s.Queries.BackfillChannelInstallationRegionToFeishuLark(ctx)
 }

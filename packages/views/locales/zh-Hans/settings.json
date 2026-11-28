@@ -1284,7 +1284,10 @@
     "inbound_pending": "已绑定，等待消息验证",
     "inbound_verified": "消息接收已验证",
     "inbound_pending_hint": "请在飞书/Lark 中给此机器人发送消息以验证接收。若未收到，请检查长连接模式、im.message.receive_v1 事件订阅以及应用发布和审批状态。已有绑定可能尚无验证记录。",
-    "inbound_verified_hint": "本次绑定已收到有效消息；这不代表持续在线、智能体执行成功或回复成功。"
+    "inbound_verified_hint": "本次绑定已收到有效消息；这不代表持续在线、智能体执行成功或回复成功。",
+    "group_access_label": "群聊中所有人都可使用",
+    "group_access_description": "不在本工作区的群成员会以连接此机器人的成员身份、按其权限运行智能体。私聊仍仅限工作区成员。",
+    "group_access_failed": "无法更新机器人的使用范围"
   },
   "slack": {
     "section_title": "Slack",

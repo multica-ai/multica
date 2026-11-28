@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -32,10 +33,14 @@ type LarkInstallationResponse struct {
 	// Region is the Lark cloud this installation lives on: "feishu"
 	// (mainland) or "lark" (international). The UI uses it to render a
 	// badge and to build the correct "Manage in Lark" dev-console host.
-	Region      string `json:"region"`
-	InstalledAt string `json:"installed_at"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	Region string `json:"region"`
+	// GroupSenderPolicy is "members_only" or "anyone_in_chat"; see
+	// lark.GroupSenderPolicy. It is stored even while the
+	// lark_open_group_access flag is off, when it has no effect.
+	GroupSenderPolicy string `json:"group_sender_policy"`
+	InstalledAt       string `json:"installed_at"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse {
@@ -49,6 +54,7 @@ func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse 
 		InstallerUserID:        uuidToString(row.InstallerUserID),
 		Status:                 row.Status,
 		Region:                 row.Region,
+		GroupSenderPolicy:      string(row.GroupSenderPolicy),
 		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
 		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
@@ -176,6 +182,84 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateLarkInstallationRequest carries the installation settings a manager
+// may change. Only group_sender_policy exists today.
+type UpdateLarkInstallationRequest struct {
+	GroupSenderPolicy string `json:"group_sender_policy"`
+}
+
+// UpdateLarkInstallation (PATCH /api/workspaces/{id}/lark/installations/{installationId})
+// sets who in a group chat may use the Bot. Authorization matches revoke and
+// install (canManageAgent): the bound agent's owner or a workspace
+// owner/admin. Turning group access on lets people outside the workspace run
+// the agent as its installer, so it is refused while the
+// lark_open_group_access flag is off; turning it off is always allowed.
+func (h *Handler) UpdateLarkInstallation(w http.ResponseWriter, r *http.Request) {
+	if h.LarkInstallations == nil {
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	instUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "installationId"), "installation id")
+	if !ok {
+		return
+	}
+	var req UpdateLarkInstallationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	policy, known := lark.ParseGroupSenderPolicy(req.GroupSenderPolicy)
+	if !known {
+		writeError(w, http.StatusBadRequest, "group_sender_policy must be members_only or anyone_in_chat")
+		return
+	}
+	if policy == lark.GroupSendersAnyone && !featureflags.LarkOpenGroupAccessEnabled(r.Context(), h.FeatureFlags) {
+		writeFeatureDisabled(w, "lark_open_group_access_disabled", "open group access is not enabled")
+		return
+	}
+	inst, err := h.LarkInstallations.GetInWorkspace(r.Context(), instUUID, wsUUID)
+	if err != nil {
+		if errors.Is(err, lark.ErrInstallationNotFound) {
+			writeError(w, http.StatusNotFound, "lark installation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load installation")
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          inst.AgentID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "lark installation not found")
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	updated, err := h.LarkInstallations.SetGroupSenderPolicy(r.Context(), instUUID, wsUUID, policy)
+	if err != nil {
+		if errors.Is(err, lark.ErrInstallationNotFound) {
+			writeError(w, http.StatusNotFound, "lark installation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update installation")
+		return
+	}
+	h.publish(protocol.EventLarkInstallationUpdated, uuidToString(wsUUID), "user", userID, map[string]any{
+		"id": uuidToString(instUUID),
+	})
+	writeJSON(w, http.StatusOK, larkInstallationToResponse(updated))
 }
 
 // RedeemLarkBindingTokenRequest carries the raw token the user

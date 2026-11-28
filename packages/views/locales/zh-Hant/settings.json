@@ -1284,7 +1284,10 @@
     "inbound_pending": "已綁定，等待訊息驗證",
     "inbound_verified": "訊息接收已驗證",
     "inbound_pending_hint": "請在飛書/Lark 中傳送訊息給此機器人以驗證接收。若未收到，請檢查長連線模式、im.message.receive_v1 事件訂閱，以及應用程式發布和審核狀態。既有綁定可能尚無驗證紀錄。",
-    "inbound_verified_hint": "本次綁定已收到有效訊息；這不代表持續連線、AI 代理執行成功或回覆成功。"
+    "inbound_verified_hint": "本次綁定已收到有效訊息；這不代表持續連線、AI 代理執行成功或回覆成功。",
+    "group_access_label": "群組聊天中所有人都可使用",
+    "group_access_description": "不在本工作區的群成員會以連接此機器人的成員身分、依其權限執行代理。私訊仍僅限工作區成員。",
+    "group_access_failed": "無法更新機器人的使用範圍"
   },
   "slack": {
     "section_title": "Slack",

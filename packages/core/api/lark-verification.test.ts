@@ -17,6 +17,12 @@ describe("Lark receipt response compatibility", () => {
   it.each([null, false, 123, "yesterday", "", "2026-99-99T00:00:00Z"])("does not treat %s as verification", (value) => {
     expect(LarkInstallationSchema.parse({ ...installation, first_message_received_at: value }).first_message_received_at).toBeFalsy();
   });
+  it.each([undefined, null, "everyone", 1])("reads group sender policy %s as members only", (value) => {
+    expect(LarkInstallationSchema.parse({ ...installation, group_sender_policy: value }).group_sender_policy).toBe("members_only");
+  });
+  it("keeps an open group sender policy", () => {
+    expect(LarkInstallationSchema.parse({ ...installation, group_sender_policy: "anyone_in_chat" }).group_sender_policy).toBe("anyone_in_chat");
+  });
   it("defaults missing status to revoked and malformed lists safely", () => {
     expect(LarkInstallationSchema.parse({ id: "inst" }).status).toBe("revoked");
     expect(parseWithFallback({ installations: "bad" }, ListLarkInstallationsResponseSchema, EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE, { endpoint: "lark" })).toEqual(EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE);

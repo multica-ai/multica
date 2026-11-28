@@ -65,7 +65,7 @@ func TestChannelStartTitleCommandMappingDB(t *testing.T) {
 			var binder engine.SessionBinder
 			switch platform {
 			case "feishu":
-				binder = lark.NewFeishuResolverSet(nil, session, nil, nil, nil, nil).Session
+				binder = lark.NewFeishuResolverSet(nil, session, nil, nil, nil, nil, nil).Session
 			case "telegram":
 				binder = telegram.NewTelegramResolverSet(q, pool, nil, nil, nil).Session
 			case "dingtalk":

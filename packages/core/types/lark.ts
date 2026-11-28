@@ -19,12 +19,19 @@ export interface LarkInstallation {
    * server that predates the field — defaults to Feishu in the UI
    * (see CLAUDE.md → API Response Compatibility). */
   region?: "feishu" | "lark" | string;
+  /** Who in a group chat may use the bot. Optional for servers that predate
+   * it; read a missing or unknown value as "members_only". */
+  group_sender_policy?: LarkGroupSenderPolicy;
   /** First valid message observed for this binding; absence means no recorded proof. */
   first_message_received_at?: string | null;
   installed_at: string;
   created_at: string;
   updated_at: string;
 }
+
+/** "anyone_in_chat" serves group senders who are not workspace members as the
+ * installer; "members_only" serves bound workspace members only. */
+export type LarkGroupSenderPolicy = "members_only" | "anyone_in_chat";
 
 export interface ListLarkInstallationsResponse {
   installations: LarkInstallation[];

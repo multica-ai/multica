@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { api, ApiError } from "@multica/core/api";
+import { configStore } from "@multica/core/config";
 import {
   AgentChannelsSection,
   AgentChannelLinks,
@@ -66,6 +67,7 @@ vi.mock("@multica/core/api", async (original) => ({
       "registerWecomBYO",
       "registerTelegramBot",
       "deleteLarkInstallation",
+      "updateLarkInstallation",
       "deleteSlackInstallation",
       "deleteDingTalkInstallation",
       "deleteWecomInstallation",
@@ -122,6 +124,7 @@ beforeEach(() => {
   state.role = "admin";
   state.member = true;
   state.search = "tab=channels";
+  configStore.getState().setFeatureFlags({});
   for (const name of [
     "listLarkInstallations",
     "listSlackInstallations",
@@ -335,6 +338,62 @@ describe("agent messaging channels", () => {
       expect(screen.queryByText("Waiting for first message")).toBeNull(),
     );
     expect(screen.getByText("Connected")).toBeInTheDocument();
+  });
+
+  it("lets a bot manager open group access once the server stores it", async () => {
+    configStore.getState().setFeatureFlags({ lark_open_group_access: true });
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(
+      listing([{ ...active, app_id: "cli_mika", group_sender_policy: "members_only" }]) as never,
+    );
+    let finish!: () => void;
+    vi.mocked(api.updateLarkInstallation).mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    show(<AgentChannelsSection agent={agent} />);
+    const toggle = await screen.findByRole("switch", {
+      name: "Anyone in a group chat can use this bot",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAccessibleDescription(/run the agent as the person who connected the bot/);
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(api.updateLarkInstallation).toHaveBeenCalledWith("ws-1", "i1", {
+        group_sender_policy: "anyone_in_chat",
+      }),
+    );
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-disabled", "true"));
+
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(
+      listing([{ ...active, app_id: "cli_mika", group_sender_policy: "anyone_in_chat" }]) as never,
+    );
+    finish();
+    await waitFor(() =>
+      expect(toggle).not.toHaveAttribute("aria-disabled", "true"),
+    );
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(api.listLarkInstallations).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides group access while the server flag is off or from non-managers", async () => {
+    vi.mocked(api.listLarkInstallations).mockResolvedValue(
+      listing([
+        { ...active, app_id: "cli_mika" },
+        { ...active, id: "i2", agent_id: otherAgent.id, app_id: "cli_support" },
+      ]) as never,
+    );
+    state.role = "member";
+    const { unmount } = show(<AgentChannelsSection agent={agent} />);
+    await screen.findByText("Waiting for first message");
+    expect(screen.queryByRole("switch")).toBeNull();
+    unmount();
+
+    configStore.getState().setFeatureFlags({ lark_open_group_access: true });
+    show(<AgentChannelsSection agent={otherAgent} />);
+    await screen.findByText("Waiting for first message");
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("does not display revoked connections or another agent's connection", async () => {
