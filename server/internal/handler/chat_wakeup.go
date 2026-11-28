@@ -227,15 +227,21 @@ func (h *Handler) maybeRefreshPRForChatWakeup(ctx context.Context, workspaceID p
 	if json.Unmarshal(rawCondition, &cond) != nil || cond.Type != "pull_request" || cond.Event != "checks_finished" {
 		return
 	}
-	owner, repo, ok := strings.Cut(cond.Repo, "/")
-	if !ok || owner == "" || repo == "" || cond.Number <= 0 {
+	h.maybeRefreshNamedPR(ctx, workspaceID, cond.Repo, cond.Number)
+}
+
+// maybeRefreshNamedPR kicks off a non-blocking snapshot refresh for the
+// open/draft GitHub PR a wakeup names when its snapshot is missing or stale.
+func (h *Handler) maybeRefreshNamedPR(ctx context.Context, workspaceID pgtype.UUID, fullRepo string, number int32) {
+	owner, repo, ok := strings.Cut(fullRepo, "/")
+	if !ok || owner == "" || repo == "" || number <= 0 {
 		return
 	}
 	row, err := h.Queries.GetGitHubPRForRefresh(ctx, db.GetGitHubPRForRefreshParams{
 		WorkspaceID: workspaceID,
 		RepoOwner:   owner,
 		RepoName:    repo,
-		PrNumber:    cond.Number,
+		PrNumber:    number,
 	})
 	if err != nil || (row.State != "open" && row.State != "draft") {
 		return

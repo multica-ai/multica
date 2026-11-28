@@ -269,3 +269,24 @@ it("loads a rule's runs and the paused list", async () => {
   ]);
   await expect(client.listPausedWakeups()).resolves.toEqual([{ issue_id: "i", id: "w", agent_id: "a", paused_reason: "loop" }]);
 });
+
+it("keeps a named pull request on a PR condition and drops a malformed one", async () => {
+  const base = {
+    id: "w", issue_id: "i", agent_id: "a", instruction: "go", kind: "event", mode: "once",
+    event_types: [], filter_agent_id: null, filter_task_id: null, interval_seconds: null,
+    cron_expression: null, timezone: "UTC", next_fire_at: null, enabled: true, disabled_at: null,
+    last_task_id: null, last_error: null,
+  };
+  const rows = [
+    { ...base, condition: { type: "pull_request", event: "closed", repo: "acme/web", number: 12 } },
+    { ...base, id: "w2", condition: { type: "pull_request", event: "merged" } },
+    { ...base, id: "w3", condition: { type: "pull_request", event: "closed" } },
+    { ...base, id: "w4", condition: { type: "pull_request", event: "closed", repo: "acme/web", number: "12" } },
+  ];
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(rows))));
+  const [named, linked, closedWithoutPR, badNumber] = await client.listIssueWakeups("i");
+  expect(named!.condition).toEqual({ type: "pull_request", event: "closed", repo: "acme/web", number: 12 });
+  expect(linked!.condition).toEqual({ type: "pull_request", event: "merged" });
+  expect(closedWithoutPR!.condition).toBeNull();
+  expect(badNumber!.condition).toBeNull();
+});

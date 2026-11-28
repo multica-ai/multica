@@ -47,8 +47,12 @@ type WakeupCondition struct {
 	// every stage closing while a later one waits, then every sub-issue
 	// closing. Only the platform sets it.
 	EachStage bool `json:"each_stage,omitempty"`
-	// pull_request: checks_finished | merged | conflicts
-	Event string `json:"event,omitempty"`
+	// pull_request: checks_finished | merged | conflicts across the issue's
+	// linked pull requests, or merged | closed | checks_finished for the one
+	// GitHub pull request Repo (owner/name) and Number name, linked or not.
+	Event  string `json:"event,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+	Number int32  `json:"number,omitempty"`
 	// other_issue: the watched issue and done | ended | in_review | blocked. The
 	// identifier is recorded for display; clients never set it.
 	IssueID    string `json:"issue_id,omitempty"`
@@ -68,7 +72,8 @@ var (
 )
 
 func conditionDiagnostic(err error) bool {
-	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) || errors.Is(err, errPRConflictsUnsupported)
+	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) || errors.Is(err, errPRConflictsUnsupported) ||
+		errors.Is(err, errPRTargetMissing) || errors.Is(err, errPRTargetSnapshotPending)
 }
 
 func badCondition(msg string) error {
@@ -187,10 +192,25 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		}
 		out = WakeupCondition{Type: c.Type, Stage: c.Stage}
 	case "pull_request":
-		if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "conflicts" {
-			return nil, nil, badCondition("event must be checks_finished, merged or conflicts")
+		if c.Repo == "" && c.Number == 0 {
+			if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "conflicts" {
+				return nil, nil, badCondition("event must be checks_finished, merged or conflicts; closed needs a named pull request")
+			}
+			out = WakeupCondition{Type: c.Type, Event: c.Event}
+			break
 		}
-		out = WakeupCondition{Type: c.Type, Event: c.Event}
+		if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "closed" {
+			return nil, nil, badCondition("event for a named pull request must be checks_finished, merged or closed")
+		}
+		repo, err := normalizePRTarget(ctx, tx, ws, c.Repo, c.Number)
+		var bad prTargetInputError
+		if errors.As(err, &bad) {
+			return nil, nil, badCondition(bad.msg)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		out = WakeupCondition{Type: c.Type, Event: c.Event, Repo: repo, Number: c.Number}
 	case "other_issue":
 		id, err := uuidArg(c.IssueID, "issue_id")
 		if err != nil {
@@ -262,6 +282,12 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
 	case "pull_request":
+		if c.Repo != "" {
+			if c.Event == "checks_finished" && (s.Tasks == nil || !s.Tasks.PRSnapshotsEnabled) {
+				return false, "", nil, errPRSnapshotsUnavailable
+			}
+			return evaluatePRTarget(ctx, tx, w.WorkspaceID, c.Repo, c.Number, c.Event)
+		}
 		// Without the snapshot client GitHub rows are never refreshed, so their
 		// checks and mergeability neither satisfy nor stall the rule. Self-hosted VCS rows carry
 		// their own commit statuses and are evaluated regardless (#9034).

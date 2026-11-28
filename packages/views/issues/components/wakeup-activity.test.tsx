@@ -42,6 +42,9 @@ describe("wakeup timeline entries", () => {
     expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "conflicts" } } }))).toBe(
       "当关联 PR 出现合并冲突时，唤醒了 Emacs",
     );
+    expect(read(entry("wakeup_triggered", { wakeup: { ...reply, condition: { type: "pull_request", event: "closed", repo: "acme/web", number: 12 } } }))).toBe(
+      "当 acme/web#12 合并或关闭时，唤醒了 Emacs",
+    );
     expect(read(entry("wakeup_triggered", { wakeup: reply, events: ["wakeup.manual"], actor_type: "member", actor_id: "u" }))).toBe(
       "Jiayuan 立即唤醒了 Emacs",
     );

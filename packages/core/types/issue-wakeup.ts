@@ -54,6 +54,8 @@ export type WakeupCondition =
   | { type: "issue_field"; field: "property"; property_id: string; value: unknown }
   | { type: "children_done"; stage?: number | null }
   | { type: "pull_request"; event: "checks_finished" | "merged" | "conflicts" }
+  /** One GitHub pull request (repo is owner/name), linked to the issue or not. */
+  | { type: "pull_request"; event: "checks_finished" | "merged" | "closed"; repo: string; number: number }
   | { type: "other_issue"; issue_id: string; state: "done" | "ended" | "in_review" | "blocked"; identifier?: string };
 
 /** One run a rule started, for its trigger history. */

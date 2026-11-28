@@ -156,7 +156,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "檢�
 
 - **時間**：`--kind at` 配 `--after 10m` 或 `--at <RFC3339 時間>`；`--kind every --every 1h` 按固定間隔，最短 1 分鐘；`--kind cron --cron "<5 段表示式>"` 配 `--timezone`，時區預設 UTC。
 - **事件**：`--event` 後面寫事件名，多個用逗號分隔，`multica issue wakeup events` 列出全部事件和過濾引數。`--mode continuous` 改成重複喚醒。
-- **條件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`、`--until-issue <任務> --until-issue-state done|ended|in_review|blocked`。一條喚醒只能用一個 `--until-*`，不能和 `--event` 同時用。
+- **條件**：`--until-status`、`--until-assignee`、`--until-label`、`--until-property`、`--until-children-done [--stage N]`、`--until-pr checks|merged|conflicts`（任務關聯的任一 PR）或 `--until-pr owner/repo#N[:merged|closed|checks]`（目前工作區已鏡像的某一個 GitHub PR，關聯與否都可以；預設 `merged`，`closed` 在合併時也會觸發）、`--until-issue <任務> --until-issue-state done|ended|in_review|blocked`。一條喚醒只能用一個 `--until-*`，不能和 `--event` 同時用。
 - **結束方式**：CLI 不會自動給等待加期限，用 `--expires-in 72h` 或 `--expires-at <RFC3339 時間>` 設結束時間；`--on-timeout wake` 讓事件規則在超時時再喚醒一次。`--max-fires N`（1–1000）限制重複規則最多執行幾次。
 - **結果放在哪**：`--parent <評論 ID>` 讓喚醒後的回覆留在原來的評論串裡。
 
