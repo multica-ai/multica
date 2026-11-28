@@ -373,6 +373,19 @@ Cursor's verified background cleanup requires Linux 6.9 or newer (process-group 
 
 Owned Cursor background processes are also stopped when the run completes normally, so a background server started by that run does not intentionally survive finalization. macOS can recognize late children through retained original-parent identities, but cannot prove a chain whose intermediate processes disappeared before observation. Such processes, work that leaves the tracked group, or persistent ownership/signalling errors can leave background work behind. Unconfirmed cleanup is logged and never grants a successful-cleanup recovery window; unknown processes are not killed based only on their numeric PID or process group.
 
+### ZCode browser use
+
+ZCode's browser tool runs in a managed headless Chromium that the daemon starts in Docker: one container per run, removed when the run ends. Until a modules directory is configured, browser use stays off and nothing is resolved or started.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_ZCODE_BROWSER` | `auto` | `auto`, `docker` or `off`. `auto` and `docker` behave the same: the browser is available once Docker, the image and the modules directory are present |
+| `MULTICA_ZCODE_BROWSER_MODULES` | empty | Directory whose `node_modules` contains `playwright-core`. Browser use stays off while it is unset |
+| `MULTICA_ZCODE_BROWSER_IMAGE` | `mcr.microsoft.com/playwright:v1.62.1-noble` | Docker image that holds the browser runtime. It must already be present: Multica never pulls it |
+| `MULTICA_ZCODE_BROWSER_DOCKER_BIN` | `docker` on `PATH` | Path to the Docker CLI. Unset means `docker` on `PATH`, then the conventional install locations |
+
+Multica pulls no image and installs nothing from npm: provide both yourself, with the `playwright-core` version that matches the image.
+
 ### Persisting daemon configuration
 
 Common daemon-side settings can also be written to `~/.multica/config.json` instead of relying on shell environment variables; named profiles keep theirs at `~/.multica/profiles/<name>/config.json`:

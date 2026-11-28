@@ -91,6 +91,9 @@ var zcodeBlockedArgs = map[string]blockedArgMode{
 //     may reach the transcript.
 type zcodeBackend struct {
 	cfg Config
+	// browser holds the browser-use options resolved once from the daemon's
+	// own environment by newZcodeBackend. The zero value is off.
+	browser zcodeBrowserOptions
 }
 
 // zcodeMessageStream serializes sends and the final close so a late stdout
@@ -264,6 +267,8 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		stdin:       stdin,
 		pending:     make(map[int]*pendingRPC),
 		processDone: make(chan struct{}),
+		browserOpts: b.browser,
+		browser:     newZcodeBrowserHost(b.browser, b.cfg.Logger),
 	}
 	c.onEvent = func(ev zcodeSessionEvent) {
 		// Double gate: the in-turn flag plus the subscribe baseline seq.
@@ -357,6 +362,10 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
+			// Stop the browser sidecar and remove its container first. The
+			// result is already queued on resCh, so nothing waits on this
+			// except the channel cleanup below.
+			c.closeBrowser()
 			stdin.Close()
 			stopProcess()
 			_ = cmd.Wait()
@@ -527,6 +536,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		// Early session pin so a cancelled run still preserves resume pointer.
+		c.setSessionID(sessionID)
 		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		b.cfg.Logger.Info("zcode session ready", "session_id", sessionID)
 
@@ -902,16 +912,30 @@ type zcodeClient struct {
 
 	stdin io.Writer
 
+	// writeMu serialises whole frames onto stdin: replies to browser requests
+	// are written from their own goroutines, alongside client requests.
+	writeMu sync.Mutex
+
 	mu          sync.Mutex
 	nextID      int
 	pending     map[int]*pendingRPC
 	processDone chan struct{}
 	processErr  error
 
+	// sessionID is the session this run owns, set once the handshake
+	// completed. Guarded by mu.
+	sessionID string
+
 	// baselineSeq is the subscribe acknowledgement's eventSeq: events with a
 	// smaller seq were emitted before this client subscribed and are replay.
 	baselineSeq int64
 	baselineSet bool
+
+	// browserOpts are the resolved browser-use settings; browser is the host
+	// that answers interaction/browser* requests for this run. Both are nil or
+	// off when browser use is not enabled.
+	browserOpts zcodeBrowserOptions
+	browser     *zcodeBrowserHost
 
 	onEvent func(zcodeSessionEvent)
 }
@@ -975,7 +999,9 @@ func (c *zcodeClient) request(ctx context.Context, method string, params any, ti
 	data = append(data, '\n')
 	written := make(chan error, 1)
 	go func() {
+		c.writeMu.Lock()
 		_, writeErr := c.stdin.Write(data)
+		c.writeMu.Unlock()
 		written <- writeErr
 	}()
 	select {
@@ -1134,7 +1160,9 @@ func (c *zcodeClient) writeFrame(msg map[string]any) {
 		return
 	}
 	data = append(data, '\n')
+	c.writeMu.Lock()
 	_, _ = c.stdin.Write(data)
+	c.writeMu.Unlock()
 }
 
 func (c *zcodeClient) closeAllPending(err error) {
@@ -1164,8 +1192,9 @@ func (c *zcodeClient) closeAllPending(err error) {
 //     requestPermission is answered {"decision":"deny"} fail-closed (the
 //     headless client cannot approve); session/requestRuntimePreferences is
 //     answered with zcodeRuntimePreferencesDefaults (an unanswered request
-//     fails session/create with -32022 after its 15s timeout); every other
-//     method gets -32601.
+//     fails session/create with -32022 after its 15s timeout); the two
+//     interaction/browser* methods are handed to the browser host on their own
+//     goroutine (they may start a container); every other method gets -32601.
 //   - {id, result|error}: a response to one of our requests.
 //   - {method, params}: a notification; only session/event is consumed.
 func (c *zcodeClient) handleLine(line string) {
@@ -1191,6 +1220,11 @@ func (c *zcodeClient) handleLine(line string) {
 			c.respond(msg.ID, map[string]any{"decision": "deny"})
 		case "session/requestRuntimePreferences":
 			c.respond(msg.ID, zcodeRuntimePreferencesDefaults())
+		case zcodeBrowserMethodList, zcodeBrowserMethodExecute:
+			// Never blocks the reader loop: a browser request may wait on a
+			// container start or a page load.
+			id, method, params := msg.ID, msg.Method, msg.Params
+			zcodeSafeGo(c.cfg.Logger, func() { c.dispatchBrowser(id, method, params) })
 		default:
 			c.respondError(msg.ID, -32601, fmt.Sprintf("method not supported by multica: %s", msg.Method))
 		}

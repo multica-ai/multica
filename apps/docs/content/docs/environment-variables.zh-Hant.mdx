@@ -363,6 +363,19 @@ Cursor 已驗證的後臺清理需要 Linux 6.9 及以上（程序組 pidfd）�
 
 執行正常結束時，被認領的 Cursor 後臺程序同樣會被停止，因此該次執行啟動的後臺服務不會有意留到收尾之後。macOS 可以透過保留的原始父程序身份識別後期產生的子程序，但無法證明中間程序在被觀察到之前就已消失的那條鏈路。這類程序、離開被追蹤程序組的工作，以及持續的歸屬或發訊號錯誤，都可能留下殘餘的後臺工作。未確認的清理會被記錄下來，且永遠不會換取一次"清理成功"的恢復視窗；不會僅憑數字 PID 或程序組就去殺掉未知程序。
 
+### ZCode 瀏覽器使用
+
+ZCode 的瀏覽器工具運行在託管的無頭 Chromium 中：守護程序透過 Docker 為每次執行啟動一個容器，執行結束時將其移除。未設定 modules 目錄時，瀏覽器使用保持關閉，不會解析或啟動任何東西。
+
+| 變數 | 預設值 | 說明 |
+|---|---|---|
+| `MULTICA_ZCODE_BROWSER` | `auto` | 取值為 `auto`、`docker` 或 `off`。`auto` 與 `docker` 行為相同：Docker、鏡像和 modules 目錄都就位後，瀏覽器才可用 |
+| `MULTICA_ZCODE_BROWSER_MODULES` | 空 | 其 `node_modules` 中包含 `playwright-core` 的目錄。未設定時瀏覽器使用保持關閉 |
+| `MULTICA_ZCODE_BROWSER_IMAGE` | `mcr.microsoft.com/playwright:v1.62.1-noble` | 存放瀏覽器執行環境的 Docker 鏡像。必須事先準備好：Multica 不會拉取它 |
+| `MULTICA_ZCODE_BROWSER_DOCKER_BIN` | `PATH` 上的 `docker` | Docker CLI 的路徑。未設定時先在 `PATH` 上查找 `docker`，再查找常規安裝位置 |
+
+Multica 不拉取任何鏡像，也不會從 npm 安裝任何內容：請自行準備兩者，並使用與鏡像版本一致的 `playwright-core`。
+
 ### 守護程序配置的持久化
 
 守護程序側的常用配置也可以寫入 `~/.multica/config.json`，不必依賴 shell 環境變數；命名 profile 的配置檔案在 `~/.multica/profiles/<name>/config.json`：

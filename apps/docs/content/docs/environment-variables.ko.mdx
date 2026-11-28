@@ -367,6 +367,19 @@ Cursor의 검증된 백그라운드 정리에는 Linux 6.9 이상(프로세스 �
 
 확보한 Cursor 백그라운드 프로세스는 실행이 정상적으로 완료될 때도 정리됩니다. 따라서 해당 실행이 시작한 백그라운드 서버가 의도적으로 종료 처리 이후까지 살아남지는 않습니다. macOS는 보존된 원래 부모 프로세스 신원을 통해 나중에 생성된 자식 프로세스를 인식할 수 있지만, 관찰 이전에 중간 프로세스가 사라진 연결 고리는 증명할 수 없습니다. 그러한 프로세스, 추적 중인 그룹을 벗어난 작업, 그리고 지속적인 소유권 또는 시그널링 오류는 백그라운드 작업을 남길 수 있습니다. 확인되지 않은 정리는 로그로 남으며 '정리 성공'에 따른 복구 창을 부여하지 않습니다. 숫자 PID나 프로세스 그룹만을 근거로 알 수 없는 프로세스를 종료하지 않습니다.
 
+### ZCode 브라우저 사용
+
+ZCode의 브라우저 도구는 관리되는 헤드리스 Chromium에서 실행됩니다. 데몬이 실행마다 Docker로 컨테이너 하나를 시작하고, 실행이 끝나면 제거합니다. modules 디렉터리를 설정하기 전에는 브라우저 사용이 꺼져 있으며 아무것도 확인하거나 시작하지 않습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_ZCODE_BROWSER` | `auto` | `auto`, `docker`, `off` 중 하나입니다. `auto`와 `docker`는 동일하게 동작하며, Docker, 이미지, modules 디렉터리가 준비되면 브라우저를 사용할 수 있습니다 |
+| `MULTICA_ZCODE_BROWSER_MODULES` | 비어 있음 | `node_modules`에 `playwright-core`가 있는 디렉터리입니다. 설정하지 않으면 브라우저 사용은 꺼져 있습니다 |
+| `MULTICA_ZCODE_BROWSER_IMAGE` | `mcr.microsoft.com/playwright:v1.62.1-noble` | 브라우저 런타임이 들어 있는 Docker 이미지입니다. 미리 있어야 합니다. Multica는 풀하지 않습니다 |
+| `MULTICA_ZCODE_BROWSER_DOCKER_BIN` | `PATH`의 `docker` | Docker CLI 경로입니다. 설정하지 않으면 `PATH`에서 `docker`를 찾은 뒤 기존 설치 위치를 찾습니다 |
+
+Multica는 이미지를 풀하지 않고 npm에서 아무것도 설치하지 않습니다. 둘 다 직접 준비하고, 이미지 버전에 맞는 `playwright-core`를 사용하세요.
+
 ### 데몬 설정 영속화
 
 자주 사용하는 데몬 측 설정은 shell 환경 변수에 의존하지 않고 `~/.multica/config.json`에 기록할 수도 있습니다. 이름 있는 profile의 설정 파일은 `~/.multica/profiles/<name>/config.json`에 있습니다.

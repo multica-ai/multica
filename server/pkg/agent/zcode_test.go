@@ -50,6 +50,9 @@ func newZcodeTestBackend(t *testing.T, bin string) Backend {
 	if err != nil {
 		t.Fatalf("New(zcode) error: %v", err)
 	}
+	// Browser use is off for these tests: none of them may look for docker or
+	// start a container. Browser frames are covered by the browser host tests.
+	b.(*zcodeBackend).browser = zcodeBrowserOptions{Mode: zcodeBrowserModeOff}
 	return b
 }
 
