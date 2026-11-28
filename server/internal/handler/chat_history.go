@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -120,10 +121,17 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 		if m.Role == "assistant" {
 			role = channel.HistoryRoleAssistant
 		}
+		// A failed turn's content is the run's error, shown to people in the
+		// chat UI. The agent reading this transcript gets the notice instead,
+		// so an error quoting a rejected request is not sent to its model.
+		text := m.Content
+		if m.FailureReason.Valid && m.FailureReason.String != "" {
+			text = service.RunFailureNotice(m.TaskID, m.FailureReason.String)
+		}
 		out = append(out, channel.HistoryMessage{
 			ID:     uuidToString(m.ID),
 			Role:   role,
-			Text:   m.Content,
+			Text:   text,
 			Author: transcriptAuthor(role),
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 		})

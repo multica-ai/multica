@@ -16,6 +16,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -329,6 +330,48 @@ func TestGetChatHistory_NilReaderServesStoredTranscript(t *testing.T) {
 	}
 	if len(resp.Messages) != 2 || resp.Messages[0].Text != "nil reader still reads me" || resp.Messages[1].Text != "and my reply" {
 		t.Fatalf("nil reader did not serve the stored transcript: %+v", resp.Messages)
+	}
+}
+
+// TestGetChatHistory_FailedTurnReadsAsNoticeNotError: a failed turn's stored
+// content is the run's raw error. The transcript an agent reads back replaces it
+// with the run-failure notice, so an error quoting a rejected request is not
+// sent to the next run's model.
+func TestGetChatHistory_FailedTurnReadsAsNoticeNotError(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	agentID := createHandlerTestAgent(t, "ChatHistoryFailedTurnAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+
+	base := time.Date(2026, 8, 12, 1, 0, 0, 0, time.UTC)
+	insertChatVisibilityMessage(t, sessionID, "please summarize", "message", true, base)
+	const rawError = `403 {"error":{"type":"content_rejected","value":"rejected value"}}`
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, channel_ingested, created_at)
+		VALUES ($1, 'assistant', $2, $3, 'agent_error.provider_auth_or_access', true, $4)
+	`, sessionID, rawError, taskID, base.Add(time.Second)); err != nil {
+		t.Fatalf("insert failed turn: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Messages) != 2 {
+		t.Fatalf("messages = %+v, want the user turn and the failed turn", resp.Messages)
+	}
+	want := service.RunFailureNotice(parseUUID(taskID), "agent_error.provider_auth_or_access")
+	if got := resp.Messages[1].Text; got != want {
+		t.Fatalf("failed turn text = %q, want %q", got, want)
+	}
+	if strings.Contains(w.Body.String(), "rejected value") {
+		t.Fatalf("transcript carries the raw run error: %s", w.Body.String())
 	}
 }
 

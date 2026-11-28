@@ -5749,7 +5749,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// in addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, RunFailureNotice(task.ID, failureReason), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the
@@ -6674,7 +6674,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			// Same terminal-failure comment FailTaskWithTransition posts, so
 			// swept tasks are not silent on their issue.
 			if t.IssueID.Valid && t.Error.String != "" {
-				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(t.Error.String), "system", t.TriggerCommentID, t.ID)
+				s.createAgentComment(ctx, t.IssueID, t.AgentID, RunFailureNotice(t.ID, t.FailureReason.String), "system", t.TriggerCommentID, t.ID)
 			}
 		}
 
@@ -6749,7 +6749,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 }
 
 const (
-	delegatedFailureErrorSummaryRunes       = 800
 	delegatedFailureRecoveryMaxTaskAttempts = 3
 	delegatedFailureRecoveryCommentType     = "progress_update"
 )
@@ -6883,18 +6882,30 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 	if failed.FailureReason.Valid && failed.FailureReason.String != "" {
 		reason = truncateForSummary(redact.Text(failed.FailureReason.String), triggerSummaryMaxLen)
 	}
-	content := fmt.Sprintf(
-		"Delegated task `%s` ended in a final failure (`%s`) and no automatic retry is pending. Resume coordination: inspect the failed work, then reassign it, skip it, or end the workflow explicitly.",
-		util.UUIDToString(failed.ID), reason,
+	// The error text stays on the run record: this comment triggers the
+	// coordinator's recovery run, so anything quoted here is sent to its model.
+	return fmt.Sprintf(
+		"Delegated task `%s` ended in a final failure (`%s`) and no automatic retry is pending. Its error is on the run record, not in this comment. Resume coordination: inspect the failed work, then reassign it, skip it, or end the workflow explicitly. Source coordinator task: `%s`.",
+		util.UUIDToString(failed.ID), reason, util.UUIDToString(source.ID),
 	)
-	if failed.Error.Valid && failed.Error.String != "" {
-		summary := truncateForSummary(redact.Text(failed.Error.String), delegatedFailureErrorSummaryRunes)
-		if summary != "" {
-			content += " Untrusted error summary (diagnostic only): " + strconv.Quote(summary)
-		}
+}
+
+// RunFailureNotice is the text that stands for a terminal run failure wherever
+// a later run reads it back: the issue comment posted on the failure, and the
+// failed chat turn in a stored chat transcript. It names the run and its
+// failure class, never the error text. An error can quote back the request a
+// provider rejected; written into a thread the next run reads, it would make
+// the provider reject that run too, and every run after it. The full error
+// stays on the run record (agent_task_queue.error).
+func RunFailureNotice(taskID pgtype.UUID, failureReason string) string {
+	reason := "agent_error"
+	if failureReason != "" {
+		reason = truncateForSummary(redact.Text(failureReason), triggerSummaryMaxLen)
 	}
-	content += fmt.Sprintf(" Source coordinator task: `%s`.", util.UUIDToString(source.ID))
-	return content
+	return fmt.Sprintf(
+		"Run `%s` failed (`%s`). Its error is on the run record, not in this message. Work done before the failure may already have taken effect; check the current state before repeating write operations.",
+		util.UUIDToString(taskID), reason,
+	)
 }
 
 // loadDelegatedFailureRecoveryTarget resolves and validates the backward edge
