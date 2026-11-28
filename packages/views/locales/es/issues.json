@@ -1462,6 +1462,9 @@
       "checked": "marcado",
       "unchecked": "sin marcar",
       "pr_conflicts": "Cuando un PR enlazado tiene conflictos de fusión",
+      "pr_target_checks": "Cuando termina la CI de {{pr}}",
+      "pr_target_merged": "Cuando se fusiona {{pr}}",
+      "pr_target_closed": "Cuando {{pr}} se fusiona o se cierra",
       "other_blocked": "Cuando {{issue}} pase a Bloqueado"
     },
     "wait": {
@@ -1485,6 +1488,9 @@
       "paused": "Activación pausada",
       "open": "Mostrar activaciones",
       "pr_conflicts": "Vigilando conflictos de fusión",
+      "pr_target_checks": "Esperando la CI de {{pr}}",
+      "pr_target_merged": "Esperando a que se fusione {{pr}}",
+      "pr_target_closed": "Esperando a que se cierre {{pr}}",
       "other_blocked": "Esperando a que {{issue}} pase a Bloqueado"
     },
     "paused": {
