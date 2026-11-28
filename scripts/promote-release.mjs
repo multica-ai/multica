@@ -1,4 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse } from "yaml";
 
@@ -10,6 +14,8 @@ export const channels = [
   ["latest-linux.yml", "linux", "x64", "AppImage"],
   ["latest-linux-arm64.yml", "linux", "arm64", "AppImage"],
 ];
+
+const checksumsName = "checksums.txt";
 
 function stableVersion(tag) {
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) {
@@ -75,26 +81,40 @@ export async function validateRelease(tag, release, assets, readMetadata) {
       problems.push(`${name}: ${error.message}`);
     }
   }
-  // Both naming schemes are consumed by shipped CLI clients/installers.
+  // Include the uploaded Desktop assets that updater metadata doesn't reference,
+  // such as blockmaps, as well as both CLI archive naming schemes.
+  const checksumNames = [...uploaded.keys()].filter((name) => name.startsWith(`multica-desktop-${version}-`));
   for (const os of ["darwin", "linux", "windows"]) {
     for (const arch of ["amd64", "arm64"]) {
       const ext = os === "windows" ? "zip" : "tar.gz";
-      for (const name of [`multica_${os}_${arch}.${ext}`, `multica-cli-${version}-${os}-${arch}.${ext}`]) {
-        if (!uploaded.has(name)) problems.push(`Missing ${name}`);
-      }
+      checksumNames.push(`multica_${os}_${arch}.${ext}`, `multica-cli-${version}-${os}-${arch}.${ext}`);
     }
   }
-  if (!uploaded.has("checksums.txt")) problems.push("Missing checksums.txt");
-  return problems;
+  const lines = [];
+  for (const name of checksumNames.sort()) {
+    const asset = uploaded.get(name);
+    if (!asset) { problems.push(`Missing ${name}`); continue; }
+    const digest = /^sha256:([a-f0-9]{64})$/.exec(asset.digest);
+    if (!digest) { problems.push(`Missing or invalid SHA-256 digest for ${name}`); continue; }
+    lines.push(`${digest[1]}  ${name}`);
+  }
+  return {
+    problems,
+    checksums: lines.join("\n") + "\n",
+    existingChecksumDigest: uploaded.get(checksumsName)?.digest,
+  };
 }
 
 // All callers run in the workflow's single stable-channel concurrency group.
 // Missing uploads are a normal waiting state; malformed API/auth responses fail.
-export async function promoteRelease({ tag, getRelease, getAssets, readMetadata, getLatest, promote }) {
+export async function promoteRelease({ tag, getRelease, getAssets, readMetadata, uploadChecksums, getLatest, promote }) {
   stableVersion(tag);
   const release = await getRelease(tag);
-  const problems = await validateRelease(tag, release, await getAssets(release.id), readMetadata);
+  const { problems, checksums, existingChecksumDigest } =
+    await validateRelease(tag, release, await getAssets(release.id), readMetadata);
   if (problems.length) return { status: "waiting", problems };
+  const checksumDigest = `sha256:${createHash("sha256").update(checksums).digest("hex")}`;
+  if (checksumDigest !== existingChecksumDigest) await uploadChecksums(tag, checksums);
   // Read Latest immediately before writing it, inside the serialized job.
   const latest = await getLatest();
   if (!isNewer(tag, latest)) return { status: "skipped", latest };
@@ -117,6 +137,16 @@ export async function main() {
     getRelease: (tag) => api(`releases/tags/${encodeURIComponent(tag)}`),
     getAssets: (id) => JSON.parse(gh(["api", `repos/${repo}/releases/${id}/assets?per_page=100`, "--paginate", "--slurp"])).flat(),
     readMetadata: (asset) => gh(["api", `repos/${repo}/releases/assets/${asset.id}`, "-H", "Accept: application/octet-stream"]),
+    uploadChecksums: (tag, contents) => {
+      const dir = mkdtempSync(join(tmpdir(), "multica-checksums-"));
+      try {
+        const path = join(dir, checksumsName);
+        writeFileSync(path, contents, "utf8");
+        gh(["release", "upload", tag, path, "--repo", repo, "--clobber"]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
     getLatest: () => {
       try { return api("releases/latest").tag_name; }
       catch (error) {

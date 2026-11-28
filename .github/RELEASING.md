@@ -75,14 +75,20 @@ The gate checks all six update metadata files (`latest-mac.yml`,
 `latest-x64-mac.yml`, `latest.yml`, `latest-arm64.yml`, `latest-linux.yml`, and
 `latest-linux-arm64.yml`), their version against the tag, and each referenced
 artifact's architecture, upload status, and byte size. It also requires all six
-CLI targets in both legacy and versioned archive names plus `checksums.txt`.
-macOS update metadata must reference the ZIP; Windows requires EXE and Linux
-AppImage. Missing blockmaps do not block promotion. The macOS `afterSign` hook
+CLI targets in both legacy and versioned archive names. macOS update metadata
+must reference the ZIP. Windows requires EXE and Linux requires AppImage.
+Missing blockmaps do not block promotion. The macOS `afterSign` hook
 runs `spctl` and `stapler validate` after notarization and before packaging/upload
 for explicit publishing builds. The release skill requires code signing so an
 unsigned build cannot skip that hook. These host checks do not run for unsigned
 local builds or other platforms. The gate does not download large binaries to
 recalculate SHA-512.
+
+Once the uploads pass validation, the workflow generates `checksums.txt` using
+GitHub's SHA-256 digests for both CLI archive naming schemes and all uploaded
+Desktop assets for the tag, including any blockmaps. It replaces GoReleaser's
+CLI-only manifest before promoting Latest. A rerun can refresh checksums after
+an asset replacement even if the tag is already Latest or older than Latest.
 
 Missing or inconsistent assets produce a `waiting` result with a list of blockers
 and leave Latest unchanged. This is normal when macOS and CI finish in either

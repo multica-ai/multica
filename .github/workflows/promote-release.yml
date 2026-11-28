@@ -37,7 +37,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts --filter multica
-      - name: Validate artifacts and promote Latest
+      - name: Validate artifacts, publish checksums, and promote Latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
