@@ -10,6 +10,7 @@
     "self-host-quickstart",
     "---工作区---",
     "workspaces",
+    "workspace-docs",
     "members-roles",
     "team-agent-pool",
     "analytics",
