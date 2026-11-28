@@ -15,9 +15,24 @@ import (
 
 func TestCursorExecuteInstallsSupplementHooksForTheRun(t *testing.T) {
 	t.Parallel()
+	testCursorExecuteSupplementLifecycle(t, "")
+}
+
+func TestCursorExecuteContextModelPreservesSupplementLifecycle(t *testing.T) {
+	t.Parallel()
+	testCursorExecuteSupplementLifecycle(t, "grok-4.7[500k]")
+}
+
+func testCursorExecuteSupplementLifecycle(t *testing.T, model string) {
+	t.Helper()
 	cwd := t.TempDir()
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, cursorCLIConfigFile), []byte(cursorTestCLIConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	script := `#!/bin/sh
 cat > prompt.txt
+printf '%s\n' "$CURSOR_CONFIG_DIR" > config-dir.txt
 printf '%s\n%s\n' "$MULTICA_CURSOR_HOOK_URL" "$MULTICA_CURSOR_HOOK_TOKEN" > hook-env.txt
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-steer"}'
 while [ ! -f receipt.jsonl ]; do sleep 0.02; done
@@ -27,11 +42,12 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 `
 	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
 	writeTestExecutable(t, fakePath, []byte(script))
-	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: map[string]string{"CURSOR_CONFIG_DIR": source}})
 	if err != nil {
 		t.Fatalf("New(cursor): %v", err)
 	}
 	session, err := backend.Execute(t.Context(), "original goal", ExecOptions{
+		Model:                 model,
 		Cwd:                   cwd,
 		Timeout:               30 * time.Second,
 		EnableTaskSupplement:  true,
@@ -40,7 +56,9 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+	messagesDrained := make(chan struct{})
 	go func() {
+		defer close(messagesDrained)
 		for range session.Messages {
 		}
 	}()
@@ -123,8 +141,22 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 	if result := <-session.Result; result.Status != "completed" {
 		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
 	}
+	<-messagesDrained
 	if session.SupplementReady() {
 		t.Fatal("ready after the terminal result")
+	}
+	if model != "" {
+		data, err := os.ReadFile(filepath.Join(cwd, "config-dir.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := strings.TrimSpace(string(data))
+		if dir == "" || dir == source {
+			t.Fatalf("context model did not use a private config directory: %q", dir)
+		}
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("private config directory after the run: %v, want removed", err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".cursor", "hooks.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("hooks.json after the run: %v, want removed", err)
