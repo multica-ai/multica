@@ -32,8 +32,7 @@
       "other_machine": "Otra máquina o servidor",
       "other_machine_hint": "Ejecuta dos comandos en esa máquina",
       "cloud_services": "Servicios en la nube",
-      "qoder_manage_hint": "Conectado · gestionar la conexión",
-      "cloud_runtime_hint": "Aprovisiona un nodo en la nube alojado por Multica"
+      "qoder_manage_hint": "Conectado · gestionar la conexión"
     },
     "columns": {
       "name": "Nombre",
@@ -290,45 +289,6 @@
     "success_description": "Máquina conectada. Ya puedes crear un agente.",
     "view_runtime": "Ver runtime",
     "create_agent": "Crear un agente"
-  },
-  "cloud_runtime": {
-    "action": "Runtime en la nube",
-    "title": "Runtime en la nube",
-    "description": "Crea un runtime en la nube.",
-    "create_title": "Nodo nuevo",
-    "nodes_title": "Nodos en la nube",
-    "refresh": "Actualizar",
-    "nodes_empty": "Sin nodos en la nube",
-    "nodes_failed": "Runtime en la nube no disponible",
-    "nodes_failed_hint": "No se han podido cargar los nodos en la nube. Inténtalo de nuevo.",
-    "node_fallback_name": "Nodo en la nube",
-    "create": "Crear nodo",
-    "creating": "Creando...",
-    "cancel": "Cancelar",
-    "toast_created": "Nodo de Runtime en la nube creado",
-    "toast_create_failed": "No se ha podido crear el nodo de Runtime en la nube",
-    "delete": "Eliminar nodo",
-    "delete_confirm": "¿Seguro que quieres eliminar este nodo en la nube? Esta acción no se puede deshacer.",
-    "toast_deleted": "Nodo en la nube eliminado",
-    "toast_delete_failed": "No se ha podido eliminar el nodo en la nube",
-    "fields": {
-      "name": "Nombre",
-      "instance_type": "Tipo de instancia",
-      "region": "Región",
-      "disk_size": "Tamaño del disco (GiB)",
-      "image_id": "ID de imagen (AMI)",
-      "subnet_id": "ID de subred",
-      "key_name": "Par de claves SSH",
-      "bootstrap_pat": "Token de arranque (PAT)"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "El tipo de instancia es obligatorio",
-      "disk_size_invalid": "El tamaño de disco debe ser un entero positivo"
-    }
   },
   "update": {
     "cli_version_label": "Versión de la CLI:",
@@ -695,10 +655,6 @@
       "remote": {
         "title": "Otra máquina, dos comandos",
         "description": "Instala la CLI en un servidor u otro ordenador y ejecuta multica setup para conectarlo."
-      },
-      "cloud": {
-        "title": "O usa un nodo en la nube",
-        "description": "¿Prefieres no gestionar máquinas? Crea un nodo en la nube alojado por Multica."
       }
     },
     "art": {

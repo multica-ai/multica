@@ -183,7 +183,7 @@ func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
 			queries := db.New(&fakeTaskTokenDB{t: t})
 			var called bool
 			var gotWorkspace, gotSource string
-			handler := Auth(queries, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := Auth(queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
 				gotWorkspace = r.Header.Get("X-Workspace-ID")
 				gotSource = r.Header.Get("X-Actor-Source")
@@ -232,7 +232,7 @@ func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
 // and Auth must neither validate nor rewrite that choice.
 func TestAuth_JWTWorkspaceSelectorUntouched(t *testing.T) {
 	var gotWorkspace string
-	handler := Auth(nil, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotWorkspace = r.Header.Get("X-Workspace-ID")
 		w.WriteHeader(http.StatusOK)
 	}))

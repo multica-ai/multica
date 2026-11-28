@@ -32,8 +32,7 @@
       "other_machine": "他のマシンまたはサーバー",
       "other_machine_hint": "そのマシンで 2 つのコマンドを実行",
       "cloud_services": "クラウドサービス",
-      "qoder_manage_hint": "接続済み · 接続を管理",
-      "cloud_runtime_hint": "Multica がホストするクラウドノードを作成"
+      "qoder_manage_hint": "接続済み · 接続を管理"
     },
     "columns": {
       "name": "名前",
@@ -279,45 +278,6 @@
     "success_description": "マシンに接続しました。エージェントを作成できます。",
     "view_runtime": "ランタイムを表示",
     "create_agent": "エージェントを作成"
-  },
-  "cloud_runtime": {
-    "action": "クラウドランタイム",
-    "title": "クラウドランタイム",
-    "description": "クラウドランタイムを作成します。",
-    "create_title": "新規ノード",
-    "nodes_title": "クラウドノード",
-    "refresh": "更新",
-    "nodes_empty": "クラウドノードなし",
-    "nodes_failed": "クラウドランタイムを利用できません",
-    "nodes_failed_hint": "クラウドノードを読み込めません。再試行してください。",
-    "node_fallback_name": "クラウドノード",
-    "create": "ノードを作成",
-    "creating": "作成中...",
-    "cancel": "キャンセル",
-    "toast_created": "クラウドランタイムノードを作成しました",
-    "toast_create_failed": "クラウドランタイムノードを作成できませんでした",
-    "delete": "ノードを削除",
-    "delete_confirm": "このクラウドノードを削除してもよろしいですか? この操作は元に戻せません。",
-    "toast_deleted": "クラウドノードを削除しました",
-    "toast_delete_failed": "クラウドノードを削除できませんでした",
-    "fields": {
-      "name": "名前",
-      "instance_type": "インスタンスタイプ",
-      "region": "リージョン",
-      "disk_size": "ディスクサイズ（GiB）",
-      "image_id": "イメージ ID（AMI）",
-      "subnet_id": "Subnet ID",
-      "key_name": "SSH キーペア",
-      "bootstrap_pat": "ブートストラップトークン（PAT）"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "インスタンスタイプは必須です",
-      "disk_size_invalid": "ディスクサイズは正の整数である必要があります"
-    }
   },
   "update": {
     "cli_version_label": "CLI バージョン:",
@@ -675,10 +635,6 @@
       "remote": {
         "title": "ほかのマシンはコマンド 2 つ",
         "description": "サーバーや別のコンピューターに CLI をインストールし、multica setup を実行すれば接続できます。"
-      },
-      "cloud": {
-        "title": "クラウドノードも使える",
-        "description": "マシンを自分で管理したくないなら、Multica がホストするクラウドノードを作成できます。"
       }
     },
     "art": {

@@ -29,7 +29,7 @@ func TestQuickActionTaskTokenPrivateAccess(t *testing.T) {
 	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
 
 	serve := func(handler func(*Handler, http.ResponseWriter, *http.Request)) http.HandlerFunc {
-		return middleware.Auth(testHandler.Queries, nil, nil, nil)(
+		return middleware.Auth(testHandler.Queries, nil, nil)(
 			middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				handler(testHandler, w, r)
 			})),

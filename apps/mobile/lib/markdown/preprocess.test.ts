@@ -3,7 +3,7 @@ import { preprocessMobileMarkdown } from "./preprocess";
 import { splitMarkdown } from "./split-markdown";
 
 const UUID = "019f49e2-5b07-7970-beef-c0d537fb8c1d";
-const ABS_URL = `https://multica-app.copilothub.ai/api/attachments/${UUID}/download`;
+const ABS_URL = `https://app.multica.example/api/attachments/${UUID}/download`;
 const REL_URL = `/api/attachments/${UUID}/download`;
 
 describe("preprocessMobileMarkdown — !file file cards", () => {

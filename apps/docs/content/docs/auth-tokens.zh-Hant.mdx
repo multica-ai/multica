@@ -85,14 +85,13 @@ curl https://api.multica.ai/api/issues \
 
 ## 其他機器憑據
 
-服務端還識別兩種內部或託管場景中的憑據：
+服務端還識別一種內部場景中的憑據：
 
 | 字首 | 用途 | 誰管理 |
 | --- | --- | --- |
-| `mcn_` | Multica Cloud Node 連線 | Multica Cloud Fleet |
 | `mdt_` | 工作區範圍的守護程序認證協議 | 服務端內部流程 |
 
-普通 Cloud、自託管和 Desktop 安裝都不需要手動建立它們。使用者側的 CLI 與守護程序始終使用 `mul_` PAT；不要自行構造其他字首的令牌。
+普通 Cloud、自託管和 Desktop 安裝都不需要手動建立它。使用者側的 CLI 與守護程序始終使用 `mul_` PAT；不要自行構造其他字首的令牌。
 
 ## 接下來
 

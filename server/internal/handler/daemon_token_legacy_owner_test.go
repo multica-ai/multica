@@ -90,7 +90,7 @@ func legacyTaskStatus(t *testing.T, raw, taskID string) int {
 	req := withURLParams(httptest.NewRequest("GET", "/api/daemon/tasks/"+taskID+"/status", nil), "taskId", taskID)
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
-	middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.GetTaskStatus)).ServeHTTP(w, req)
+	middleware.DaemonAuth(testHandler.Queries, nil, nil)(http.HandlerFunc(testHandler.GetTaskStatus)).ServeHTTP(w, req)
 	return w.Code
 }
 

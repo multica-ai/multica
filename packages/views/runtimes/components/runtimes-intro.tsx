@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, Cloud, Download, Laptop, Server, SquareTerminal } from "@multica/ui/icons";
+import { Check, Download, Laptop, Server, SquareTerminal } from "@multica/ui/icons";
 import { buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { providerDisplayName } from "@multica/core/runtimes";
@@ -22,18 +22,11 @@ const SETUP_COMMANDS = [
   "curl -fsSL …/multica/main/scripts/n | bash",
   "multica setup",
 ];
-const CLOUD_NODES = [
-  { name: "cloud-node-01", spec: "t3.medium · ap-southeast-1", online: true },
-  { name: "cloud-node-02", spec: "t3.large · ap-northeast-1", online: false },
-];
-
 export function RuntimesIntro({
   action,
-  cloudRuntimeEnabled,
 }: {
   /** The page's add-runtime menu, so every way to add one stays reachable. */
   action: ReactNode;
-  cloudRuntimeEnabled: boolean;
 }) {
   const { t } = useT("runtimes");
 
@@ -51,14 +44,6 @@ export function RuntimesIntro({
       art: <RemoteArt />,
     },
   ];
-  if (cloudRuntimeEnabled) {
-    slides.push({
-      id: "cloud",
-      title: t(($) => $.intro.slides.cloud.title),
-      description: t(($) => $.intro.slides.cloud.description),
-      art: <CloudArt />,
-    });
-  }
 
   return (
     <FeatureIntro
@@ -160,33 +145,6 @@ function RemoteArt() {
           {t(($) => $.intro.art.connected, { name: REMOTE_MACHINE })}
         </div>
       </div>
-    </IntroArtCard>
-  );
-}
-
-function CloudArt() {
-  const { t } = useT("runtimes");
-  return (
-    <IntroArtCard className="p-1.5">
-      <div className="flex items-center gap-1.5 px-1.5 pt-1 pb-1.5 font-medium text-muted-foreground">
-        <Cloud className="size-3" />
-        {t(($) => $.cloud_runtime.title)}
-      </div>
-      {CLOUD_NODES.map((node) => (
-        <div key={node.name} className="flex items-center gap-2 border-t px-1.5 py-1.5">
-          <MachineIcon>
-            <Server className="size-3.5" />
-          </MachineIcon>
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-medium">{node.name}</span>
-            <span className="truncate text-micro text-muted-foreground">{node.spec}</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-1 text-micro">
-            <StatusDot online={node.online} />
-            {node.online ? t(($) => $.health.online.label) : t(($) => $.cloud_runtime.creating)}
-          </span>
-        </div>
-      ))}
     </IntroArtCard>
   );
 }

@@ -71,7 +71,7 @@ function toFileCardHtml(filename: string, url: string): string {
 /**
  * Check if a URL points to our upload CDN.
  *
- * Uses exact hostname match against `cdnDomain` (e.g. "multica-static.copilothub.ai"),
+ * Uses exact hostname match against `cdnDomain` (e.g. "static.multica.example"),
  * and also matches any `.amazonaws.com` subdomain as a fallback for direct S3 URLs.
  */
 export function isCdnUrl(url: string, cdnDomain: string): boolean {
@@ -102,7 +102,7 @@ export function isFileCardUrl(url: string, cdnDomain: string): boolean {
  * lines. Only standalone lines are matched — inline links are left untouched.
  *
  * @param markdown  Raw markdown string
- * @param cdnDomain CDN hostname for legacy link detection (e.g. "multica-static.copilothub.ai")
+ * @param cdnDomain CDN hostname for legacy link detection (e.g. "static.multica.example")
  */
 export function preprocessFileCards(markdown: string, cdnDomain: string): string {
   return markdown

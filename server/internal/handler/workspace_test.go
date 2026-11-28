@@ -1721,7 +1721,7 @@ func TestListWorkspacesTaskCredentialSeesOnlyBoundWorkspace(t *testing.T) {
 	}
 
 	// The CLI lists workspaces without a workspace selector.
-	asAgent := middleware.Auth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.ListWorkspaces))
+	asAgent := middleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(testHandler.ListWorkspaces))
 	req := testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/workspaces", nil), "Authorization", "Bearer "+token)
 	var agent []WorkspaceResponse
 	testutil.Call(t, asAgent.ServeHTTP, req).Want(http.StatusOK).JSON(&agent)

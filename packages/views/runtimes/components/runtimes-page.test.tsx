@@ -103,13 +103,11 @@ function renderPage({
   runtimes = [makeRuntime()],
   connection = qoder(),
   desktop = false,
-  cloudRuntimeEnabled = false,
 }: {
   /** `null` leaves the runtime list unseeded, so the page renders loading. */
   runtimes?: AgentRuntime[] | null;
   connection?: QoderConnection;
   desktop?: boolean;
-  cloudRuntimeEnabled?: boolean;
 } = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -125,7 +123,6 @@ function renderPage({
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <RuntimesPage
-          cloudRuntimeEnabled={cloudRuntimeEnabled}
           {...(desktop
             ? {
                 localDaemonId: "daemon-1",
@@ -235,16 +232,6 @@ describe("RuntimesPage", () => {
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Other machine or server")).toBeInTheDocument();
     expect(within(menu).getByText("Qoder Cloud Agents")).toBeInTheDocument();
-  });
-
-  it("adds the cloud node card only when cloud runtimes are enabled", () => {
-    renderPage({ runtimes: [], cloudRuntimeEnabled: true });
-
-    const intro = screen.getByRole("region", {
-      name: "Give your agents a computer to work on",
-    });
-    expect(within(intro).getAllByRole("button", { name: /^Go to slide/ })).toHaveLength(3);
-    expect(within(intro).getByText("Or use a cloud node")).toBeInTheDocument();
   });
 
   it("keeps the list when only a cloud service is connected", () => {

@@ -15,10 +15,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Cloud billing endpoints proxy to the same multica-cloud HTTP service
-// that backs cloud-runtime (Fleet and Billing share `:8080` per the
-// upstream README). All paths here forward verbatim to /api/v1/billing/*
-// on the cloud side, mirroring the cloud-runtime handler shape:
+// Cloud billing endpoints proxy to the multica-cloud HTTP service. All
+// paths here forward verbatim to /api/v1/billing/* on the cloud side:
 //
 //   - Owner-credit endpoints sit under /api/cloud-billing/* in our router.
 //     Workspace subscription endpoints sit under /api/cloud-subscriptions/*

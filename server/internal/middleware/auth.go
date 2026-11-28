@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -50,13 +49,7 @@ func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userI
 // renewer knows it renewed. A group that mounts Auth without the CDN
 // middleware (the plugin bridge) would otherwise slide the session forward
 // while leaving the CDN policy pinned to the original login.
-//
-// cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
-// validated by calling the Multica Cloud Fleet service rather than the
-// local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
-// prefix branch — we don't fall through to the mul_ / JWT paths, since
-// an mcn_ string is by construction not a valid mul_ PAT or JWT.
-func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
+func Auth(queries *db.Queries, patCache *auth.PATCache, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -146,63 +139,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				return
 			}
 
-			// Cloud Node PAT: "mcn_" prefix. Verified by calling the
-			// Multica Cloud Fleet service — Cloud (not us) is the
-			// authoritative owner of the token's status and owner_id
-			// binding. We never look at the local
-			// personal_access_tokens table for this prefix; an mcn_
-			// string is not a valid mul_ value, so falling through
-			// would just be a redundant DB miss. When the verifier
-			// is unconfigured (no MULTICA_CLOUD_URL) we reject
-			// at this branch rather than treating the token as a
-			// JWT/PAT — failing closed avoids a misconfigured prod
-			// silently downgrading auth.
-			//
-			// After Cloud confirms the token, we also confirm that
-			// the returned owner_id maps to a real local user. The
-			// Cloud `owner_id` and our `users.id` share the same UUID
-			// space by contract, so this is a defense in depth: a
-			// missing user means the local row was deleted out from
-			// under a still-active node, or something is forging
-			// owner_ids — either way we must not let the request
-			// pass with a phantom X-User-ID.
-			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
-				if cloudPAT == nil {
-					slog.Warn("auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
-				if err != nil {
-					if errors.Is(err, auth.ErrCloudPATInvalid) {
-						slog.Warn("auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)
-						http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-						return
-					}
-					// Cloud unreachable / 5xx / decode error. We surface
-					// 503 so callers (CLI / daemon) can retry — a 401
-					// here would tell them to throw out a valid token.
-					slog.Warn("auth: cloud pat verify unavailable", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
-					return
-				}
-				if rejectTemporarilyDisabledUser(w, r, identity.OwnerID, "", "cloud_pat") {
-					return
-				}
-				r.Header.Set("X-User-ID", identity.OwnerID)
-				// Tag the auth path so account-level guards (e.g.
-				// handler.RequireHumanActor on /api/cloud-billing/*)
-				// can distinguish a cloud-node machine credential
-				// from a human PAT/JWT. Mirrors the mat_ branch's
-				// stamp of "task_token" — both are server-set,
-				// authoritative, and stripped from any client-
-				// supplied value at the top of this middleware. Same
-				// rationale as MUL-2600: a machine credential
-				// (running agent or running cloud node) must not be
-				// treated as the owner having approved an account-
-				// level action.
-				r.Header.Set("X-Actor-Source", "cloud_pat")
-				next.ServeHTTP(w, r)
+			// Cloud Node PATs ("mcn_") belonged to the retired Multica
+			// Cloud Runtime. Reject them here instead of letting them
+			// reach the mul_ / JWT branches.
+			if strings.HasPrefix(tokenString, "mcn_") {
+				slog.Warn("auth: retired mcn_ token presented", "path", r.URL.Path)
+				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 				return
 			}
 

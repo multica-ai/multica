@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   Check,
-  Cloud,
   Download,
   Laptop,
   Loader2,
@@ -89,7 +88,6 @@ import { qoderOptions } from "@multica/core/runtimes/qoder";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
 import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
-import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import { RuntimesIntro } from "./runtimes-intro";
@@ -112,8 +110,6 @@ export interface RuntimesPageProps {
   hasLocalMachine?: boolean;
   /** The bundled daemon is starting but has not registered yet. */
   bootstrapping?: boolean;
-  /** Web SaaS-only Cloud Runtime entrypoint. */
-  cloudRuntimeEnabled?: boolean;
 }
 
 type StatusFilter = "all" | "online" | "offline";
@@ -177,7 +173,6 @@ export function RuntimesPage({
   localMachineName,
   hasLocalMachine,
   bootstrapping,
-  cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const { t } = useT("runtimes");
   const isAuthLoading = useAuthStore((state) => state.isLoading);
@@ -189,7 +184,6 @@ export function RuntimesPage({
   const navigation = useNavigation();
   const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
-  const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const restoreScrollRef = useRestoredScrollRef("runtimes");
 
@@ -339,10 +333,8 @@ export function RuntimesPage({
     isDesktop,
     localMachineName: localMachineName ?? localMachine?.title ?? null,
     qoder,
-    cloudRuntimeEnabled,
     onAddMachine: () => setShowConnectDialog(true),
     onQoder: openQoder,
-    onCloudRuntime: () => setShowCloudRuntimeDialog(true),
   };
 
   const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
@@ -499,7 +491,6 @@ export function RuntimesPage({
 
       {showIntro ? (
         <RuntimesIntro
-          cloudRuntimeEnabled={cloudRuntimeEnabled}
           action={
             <AddRuntimeMenu
               {...addMenuProps}
@@ -573,9 +564,6 @@ export function RuntimesPage({
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
-      {cloudRuntimeEnabled && showCloudRuntimeDialog && (
-        <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
-      )}
     </div>
   );
 }
@@ -584,20 +572,16 @@ function AddRuntimeMenu({
   isDesktop,
   localMachineName,
   qoder,
-  cloudRuntimeEnabled,
   onAddMachine,
   onQoder,
-  onCloudRuntime,
   trigger,
   align = "end",
 }: {
   isDesktop: boolean;
   localMachineName: string | null;
   qoder: QoderConnection | null;
-  cloudRuntimeEnabled: boolean;
   onAddMachine: () => void;
   onQoder: () => void;
-  onCloudRuntime: () => void;
   trigger?: ReactElement;
   align?: "start" | "end";
 }) {
@@ -657,14 +641,6 @@ function AddRuntimeMenu({
                 ) : undefined
               }
               onClick={onQoder}
-            />
-          )}
-          {cloudRuntimeEnabled && (
-            <AddMenuItem
-              icon={<Cloud className="size-4 text-muted-foreground" />}
-              title={t(($) => $.cloud_runtime.action)}
-              description={t(($) => $.page.add_menu.cloud_runtime_hint)}
-              onClick={onCloudRuntime}
             />
           )}
           {COMING_SOON_SERVICES.map((service) => (

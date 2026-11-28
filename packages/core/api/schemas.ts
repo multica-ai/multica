@@ -124,7 +124,6 @@ import type {
   WebhookDelivery,
   WorkspaceMcpServer,
 } from "../types";
-import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
 export const PluginConfigFieldSchema = z.object({
@@ -2185,42 +2184,6 @@ export const ChildIssueProgressResponseSchema = z.object({
     )
     .default([]),
 }).loose();
-
-export const CloudRuntimeNodeSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  instance_id: z.string(),
-  region: z.string(),
-  instance_type: z.string(),
-  image_id: z.string(),
-  subnet_id: z.string(),
-  name: z.string(),
-  status: z.string(),
-  tags: z.record(z.string(), z.string()).default({}),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
-
-export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
-
-export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
-  id: "",
-  owner_id: "",
-  instance_id: "",
-  region: "",
-  instance_type: "",
-  image_id: "",
-  subnet_id: "",
-  name: "",
-  status: "",
-  tags: {},
-  metadata: {},
-  created_at: "",
-  updated_at: "",
-};
 
 // Workspace dashboard schemas
 //

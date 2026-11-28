@@ -32,8 +32,7 @@
       "other_machine": "其他機器或伺服器",
       "other_machine_hint": "在那臺機器上執行兩條命令",
       "cloud_services": "雲服務",
-      "qoder_manage_hint": "已連線 · 管理連線",
-      "cloud_runtime_hint": "建立一臺 Multica 託管的雲節點"
+      "qoder_manage_hint": "已連線 · 管理連線"
     },
     "columns": {
       "name": "名稱",
@@ -279,45 +278,6 @@
     "success_description": "機器已連線，可以建立 AI 代理。",
     "view_runtime": "檢視執行時",
     "create_agent": "建立 AI 代理"
-  },
-  "cloud_runtime": {
-    "action": "雲端執行時",
-    "title": "雲端執行時",
-    "description": "建立雲端執行環境。",
-    "create_title": "新節點",
-    "nodes_title": "雲端節點",
-    "refresh": "重新整理",
-    "nodes_empty": "還沒有云端節點",
-    "nodes_failed": "雲端執行時不可用",
-    "nodes_failed_hint": "無法載入雲端節點，請重試。",
-    "node_fallback_name": "雲端節點",
-    "create": "建立節點",
-    "creating": "建立中...",
-    "cancel": "取消",
-    "toast_created": "雲端節點已建立",
-    "toast_create_failed": "建立雲端節點失敗",
-    "delete": "刪除節點",
-    "delete_confirm": "確定要刪除此雲節點嗎？此操作無法撤銷。",
-    "toast_deleted": "雲節點已刪除",
-    "toast_delete_failed": "刪除雲節點失敗",
-    "fields": {
-      "name": "名稱",
-      "instance_type": "例項規格",
-      "region": "Region",
-      "disk_size": "磁碟大小（GiB）",
-      "image_id": "映像 ID（AMI）",
-      "subnet_id": "Subnet ID",
-      "key_name": "SSH 金鑰對",
-      "bootstrap_pat": "初始化 Token（PAT）"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "例項規格不能為空",
-      "disk_size_invalid": "磁碟大小必須是正整數"
-    }
   },
   "update": {
     "cli_version_label": "CLI 版本：",
@@ -675,10 +635,6 @@
       "remote": {
         "title": "其他機器，兩條命令",
         "description": "在伺服器或另一臺電腦上裝好 CLI，執行 multica setup 就連上了。"
-      },
-      "cloud": {
-        "title": "或者用雲端節點",
-        "description": "不想自己管機器？建立一臺 Multica 託管的雲節點。"
       }
     },
     "art": {

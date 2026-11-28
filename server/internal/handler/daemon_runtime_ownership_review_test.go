@@ -193,7 +193,7 @@ func TestDaemonRPC_QoderClaimRevalidatesConnectionCredential(t *testing.T) {
 	handshake := httptest.NewRequest(http.MethodGet, "/api/daemon/ws", nil)
 	handshake.Header.Set("Authorization", "Bearer "+raw)
 	hw := httptest.NewRecorder()
-	middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	middleware.DaemonAuth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		identity, ok = testHandler.buildDaemonWebSocketIdentity(w, r, []string{runtimeID}, "")
 	})).ServeHTTP(hw, handshake)
 	if !ok {
@@ -273,7 +273,7 @@ func TestDaemonToken_OldOwnersCredentialCannotReachReplacementOwner(t *testing.T
 		req.Header.Del("X-User-ID")
 		req.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
-		middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(h).ServeHTTP(w, req)
+		middleware.DaemonAuth(testHandler.Queries, nil, nil)(h).ServeHTTP(w, req)
 		return w
 	}
 	heartbeat := func(runtimeID string) int {
@@ -386,7 +386,7 @@ func TestDaemonToken_ReplacedOwnerAndUnboundTokensCannotRegisterOrAct(t *testing
 				req.Header.Del("X-User-ID")
 				req.Header.Set("Authorization", "Bearer "+raw)
 				w := httptest.NewRecorder()
-				middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(h).ServeHTTP(w, req)
+				middleware.DaemonAuth(testHandler.Queries, nil, nil)(h).ServeHTTP(w, req)
 				return w.Code
 			}
 			register := func() int {
@@ -468,7 +468,7 @@ func TestDaemonRegister_QoderPrefixNeedsLiveConnectionForEveryShape(t *testing.T
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
-		middleware.DaemonAuth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.DaemonRegister)).ServeHTTP(w, req)
+		middleware.DaemonAuth(testHandler.Queries, nil, nil)(http.HandlerFunc(testHandler.DaemonRegister)).ServeHTTP(w, req)
 		return w.Code
 	}
 	for name, body := range map[string]map[string]any{

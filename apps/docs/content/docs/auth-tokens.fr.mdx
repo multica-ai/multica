@@ -85,14 +85,13 @@ Ces jetons sont créés automatiquement par le serveur ; les utilisateurs n'ont 
 
 ## Autres identifiants machine
 
-Le serveur reconnaît également deux identifiants utilisés dans des scénarios internes ou gérés :
+Le serveur reconnaît également un identifiant utilisé dans des scénarios internes :
 
 | Préfixe | Rôle | Géré par |
 | --- | --- | --- |
-| `mcn_` | Connexions Multica Cloud Node | Multica Cloud Fleet |
 | `mdt_` | Protocole d'authentification du daemon limité à un espace de travail | Flux internes du serveur |
 
-Les installations Cloud, auto-hébergées et Desktop classiques n'ont jamais besoin de les créer manuellement. Le CLI et le daemon côté utilisateur utilisent toujours des PAT `mul_` ; ne construisez pas vous-même de jetons avec d'autres préfixes.
+Les installations Cloud, auto-hébergées et Desktop classiques n'ont jamais besoin de le créer manuellement. Le CLI et le daemon côté utilisateur utilisent toujours des PAT `mul_` ; ne construisez pas vous-même de jetons avec d'autres préfixes.
 
 ## Étapes suivantes
 

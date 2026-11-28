@@ -49,7 +49,7 @@ func TestConnectedApps_RunCredentialIsNotAPerson(t *testing.T) {
 	t.Cleanup(func() { f.h.Queries.DeleteTaskTokensByTask(context.Background(), parseUUID(f.taskID)) })
 
 	router := chi.NewRouter()
-	router.Use(middleware.Auth(f.h.Queries, nil, nil, nil))
+	router.Use(middleware.Auth(f.h.Queries, nil, nil))
 	router.Use(middleware.RequireWorkspaceMember(f.h.Queries))
 	router.Post("/api/app-requests/{id}/approve", f.h.ApproveAppRequest)
 	router.Get("/api/app-requests", f.h.ListAppRequests)

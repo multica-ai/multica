@@ -32,8 +32,7 @@
       "other_machine": "Other machine or server",
       "other_machine_hint": "Run two commands on that machine",
       "cloud_services": "Cloud services",
-      "qoder_manage_hint": "Connected · manage connection",
-      "cloud_runtime_hint": "Provision a Multica-hosted cloud node"
+      "qoder_manage_hint": "Connected · manage connection"
     },
     "columns": {
       "name": "Name",
@@ -290,45 +289,6 @@
     "success_description": "Machine connected. You can now create an agent.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
-  },
-  "cloud_runtime": {
-    "action": "Cloud Runtime",
-    "title": "Cloud Runtime",
-    "description": "Create a cloud runtime.",
-    "create_title": "New node",
-    "nodes_title": "Cloud nodes",
-    "refresh": "Refresh",
-    "nodes_empty": "No cloud nodes",
-    "nodes_failed": "Cloud Runtime unavailable",
-    "nodes_failed_hint": "Couldn't load cloud nodes. Try again.",
-    "node_fallback_name": "Cloud node",
-    "create": "Create node",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "toast_created": "Cloud Runtime node created",
-    "toast_create_failed": "Failed to create Cloud Runtime node",
-    "delete": "Delete node",
-    "delete_confirm": "Are you sure you want to delete this cloud node? This action cannot be undone.",
-    "toast_deleted": "Cloud node deleted",
-    "toast_delete_failed": "Failed to delete cloud node",
-    "fields": {
-      "name": "Name",
-      "instance_type": "Instance type",
-      "region": "Region",
-      "disk_size": "Disk size (GiB)",
-      "image_id": "Image ID (AMI)",
-      "subnet_id": "Subnet ID",
-      "key_name": "SSH key pair",
-      "bootstrap_pat": "Bootstrap token (PAT)"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "Instance type is required",
-      "disk_size_invalid": "Disk size must be a positive integer"
-    }
   },
   "update": {
     "cli_version_label": "CLI Version:",
@@ -695,10 +655,6 @@
       "remote": {
         "title": "Another machine, two commands",
         "description": "Install the CLI on a server or another computer, then run multica setup to connect it."
-      },
-      "cloud": {
-        "title": "Or use a cloud node",
-        "description": "Rather not manage machines? Create a cloud node hosted by Multica."
       }
     },
     "art": {
