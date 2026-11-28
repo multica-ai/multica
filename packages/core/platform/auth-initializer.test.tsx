@@ -13,7 +13,8 @@ import {
   registerAuthStore,
   useAuthStore,
 } from "../auth";
-import type { StorageAdapter, User, Workspace } from "../types";
+import { queueIssueDescriptionSave } from "../issues/description-save-queue";
+import type { Issue, StorageAdapter, User, Workspace } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 import {
   registerDraftCleanup,
@@ -563,5 +564,41 @@ describe("AuthInitializer recovery", () => {
     });
     expect(storage.snapshot().multica_token).toBeUndefined();
     expect(onLogout).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("AuthInitializer description ownership", () => {
+  it.each([false, true])("drops pending descriptions on session expiry (cookieAuth=%s)", async (cookieAuth) => {
+    const { queryClient } = renderInitializer({ api: makeApi(), cookieAuth });
+    await waitFor(() => expect(useAuthStore.getState().status).toBe("authenticated"));
+    let finish!: (issue: Issue) => void;
+    const save = vi.fn().mockReturnValueOnce(new Promise<Issue>((resolve) => { finish = resolve; }));
+    const onError = vi.fn();
+    const queue = (markdown: string) => queueIssueDescriptionSave(queryClient, "ws-1", "issue-1", {
+      markdown, baseMarkdown: "baseline", attachmentIds: [],
+    }, save, onError);
+    queue("A1"); queue("A2");
+    await act(async () => { useAuthStore.getState().sessionExpired(); });
+    expect(useAuthStore.getState().status).toBe("unauthenticated");
+    await act(async () => { finish({ description: "A1" } as Issue); });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same account's pending descriptions during a normal token update", async () => {
+    const { queryClient } = renderInitializer({ api: makeApi() });
+    await waitFor(() => expect(useAuthStore.getState().status).toBe("authenticated"));
+    let finish!: (issue: Issue) => void;
+    const save = vi.fn().mockReturnValueOnce(new Promise<Issue>((resolve) => { finish = resolve; }))
+      .mockResolvedValue({ description: "A2" } as Issue);
+    const queue = (markdown: string) => queueIssueDescriptionSave(queryClient, "ws-1", "issue-1", {
+      markdown, baseMarkdown: "baseline", attachmentIds: [],
+    }, save, vi.fn());
+    queue("A1"); queue("A2");
+    await act(async () => { await useAuthStore.getState().loginWithToken("synthetic-refreshed-token"); });
+    expect(useAuthStore.getState().user?.id).toBe(fakeUser.id);
+    await act(async () => { finish({ description: "A1" } as Issue); });
+    expect(save).toHaveBeenNthCalledWith(2, expect.objectContaining({ description: "A2", description_base: "A1" }));
   });
 });
