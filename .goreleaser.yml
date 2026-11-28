@@ -31,6 +31,13 @@ builds:
     goarch:
       - amd64
       - arm64
+      - s390x
+    # s390x is a Linux-only architecture
+    ignore:
+      - goos: darwin
+        goarch: s390x
+      - goos: windows
+        goarch: s390x
 
 archives:
   # Legacy archive name kept so already-released CLIs (whose `multica update`
