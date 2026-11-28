@@ -1,0 +1,20 @@
+FROM node:22.23.4-alpine
+
+WORKDIR /app
+RUN apk add --no-cache "libcrypto3>=3.5.8-r0" "libssl3>=3.5.8-r0" && \
+    addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+ENV NODE_ENV=production
+ENV REMOTE_API_URL=http://backend:8080
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+COPY --chown=nextjs:nodejs apps/web/.next/standalone ./
+COPY --chown=nextjs:nodejs apps/web/.next/static ./apps/web/.next/static
+COPY --chown=nextjs:nodejs apps/web/public ./apps/web/public
+COPY --chown=nextjs:nodejs LICENSE NOTICE ./
+
+USER nextjs
+EXPOSE 3000
+CMD ["node", "apps/web/server.js"]
