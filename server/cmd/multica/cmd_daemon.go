@@ -1145,6 +1145,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		overrides.AutoUpdateCheckInterval = autoUpdateOverride
 	}
 
+	// LoadConfig exports profile values for the current daemon and its agents.
+	// The successor must read its own profile values from the updated file.
+	handoffEnv := append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1")
 	cfg, err := daemon.LoadConfig(overrides)
 	if err != nil {
 		return err
@@ -1237,7 +1240,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
-		child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1")
+		child.Env = handoffEnv
 
 		// The successor is a fresh foreground daemon that will open daemon.log
 		// through its own rotating writer; hand it the raw-stderr sink so its
@@ -1263,7 +1266,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			// duplicate cleanup here.
 			if isAccessDeniedSpawnErr(err) {
 				child = exec.Command(restartBin, args...)
-				child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1")
+				child.Env = handoffEnv
 				child.Stdout = logFile
 				child.Stderr = logFile
 				child.SysProcAttr = daemonSysProcAttr(false)
