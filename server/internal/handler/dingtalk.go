@@ -95,7 +95,7 @@ func (h *Handler) dingtalkAgentVisibility(
 	userID string,
 	member db.Member,
 ) (available map[string]struct{}, visible map[string]struct{}, ok bool) {
-	agents, err := h.Queries.ListAllAgents(ctx, workspaceID)
+	agents, err := h.Queries.ListAgentAccessRows(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, false
 	}
@@ -111,13 +111,17 @@ func (h *Handler) dingtalkAgentVisibility(
 	if roleAllowed(member.Role, "owner", "admin") {
 		return available, visible, true
 	}
-	targetsByAgent, loaded := h.loadInvocationTargetsByAgent(ctx, agents)
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		ids = append(ids, agent.ID)
+	}
+	targetsByAgent, loaded := h.loadInvocationTargetsByAgentIDs(ctx, ids)
 	if !loaded {
 		return nil, nil, false
 	}
 	for _, agent := range agents {
 		agentID := uuidToString(agent.ID)
-		if memberAllowedToViewAgent(agent, targetsByAgent[agentID], userID, member.Role) {
+		if memberAllowedToViewAgent(agent.OwnerID, agent.PermissionMode, targetsByAgent[agentID], userID, member.Role) {
 			visible[agentID] = struct{}{}
 		}
 	}

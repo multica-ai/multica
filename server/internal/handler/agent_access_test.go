@@ -101,7 +101,7 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := memberAllowedToViewAgent(agent, nil, tc.userID, tc.role)
+			got := memberAllowedToViewAgent(agent.OwnerID, agent.PermissionMode, nil, tc.userID, tc.role)
 			if got != tc.want {
 				t.Fatalf("memberAllowedToViewAgent(userID=%s, role=%s) = %v; want %v",
 					tc.userID, tc.role, got, tc.want)

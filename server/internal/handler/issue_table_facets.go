@@ -361,7 +361,7 @@ func (h *Handler) issueTableWorkingAgentIDs(
 	}
 	ids := make([]pgtype.UUID, 0, len(agents))
 	for _, agent := range agents {
-		if actorType == "member" && !memberAllowedToViewAgent(agent, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role) {
+		if actorType == "member" && !memberAllowedToViewAgent(agent.OwnerID, agent.PermissionMode, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role) {
 			continue
 		}
 		ids = append(ids, agent.ID)
