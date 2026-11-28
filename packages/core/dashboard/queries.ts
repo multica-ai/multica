@@ -20,6 +20,7 @@ type DashboardKeyPart =
   | "daily"
   | "by-agent"
   | "by-squad"
+  | "by-runtime"
   | "agent-runtime"
   | "squad-runtime"
   | "runtime-daily"
@@ -66,6 +67,14 @@ export const dashboardKeys = {
     historyLimit?: DashboardHistoryLimitParam,
     squadId: string | null = null,
   ) => dashboardKey(wsId, "by-squad", days, projectId, tz, historyLimit, squadId),
+  byRuntime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "by-runtime", days, projectId, tz, historyLimit, squadId),
   agentRuntime: (
     wsId: string,
     days: number,
@@ -253,6 +262,28 @@ export function dashboardUsageBySquadOptions(
   return dashboardOptions(
     "by-squad",
     (params) => api.getDashboardUsageBySquad(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+// Only mounted by the "By machine" tab, so it is not prefetched with the
+// other rollups.
+export function dashboardUsageByRuntimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "by-runtime",
+    (params) => api.getDashboardUsageByRuntime(params),
     wsId,
     days,
     projectId,

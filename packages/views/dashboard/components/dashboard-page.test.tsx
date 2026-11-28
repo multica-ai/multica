@@ -716,6 +716,35 @@ describe("DashboardPage — the two questions are separate tabs", () => {
     expect(screen.getByRole("list", { name: "Errors by agent" })).toBeInTheDocument();
   });
 
+  it("fetches per-runtime usage only once the By machine tab is open", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    expect(queryKeys.some((k) => k[2] === "by-runtime")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "By machine" }));
+    expect(replaceSpy).toHaveBeenLastCalledWith("/acme/usage?tab=machines");
+    expect(screen.getByRole("tab", { name: "By machine" })).toHaveAttribute("aria-selected", "true");
+    // Same range, project, tz, history limit and squad scope as the other tabs.
+    expect(queryKeys.find((k) => k[2] === "by-runtime")).toEqual([
+      "dashboard",
+      "ws-1",
+      "by-runtime",
+      30,
+      null,
+      "UTC",
+      null,
+    ]);
+    expect(screen.getByText("No machine usage in this window.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Leaderboard" })).not.toBeInTheDocument();
+  });
+
+  it("opens straight onto By machine when the URL asks for it", () => {
+    renderDashboard("tab=machines");
+
+    expect(screen.getByRole("tab", { name: "By machine" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("list", { name: "Leaderboard" })).not.toBeInTheDocument();
+  });
+
   it("falls back to Usage for a tab value it does not recognise", () => {
     renderDashboard("tab=nonsense");
 

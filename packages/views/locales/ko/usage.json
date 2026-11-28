@@ -127,6 +127,24 @@
     "deleted_squads": "삭제된 Squad",
     "toggle_squad_members": "{{name}} 멤버 세부 정보 전환"
   },
+  "machines": {
+    "tab": "머신별",
+    "title": "머신별 사용량",
+    "description": "각 머신에서 실행된 작업의 사용량입니다. 머신은 런타임 페이지와 같은 방식으로 묶고 이름을 표시합니다.",
+    "caption_other": "머신 {{count}}대",
+    "header_machine": "머신",
+    "header_tokens": "토큰",
+    "header_cost": "비용",
+    "header_tasks": "사용량 있는 실행",
+    "show_runtimes": "{{name}}의 런타임 보기",
+    "hide_runtimes": "{{name}}의 런타임 숨기기",
+    "runtimes_title": "{{name}}의 런타임",
+    "other_machines": "기타 머신",
+    "other_machines_hint": "사용량을 볼 수 없거나 삭제된 머신",
+    "deleted_machines": "삭제된 머신",
+    "no_data": "이 기간에는 머신 사용량이 없습니다.",
+    "load_error": "머신별 사용량을 불러오지 못했습니다."
+  },
   "empty": {
     "title": "아직 사용량이 없습니다",
     "body": "에이전트가 실행되기 시작하면 토큰 사용량, 비용, 실패율이 여기에 표시됩니다."

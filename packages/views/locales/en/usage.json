@@ -129,6 +129,25 @@
     "deleted_squads": "Deleted squads",
     "toggle_squad_members": "Toggle members for {{name}}"
   },
+  "machines": {
+    "tab": "By machine",
+    "title": "Usage by machine",
+    "description": "Usage of the runs each machine executed. Machines are grouped and named as on the Runtimes page.",
+    "caption_one": "{{count}} machine",
+    "caption_other": "{{count}} machines",
+    "header_machine": "Machine",
+    "header_tokens": "Tokens",
+    "header_cost": "Cost",
+    "header_tasks": "Runs with usage",
+    "show_runtimes": "Show runtimes on {{name}}",
+    "hide_runtimes": "Hide runtimes on {{name}}",
+    "runtimes_title": "Runtimes on {{name}}",
+    "other_machines": "Other machines",
+    "other_machines_hint": "Machines whose usage you can't view, or that were removed",
+    "deleted_machines": "Deleted machines",
+    "no_data": "No machine usage in this window.",
+    "load_error": "Couldn't load machine usage."
+  },
   "empty": {
     "title": "No usage yet",
     "body": "Once agents start running, token usage, cost, and failure rate show up here."

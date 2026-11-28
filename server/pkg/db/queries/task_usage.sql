@@ -238,6 +238,66 @@ WHERE workspace_id = $1
 GROUP BY squad_id, agent_id, LOWER(provider), model
 ORDER BY squad_id NULLS LAST, agent_id, LOWER(provider), model;
 
+-- name: ListDashboardUsageByRuntime :many
+-- Per-(runtime, provider, model) token aggregates from `task_usage_hourly`
+-- for the dashboard's "By machine" tab. Same table, cutoff and filters as
+-- ListDashboardUsageByAgent, so the rows add up to the Cost / Tokens KPIs.
+-- The client groups runtimes into machines the way the Runtimes page does.
+SELECT
+    runtime_id,
+    LOWER(provider) AS provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND squad_id IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND squad_id = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY runtime_id, LOWER(provider), model
+ORDER BY runtime_id, LOWER(provider), model;
+
+-- name: ListDashboardTaskCountByRuntime :many
+-- Distinct runs with usage in the window, per runtime. The hourly rollup's
+-- task_count counts a run once per (hour, model) bucket it touched, so this
+-- reads raw task_usage with the filters rollup_task_usage_hourly_window
+-- applies (agent in this workspace, runtime_id NOT NULL, project from the
+-- run's issue, squad from COALESCE(usage_squad_id, squad_id)).
+--
+-- @since_hour is the handler's cutoff rounded UP to the hour: the rollup keeps
+-- a bucket when bucket_hour >= cutoff, and for a usage row that is exactly
+-- created_at >= ceil_to_hour(cutoff). Passing it pre-rounded keeps the
+-- predicate on the bare column, which idx_task_usage_created_at can serve.
+SELECT
+    atq.runtime_id,
+    COUNT(DISTINCT atq.id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = @workspace_id
+  AND atq.runtime_id IS NOT NULL
+  AND tu.created_at >= @since_hour::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY atq.runtime_id
+ORDER BY atq.runtime_id;
+
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"

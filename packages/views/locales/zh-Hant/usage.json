@@ -127,6 +127,24 @@
     "deleted_squads": "已刪除的 Squad",
     "toggle_squad_members": "展開或收合 {{name}} 成員明細"
   },
+  "machines": {
+    "tab": "按機器",
+    "title": "按機器統計用量",
+    "description": "在每台機器上進行的執行所產生的用量。機器的分組和名稱與執行時頁面一致。",
+    "caption_other": "{{count}} 台機器",
+    "header_machine": "機器",
+    "header_tokens": "Token",
+    "header_cost": "費用",
+    "header_tasks": "有用量的執行",
+    "show_runtimes": "展開 {{name}} 的執行時",
+    "hide_runtimes": "收合 {{name}} 的執行時",
+    "runtimes_title": "{{name}} 的執行時",
+    "other_machines": "其他機器",
+    "other_machines_hint": "你無權查看用量或已刪除的機器",
+    "deleted_machines": "已刪除的機器",
+    "no_data": "所選時間範圍內暫無機器用量。",
+    "load_error": "機器用量載入失敗。"
+  },
   "empty": {
     "title": "暫無消耗資料",
     "body": "AI 代理開始執行後，這裡會顯示 token、費用和失敗率。"

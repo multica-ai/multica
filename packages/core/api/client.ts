@@ -117,6 +117,7 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardUsageBySquad,
+  DashboardUsageByRuntime,
   DashboardAgentRunTime,
   DashboardSquadRunTime,
   DashboardRunTimeDaily,
@@ -377,6 +378,7 @@ import {
   DashboardFailureBySquadListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageBySquadListSchema,
+  DashboardUsageByRuntimeListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -3221,6 +3223,17 @@ export class ApiClient {
       params,
       DashboardUsageByAgentListSchema,
       "GET /api/dashboard/usage/by-agent",
+    );
+  }
+
+  // Per-runtime usage. Runtimes the caller may not read come back folded into
+  // one "__restricted_runtimes__" row.
+  async getDashboardUsageByRuntime(params: DashboardRequestParams): Promise<DashboardUsageByRuntime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-runtime",
+      params,
+      DashboardUsageByRuntimeListSchema,
+      "GET /api/dashboard/usage/by-runtime",
     );
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   dashboardAgentRunTimeOptions,
+  dashboardUsageByRuntimeOptions,
   dashboardFailuresByAgentOptions,
   dashboardFailuresDailyOptions,
   dashboardRunTimeDailyOptions,
@@ -34,6 +35,7 @@ function resolvePlaceholder(
 const optionBuilders = [
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardUsageByRuntimeOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
@@ -88,6 +90,19 @@ describe("dashboard range placeholders", () => {
     const options = dashboardUsageDailyOptions("ws-1", 30, null, "UTC", null);
 
     expect(resolvePlaceholder(options, undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("usage by runtime query", () => {
+  it("is keyed on the same scope as the other rollups and waits for the history limit", () => {
+    const options = dashboardUsageByRuntimeOptions("ws-1", 30, "project-1", "UTC", 90, "squad-1");
+    expect(options.queryKey).toEqual([
+      "dashboard", "ws-1", "by-runtime", 30, "project-1", "UTC", 90, "squad-1",
+    ]);
+    expect(options.enabled).toBe(true);
+    expect(
+      dashboardUsageByRuntimeOptions("ws-1", 30, null, "UTC", undefined).enabled,
+    ).toBe(false);
   });
 });
 

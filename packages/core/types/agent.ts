@@ -1220,6 +1220,34 @@ export interface DashboardUsageBySquad extends DashboardUsageByAgent {
   squad_id: string;
 }
 
+// One (provider, model) usage aggregate inside a per-runtime dashboard row.
+// Same token and cost-split fields as DashboardUsageByAgent, priced the same
+// way client-side.
+export interface DashboardRuntimeUsage {
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
+// One runtime's usage for the workspace dashboard's "By machine" tab; the
+// client groups runtimes into machines. `runtime_id` is
+// "__restricted_runtimes__" for the bucket of every runtime whose usage the
+// viewer may not read (or that no longer exists). `task_count` is distinct
+// runs with usage (a run that used two models counts once).
+export interface DashboardUsageByRuntime {
+  runtime_id: string;
+  task_count: number;
+  usage: DashboardRuntimeUsage[];
+}
+
 // Per-(squad, agent) terminal-task run-time + counts for the workspace dashboard.
 // squad_id is "" for standalone (non-squad-triggered) agent runs.
 export interface DashboardSquadRunTime extends DashboardAgentRunTime {

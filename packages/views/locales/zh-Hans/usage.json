@@ -127,6 +127,24 @@
     "deleted_squads": "已删除的 Squad",
     "toggle_squad_members": "展开或收起 {{name}} 成员明细"
   },
+  "machines": {
+    "tab": "按机器",
+    "title": "按机器统计用量",
+    "description": "在每台机器上进行的运行所产生的用量。机器的分组和名称与运行时页面一致。",
+    "caption_other": "{{count}} 台机器",
+    "header_machine": "机器",
+    "header_tokens": "Token",
+    "header_cost": "费用",
+    "header_tasks": "有用量的运行",
+    "show_runtimes": "展开 {{name}} 的运行时",
+    "hide_runtimes": "收起 {{name}} 的运行时",
+    "runtimes_title": "{{name}} 的运行时",
+    "other_machines": "其他机器",
+    "other_machines_hint": "你无权查看用量或已删除的机器",
+    "deleted_machines": "已删除的机器",
+    "no_data": "所选时间范围内暂无机器用量。",
+    "load_error": "机器用量加载失败。"
+  },
   "empty": {
     "title": "暂无用量数据",
     "body": "智能体开始运行后，这里会显示 token 用量、费用和失败率。"

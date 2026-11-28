@@ -127,6 +127,24 @@
     "deleted_squads": "削除済み Squad",
     "toggle_squad_members": "{{name}} のメンバー内訳を切り替え"
   },
+  "machines": {
+    "tab": "マシン別",
+    "title": "マシン別の使用量",
+    "description": "各マシンで実行された実行の使用量です。マシンはランタイムページと同じようにまとめて表示されます。",
+    "caption_other": "{{count}} 台のマシン",
+    "header_machine": "マシン",
+    "header_tokens": "トークン",
+    "header_cost": "コスト",
+    "header_tasks": "使用量のある実行",
+    "show_runtimes": "{{name}} のランタイムを表示",
+    "hide_runtimes": "{{name}} のランタイムを隠す",
+    "runtimes_title": "{{name}} のランタイム",
+    "other_machines": "その他のマシン",
+    "other_machines_hint": "使用量を表示できないマシン、または削除されたマシン",
+    "deleted_machines": "削除済みマシン",
+    "no_data": "この期間にマシンの使用量はありません。",
+    "load_error": "マシン別の使用量を読み込めませんでした。"
+  },
   "empty": {
     "title": "まだ使用量はありません",
     "body": "エージェントが動き始めると、トークン使用量、コスト、失敗率がここに表示されます。"
