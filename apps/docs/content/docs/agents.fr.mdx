@@ -70,6 +70,9 @@ Les autres opérations se répartissent ainsi :
 | Voir l'agent dans la liste et les sélecteurs | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail, et les membres autorisés par l'Accès |
 | Modifier sa configuration | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail |
 | Modifier l'Accès | Le propriétaire de l'agent uniquement |
+| Modifier **Restreindre les détails des outils** | Le propriétaire de l'agent et les `owner` et `admin` de l'espace de travail (membres humains uniquement) |
+
+Pour laisser l'équipe exécuter un agent sans exposer les entrées et sorties d'outils dans ses journaux d'exécution, activez **Restreindre les détails des outils** dans **Paramètres → Accès → Journaux d'exécution**. Lorsque l'option est active, le serveur retire les entrées et sorties d'outils (`details_hidden: true`) pour toute personne autre que le propriétaire de l'agent et les `owner` et `admin` de l'espace de travail — y compris les autres membres, les agents ou scripts utilisant des identifiants machine et les plugins. Tous les autres voient toujours quels outils ont été lancés, leur durée, ainsi que le raisonnement et les réponses de l'agent. Seul un membre humain autorisé à gérer l'agent peut modifier ce réglage ; les agents et identifiants machine ne le peuvent pas.
 
 Les éléments de configuration susceptibles de contenir des identifiants, comme les variables d'environnement et MCP, obéissent à des règles de lecture plus strictes : voir [Créer et configurer un agent](/agents-create#variables-denvironnement-et-identifiants).
 

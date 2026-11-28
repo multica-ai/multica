@@ -82,6 +82,8 @@ Changer l'assigné ou le statut d'une tâche n'arrête pas une exécution déjà
 
 L'en-tête du journal d'exécution indique ce que la tâche a déjà dépensé. **Ouvrir la chronologie** ouvre la boîte de dialogue **Exécutions**, qui totalise le **Dépensé**, les **Tokens** et le **Travail d'agent**, montre le coût par exécution ou en cumul, le répartit par agent et par modèle, et compte les exécutions en échec et annulées. Les coûts sont des estimations ; leur calcul et la consommation de tout l'espace de travail sont décrits dans [Statistiques](/analytics#coût-dune-tâche).
 
+Lorsqu'un agent active **Restreindre les détails des outils** (dans **Paramètres → Accès → Journaux d'exécution** de l'agent), seuls le propriétaire de l'agent et les `owner` et `admin` de l'espace de travail voient les entrées et sorties d'outils dans la transcription (signalé dans la barre d'outils par **Détails des outils visibles par le propriétaire et les administrateurs uniquement**). Tous les autres — autres membres, agents utilisant un jeton de tâche ou un identifiant machine, et plugins — continuent de voir le raisonnement, les réponses, les outils lancés et leur durée, tandis que le serveur retire les entrées et sorties d'outils pour afficher **Masqué** (et omet le résumé **Produit** dérivé des entrées d'outils). Voir [Permissions et accès](/agents#permissions-et-accès).
+
 ## Échecs et relances automatiques
 
 Les défaillances transitoires — un runtime brièvement hors ligne, un redémarrage du daemon, un délai d'exécution dépassé ou une interruption réseau dans l'outil de codage IA — peuvent déclencher une relance automatique. Par défaut, une exécution ordinaire est tentée au plus deux fois ; les interruptions réseau de l'outil ont droit à trois tentatives au maximum.

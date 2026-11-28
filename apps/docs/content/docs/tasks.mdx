@@ -82,6 +82,8 @@ Changing an issue's assignee or status does not stop a run that has already star
 
 The execution log's header shows what the issue has spent so far. **Open timeline** opens the **Runs** dialog, which totals **Spent**, **Tokens**, and **Agent time**, charts cost per run or cumulatively, splits it by agent and by model, and counts failed and cancelled runs. Costs are estimates; see [Analytics](/analytics#issue-cost) for how they are calculated and for workspace-wide usage.
 
+When an agent has **Restrict tool details** turned on (under the agent's **Settings → Access → Run logs**), only the agent owner and workspace `owner`s and `admin`s see tool inputs and outputs in its transcripts (noted in the toolbar as **Tool details visible to owner and admins only**). Everyone else — including other members, agents using task tokens or machine credentials, and plugins — still sees the agent's thinking, replies, which tools ran, and how long they took, while tool inputs and outputs are stripped by the server and shown as **Hidden** (and the **Produced** summary derived from tool inputs is omitted). See [Permissions and Access](/agents#permissions-and-access).
+
 ## Failures and automatic retries
 
 Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular run executes at most twice by default; tool network interruptions get up to three attempts.

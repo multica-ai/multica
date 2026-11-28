@@ -54,6 +54,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 - 小隊不會擴大權限：要把任務分配給小隊或 @小隊，必須有權執行它的隊長。
 - 移除成員時，會清除他在其他 AI 代理 Access 名單裡的授權。
 - AI 代理環境變數裡的憑據只有工作區 `owner` 和 `admin` 能解鎖查看，每次讀取都會記入稽核。見[環境變數與憑據](/agents-create#環境變數與憑據)。
+- 如果希望團隊可以執行某個共享 AI 代理，但不暴露其執行紀錄中的命令引數或檔案內容，可在該 AI 代理的 **設定 → 訪問權限 → 執行紀錄** 中開啟 **限制查看工具詳情**，讓工具輸入與輸出僅對 AI 代理 owner 和工作區 `owner`、`admin` 可見。見[權限與 Access](/agents#權限與-access)。
 
 私有專案是第二道邊界。私有專案只對成員名單上的人可見；只有發起執行的人和 AI 代理 owner 都在名單上時，這次執行才能看到它。見[私有專案](/projects#private-projects)。
 

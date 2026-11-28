@@ -54,6 +54,7 @@ Quelques règles importantes pour une équipe :
 - Une squad n'élargit pas l'accès : pour assigner ou @mentionner une squad, il faut pouvoir exécuter son leader.
 - Retirer un membre efface les autorisations qu'il avait dans l'accès des autres agents.
 - Les identifiants placés dans les variables d'environnement d'un agent ne peuvent être affichés que par les `owner` et `admin` de l'espace de travail, et chaque lecture est journalisée. Voir [Variables d'environnement et identifiants](/agents-create#variables-denvironnement-et-identifiants).
+- Pour laisser l'équipe exécuter un agent partagé sans exposer les arguments de commande ni le contenu des fichiers dans ses journaux d'exécution, activez **Restreindre les détails des outils** dans **Paramètres → Accès → Journaux d'exécution** de l'agent afin que seuls le propriétaire de l'agent et les `owner` et `admin` de l'espace de travail voient les entrées et sorties d'outils. Voir [Permissions et accès](/agents#permissions-et-accès).
 
 Les projets privés ajoutent une seconde limite. Un projet privé n'est visible que par les personnes de sa liste de membres, et une exécution d'agent ne le voit que si la personne qui l'a lancée et le propriétaire de l'agent figurent tous deux sur cette liste. Voir [Projets privés](/projects#private-projects).
 
