@@ -704,10 +704,20 @@ const IssueWorkflowHandlerSchema = z.object({
     ISSUE_WORKFLOW_HANDLER_TYPES.has(value) ? (value as IssueWorkflowHandlerType) : "none",
   ),
   id: z.string().optional(),
+  status_key: z.string().optional(),
+  property_id: z.string().optional(),
+  cases: z.array(z.object({
+    value: z.string(),
+    handler: z.object({
+      type: z.enum(["agent", "squad", "member"]),
+      id: z.string(),
+    }).loose(),
+  }).loose()).optional(),
 }).loose();
 
 const ISSUE_WORKFLOW_HANDLER_TYPES = new Set<string>([
   "none", "agent", "squad", "member", "project_lead", "creator",
+  "current_assignee", "previous_step_assignee", "property_match",
 ]);
 
 const IssueWorkflowStepSchema = z.object({

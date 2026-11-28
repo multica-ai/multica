@@ -35,12 +35,25 @@ import (
 
 // Handler types a project can hand an issue to when it enters a status.
 const (
-	HandlerNone        = "none"
-	HandlerAgent       = "agent"
-	HandlerSquad       = "squad"
-	HandlerMember      = "member"
-	HandlerProjectLead = "project_lead"
-	HandlerCreator     = "creator"
+	HandlerNone                 = "none"
+	HandlerAgent                = "agent"
+	HandlerSquad                = "squad"
+	HandlerMember               = "member"
+	HandlerProjectLead          = "project_lead"
+	HandlerCreator              = "creator"
+	HandlerCurrentAssignee      = "current_assignee"
+	HandlerPreviousStepAssignee = "previous_step_assignee"
+	// HandlerPropertyMatch picks an agent, squad or member by matching one
+	// select property value on the issue (one property per step; no nesting).
+	HandlerPropertyMatch = "property_match"
+)
+
+// Route error codes returned when a property_match step cannot resolve.
+const (
+	RoutePropertyMissing   = "workflow_route_property_missing"
+	RouteNoMatch           = "workflow_route_no_match"
+	RouteTargetUnavailable = "workflow_route_target_unavailable"
+	RouteAssigneeConflict  = "workflow_route_assignee_conflict"
 )
 
 const (
@@ -144,11 +157,23 @@ func BuiltInDefaultKeys() []string {
 	return ArrangeKeys([]string{issuestatus.Backlog, issuestatus.InProgress, issuestatus.InReview, issuestatus.Blocked})
 }
 
+// PropertyMatchCase maps one select-option value to a concrete handler.
+// Value is the property option UUID stored on the issue. Nested handlers are
+// only agent, squad or member — never another property_match or none.
+type PropertyMatchCase struct {
+	Value   string  `json:"value"`
+	Handler Handler `json:"handler"`
+}
+
 // Handler names who receives an issue when it enters a step. ID is set only
-// for the concrete types (agent, squad, member).
+// for the concrete types (agent, squad, member). PropertyID and Cases are set
+// only for property_match.
 type Handler struct {
-	Type string `json:"type"`
-	ID   string `json:"id,omitempty"`
+	Type       string              `json:"type"`
+	ID         string              `json:"id,omitempty"`
+	StatusKey  string              `json:"status_key,omitempty"`
+	PropertyID string              `json:"property_id,omitempty"`
+	Cases      []PropertyMatchCase `json:"cases,omitempty"`
 }
 
 // Step is one status of a workflow with its handoff.
@@ -158,6 +183,29 @@ type Step struct {
 	Instructions  string  `json:"instructions"`
 	NextStatusKey string  `json:"next_status_key,omitempty"`
 	BackStatusKey string  `json:"back_status_key,omitempty"`
+}
+
+// RouteError is a user-correctable failure resolving a property_match step.
+type RouteError struct {
+	Code    string
+	Message string
+}
+
+func (e *RouteError) Error() string { return e.Message }
+
+// RouteErr builds a property-routing failure with a stable code.
+func RouteErr(code, format string, args ...any) error {
+	return &RouteError{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// RouteErrConflict rejects an explicit assignee that disagrees with property_match.
+func RouteErrConflict() error {
+	return RouteErr(RouteAssigneeConflict, "this step assigns by property match; omit assignee or match the mapped handler")
+}
+
+// RouteErrTargetUnavailable rejects a mapped target that is gone or forbidden.
+func RouteErrTargetUnavailable() error {
+	return RouteErr(RouteTargetUnavailable, "the mapped handoff target is unavailable")
 }
 
 // Definition is a decoded workflow.
@@ -171,8 +219,18 @@ type Definition struct {
 // HandsOff reports whether entering the step reassigns the issue.
 func (s Step) HandsOff() bool {
 	switch s.Handler.Type {
-	case HandlerAgent, HandlerSquad, HandlerMember, HandlerProjectLead, HandlerCreator:
+	case HandlerAgent, HandlerSquad, HandlerMember, HandlerProjectLead, HandlerCreator, HandlerCurrentAssignee, HandlerPreviousStepAssignee, HandlerPropertyMatch:
 		return true
+	}
+	return false
+}
+
+// UsesPropertyRouting reports whether any step uses property_match.
+func UsesPropertyRouting(steps []Step) bool {
+	for _, s := range steps {
+		if s.Handler.Type == HandlerPropertyMatch {
+			return true
+		}
 	}
 	return false
 }
@@ -485,18 +543,7 @@ func Validate(name, description string, steps []Step, isDefault bool, catalog ma
 // not use.
 func NormalizeHandoff(s Step) Step {
 	s.StatusKey = strings.TrimSpace(s.StatusKey)
-	s.Handler.Type = strings.TrimSpace(s.Handler.Type)
-	s.Handler.ID = strings.TrimSpace(s.Handler.ID)
-	if s.Handler.Type == "" {
-		s.Handler.Type = HandlerNone
-	}
-	switch s.Handler.Type {
-	case HandlerAgent, HandlerSquad, HandlerMember:
-	default:
-		// Only the concrete handler types carry an id; a stale one left
-		// by a type switch in the form would otherwise be stored.
-		s.Handler.ID = ""
-	}
+	s.Handler = normalizeHandler(s.Handler, false)
 	s.Instructions = strings.TrimSpace(s.Instructions)
 	if s.Handler.Type == HandlerNone {
 		s.Instructions = ""
@@ -506,17 +553,68 @@ func NormalizeHandoff(s Step) Step {
 	return s
 }
 
+// normalizeHandler trims a handler. nested is true for property_match cases,
+// which may only be concrete agent/squad/member targets.
+func normalizeHandler(h Handler, nested bool) Handler {
+	h.Type = strings.TrimSpace(h.Type)
+	h.ID = strings.TrimSpace(h.ID)
+	h.StatusKey = strings.TrimSpace(h.StatusKey)
+	h.PropertyID = strings.TrimSpace(h.PropertyID)
+	if h.Type == "" {
+		h.Type = HandlerNone
+	}
+	if h.Type != HandlerPreviousStepAssignee {
+		h.StatusKey = ""
+	}
+	if h.Type != HandlerPropertyMatch {
+		h.PropertyID = ""
+		h.Cases = nil
+	}
+	switch h.Type {
+	case HandlerAgent, HandlerSquad, HandlerMember:
+		// Keep ID.
+	default:
+		// Only the concrete handler types carry an id; a stale one left
+		// by a type switch in the form would otherwise be stored.
+		h.ID = ""
+	}
+	if h.Type == HandlerPropertyMatch {
+		cases := make([]PropertyMatchCase, 0, len(h.Cases))
+		for _, c := range h.Cases {
+			c.Value = strings.TrimSpace(c.Value)
+			c.Handler = normalizeHandler(c.Handler, true)
+			cases = append(cases, c)
+		}
+		h.Cases = cases
+	}
+	if nested {
+		h.PropertyID = ""
+		h.Cases = nil
+		h.StatusKey = ""
+	}
+	return h
+}
+
 // ValidateHandoff checks one normalized handoff against its workflow.
-// Handler ids are checked by the caller, which owns the workspace lookups.
+// Handler ids and property definitions are checked by the caller, which owns
+// the workspace lookups.
 func ValidateHandoff(s Step, def Definition) error {
 	if !def.Has(s.StatusKey) {
 		return invalid("status %q is not part of this workflow", s.StatusKey)
 	}
 	switch s.Handler.Type {
-	case HandlerNone, HandlerProjectLead:
+	case HandlerNone, HandlerProjectLead, HandlerCurrentAssignee:
+	case HandlerPreviousStepAssignee:
+		if s.Handler.StatusKey == "" || !def.Has(s.Handler.StatusKey) {
+			return invalid("choose an existing workflow status whose previous assignee receives this handoff")
+		}
 	case HandlerAgent, HandlerSquad, HandlerMember:
 		if s.Handler.ID == "" {
 			return invalid("choose a %s to hand off to", s.Handler.Type)
+		}
+	case HandlerPropertyMatch:
+		if err := validatePropertyMatchHandler(s.Handler); err != nil {
+			return err
 		}
 	case HandlerCreator:
 		return invalid("hand off to an agent, a squad, a member or the project lead")
@@ -535,6 +633,91 @@ func ValidateHandoff(s Step, def Definition) error {
 		}
 	}
 	return nil
+}
+
+func validatePropertyMatchHandler(h Handler) error {
+	if h.PropertyID == "" {
+		return invalid("choose a select property to match")
+	}
+	if len(h.Cases) == 0 {
+		return invalid("add at least one property value mapping")
+	}
+	seen := make(map[string]bool, len(h.Cases))
+	for _, c := range h.Cases {
+		if c.Value == "" {
+			return invalid("each property mapping needs a value")
+		}
+		if seen[c.Value] {
+			return invalid("property value %q is mapped more than once", c.Value)
+		}
+		seen[c.Value] = true
+		switch c.Handler.Type {
+		case HandlerAgent, HandlerSquad, HandlerMember:
+			if c.Handler.ID == "" {
+				return invalid("choose a %s for property value %q", c.Handler.Type, c.Value)
+			}
+		case HandlerPropertyMatch:
+			return invalid("property match rules cannot nest")
+		case HandlerNone:
+			return invalid("property match rules need a concrete assignee, not none")
+		default:
+			return invalid("property match targets must be an agent, squad or member")
+		}
+	}
+	return nil
+}
+
+// MatchPropertyCase picks the concrete handler for a property_match step from
+// the issue's property bag (definition id → stored value). properties should
+// already reflect any in-request updates. Exact string match on the select
+// option id; no fuzzy matching.
+func MatchPropertyCase(step Step, properties map[string]any) (Handler, error) {
+	if step.Handler.Type != HandlerPropertyMatch {
+		return Handler{}, fmt.Errorf("step is not property_match")
+	}
+	if step.Handler.PropertyID == "" || len(step.Handler.Cases) == 0 {
+		return Handler{}, RouteErr(RoutePropertyMissing, "this step needs a select property mapping")
+	}
+	raw, ok := properties[step.Handler.PropertyID]
+	if !ok || raw == nil {
+		return Handler{}, RouteErr(RoutePropertyMissing, "set the required select property before entering this step")
+	}
+	value, ok := propertySelectValue(raw)
+	if !ok || value == "" {
+		return Handler{}, RouteErr(RoutePropertyMissing, "the required select property is missing or invalid")
+	}
+	for _, c := range step.Handler.Cases {
+		if c.Value == value {
+			return c.Handler, nil
+		}
+	}
+	return Handler{}, RouteErr(RouteNoMatch, "no handoff mapping matches the issue's select property value")
+}
+
+// propertySelectValue reads a stored select value (JSON string) as a string.
+func propertySelectValue(raw any) (string, bool) {
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v), true
+	default:
+		return "", false
+	}
+}
+
+// HandlersEqual reports whether two handlers are the same for change detection.
+func HandlersEqual(a, b Handler) bool {
+	if a.Type != b.Type || a.ID != b.ID || a.StatusKey != b.StatusKey || a.PropertyID != b.PropertyID {
+		return false
+	}
+	if len(a.Cases) != len(b.Cases) {
+		return false
+	}
+	for i := range a.Cases {
+		if a.Cases[i].Value != b.Cases[i].Value || !HandlersEqual(a.Cases[i].Handler, b.Cases[i].Handler) {
+			return false
+		}
+	}
+	return true
 }
 
 // Querier is the read surface workflow resolution needs.

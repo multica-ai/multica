@@ -438,12 +438,12 @@ func createWorkflowStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UU
 // assignment passes. Only changed handlers are checked, so an edit never
 // fails on a handler someone else picked.
 func (h *Handler) validateHandoffHandlers(ctx context.Context, r *http.Request, workspaceID string, steps, previous []issueworkflow.Step) (int, string) {
-	before := map[issueworkflow.Handler]bool{}
-	for _, s := range previous {
-		before[s.Handler] = true
+	before := make(map[string]issueworkflow.Handler, len(previous))
+	for _, step := range previous {
+		before[step.StatusKey] = step.Handler
 	}
 	for _, s := range steps {
-		if before[s.Handler] {
+		if old, ok := before[s.StatusKey]; ok && issueworkflow.HandlersEqual(old, s.Handler) {
 			continue
 		}
 		if status, msg := h.validateHandoffHandler(ctx, r, workspaceID, s); status != 0 {

@@ -58,6 +58,36 @@ describe("workflow schemas (MUL-7420)", () => {
     expect(parsed.steps[0]?.instructions).toBe("");
   });
 
+  it.each([
+    { type: "current_assignee" },
+    { type: "previous_step_assignee", status_key: "implementation" },
+    {
+      type: "property_match",
+      property_id: "product-area",
+      cases: [
+        { value: "backend", handler: { type: "agent", id: "agent-1" } },
+        { value: "mobile", handler: { type: "squad", id: "squad-2" } },
+        { value: "support", handler: { type: "member", id: "user-3" } },
+      ],
+    },
+  ])("preserves the $type rule and its instructions", (handler) => {
+    const step = { status_key: "review", handler, instructions: "Review the change." };
+    const result = IssueWorkflowSchema.parse({ ...baseWorkflow, steps: [step] });
+    expect(result.steps[0]).toMatchObject(step);
+  });
+
+  it("rejects a nested dynamic target in a property mapping", () => {
+    const handler = {
+      type: "property_match",
+      property_id: "product-area",
+      cases: [{ value: "backend", handler: { type: "current_assignee" } }],
+    };
+    expect(IssueWorkflowSchema.safeParse({
+      ...baseWorkflow,
+      steps: [{ status_key: "review", handler }],
+    }).success).toBe(false);
+  });
+
   it("defaults the optional fields an older server may omit", () => {
     const { description: _d, project_ids: _p, ...minimal } = baseWorkflow;
     const parsed = IssueWorkflowSchema.parse({ ...minimal, steps: [{ status_key: "todo" }] });
