@@ -310,6 +310,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_GROK_PATH", "grok", "MULTICA_GROK_MODEL"); ok {
 		agents["grok"] = e
 	}
+	// ByteDance Doubao CLI (`doubao`), driven over ACP v1 via
+	// `doubao acp serve`. Login state is created out of band by
+	// `doubao login` and embedded in the ACP channel (the initialize result
+	// advertises authMethods: []), so there is no API key or authenticate
+	// step. MULTICA_DOUBAO_MODEL seeds the daemon-wide default model.
+	if e, ok := probe("MULTICA_DOUBAO_PATH", "doubao", "MULTICA_DOUBAO_MODEL"); ok {
+		agents["doubao"] = e
+	}
 	// Qwen Code (`qwen`) runs headlessly with -p and stream-json. Its native
 	// QWEN.md and .qwen/skills task context is prepared by execenv.
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {

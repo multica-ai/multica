@@ -10,6 +10,10 @@ export type RuntimeExemption = {
 // variable coverage test and left out of the published tool count. Remove an
 // entry once the runtime is documented in every locale.
 export const undocumentedRuntimes: Record<string, RuntimeExemption> = {
+  doubao: {
+    reason:
+      "ByteDance Doubao CLI (doubao acp serve) support; documentation and product sign-off pending.",
+  },
   museapp: {
     reason:
       "Muse app remote receptionist (#9155). Whether it is publicly documented awaits a product decision.",

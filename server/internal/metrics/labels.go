@@ -158,6 +158,7 @@ var (
 		"dsh":           "dsh",
 		"gemini":        "gemini",
 		"grok":          "grok",
+		"doubao":        "doubao",
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",

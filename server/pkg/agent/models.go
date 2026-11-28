@@ -350,6 +350,14 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
 			return discoverGrokModels(callCtx, runtimeCmd)
 		})
+	case "doubao":
+		// Doubao CLI is ACP-native (`doubao acp serve`); its model catalog is
+		// returned by session/new. Enumerate it on demand. There is no static
+		// fallback: Doubao model ids are account/region specific, so an
+		// invented list would be worse than leaving manual entry available.
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverDoubaoModels(callCtx, runtimeCmd))
+		})
 	case "dim":
 		// Dim (dimcode) is ACP-native (`dim acp`); its model catalog is
 		// advertised by session/new under models.availableModels. Enumeration
@@ -2769,6 +2777,45 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 		}
 	}
 	return Catalog{Models: models}, nil
+}
+
+// discoverDoubaoModels spins up `doubao acp serve` and parses the model catalog
+// from session/new, reusing the shared ACP discovery helper. Doubao
+// authenticates out of band (`doubao login`) and advertises an empty
+// authMethods list, so no authenticate step is performed (selectAuthMethod is
+// nil). There is deliberately no static fallback: Doubao model ids are account
+// and region specific, so returning an empty catalog keeps manual entry
+// available instead of advertising ids this account may not have.
+func discoverDoubaoModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "doubao",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-doubao-discovery-",
+		acpArgs:      []string{"acp", "serve", "--permission-mode", "bypass_permissions"},
+		annotate:     annotateDoubaoThinkingFromACP,
+		strictErrors: true,
+	})
+	if err != nil {
+		slog.Debug("doubao model discovery failed", "error", err)
+		return nil, err
+	}
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = "doubao"
+		}
+	}
+	return models, nil
+}
+
+// annotateDoubaoThinkingFromACP fills in each model's effort catalog from the
+// runtime's `_meta` block on its session/new entry. ACP does not standardise
+// this block, so the parser is shared with grok (`supportsReasoningEffort` /
+// `reasoningEfforts`) — the shape xAI documents. Models whose entry does not
+// advertise it keep Thinking nil, which hides the picker instead of offering
+// levels the CLI may reject. If a Doubao build uses a different field name,
+// capture one session/new response and add a parser here.
+func annotateDoubaoThinkingFromACP(models []Model, sessionResult json.RawMessage) {
+	annotateGrokThinkingFromACP(models, sessionResult)
 }
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.

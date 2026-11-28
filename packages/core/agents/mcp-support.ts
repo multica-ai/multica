@@ -12,6 +12,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "codex",
   "cursor",
   "grok",
+  "doubao",
   "hermes",
   "kimi",
   "reasonix",
