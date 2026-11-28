@@ -126,6 +126,7 @@ export function ModelDropdown({
   };
 
   const triggerLabel =
+    models.find((model) => model.id === value)?.label ||
     value ||
     (disabled
       ? t(($) => $.model_dropdown.select_runtime_first)
@@ -168,6 +169,7 @@ export function ModelDropdown({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
+          title={value && triggerLabel !== value ? `${triggerLabel} · ${value}` : value || undefined}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />

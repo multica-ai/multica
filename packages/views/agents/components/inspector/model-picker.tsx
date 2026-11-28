@@ -90,8 +90,13 @@ export function ModelPicker({
   );
   const canCreate = trimmedSearch.length > 0 && !exactMatch;
 
-  const triggerLabel = value || t(($) => $.pickers.model_default);
-  const triggerTitle = t(($) => $.pickers.model_tooltip, { value: triggerLabel });
+  const triggerLabel =
+    models.find((model) => model.id === value)?.label ||
+    value ||
+    t(($) => $.pickers.model_default);
+  const triggerTitle = t(($) => $.pickers.model_tooltip, {
+    value: value && triggerLabel !== value ? `${triggerLabel} · ${value}` : triggerLabel,
+  });
 
   const select = async (id: string) => {
     setOpen(false);

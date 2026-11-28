@@ -312,18 +312,18 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if len(got) != 6 {
 		t.Fatalf("expected six visible models, got %+v", got)
 	}
-	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6 Sol" || !got[0].Default {
+	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6-Sol" || !got[0].Default {
 		t.Errorf("unexpected first model: %+v", got[0])
 	}
 	for _, want := range []struct {
 		id    string
 		label string
 	}{
-		{"gpt-5.6-sol", "GPT-5.6 Sol"},
-		{"gpt-5.6-terra", "GPT-5.6 Terra"},
-		{"gpt-5.6-luna", "GPT-5.6 Luna"},
-		{"gpt-6-astra", "GPT-6 Astra"},
-		{"gpt-6.1-sol", "GPT-6.1 Sol"},
+		{"gpt-5.6-sol", "GPT-5.6-Sol"},
+		{"gpt-5.6-terra", "GPT-5.6-Terra"},
+		{"gpt-5.6-luna", "GPT-5.6-Luna"},
+		{"gpt-6-astra", "GPT-6-Astra"},
+		{"gpt-6.1-sol", "GPT-6.1-Sol"},
 	} {
 		var found *Model
 		for i := range got {
@@ -354,9 +354,7 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	}
 }
 
-// Codex reports the GPT-6 family as "GPT-6-Sol" and so on (codex-cli 0.155.1
-// `debug models`). The picker shows each one the way the static catalog
-// spells it, so a model reads the same whether discovery succeeded or not.
+// Missing runtime display names use the same ID formatting as the static catalog.
 func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 	t.Parallel()
 	static := map[string]string{}
@@ -371,20 +369,83 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 			}
 		}
 	}
-	for id, reported := range map[string]string{
-		"gpt-6-astra":   "GPT-6-Astra",
-		"gpt-6.1-sol":   "GPT-6.1-Sol",
-		"gpt-6.1-terra": "GPT-6.1 Terra",
-		"gpt-6-sol":     "GPT-6-Sol",
-		"gpt-6-luna":    "GPT-6-Luna",
+	for _, id := range []string{
+		"gpt-6-astra",
+		"gpt-6.1-sol",
+		"gpt-6.1-terra",
+		"gpt-6-sol",
+		"gpt-6-luna",
 	} {
 		if static[id] == "" {
 			t.Errorf("%s missing from the static Codex catalog", id)
 			continue
 		}
-		if got := normalizeCodexModelLabel(id, reported); got != static[id] {
-			t.Errorf("normalizeCodexModelLabel(%q, %q) = %q, want %q", id, reported, got, static[id])
+		if got := normalizeCodexModelLabel(id, id); got != static[id] {
+			t.Errorf("normalizeCodexModelLabel(%q, %q) = %q, want %q", id, id, got, static[id])
 		}
+	}
+}
+
+func TestParseCodexModelCatalogLabels(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		model     string
+		wantID    string
+		wantLabel string
+	}{
+		{
+			name:      "renamed_sol",
+			model:     `{"slug":"gpt-5.6-terra","display_name":"gpt-6.2-sol"}`,
+			wantID:    "gpt-5.6-terra",
+			wantLabel: "gpt-6.2-sol",
+		},
+		{
+			name:      "renamed_astra",
+			model:     `{"slug":"gpt-5.6-sol","display_name":"gpt-6.2-astra"}`,
+			wantID:    "gpt-5.6-sol",
+			wantLabel: "gpt-6.2-astra",
+		},
+		{
+			name:      "custom_display_name",
+			model:     `{"slug":"custom-model","display_name":"Custom Runtime Model"}`,
+			wantID:    "custom-model",
+			wantLabel: "Custom Runtime Model",
+		},
+		{
+			name:      "known_id_without_display_name",
+			model:     `{"slug":"gpt-5.6-terra"}`,
+			wantID:    "gpt-5.6-terra",
+			wantLabel: "GPT-5.6 Terra",
+		},
+		{
+			name:      "known_id_with_empty_display_name",
+			model:     `{"slug":"gpt-5.6-sol","display_name":""}`,
+			wantID:    "gpt-5.6-sol",
+			wantLabel: "GPT-5.6 Sol",
+		},
+		{
+			name:      "unknown_id_without_display_name",
+			model:     `{"slug":"custom-model"}`,
+			wantID:    "custom-model",
+			wantLabel: "custom-model",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCodexModelCatalog([]byte(`{"models":[` + tc.model + `]}`))
+			if err != nil {
+				t.Fatalf("parseCodexModelCatalog: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("expected one selectable model, got %+v", got)
+			}
+			if got[0].ID != tc.wantID {
+				t.Errorf("model ID = %q, want %q", got[0].ID, tc.wantID)
+			}
+			if got[0].Label != tc.wantLabel {
+				t.Errorf("model label = %q, want %q", got[0].Label, tc.wantLabel)
+			}
+		})
 	}
 }
 

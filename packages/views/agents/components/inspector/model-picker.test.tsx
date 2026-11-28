@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeModelsResult } from "@multica/core/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -45,24 +45,30 @@ vi.mock("@multica/core/runtimes", () => ({
     mockRefreshRuntimeModels(...args),
 }));
 
-function renderPicker() {
+function renderPicker(value = "") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const onChange = vi.fn(async () => {});
-  const view = render(
+  const control = (value: string) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <ModelPicker
           runtimeId="rt-claude"
           runtimeOnline
-          value=""
+          value={value}
           onChange={onChange}
         />
       </QueryClientProvider>
-    </I18nProvider>,
+    </I18nProvider>
   );
-  return { ...view, onChange, queryClient };
+  const view = render(control(value));
+  return {
+    ...view,
+    onChange,
+    queryClient,
+    rerenderValue: (value: string) => view.rerender(control(value)),
+  };
 }
 
 function openPicker(container: HTMLElement) {
@@ -85,6 +91,39 @@ describe("ModelPicker (inspector)", () => {
 
     fireEvent.click(await screen.findByText("Fable"));
     expect(onChange).toHaveBeenCalledWith("claude-fable-5");
+  });
+
+  it.each([
+    { id: "gpt-5.6-terra", label: "gpt-6.2-sol" },
+    { id: "gpt-5.6-sol", label: "gpt-6.2-astra" },
+  ])("keeps $label visible after selecting its runtime ID", async ({ id, label }) => {
+    discovery = async () => ({
+      models: [{ id, label, provider: "openai" }],
+      supported: true,
+    });
+    const { container, onChange, rerenderValue } = renderPicker();
+    openPicker(container);
+
+    fireEvent.click(await screen.findByText(label));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(id);
+
+    rerenderValue(id);
+    const trigger = container.querySelector("button");
+    await waitFor(() => expect(trigger?.textContent).toBe(label));
+    expect(trigger?.getAttribute("aria-label")).toContain(label);
+    expect(trigger?.getAttribute("aria-label")).toContain(id);
+  });
+
+  it("shows the saved ID when the catalog has no matching label", async () => {
+    discovery = async () => ({ models: [], supported: true });
+    const { container } = renderPicker("saved-model");
+    openPicker(container);
+    await screen.findByText(enAgents.pickers.model_empty);
+
+    await waitFor(() =>
+      expect(container.querySelector("button")?.textContent).toBe("saved-model"),
+    );
   });
 
   it("shows the discovery failure and keeps manual model selection available", async () => {
