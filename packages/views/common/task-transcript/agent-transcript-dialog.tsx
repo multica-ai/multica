@@ -122,6 +122,7 @@ import {
 } from "./detail-surfaces";
 import { languageForPath } from "./diff-highlight";
 import { useLocale, useT } from "../../i18n";
+import { callDetailsHidden, HiddenDetails, HiddenDetailsNotice } from "./tool-details-hidden";
 import {
   formatTokens,
   hasTokenFigure,
@@ -1949,22 +1950,6 @@ function firstLineOf(value: string | undefined): string {
   return value?.split("\n").find((line) => line.trim().length > 0) ?? "";
 }
 
-/** The agent restricts its tool details and the server withheld this call's. */
-function callDetailsHidden(step: TraceCallStep): boolean {
-  return step.call?.detailsHidden === true || step.result?.detailsHidden === true;
-}
-
-/** Stands in for a call's argument when the viewer may not read it. */
-function HiddenDetails() {
-  const { t } = useT("agents");
-  return (
-    <span className="inline-flex items-center gap-1 font-sans text-faint-foreground">
-      <Lock aria-hidden className="h-3 w-3" />
-      {t(($) => $.transcript.tool_details_hidden_value)}
-    </span>
-  );
-}
-
 // ─── Inspector ──────────────────────────────────────────────────────────────
 
 /**
@@ -2070,12 +2055,7 @@ function StepInspector({
           {detailsHidden ? (
             <div className="flex flex-col items-center gap-1.5 px-6 py-12 text-center">
               <Lock aria-hidden className="mb-1 h-4 w-4 text-faint-foreground" />
-              <p className="text-caption font-medium text-foreground">
-                {t(($) => $.transcript.tool_details_hidden_title)}
-              </p>
-              <p className="text-caption text-muted-foreground">
-                {t(($) => $.transcript.tool_details_hidden_body)}
-              </p>
+              <HiddenDetailsNotice className="contents" />
             </div>
           ) : call ? (
             <>

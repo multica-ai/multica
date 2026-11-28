@@ -21,6 +21,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
+import { callDetailsHidden, HiddenDetails, HiddenDetailsNotice } from "../../common/task-transcript/tool-details-hidden";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceCallStep, type TraceRow, type TraceStep } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { redactSecrets } from "../../common/task-transcript/redact";
@@ -393,6 +394,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
   const grouped = isGroupRow(row);
   const call = isCallStep(row);
   const pending = call && live && !row.result;
+  const detailsHidden = call && callDetailsHidden(row);
   const error = !grouped && !call && row.kind === "error";
   const Icon = grouped || call ? Terminal : row.kind === "text" ? MessageSquare : row.kind === "thinking" ? Brain : AlertCircle;
   const previewCall = grouped ? row.steps[0] : call ? row : undefined;
@@ -413,7 +415,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
           : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
         <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")}>{summary}</span>
         {(grouped || call) && <span className="max-w-[40%] shrink-0 truncate text-micro text-muted-foreground">
-          {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
+          {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : detailsHidden ? <HiddenDetails /> : row.tool}
         </span>}
         <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
       </summary>
@@ -424,8 +426,10 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}
         {row.steps.slice(-limit).map((step) => <InlineStep key={step.seq} row={step} live={live} formatText={formatText} />)}
       </> : call ? <>
-        {row.call && <StepBody item={row.call} />}
-        {row.result && <StepBody item={row.result} />}
+        {detailsHidden ? <HiddenDetailsNotice className="space-y-0.5 py-1" /> : <>
+          {row.call && <StepBody item={row.call} />}
+          {row.result && <StepBody item={row.result} />}
+        </>}
         {pending && <p className="text-muted-foreground">{t(($) => $.inline_run.waiting_result)}</p>}
       </> : <StepBody item={row.item} />}
     </div>}
