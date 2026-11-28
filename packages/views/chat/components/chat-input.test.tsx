@@ -459,6 +459,59 @@ describe("ChatInput annotations", () => {
   });
 });
 
+describe("ChatInput draft upload strip", () => {
+  it("shows staged uploads horizontally with previews and blocks send while one is unfinished", async () => {
+    const uploaded = makeUpload({
+      id: "att-preview",
+      link: "https://cdn.example/preview.png",
+      filename: "preview.png",
+    });
+    const staged = [
+      {
+        clientUploadId: "upload-preview",
+        status: "uploaded",
+        filename: "preview.png",
+        size: 1,
+        attachment: uploaded,
+      },
+      {
+        clientUploadId: "upload-pending",
+        status: "uploading",
+        filename: "pending.zip",
+        size: 2,
+      },
+    ] as DraftUpload[];
+    const state = useChatStore.getState() as unknown as {
+      inputDrafts: Record<string, string>;
+      inputDraftAttachments: Record<string, DraftUpload[]>;
+    };
+    state.inputDrafts.__draft_new__ = "send this";
+    state.inputDraftAttachments.__draft_new__ = staged;
+
+    renderInput();
+
+    const strip = screen.getByTestId("chat-input-draft-uploads");
+    expect(strip.className).toContain("overflow-x-auto");
+    expect(strip.className).toContain("flex-nowrap");
+    expect(screen.getByText("preview.png")).toBeInTheDocument();
+    expect(screen.getByAltText("preview.png")).toHaveAttribute(
+      "src",
+      "https://cdn.example/preview.png",
+    );
+    expect(screen.getByText("Uploaded")).toBeInTheDocument();
+    expect(screen.getByText("Uploading pending.zip...")).toBeInTheDocument();
+
+    const sendButton = screen.getAllByRole("button").at(-1)!;
+    expect(sendButton).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove preview.png" }));
+    expect(useChatStore.getState().removeInputDraftUpload).toHaveBeenCalledWith(
+      "__draft_new__",
+      "upload-preview",
+    );
+  });
+});
+
 // MUL-4864: an uncreated chat has ONE draft per workspace. `selectedAgentId`
 // picks where the first send goes; it does not own the draft. Switching agent
 // mid-compose must therefore change nothing the user can see.

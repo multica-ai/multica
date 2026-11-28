@@ -153,12 +153,41 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. Follow the [pull request requirements](CONTRIBUTING.md#pull-request-requirements): Problem, Goal, Proposal (high-level design understandable without much background), Alternatives (optional), and Screenshots. Attach screenshots or a screen recording for UI or interaction changes (missing both means rejection by default). For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
 
-## Public Repository Writing
+## Formal Cloud Delivery Rules
 
-This repository is public. PR titles and descriptions, commit messages, code comments, tests and fixtures, docs, screenshots, and GitHub issue or PR comments are readable by anyone, and history on `main` is permanent.
+These rules apply to the formal production self-host deployment, not to the
+default local daemon, a named profile, a development Compose stack, or an
+independent remote service.
 
-- Write them from what a reader of this repository can verify: the code, its behavior, and the published product. Internal context stays in the tracking issue; refer to it only by its key (`MUL-xxx`).
-- State a motive as its effect in the code ("cap monthly app calls per workspace"), or leave it out. Do not include unpublished business detail (prices, plan limits, costs, vendor terms, customers, competitor or marketing analysis, roadmap), production data (user or workspace names, IDs, logs, query results), private repository internals beyond the interface this code consumes, internal hosts or local paths, or who requested or approved the change internally.
-- Security fixes describe the corrected behavior, not how to exploit the old one, its production scope, or how long it was exposed. An exploitable vulnerability whose fix is not deployed goes through [SECURITY.md](SECURITY.md), not a public PR or issue.
-- Squash merges use the PR title and description as the commit message on `main`. Put `Co-authored-by:` trailers that release notes should credit at the end of the description.
-- Before `gh pr create`, `gh pr edit`, or a push, reread the title, description, and commit messages against this section.
+- `/Users/mac/Documents/vibcoding/multica-source` is the development source
+  checkout. `/opt/multica` is the production deployment and audit directory;
+  it is the only checkout whose Compose state represents the formal serving
+  deployment.
+- Production must use versioned, paired OCI images from GHCR: at minimum
+  `ghcr.io/multica-ai/multica-backend:<version>` and
+  `ghcr.io/multica-ai/multica-web:<version>`, with the same exact semantic
+  version tag. `latest`, `dev`, untagged images, local images, source builds,
+  `docker-compose.selfhost.build.yml`, and Compose overrides are prohibited in
+  the production path. Optional `collab` uses the same version tag.
+- Before any backend or frontend recreation, record and review the source
+  checkout commit, the `/opt/multica` audit checkout commit, the OCI revision
+  labels, and immutable image digests. The paired images must agree on the
+  intended revision and version; a tag alone is not release provenance.
+- Immediately before recreation, query and record active tasks from the
+  production database. Active means `queued`, `dispatched`, `running`,
+  `waiting_local_directory`, or `deferred`; defer the release when any exist.
+  Repeat the query immediately before a later service recreation because a
+  task can start between checks.
+- Protect the production PostgreSQL data and upload storage. The release path
+  must retain the `pgdata` and `backend_uploads` volumes, must not use
+  `down -v`, and must leave unrelated stacks/bridges untouched. A release
+  check must confirm both volumes are present before mutation.
+- Run [`scripts/multica-release-guard.sh`](scripts/multica-release-guard.sh)
+  from the development source checkout as a read-only preflight. It does not
+  pull, build, start, recreate, stop, migrate, or delete anything. A failed
+  check is a release blocker, not a reason to bypass the guard.
+
+The guard intentionally does not contain credentials or tokens. It may print
+commit IDs, image names, OCI revisions, digests, volume names, and the active
+task count; do not add connection strings, `.env` contents, or secret-bearing
+logs to release evidence.
