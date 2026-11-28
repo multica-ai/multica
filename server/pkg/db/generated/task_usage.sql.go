@@ -629,6 +629,90 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardRuntimeDuration = `-- name: ListDashboardRuntimeDuration :many
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed', 'cancelled')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND (
+      $4::text = ''
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
+  )
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC
+`
+
+type ListDashboardRuntimeDurationParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	SquadScope  string             `json:"squad_scope"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+}
+
+type ListDashboardRuntimeDurationRow struct {
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	TotalSeconds     int64       `json:"total_seconds"`
+	TaskCount        int32       `json:"task_count"`
+	MeteredTaskCount int32       `json:"metered_task_count"`
+	FailedCount      int32       `json:"failed_count"`
+	CancelledCount   int32       `json:"cancelled_count"`
+}
+
+// Per-runtime terminal-task run time and task counts, the Time / Runs half of
+// the leaderboard's Runtime view. ListDashboardAgentRunTime's filters and
+// counters verbatim, grouped by the runtime the task ran on instead.
+func (q *Queries) ListDashboardRuntimeDuration(ctx context.Context, arg ListDashboardRuntimeDurationParams) ([]ListDashboardRuntimeDurationRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardRuntimeDuration,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardRuntimeDurationRow{}
+	for rows.Next() {
+		var i ListDashboardRuntimeDurationRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.MeteredTaskCount,
+			&i.FailedCount,
+			&i.CancelledCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardSquadRunTime = `-- name: ListDashboardSquadRunTime :many
 SELECT
     COALESCE(atq.usage_squad_id, atq.squad_id)::uuid AS squad_id,
@@ -810,6 +894,103 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.UncostedCacheReadTokens,
 			&i.UncostedCacheWriteTokens,
 			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByRuntime = `-- name: ListDashboardUsageByRuntime :many
+SELECT
+    runtime_id,
+    LOWER(provider) AS provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= $2::timestamptz
+  AND ($3::uuid IS NULL OR project_id = $3)
+  AND (
+      $4::text = ''
+      OR ($4::text = 'standalone' AND squad_id IS NULL)
+      OR ($4::text = 'squad' AND squad_id = $5::uuid)
+  )
+GROUP BY runtime_id, LOWER(provider), model
+ORDER BY runtime_id, LOWER(provider), model
+`
+
+type ListDashboardUsageByRuntimeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	SquadScope  string             `json:"squad_scope"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+}
+
+type ListDashboardUsageByRuntimeRow struct {
+	RuntimeID                pgtype.UUID `json:"runtime_id"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+}
+
+// Per-(runtime, provider, model) token aggregates from `task_usage_hourly`,
+// the token half of the leaderboard's Runtime view. Same filters, cost split
+// and LOWER(provider) normalisation as ListDashboardUsageByAgent; no
+// task_count, because the hourly one over-counts and the client reads task
+// counts from ListDashboardRuntimeDuration.
+//
+// @since is the EXACT N-day cutoff: rows carry no date, so the client cannot
+// trim a surplus day (MUL-5551).
+func (q *Queries) ListDashboardUsageByRuntime(ctx context.Context, arg ListDashboardUsageByRuntimeParams) ([]ListDashboardUsageByRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByRuntime,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByRuntimeRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByRuntimeRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
 		); err != nil {
 			return nil, err
 		}

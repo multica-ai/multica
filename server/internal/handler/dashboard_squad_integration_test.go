@@ -272,6 +272,46 @@ func TestDashboardSquadAttributionAndEndpoints(t *testing.T) {
 	if squadSuccesses != 1 || squadTimeouts != 1 {
 		t.Fatalf("failures/by-squad for squad = ok:%d timeout:%d, want 1/1", squadSuccesses, squadTimeouts)
 	}
+
+	// 7) The Runtime view's two reads honour ?squad_id= like every other one.
+	getJSON(testHandler.GetDashboardUsageByRuntime, "/api/dashboard/usage/by-runtime?days=7&squad_id=not-a-uuid", http.StatusBadRequest, nil)
+	getJSON(testHandler.GetDashboardRuntimeDuration, "/api/dashboard/runtime-duration?days=7&squad_id=not-a-uuid", http.StatusBadRequest, nil)
+	for _, tc := range []struct {
+		name                 string
+		query                string
+		wantTokens           int64
+		wantTasks, wantFails int32
+		wantSeconds          int64
+	}{
+		{"squad", "&squad_id=" + squadID, 3000, 2, 1, 1200},
+		{"standalone", "&squad_id=__standalone__", 500, 1, 0, 600},
+		{"unscoped", "", 3500, 3, 1, 1800},
+	} {
+		var usage []DashboardUsageByRuntimeResponse
+		getJSON(testHandler.GetDashboardUsageByRuntime, "/api/dashboard/usage/by-runtime?days=7&tz=UTC"+tc.query, http.StatusOK, &usage)
+		var tokens int64
+		for _, r := range usage {
+			if r.RuntimeID == runtimeID && r.Provider == provider {
+				tokens += r.InputTokens
+			}
+		}
+		if tokens != tc.wantTokens {
+			t.Fatalf("usage/by-runtime %s: input_tokens = %d, want %d", tc.name, tokens, tc.wantTokens)
+		}
+
+		var duration []DashboardRuntimeDurationResponse
+		getJSON(testHandler.GetDashboardRuntimeDuration, "/api/dashboard/runtime-duration?days=7&tz=UTC"+tc.query, http.StatusOK, &duration)
+		var got DashboardRuntimeDurationResponse
+		for _, r := range duration {
+			if r.RuntimeID == runtimeID {
+				got = r
+			}
+		}
+		if got.TaskCount != tc.wantTasks || got.FailedCount != tc.wantFails || got.TotalSeconds != tc.wantSeconds {
+			t.Fatalf("runtime-duration %s = tasks:%d failed:%d seconds:%d, want %d/%d/%d",
+				tc.name, got.TaskCount, got.FailedCount, got.TotalSeconds, tc.wantTasks, tc.wantFails, tc.wantSeconds)
+		}
+	}
 }
 
 // TestSquadInheritanceAndDaemonClaimSafety verifies that:

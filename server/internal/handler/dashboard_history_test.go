@@ -180,7 +180,7 @@ func stubWith(workspaceID uuid.UUID, decision entitlement.Decision) *entitlement
 	return stub
 }
 
-// All six dashboard endpoints, against the database: under enforce none of
+// The dashboard endpoints, against the database: under enforce none of
 // them returns a row from before the plan's range, whatever `days` asked for.
 func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 	if testHandler == nil {
@@ -222,6 +222,8 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 		{"/api/dashboard/runtime/daily", testHandler.GetDashboardRunTimeDaily, countRows("task_count"), true},
 		{"/api/dashboard/failures/daily", testHandler.GetDashboardFailuresDaily, countRows("task_count"), true},
 		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, countRows("task_count"), false},
+		{"/api/dashboard/usage/by-runtime", testHandler.GetDashboardUsageByRuntime, countTokens, false},
+		{"/api/dashboard/runtime-duration", testHandler.GetDashboardRuntimeDuration, countRows("task_count"), false},
 	}
 
 	// Each plan's limit with the request its weekly chart sends. Fixtures sit

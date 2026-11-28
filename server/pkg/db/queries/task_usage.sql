@@ -238,6 +238,40 @@ WHERE workspace_id = $1
 GROUP BY squad_id, agent_id, LOWER(provider), model
 ORDER BY squad_id NULLS LAST, agent_id, LOWER(provider), model;
 
+-- name: ListDashboardUsageByRuntime :many
+-- Per-(runtime, provider, model) token aggregates from `task_usage_hourly`,
+-- the token half of the leaderboard's Runtime view. Same filters, cost split
+-- and LOWER(provider) normalisation as ListDashboardUsageByAgent; no
+-- task_count, because the hourly one over-counts and the client reads task
+-- counts from ListDashboardRuntimeDuration.
+--
+-- @since is the EXACT N-day cutoff: rows carry no date, so the client cannot
+-- trim a surplus day (MUL-5551).
+SELECT
+    runtime_id,
+    LOWER(provider) AS provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND squad_id IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND squad_id = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY runtime_id, LOWER(provider), model
+ORDER BY runtime_id, LOWER(provider), model;
+
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"
@@ -362,6 +396,39 @@ WHERE a.workspace_id = $1
       OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
   )
 GROUP BY COALESCE(atq.usage_squad_id, atq.squad_id), atq.agent_id
+ORDER BY total_seconds DESC;
+
+-- name: ListDashboardRuntimeDuration :many
+-- Per-runtime terminal-task run time and task counts, the Time / Runs half of
+-- the leaderboard's Runtime view. ListDashboardAgentRunTime's filters and
+-- counters verbatim, grouped by the runtime the task ran on instead.
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed', 'cancelled')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY atq.runtime_id
 ORDER BY total_seconds DESC;
 
 -- name: ListDashboardFailuresDaily :many

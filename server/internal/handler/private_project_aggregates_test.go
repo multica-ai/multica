@@ -78,6 +78,8 @@ func TestPrivateProjectDashboardsKeepWorkspaceTotals(t *testing.T) {
 		{"/api/dashboard/runtime/daily", testHandler.GetDashboardRunTimeDaily, false, "task_count"},
 		{"/api/dashboard/failures/daily", testHandler.GetDashboardFailuresDaily, false, "task_count"},
 		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, true, "task_count"},
+		{"/api/dashboard/usage/by-runtime", testHandler.GetDashboardUsageByRuntime, false, "input_tokens"},
+		{"/api/dashboard/runtime-duration", testHandler.GetDashboardRuntimeDuration, false, "task_count"},
 	} {
 		t.Run(ep.path, func(t *testing.T) {
 			share := sum(get(ep.h, ep.path, f.insider, secret), ep.count)
