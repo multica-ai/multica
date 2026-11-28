@@ -872,6 +872,28 @@
     "tool_details_hidden_toolbar": "ツールの詳細は非表示",
     "tool_details_restricted_toolbar": "ツールの詳細はオーナーと管理者のみに表示"
   },
+  "code_changes": {
+    "title": "コードの変更",
+    "open_tooltip": "コードの変更を表示",
+    "file_count_other": "{{count}} 個のファイル",
+    "recorded": "{{when}}に記録",
+    "close": "閉じる",
+    "load_failed": "コードの変更を読み込めませんでした。",
+    "none": "この実行ではコードは変更されていません。",
+    "not_recorded": "この実行のコードの変更は記録されていません。変更は実行の終了時に、作業ディレクトリ内の git リポジトリについて記録されます。",
+    "file_list": "変更されたファイル",
+    "files_truncated": "一覧に表示できる数を超えるファイルが変更されました。",
+    "repos_truncated": "変更されたリポジトリが多すぎるため、一部は表示されていません。",
+    "binary": "バイナリファイルのため、テキストの差分はありません。",
+    "patch_truncated": "このファイルの差分は大きすぎて記録できませんでした。",
+    "no_content": "内容の変更はありません（モードまたは名前の変更のみ）。",
+    "status": {
+      "added": "追加",
+      "modified": "変更",
+      "deleted": "削除",
+      "renamed": "名前変更"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",
     "cancelled_by_actor": "{{name}} がキャンセル",

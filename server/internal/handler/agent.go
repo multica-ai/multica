@@ -648,6 +648,11 @@ type AgentTaskResponse struct {
 	// model call, genuinely has no number, and showing 0 would assert it was
 	// free. omitempty keeps both off the wire.
 	Usage []TaskUsageData `json:"usage,omitempty"`
+	// CodeChangeFiles is how many files the run's code-change snapshot lists,
+	// across all repositories. Only the issue execution log fills it; zero (a
+	// run that changed nothing, or one with no snapshot) is omitted, and the
+	// UI shows the code-changes entry only when it is present.
+	CodeChangeFiles int `json:"code_change_files,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request

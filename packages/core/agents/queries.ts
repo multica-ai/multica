@@ -169,6 +169,25 @@ export const taskContextReceiptKeys = {
  * agent starts (and again for a fresh-session retry), so a finished run's
  * receipt never changes; a live run's is refetched whenever the dialog opens.
  */
+export const taskCodeChangesKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "task-code-changes"] as const,
+  detail: (wsId: string, taskId: string) =>
+    [...taskCodeChangesKeys.all(wsId), taskId] as const,
+};
+
+/**
+ * What a run changed in its git checkouts. The daemon records it once, when
+ * the run ends, so a finished run's snapshot does not change.
+ */
+export function taskCodeChangesOptions(wsId: string, taskId: string) {
+  return queryOptions({
+    queryKey: taskCodeChangesKeys.detail(wsId, taskId),
+    queryFn: () => api.getTaskCodeChanges(taskId),
+    enabled: !!wsId && !!taskId,
+    staleTime: 60_000,
+  });
+}
+
 export function taskContextReceiptOptions(wsId: string, taskId: string) {
   return queryOptions({
     queryKey: taskContextReceiptKeys.detail(wsId, taskId),

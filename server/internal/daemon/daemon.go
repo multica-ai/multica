@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/codechange"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/localenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -8813,6 +8814,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// Hermes overlay's task-local state.db — carried over from the prior task.
 		envReused = env != nil
 	}
+	// Where each git checkout under the working directory started, so the run
+	// can report what it changed (see reportCodeChanges below).
+	codeChangeBaselines := codechange.NewBaselines()
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
@@ -8913,6 +8917,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
+				// In place, the run works in the user's own tree, which may
+				// already hold uncommitted work. Record it before Prepare
+				// writes the runtime's files, so neither counts as the run's.
+				codeChangeBaselines.Capture(prepareCtx, localAssignment.AbsPath, true)
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
@@ -8979,6 +8987,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}()
 	}
+	// Report what the run changed in its git checkouts, on every exit path.
+	// Registered between the Finalize defer above and the runtime-file cleanup
+	// defer below, so LIFO runs it after the cleanup (the runtime's own files
+	// are gone) and before Finalize (a task worktree is still on disk).
+	//
+	// A task worktree is measured from its HEAD only: it starts on a commit
+	// that already carries the user's replayed state, and Prepare has written
+	// the runtime's files into it by now. Elsewhere the baseline includes the
+	// working tree, so uncommitted work left by an earlier turn in a reused
+	// directory is not reported again. Checkouts already captured above, and
+	// those the agent creates through `multica repo checkout`, keep their
+	// earlier baseline.
+	codeChangeRoot := env.WorkDir
+	if env.LocalWorktree != nil {
+		codeChangeRoot = env.LocalWorktree.Path
+	}
+	codeChangeBaselines.Capture(ctx, codeChangeRoot, env.LocalWorktree == nil)
+	runtimeFilesLeftInPlace := false
+	defer func() {
+		// Files the runtime could not remove would read as the agent's
+		// changes, and an unconfirmed process may still be writing.
+		if runtimeFilesLeftInPlace || taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
+			return
+		}
+		d.reportCodeChanges(task.ID, codeChangeRoot, codeChangeBaselines, taskLog)
+	}()
 	// Workdir is preserved for reuse by future tasks on the same (agent,
 	// issue) pair in cloud mode; the work_dir path is stored in DB on task
 	// completion and passed back via PriorWorkDir on the next claim, so
@@ -9014,6 +9048,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if err := env.LocalWorktree.RestoreRuntimeConfigTracking(); err != nil {
 				env.LocalWorktree.AbortWithReason(err)
 				d.logger.Warn("execenv: restore runtime config tracking failed", "error", err)
+				runtimeFilesLeftInPlace = true
 				return
 			}
 			if taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
@@ -9038,6 +9073,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				}
 				d.logger.Warn("execenv: cleanup sidecars failed", "error", cerr)
 			}
+			runtimeFilesLeftInPlace = cleanupErr != nil
 			// In worktree mode a failed cleanup is NOT survivable: Finalize is
 			// about to `git add -A`, so whatever the cleanup could not remove
 			// gets committed and delivered as the task's branch — a diff whose
@@ -9560,6 +9596,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
+		CodeChanges: codeChangeBaselines,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 	defer d.environments.trackTask(env.RootDir, localenv.Task{

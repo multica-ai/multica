@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/codechange"
 	"github.com/multica-ai/multica/server/internal/daemon/localenv"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/httptransport"
@@ -760,6 +761,16 @@ func (c *Client) ReportTaskEnvironmentConfigs(ctx context.Context, taskID string
 func (c *Client) ReportTaskContextReceipt(ctx context.Context, taskID string, receipt ContextReceipt) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/context-receipt", taskID), map[string]any{
 		"receipt": receipt,
+	}, nil)
+}
+
+// ReportTaskCodeChanges uploads what the run changed in its git checkouts.
+// The server keeps one snapshot per task; a later report replaces it.
+// reposTruncated says some checkouts were left out of repos.
+func (c *Client) ReportTaskCodeChanges(ctx context.Context, taskID string, repos []codechange.Repo, reposTruncated bool) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/code-changes", taskID), map[string]any{
+		"repos":           repos,
+		"repos_truncated": reposTruncated,
 	}, nil)
 }
 

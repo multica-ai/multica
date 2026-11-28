@@ -403,6 +403,12 @@ export interface AgentTask {
    * trigger/coalesced union; an explicitly empty array is still authoritative.
    */
   delivered_comment_ids?: string[];
+  /**
+   * Files listed in the run's code-change snapshot, across repositories. Set
+   * on finished execution-log rows only; absent when the run changed nothing,
+   * has no snapshot, or the server predates it.
+   */
+  code_change_files?: number;
   /** Exact run-scoped live-input capability negotiated at this task's start. */
   supplement_capability?: string;
   /** Ordinary historical comments explicitly bound to this run, in send order. */
@@ -569,6 +575,44 @@ export interface TaskContextReceiptResponse {
   /** Null when the run has none: an older daemon, or a run that never launched. */
   receipt: ContextReceipt | null;
   recorded_at?: string;
+}
+
+/**
+ * What a run changed in the git checkouts under its working directory, as the
+ * daemon recorded it when the run ended (`GET /api/tasks/:id/code-changes`).
+ */
+export type TaskCodeChangeStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface TaskCodeChangeFile {
+  path: string;
+  old_path?: string;
+  status: TaskCodeChangeStatus;
+  additions: number;
+  deletions: number;
+  binary?: boolean;
+}
+
+export interface TaskCodeChangeRepo {
+  /** Relative to the run's working directory; "." when it is the checkout itself. */
+  path: string;
+  branch?: string;
+  /** The commit the run started from; empty for a branch with no commits. */
+  base: string;
+  head?: string;
+  files: TaskCodeChangeFile[];
+  files_truncated?: boolean;
+  /** Unified diff of every file, cut at a file boundary when too large. */
+  patch: string;
+  patch_truncated?: boolean;
+}
+
+export interface TaskCodeChanges {
+  task_id: string;
+  repos: TaskCodeChangeRepo[];
+  /** Some checkouts were left out of `repos`. */
+  repos_truncated: boolean;
+  /** Null until the daemon has recorded the run: still running, an older daemon, or no git checkout. */
+  updated_at: string | null;
 }
 
 /**

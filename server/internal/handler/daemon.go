@@ -6685,6 +6685,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.hydrateTaskUsage(r.Context(), issue.ID, resp)
 		}
+		h.hydrateTaskCodeChangeFiles(r, issue.WorkspaceID, tasks, resp)
 	}
 
 	if scope == "subtree" {

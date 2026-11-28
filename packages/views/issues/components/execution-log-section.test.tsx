@@ -23,6 +23,12 @@ vi.mock("../../common/task-transcript", () => ({
   ),
 }));
 
+vi.mock("../../common/task-code-changes/code-changes-dialog", () => ({
+  CodeChangesButton: ({ task }: { task: { id: string } }) => (
+    <button type="button">Code changes for {task.id}</button>
+  ),
+}));
+
 vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
     open ? <button type="button" onClick={onConfirm}>Confirm stop</button> : null,
@@ -288,6 +294,27 @@ describe("subtree execution log", () => {
     expect(await screen.findByText("MUL-9")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(2);
     queryClient.clear();
+  });
+});
+
+describe("code changes entry", () => {
+  it("is offered only on finished runs that changed files", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const done = { status: "completed" as const, completed_at: "2026-06-08T08:02:00Z" };
+    const finished = makeTask({ id: "finished", ...done, code_change_files: 3, trigger_summary: "Finished run" });
+    const unchanged = makeTask({ id: "unchanged", ...done, trigger_summary: "Unchanged run" });
+    const running = makeTask({ id: "running", code_change_files: 2, trigger_summary: "Running run" });
+    const tasks = [finished, unchanged, running];
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+    queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], tasks);
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Code changes for finished" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Code changes for unchanged" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Code changes for running" })).not.toBeInTheDocument();
   });
 });
 

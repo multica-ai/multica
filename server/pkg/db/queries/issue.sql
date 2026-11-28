@@ -506,6 +506,10 @@ cleared_environment_configs AS (
 cleared_task_context_receipts AS (
     DELETE FROM task_context_receipt WHERE issue_id IN (SELECT target.id FROM target)
 ),
+-- task_code_change likewise has no FK and is swept by its copied issue_id.
+cleared_task_code_changes AS (
+    DELETE FROM task_code_change WHERE issue_id IN (SELECT target.id FROM target)
+),
 cleared_description_collab_state AS (
     DELETE FROM issue_description_collab_state WHERE issue_id IN (SELECT target.id FROM target)
 ),

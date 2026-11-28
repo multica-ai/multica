@@ -1013,6 +1013,28 @@
     "tool_details_hidden_toolbar": "工具詳情已隱藏",
     "tool_details_restricted_toolbar": "工具詳情僅所有者和管理員可見"
   },
+  "code_changes": {
+    "title": "程式碼變更",
+    "open_tooltip": "檢視程式碼變更",
+    "file_count_other": "{{count}} 個檔案",
+    "recorded": "{{when}}記錄",
+    "close": "關閉",
+    "load_failed": "無法載入程式碼變更。",
+    "none": "這次執行沒有變更程式碼。",
+    "not_recorded": "這次執行沒有記錄程式碼變更。程式碼變更在執行結束時記錄，只包含工作目錄中的 git 倉庫。",
+    "file_list": "變更的檔案",
+    "files_truncated": "變更的檔案太多，清單沒有全部列出。",
+    "repos_truncated": "變更的倉庫太多，有些沒有列出。",
+    "binary": "二進位檔案，沒有文字 diff。",
+    "patch_truncated": "這個檔案的 diff 太大，沒有記錄。",
+    "no_content": "內容沒有變更（只改了權限或檔名）。",
+    "status": {
+      "added": "新增",
+      "modified": "修改",
+      "deleted": "刪除",
+      "renamed": "重新命名"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",
     "cancelled_by_actor": "已由 {{name}} 取消",

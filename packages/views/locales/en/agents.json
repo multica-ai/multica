@@ -1043,6 +1043,29 @@
     "tool_details_hidden_toolbar": "Tool details hidden",
     "tool_details_restricted_toolbar": "Tool details visible to owner and admins only"
   },
+  "code_changes": {
+    "title": "Code changes",
+    "open_tooltip": "View code changes",
+    "file_count_one": "{{count}} file",
+    "file_count_other": "{{count}} files",
+    "recorded": "Recorded {{when}}",
+    "close": "Close",
+    "load_failed": "Couldn't load code changes.",
+    "none": "This run didn't change any code.",
+    "not_recorded": "No code changes recorded for this run. Changes are recorded when a run ends, for git repositories in its working directory.",
+    "file_list": "Changed files",
+    "files_truncated": "More files changed than can be listed.",
+    "repos_truncated": "Too many repositories changed, so some aren't listed.",
+    "binary": "Binary file, no text diff.",
+    "patch_truncated": "This file's diff was too large to record.",
+    "no_content": "No content changes (mode or rename only).",
+    "status": {
+      "added": "Added",
+      "modified": "Modified",
+      "deleted": "Deleted",
+      "renamed": "Renamed"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",
     "cancelled_by_actor": "Cancelled by {{name}}",

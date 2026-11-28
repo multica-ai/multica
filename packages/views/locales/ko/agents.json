@@ -872,6 +872,28 @@
     "tool_details_hidden_toolbar": "도구 세부 정보 숨김",
     "tool_details_restricted_toolbar": "도구 세부 정보는 소유자와 관리자에게만 표시"
   },
+  "code_changes": {
+    "title": "코드 변경 사항",
+    "open_tooltip": "코드 변경 사항 보기",
+    "file_count_other": "파일 {{count}}개",
+    "recorded": "{{when}} 기록됨",
+    "close": "닫기",
+    "load_failed": "코드 변경 사항을 불러오지 못했습니다.",
+    "none": "이 실행에서는 코드를 변경하지 않았습니다.",
+    "not_recorded": "이 실행에 기록된 코드 변경 사항이 없습니다. 변경 사항은 실행이 끝날 때 작업 디렉터리의 git 저장소에 대해 기록됩니다.",
+    "file_list": "변경된 파일",
+    "files_truncated": "목록에 표시할 수 있는 것보다 많은 파일이 변경되었습니다.",
+    "repos_truncated": "변경된 저장소가 너무 많아 일부는 표시되지 않습니다.",
+    "binary": "바이너리 파일이라 텍스트 diff가 없습니다.",
+    "patch_truncated": "이 파일의 diff가 너무 커서 기록하지 못했습니다.",
+    "no_content": "내용 변경 없음(모드 또는 이름 변경만).",
+    "status": {
+      "added": "추가됨",
+      "modified": "수정됨",
+      "deleted": "삭제됨",
+      "renamed": "이름 변경됨"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",
     "cancelled_by_actor": "{{name}}이(가) 취소함",
