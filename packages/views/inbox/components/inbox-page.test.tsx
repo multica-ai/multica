@@ -121,9 +121,11 @@ vi.mock("@multica/core/inbox/mutations", () => {
   // The shared archive handlers await the request; settle it through the spy's callbacks.
   const settled = (spy: typeof archiveMutate) => (id: string) =>
     new Promise<void>((resolve, reject) => spy(id, { onSuccess: resolve, onError: reject }));
+  const markReadAsync = async (id: string) => markReadMutate(id);
+  const markUnreadAsync = async (id: string) => markUnreadMutate(id);
   return {
-    useMarkInboxRead: () => ({ mutate: markReadMutate }),
-    useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
+    useMarkInboxRead: () => ({ mutateAsync: markReadAsync }),
+    useMarkInboxUnread: () => ({ mutateAsync: markUnreadAsync }),
     useArchiveInbox: () => ({ mutate: archiveMutate, mutateAsync: settled(archiveMutate) }),
     useUnarchiveInbox: () => ({ mutate: unarchiveMutate, mutateAsync: settled(unarchiveMutate) }),
     useSnoozeInbox: mutation,
@@ -372,7 +374,7 @@ describe("InboxPage", () => {
       listData.active = listData.active.map((current) => ({ ...current, read: true }));
     });
     const { rerender } = render(<InboxPage />);
-    expect(markReadMutate).toHaveBeenCalledWith("n3", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("n3");
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
     rerender(<InboxPage />);
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
@@ -1013,7 +1015,7 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a");
   });
 
   it("keeps an unread-filtered notification open after it is marked read", () => {
@@ -1036,7 +1038,7 @@ describe("InboxPage", () => {
     const { rerender } = render(<InboxPage />);
     rerender(<InboxPage />);
 
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a");
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
@@ -1097,7 +1099,7 @@ describe("InboxPage", () => {
     act(() => inboxCommands().markUnread("inbox-a"));
     rerender(<InboxPage />);
 
-    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a");
     expect(markReadMutate).not.toHaveBeenCalled();
   });
 
@@ -1121,7 +1123,7 @@ describe("InboxPage", () => {
     searchParams = new URLSearchParams("issue=issue-a");
     rerender(<InboxPage />);
 
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a");
   });
 
   it("folds to a single column on a foldable's inner screen held upright", () => {
@@ -1427,7 +1429,7 @@ describe("InboxPage", () => {
     markReadMutate.mockClear();
 
     fireEvent.keyDown(document, { key: "u", code: "KeyU" });
-    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a");
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
 
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
@@ -1436,7 +1438,7 @@ describe("InboxPage", () => {
 
     // Pressing U again marks it back read and releases the guard.
     fireEvent.keyDown(document, { key: "u", code: "KeyU" });
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a");
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
   });
 
@@ -1459,7 +1461,7 @@ describe("InboxPage", () => {
     // Reopening the same unread notification later should auto-mark it read.
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
     render(<InboxPage />);
-    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a");
   });
 
   it("passes the unfiltered active count to the archive-all dialog when compact filters are active", () => {
