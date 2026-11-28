@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -66,6 +66,10 @@ type TaskCodeChangesResponse struct {
 	ReposTruncated bool                 `json:"repos_truncated"`
 	// UpdatedAt is null until the daemon has reported for this run.
 	UpdatedAt *string `json:"updated_at"`
+	// DetailsHidden is set when the agent restricts its tool details and the
+	// caller is not one of their readers. The changes are derived from what
+	// the agent's tools did, so they follow the same rule and Repos is empty.
+	DetailsHidden bool `json:"details_hidden,omitempty"`
 }
 
 // normalize applies the server's caps and makes every string storable.
@@ -158,6 +162,18 @@ func (h *Handler) GetTaskCodeChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := TaskCodeChangesResponse{TaskID: uuidToString(task.ID), Repos: []taskCodeChangeRepo{}}
+	// A failed lookup restricts the read to nobody, as the transcript does.
+	audience, err := h.loadToolDetailsAudience(r.Context(), task.AgentID)
+	if err != nil && !isNotFound(err) {
+		slog.Warn("load tool details audience failed", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load code changes")
+		return
+	}
+	if audience.restricted && !audience.allows(h.toolDetailsReader(r, middleware.WorkspaceIDFromContext(r.Context()))) {
+		resp.DetailsHidden = true
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	row, err := h.Queries.GetTaskCodeChange(r.Context(), task.ID)
 	if err != nil {
 		if isNotFound(err) {
@@ -181,16 +197,42 @@ func (h *Handler) GetTaskCodeChanges(w http.ResponseWriter, r *http.Request) {
 
 // hydrateTaskCodeChangeFiles sets CodeChangeFiles on finished execution-log
 // rows in one query. Like usage it is display metadata: on error every row
-// keeps zero and the code-changes entry is simply not shown.
-func (h *Handler) hydrateTaskCodeChangeFiles(ctx context.Context, workspaceID pgtype.UUID, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
+// keeps zero and the code-changes entry is simply not shown. Runs of an agent
+// whose tool details the caller may not read keep zero too, so the entry only
+// appears where GetTaskCodeChanges would return the changes.
+func (h *Handler) hydrateTaskCodeChangeFiles(r *http.Request, workspaceID pgtype.UUID, tasks []db.AgentTaskQueue, resp []AgentTaskResponse) {
 	if len(tasks) != len(resp) {
 		return
+	}
+	ctx := r.Context()
+	audiences := map[string]toolDetailsAudience{}
+	reader, readerResolved := "", false
+	mayRead := func(agentID pgtype.UUID) bool {
+		key := uuidToString(agentID)
+		audience, ok := audiences[key]
+		if !ok {
+			var err error
+			// On error the audience is closed: nobody reads.
+			if audience, err = h.loadToolDetailsAudience(ctx, agentID); err != nil && !isNotFound(err) {
+				slog.Debug("load tool details audience failed", "agent_id", key, "error", err)
+			}
+			audiences[key] = audience
+		}
+		if !audience.restricted {
+			return true
+		}
+		if !readerResolved {
+			reader, readerResolved = h.toolDetailsReader(r, uuidToString(workspaceID)), true
+		}
+		return audience.allows(reader)
 	}
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
 	for _, t := range tasks {
 		switch t.Status {
 		case "completed", "failed", "cancelled":
-			taskIDs = append(taskIDs, t.ID)
+			if mayRead(t.AgentID) {
+				taskIDs = append(taskIDs, t.ID)
+			}
 		}
 	}
 	if len(taskIDs) == 0 {

@@ -267,3 +267,81 @@ func TestTaskCodeChanges_FileCountOnExecutionLog(t *testing.T) {
 		}
 	}
 }
+
+// A run's code changes come from what the agent's tools did, so an agent that
+// restricts its tool details restricts them too: only the agent owner and the
+// workspace's owners and admins read them, and the execution log shows the
+// entry only to them.
+func TestTaskCodeChanges_FollowToolDetailsVisibility(t *testing.T) {
+	issueID, taskID := codeChangeFixture(t, "tool details")
+	reportCodeChanges(t, taskID, map[string]any{"repos": []any{sampleCodeChangeRepo("diff --git a/main.go b/main.go\n")}}).Want(http.StatusNoContent)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID)
+	agentOwner := createTestUserAndMember(t, "member")
+	dbfx.Exec(t, `UPDATE agent SET owner_id = $1, tool_details_visibility = 'restricted'
+		WHERE id = (SELECT agent_id FROM agent_task_queue WHERE id = $2)`, agentOwner, taskID)
+	t.Cleanup(func() {
+		dbfx.Exec(t, `UPDATE agent SET owner_id = $1 WHERE owner_id = $2`, testUserID, agentOwner)
+	})
+	admin := createTestUserAndMember(t, "admin")
+	member := createTestUserAndMember(t, "member")
+	asAgent := map[string]string{"X-Actor-Source": "task_token", "X-Agent-ID": "00000000-0000-0000-0000-000000000001"}
+
+	read := func(t *testing.T, userID string, headers map[string]string) TaskCodeChangesResponse {
+		t.Helper()
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/tasks/"+taskID+"/code-changes", nil), userID), "taskId", taskID)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{}))
+		var got TaskCodeChangesResponse
+		testutil.Call(t, testHandler.GetTaskCodeChanges, req).Want(http.StatusOK).JSON(&got)
+		return got
+	}
+	fileCount := func(t *testing.T, userID string, headers map[string]string) int {
+		t.Helper()
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+issueID+"/tasks", nil), userID), "id", issueID)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		var runs []AgentTaskResponse
+		testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusOK).JSON(&runs)
+		for _, run := range runs {
+			if run.ID == taskID {
+				return run.CodeChangeFiles
+			}
+		}
+		t.Fatalf("run %s not in the execution log", taskID)
+		return 0
+	}
+
+	for _, tc := range []struct {
+		name    string
+		userID  string
+		headers map[string]string
+		full    bool
+	}{
+		{name: "agent owner", userID: agentOwner, full: true},
+		{name: "workspace owner", userID: testUserID, full: true},
+		{name: "workspace admin", userID: admin, full: true},
+		{name: "plain member", userID: member},
+		{name: "an agent acting for the workspace owner", userID: testUserID, headers: asAgent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := read(t, tc.userID, tc.headers)
+			n := fileCount(t, tc.userID, tc.headers)
+			if tc.full {
+				if got.DetailsHidden || len(got.Repos) != 1 || n != 2 {
+					t.Errorf("reader got hidden=%v repos=%d files=%d, want the changes and 2 files", got.DetailsHidden, len(got.Repos), n)
+				}
+			} else if !got.DetailsHidden || len(got.Repos) != 0 || got.UpdatedAt != nil || n != 0 {
+				t.Errorf("non-reader got hidden=%v repos=%d updated=%v files=%d, want nothing", got.DetailsHidden, len(got.Repos), got.UpdatedAt, n)
+			}
+		})
+	}
+
+	dbfx.Exec(t, `UPDATE agent SET tool_details_visibility = 'everyone'
+		WHERE id = (SELECT agent_id FROM agent_task_queue WHERE id = $1)`, taskID)
+	if got, n := read(t, member, nil), fileCount(t, member, nil); got.DetailsHidden || len(got.Repos) != 1 || n != 2 {
+		t.Errorf("an unrestricted agent hid its code changes from a member: hidden=%v repos=%d files=%d", got.DetailsHidden, len(got.Repos), n)
+	}
+}
