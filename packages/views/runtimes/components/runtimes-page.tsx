@@ -223,7 +223,7 @@ export function RuntimesPage({
   const agentCountByRuntime = useMemo(() => {
     const counts = new Map<string, number>();
     for (const agent of agents) {
-      if (!agent.runtime_id) continue;
+      if (!agent.runtime_id || agent.archived_at) continue;
       counts.set(agent.runtime_id, (counts.get(agent.runtime_id) ?? 0) + 1);
     }
     return counts;
@@ -278,11 +278,13 @@ export function RuntimesPage({
         machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud")
       ),
   );
-  const qoderAgentCount = agents.filter((agent) =>
-    runtimes.some(
-      (runtime) =>
-        runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
-    ),
+  const qoderAgentCount = agents.filter(
+    (agent) =>
+      !agent.archived_at &&
+      runtimes.some(
+        (runtime) =>
+          runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
+      ),
   ).length;
   const localMachine = machineList.find((machine) => machine.isCurrent);
 
