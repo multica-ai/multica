@@ -14,7 +14,7 @@ import (
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
-	Short: "Work with the current chat conversation",
+	Short: "Read the current chat conversation and manage your chat sessions",
 }
 
 var chatHistoryCmd = &cobra.Command{
