@@ -299,16 +299,20 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 ### Agent run history
 
 `multica agent tasks <agent-id> --limit 200` returns the newest page of runs.
-The default and maximum page size is 200. If more runs exist, stderr prints a
-cursor; pass it unchanged as `--before '<cursor>'` to read the next page.
-`--output json` keeps the array output and includes usage for that page only.
+Add `--status <status>` to keep only runs in one state (`queued`, `deferred`,
+`dispatched`, `running`, `waiting_local_directory`, `completed`, `failed`, or
+`cancelled`). The default and maximum page size is 200. If more runs exist,
+stderr prints a cursor; pass it unchanged as `--before '<cursor>'` to read the
+next page. `--output json` keeps the array output and includes usage for that
+page only.
 
-The corresponding `GET /api/agents/{id}/tasks` endpoint accepts `limit` and
-`before`, and keeps its JSON array response. The `X-Agent-Tasks-Next-Cursor`
-response header supplies the next cursor; its absence marks the final page.
-Cursors preserve `(created_at, id)` order, including timestamp precision.
-Invalid limits or cursors return HTTP 400; limits above 200 are capped.
-Clients that do not follow the cursor receive only the newest 200 runs.
+The corresponding `GET /api/agents/{id}/tasks` endpoint accepts `limit`,
+`before`, and `status`, and keeps its JSON array response. The
+`X-Agent-Tasks-Next-Cursor` response header supplies the next cursor; its
+absence marks the final page. Cursors preserve `(created_at, id)` order,
+including timestamp precision. Invalid limits, cursors, or statuses return
+HTTP 400; limits above 200 are capped. Clients that do not follow the cursor
+receive only the newest 200 runs.
 
 
 ## Daemon and runtimes
