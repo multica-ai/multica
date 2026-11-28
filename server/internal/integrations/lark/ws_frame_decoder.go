@@ -72,6 +72,9 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		return InboundMessage{}, false, nil
 	}
 
+	if env.Header.EventType == eventTypeDocCommentAdd {
+		return decodeDocCommentEvent(env, inst)
+	}
 	if env.Header.EventType != "im.message.receive_v1" {
 		return InboundMessage{}, false, nil
 	}

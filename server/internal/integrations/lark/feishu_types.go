@@ -81,6 +81,11 @@ type InboundMessage struct {
 	// HasSelectedContext is set when enrichment renders an explicitly selected
 	// quote or forward; automatic recent context does not set it.
 	HasSelectedContext bool
+
+	// DocComment is set when the message is a cloud-document comment rather
+	// than an IM message (see doc_comment.go). ChatID is then a synthetic
+	// comment-session key, not an IM chat id.
+	DocComment *DocCommentRef `json:",omitempty"`
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier

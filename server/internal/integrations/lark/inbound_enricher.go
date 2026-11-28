@@ -177,6 +177,9 @@ func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, boo
 }
 
 func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+	if msg.DocComment != nil {
+		return e.enrichDocComment(ctx, msg, creds)
+	}
 	msg, wantRecent := e.selectContext(msg)
 	isForward := msg.MessageType == larkMsgTypeMergeForward
 	if msg.ParentID == "" && !isForward && !wantRecent {
