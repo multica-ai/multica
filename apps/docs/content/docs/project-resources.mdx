@@ -173,6 +173,8 @@ Nothing the agent leaves uncommitted is deleted with the worktree, including whe
 
 One exception: a run that starts by finishing a merge with your local edits (see [conflicts](#conflicts-are-resolved-by-the-agent)) commits everything it leaves, because those uncommitted changes include your edits.
 
+Multica checks out locally available Git submodules at the commits recorded in the worktree. Commit your own edits inside a submodule before a run to include them in the starting snapshot. For a nested submodule, also commit the updated gitlink in each intermediate submodule. At delivery, Multica saves the agent’s submodule commits in the local submodule repositories and records their commit IDs in the parent repository. To share the branch on a remote, publish the referenced submodule commits first.
+
 To see what a run saved, list the refs with `git for-each-ref refs/multica/leftovers` and inspect one with `git show --stat <ref>`. `git restore --source=<ref> -- <path>` brings a file back into your checkout.
 
 In the rare case that the commit or the save itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept, the run is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
