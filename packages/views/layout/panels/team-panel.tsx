@@ -565,7 +565,10 @@ export function TeamPanel() {
         <PanelSection label={t(($) => $.panels.team.squads_and_members)}>
           <PanelList>
             <PanelLink
-              href={p.squads()}
+              // The count is every squad, so the row opens all of them. The
+              // scope rides in the URL so a new tab gets it too and the
+              // current tab's choice is left alone.
+              href={`${p.squads()}?scope=all`}
               icon={<Users />}
               label={t(($) => $.nav.squads)}
               active={isPathWithin(pathname, p.squads())}

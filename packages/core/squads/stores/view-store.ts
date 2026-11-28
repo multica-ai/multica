@@ -73,6 +73,8 @@ export const useSquadsViewStore = createCollectionViewStore<
   sortDefaultDirection: SQUAD_SORT_DEFAULT_DIRECTION,
   defaultHiddenColumns: SQUAD_DEFAULT_HIDDEN_COLUMNS,
   emptyFilters: EMPTY_SQUAD_FILTERS,
-  extraState: { scope: "mine" },
+  // "all" matches the Team panel count, which counts every squad; most
+  // squads are created by someone else, so "mine" would open empty.
+  extraState: { scope: "all" },
   extraActions: (set) => ({ setScope: (scope) => set({ scope }) }),
 });

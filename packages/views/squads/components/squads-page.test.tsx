@@ -10,6 +10,7 @@ import { SquadsPage } from "./squads-page";
 const mocks = vi.hoisted(() => ({
   squads: [] as Squad[],
   openModal: vi.fn(),
+  replace: vi.fn(),
   viewState: {
     scope: "all" as SquadsScope,
     sortField: "name",
@@ -77,17 +78,17 @@ function squad(id: string, name: string, creatorId: string): Squad {
   };
 }
 
-function renderPage() {
+function renderPage(search = "") {
   const adapter: NavigationAdapter = {
     push: vi.fn(),
-    replace: vi.fn(),
+    replace: mocks.replace,
     back: vi.fn(),
     pathname: "/acme/squads",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(search),
     hash: "",
     getShareableUrl: (path) => path,
   };
-  renderWithI18n(
+  return renderWithI18n(
     <NavigationProvider value={adapter}>
       <SquadsPage />
     </NavigationProvider>,
@@ -101,6 +102,7 @@ beforeEach(() => {
   mocks.viewState.setScope.mockReset();
   mocks.viewState.clearFilters.mockReset();
   mocks.openModal.mockReset();
+  mocks.replace.mockReset();
 });
 
 describe("SquadsPage header", () => {
@@ -166,5 +168,63 @@ describe("SquadsPage header", () => {
     );
     await user.click(within(intro).getByRole("button", { name: "New squad" }));
     expect(mocks.openModal).toHaveBeenCalledWith("create-squad");
+  });
+
+  it("says so when the user created no squad, and offers all squads", async () => {
+    const user = userEvent.setup();
+    mocks.squads = [squad("s2", "Design Crew", "someone")];
+    mocks.viewState.scope = "mine";
+    renderPage();
+
+    expect(screen.getByText("You haven't created a squad")).toBeInTheDocument();
+    expect(screen.queryByText("No squads match")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View all squads" }));
+    expect(mocks.viewState.setScope).toHaveBeenCalledWith("all");
+  });
+
+  it("names an empty filter dimension instead of opening a blank menu", async () => {
+    const user = userEvent.setup();
+    mocks.squads = [squad("s2", "Design Crew", "someone")];
+    mocks.viewState.scope = "mine";
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Leader" }));
+    expect(await screen.findByRole("menuitem", { name: "No leaders to filter by" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("shows the scope a link asks for in that tab only, leaving the saved scope to other tabs", () => {
+    // One shared store, as across desktop tabs, which mount one at a time.
+    mocks.viewState.scope = "mine";
+    mocks.viewState.setScope.mockImplementation((next: SquadsScope) => {
+      mocks.viewState.scope = next;
+    });
+
+    const tabA = renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "My squads" })).toBeInTheDocument();
+    tabA.unmount();
+
+    const tabB = renderPage("scope=all");
+    expect(screen.getByRole("heading", { level: 1, name: "All squads" })).toBeInTheDocument();
+    expect(screen.getByText("Design Crew")).toBeInTheDocument();
+    tabB.unmount();
+
+    renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "My squads" })).toBeInTheDocument();
+    expect(mocks.viewState.setScope).not.toHaveBeenCalled();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("saves a scope picked on the page and keeps the tab's URL in step", async () => {
+    const user = userEvent.setup();
+    renderPage("scope=all&x=1");
+
+    await user.click(screen.getByRole("button", { name: "All squads" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /^My squads/ }));
+    expect(mocks.viewState.setScope).toHaveBeenCalledWith("mine");
+    expect(mocks.replace).toHaveBeenCalledWith("/acme/squads?scope=mine&x=1");
   });
 });

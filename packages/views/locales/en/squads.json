@@ -12,7 +12,11 @@
     },
     "no_matches": "No squads match",
     "row_menu": "Squad actions",
-    "archive_action": "Archive"
+    "archive_action": "Archive",
+    "mine_empty": "You haven't created a squad",
+    "view_all": "View all squads",
+    "no_leader_options": "No leaders to filter by",
+    "no_creator_options": "No creators to filter by"
   },
   "member_type": {
     "agent": "Agent",

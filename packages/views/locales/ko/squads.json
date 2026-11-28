@@ -12,7 +12,11 @@
     },
     "no_matches": "일치하는 스쿼드가 없습니다",
     "row_menu": "스쿼드 작업",
-    "archive_action": "보관"
+    "archive_action": "보관",
+    "mine_empty": "아직 만든 스쿼드가 없습니다",
+    "view_all": "전체 스쿼드 보기",
+    "no_leader_options": "필터할 리더가 없습니다",
+    "no_creator_options": "필터할 생성자가 없습니다"
   },
   "member_type": {
     "agent": "에이전트",
