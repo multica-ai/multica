@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
@@ -16,7 +16,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Folder, FolderKanban, FolderMinus, FolderOpen, Plus } from "@multica/ui/icons";
+import { Folder, FolderKanban, FolderMinus, FolderOpen, ListChevronsDownUp, Plus, Search, X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -169,11 +169,22 @@ export function useIssueInTree(wsId: string, ref: string | null): IssueInTree {
   }, [snapshot]);
 }
 
+/** Filtering the section by name; the owner keeps the query. */
+export interface ProjectsSearch {
+  query: string;
+  onQueryChange: (query: string) => void;
+  /** Projects matching the query that the section's filter leaves out. */
+  hiddenMatches: number;
+  /** Whether the query also covers the projects the filter leaves out. */
+  searchAll: boolean;
+  onSearchAllChange: (searchAll: boolean) => void;
+}
+
 interface ProjectsSectionProps {
   wsId: string;
   userId: string | undefined;
   pathname: string;
-  /** Already filtered and ordered by the section's settings. */
+  /** Already filtered, searched and ordered by the section's settings. */
   projects: readonly Project[];
   totalProjects: number;
   plainRowsLit: boolean;
@@ -182,7 +193,11 @@ interface ProjectsSectionProps {
   litSource: string | null;
   /** The row, a project's or "No project", that marks the open issue no list shows. */
   locatedSource: string | null;
+  search?: ProjectsSearch;
 }
+
+const PROJECT_PREFIX = projectSidebarSource("");
+const NO_FOLDER_OF: ReadonlyMap<string, string> = new Map();
 
 export function ProjectsSection({
   wsId,
@@ -194,11 +209,15 @@ export function ProjectsSection({
   activeIssueId,
   litSource,
   locatedSource,
+  search,
 }: ProjectsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const collapsed = useSidebarTreeStore((s) => s.projectsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setProjectsCollapsed);
+  // "project:none" shares the prefix, so Collapse all also folds "No project".
+  const anyExpanded = useSidebarTreeStore((s) => s.expanded.some((key) => key.startsWith(PROJECT_PREFIX)));
+  const collapseAll = useSidebarTreeStore((s) => s.collapseAll);
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const locate = useSidebarTreeStore((s) => s.locate);
   const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
@@ -206,10 +225,21 @@ export function ProjectsSection({
   const folders = useProjectFolders(wsId);
   const foldersExtension = getProjectFoldersExtension();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searching = !!search && search.query.trim() !== "";
+  const closeSearch = () => {
+    search?.onQueryChange("");
+    setSearchOpen(false);
+  };
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
   const rows = useMemo(
-    () => sidebarProjectRows(projects, folders.folders, folders.folderOf, projectSettings, projectOrder),
-    [projects, folders.folders, folders.folderOf, projectSettings, projectOrder],
+    () =>
+      // A name search lists the matching projects only, flat: no folders and
+      // no "No project".
+      searching
+        ? sidebarProjectRows(projects, [], NO_FOLDER_OF, { ...projectSettings, showNoProject: false }, projectOrder)
+        : sidebarProjectRows(projects, folders.folders, folders.folderOf, projectSettings, projectOrder),
+    [projects, folders.folders, folders.folderOf, projectSettings, projectOrder, searching],
   );
   const topIds = useMemo(() => rows.map((row) => row.id), [rows]);
   const placement = useMemo(() => projectRowPlacement(rows), [rows]);
@@ -235,7 +265,8 @@ export function ProjectsSection({
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
       releaseClickGuard();
-      if (!over) return;
+      // A drop in a searched list would move projects the search hides.
+      if (searching || !over) return;
       const activeId = String(active.id);
       const overId = String(over.id);
       const from = placement.get(activeId);
@@ -277,7 +308,7 @@ export function ProjectsSection({
         projectSettings: { ordering: "manual" },
       });
     },
-    [rows, topIds, placement, projectOrder, releaseClickGuard, updatePrefs, canFile, moveProject],
+    [rows, topIds, placement, projectOrder, releaseClickGuard, updatePrefs, canFile, moveProject, searching],
   );
 
   const renderProject = (project: Project) => (
@@ -293,6 +324,7 @@ export function ProjectsSection({
       activeIssueId={litSource === projectSidebarSource(project.id) ? activeIssueId : null}
       openIssueId={activeIssueId}
       located={locatedSource === projectSidebarSource(project.id)}
+      dragDisabled={searching}
     />
   );
 
@@ -303,7 +335,32 @@ export function ProjectsSection({
       onCollapsedChange={setCollapsed}
       action={
         <>
+          {anyExpanded && (
+            <IconButton
+              label={t(($) => $.panels.work.collapse_projects)}
+              size="icon-xs"
+              className={cn("text-muted-foreground", SECTION_SETTINGS_REVEAL_CLASS)}
+              onClick={() => collapseAll(PROJECT_PREFIX)}
+            >
+              <ListChevronsDownUp />
+            </IconButton>
+          )}
           <ProjectsSectionSettings wsId={wsId} className={SECTION_SETTINGS_REVEAL_CLASS} />
+          {search && totalProjects > 0 && (
+            <IconButton
+              label={t(($) => $.panels.work.search_projects)}
+              size="icon-xs"
+              aria-expanded={searchOpen && !collapsed}
+              className={cn("text-muted-foreground", searchOpen && !collapsed && "bg-surface-selected text-foreground")}
+              onClick={() => {
+                if (searchOpen) return closeSearch();
+                setCollapsed(false);
+                setSearchOpen(true);
+              }}
+            >
+              <Search />
+            </IconButton>
+          )}
           {foldersExtension ? (
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -338,6 +395,7 @@ export function ProjectsSection({
         </>
       }
     >
+      {search && searchOpen && <ProjectSearchField search={search} onClose={closeSearch} />}
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetection}
@@ -379,6 +437,9 @@ export function ProjectsSection({
           </PanelList>
         </SortableContext>
       </DndContext>
+      {search && searching && (
+        <ProjectSearchStatus search={search} empty={projects.length === 0} />
+      )}
       <PanelList className="mt-px">
         {totalProjects === 0 ? (
           <li>
@@ -408,6 +469,64 @@ export function ProjectsSection({
         )}
       </PanelList>
     </PanelSection>
+  );
+}
+
+function ProjectSearchField({ search, onClose }: { search: ProjectsSearch; onClose: () => void }) {
+  const { t } = useT("layout");
+  return (
+    <div className="relative mx-1 mb-1 flex h-7 items-center rounded-md bg-surface-hover pl-2 pr-1 focus-within:outline-2 focus-within:outline-ring">
+      <Search aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <input
+        autoFocus
+        type="search"
+        value={search.query}
+        aria-label={t(($) => $.panels.work.search_projects)}
+        placeholder={t(($) => $.panels.work.search_projects_placeholder)}
+        onChange={(event) => search.onQueryChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent px-1.5 text-caption text-foreground outline-none placeholder:text-faint-foreground [&::-webkit-search-cancel-button]:hidden"
+      />
+      {search.query && (
+        <IconButton
+          label={t(($) => $.panels.work.clear_search)}
+          size="icon-xs"
+          className="text-muted-foreground"
+          onClick={() => search.onQueryChange("")}
+        >
+          <X />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+
+/** Under a searched list: what it found, and the projects the filter keeps out. */
+function ProjectSearchStatus({ search, empty }: { search: ProjectsSearch; empty: boolean }) {
+  const { t } = useT("layout");
+  const toggle = search.searchAll
+    ? t(($) => $.panels.work.search_shown_only)
+    : search.hiddenMatches > 0
+      ? t(($) => $.panels.work.search_include_hidden, { count: search.hiddenMatches })
+      : null;
+  return (
+    <div className="space-y-0.5 px-3 py-1 text-caption text-faint-foreground">
+      {empty && <p>{t(($) => $.panels.work.search_no_projects)}</p>}
+      {toggle && (
+        <button
+          type="button"
+          className="rounded-sm text-left text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
+          onClick={() => search.onSearchAllChange(!search.searchAll)}
+        >
+          {toggle}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -682,6 +801,7 @@ function ProjectTreeItem({
   activeIssueId,
   openIssueId,
   located,
+  dragDisabled = false,
 }: {
   wsId: string;
   userId: string | undefined;
@@ -693,6 +813,7 @@ function ProjectTreeItem({
   activeIssueId: string | null;
   openIssueId: string | null;
   located: boolean;
+  dragDisabled?: boolean;
 }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -707,7 +828,10 @@ function ProjectTreeItem({
     : projectSidebarRequest(project.id, issueSettings, statusCatalog.statuses, userId);
   const prefetch = usePrefetch(wsId, source, params);
 
-  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.id,
+    disabled: dragDisabled,
+  });
   // Right-click opens the projects page's row menu at the cursor. It mounts on
   // the first right-click, so idle rows hold no menu or its queries.
   const rowMenu = useRowMenu();

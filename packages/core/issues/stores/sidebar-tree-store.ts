@@ -108,6 +108,8 @@ interface SidebarTreeState {
    */
   locate: SidebarLocateRequest | null;
   setExpanded: (key: string, expanded: boolean) => void;
+  /** Collapses every expanded row whose key starts with `prefix`. */
+  collapseAll: (prefix: string) => void;
   requestLocate: (request: SidebarLocateRequest | null) => void;
   setInboxSettings: (patch: Partial<SidebarInboxSettings>) => void;
   setPinnedLimit: (limit: SidebarSectionLimit) => void;
@@ -163,6 +165,11 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
         set((s) => {
           if (s.expanded.includes(key) === expanded) return s;
           return { expanded: expanded ? [...s.expanded, key] : s.expanded.filter((k) => k !== key) };
+        }),
+      collapseAll: (prefix) =>
+        set((s) => {
+          const expanded = s.expanded.filter((k) => !k.startsWith(prefix));
+          return expanded.length === s.expanded.length ? s : { expanded };
         }),
       setInboxSettings: (patch) => set((s) => ({ inboxSettings: { ...s.inboxSettings, ...patch } })),
       setPinnedLimit: (pinnedLimit) => set({ pinnedLimit }),
