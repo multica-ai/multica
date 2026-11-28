@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -61,6 +62,10 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUI
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.inst, f.instErr
 }
+func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
+	return db.Workspace{Slug: "acme"}, nil
+}
+
 func (f *fakeOutboundQueries) RecordChannelOutboundMessage(_ context.Context, arg db.RecordChannelOutboundMessageParams) error {
 	f.recordedOutbound = append(f.recordedOutbound, arg)
 	return f.recordOutboundErr
@@ -77,6 +82,7 @@ func (f *fakeOutboundQueries) SetChatMessageChannelOutboundProvenanceByTask(_ co
 type fakeSender struct {
 	called      int
 	got         channel.OutboundMessage
+	gotBlocks   []slack.Block
 	gotMetadata slack.SlackMetadata
 	result      channel.SendResult
 }
@@ -91,6 +97,11 @@ func (f *fakeSender) SendWithMetadata(_ context.Context, out channel.OutboundMes
 	return channel.SendResult{MessageID: "1.1"}, nil
 }
 
+func (f *fakeSender) SendBlocks(ctx context.Context, out channel.OutboundMessage, blocks []slack.Block, metadata slack.SlackMetadata) (channel.SendResult, error) {
+	f.gotBlocks = blocks
+	return f.SendWithMetadata(ctx, out, metadata)
+}
+
 // slackInstallConfigJSON builds an installation config blob with base64 tokens
 // (a nil Decrypter treats the decoded bytes as plaintext).
 func slackInstallConfigJSON() []byte {
@@ -103,8 +114,8 @@ func slackInstallConfigJSON() []byte {
 }
 
 func newTestOutbound(q outboundQueries, fs *fakeSender) *Outbound {
-	o := NewOutbound(q, nil, nil)
-	o.newSender = func(credentials) replySender { return fs }
+	o := NewOutbound(q, nil, "", nil)
+	o.newSender = func(credentials) outboundSender { return fs }
 	return o
 }
 
@@ -241,5 +252,73 @@ func TestOutbound_IgnoresNonSlackAndEmptyAndRevoked(t *testing.T) {
 				t.Errorf("%s: sender must not be called, got %d", tc.name, fs.called)
 			}
 		})
+	}
+}
+
+func taskFailedEvent(payload map[string]any) events.Event {
+	payload["task_id"] = "00000000-0000-0000-0000-000000000002"
+	return events.Event{
+		Type:          protocol.EventTaskFailed,
+		TaskID:        "00000000-0000-0000-0000-000000000002",
+		ChatSessionID: "00000000-0000-0000-0000-000000000001",
+		Payload:       payload,
+	}
+}
+
+func failedSlackQueries() *fakeOutboundQueries {
+	return &fakeOutboundQueries{
+		taskChannelIngested: true,
+		binding: db.ChannelChatSessionBinding{
+			ID: uid(7), InstallationID: uid(1), ChannelChatID: "C123:1111.0",
+			Config:       []byte(`{"channel_id":"C123"}`),
+			LastThreadID: pgtype.Text{String: "1111.0", Valid: true},
+		},
+		inst: db.ChannelInstallation{ID: uid(1), WorkspaceID: uid(3), Status: "active", Config: slackInstallConfigJSON()},
+	}
+}
+
+func TestOutbound_TerminalFailurePostsRetryCard(t *testing.T) {
+	q := failedSlackQueries()
+	fs := &fakeSender{}
+	o := NewOutbound(q, nil, "https://app.example/", nil)
+	o.newSender = func(credentials) outboundSender { return fs }
+
+	o.handleEvent(taskFailedEvent(map[string]any{"error": "runtime <@U9> offline", "retry_pending": false}))
+
+	if fs.called != 1 || fs.got.ChatID != "C123" || fs.got.ThreadID != "1111.0" {
+		t.Fatalf("card post = %d %+v, want one post into the bound thread", fs.called, fs.got)
+	}
+	if fs.gotMetadata.EventPayload["kind"] != "task_failure" {
+		t.Fatalf("metadata kind = %v, want task_failure", fs.gotMetadata.EventPayload["kind"])
+	}
+	if len(fs.gotBlocks) != 2 {
+		t.Fatalf("blocks = %d, want section + actions", len(fs.gotBlocks))
+	}
+	section := fs.gotBlocks[0].(*slack.SectionBlock)
+	if !strings.Contains(section.Text.Text, "&lt;@U9&gt;") {
+		t.Fatalf("section text %q must escape agent output", section.Text.Text)
+	}
+	actions := fs.gotBlocks[1].(*slack.ActionBlock).Elements.ElementSet
+	retry := actions[0].(*slack.ButtonBlockElement)
+	open := actions[1].(*slack.ButtonBlockElement)
+	if retry.ActionID != retryTaskActionID || retry.Value != "00000000-0000-0000-0000-000000000002" {
+		t.Fatalf("retry button = %+v", retry)
+	}
+	if open.URL != "https://app.example/acme/chat?session=00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("open URL = %q", open.URL)
+	}
+	if len(q.recordedOutbound) != 1 || q.recordedOutbound[0].OutboundKind != "task_failure" {
+		t.Fatalf("recorded outbound = %+v, want one task_failure row", q.recordedOutbound)
+	}
+}
+
+func TestOutbound_FailureWithPendingAutoRetryStaysSilent(t *testing.T) {
+	q := failedSlackQueries()
+	fs := &fakeSender{}
+
+	newTestOutbound(q, fs).handleEvent(taskFailedEvent(map[string]any{"retry_pending": true, "failure_reason": "provider_network"}))
+
+	if fs.called != 0 {
+		t.Fatalf("sender called %d times, want 0 while an auto-retry is pending", fs.called)
 	}
 }
