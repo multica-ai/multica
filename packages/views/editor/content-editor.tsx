@@ -59,6 +59,7 @@ import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
 import { createEditorExtensions, type EditorCollaboration } from "./extensions";
+import { createCommitReferencesExtension } from "./extensions/commit-references";
 import {
   uploadAndInsertFile,
   insertUploadPlaceholder,
@@ -191,6 +192,8 @@ interface ContentEditorBaseProps {
    * under this ID and replaces the selection with a mention link.
    */
   currentIssueId?: string;
+  /** Enables display-only commit links. Null means the repository is unresolved. */
+  commitRepository?: string | null;
   /**
    * When true, the `@` suggestion picker is disabled but the mention node
    * type remains in the schema, so existing mentions pasted in from other
@@ -413,6 +416,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       showBubbleMenu = true,
       selectionAction,
       currentIssueId,
+      commitRepository,
       disableMentions = false,
       mentionMode = "default",
       mentionContextItems,
@@ -471,6 +475,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // snapshots a *string* placeholder at mount, so a getter is what lets it
     // change without remounting the editor.
     const placeholderRef = useRef(placeholderText);
+    const commitRepositoryRef = useRef(commitRepository);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -657,7 +662,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         resolveIssueIdentifierRef,
         collaboration,
-      }),
+      }).concat(
+        commitRepository === undefined
+          ? []
+          : createCommitReferencesExtension(() => commitRepositoryRef.current),
+      ),
     );
     const editorProps = useMemo<EditorProps>(
       () => ({
@@ -998,6 +1007,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // and no self-write loop is triggered.
       editor.view.dispatch(editor.state.tr);
     }, [editor, placeholderText]);
+
+    useEffect(() => {
+      if (commitRepositoryRef.current === commitRepository) return;
+      commitRepositoryRef.current = commitRepository;
+      // Refresh decorations without changing or saving the document.
+      if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr);
+    }, [commitRepository, editor]);
 
     useImperativeHandle(ref, () => ({
       // Intentionally NOT routed through `normalizeMarkdown` — see the "stays

@@ -147,6 +147,24 @@ beforeEach(() => {
 });
 
 describe("RichContent current-issue rendering", () => {
+  it("renders the same commit reference using its own issue repository", () => {
+    const content = "commit 716c854";
+    const first = renderContent({ ...CURRENT_CONTEXT, commitRepository: "https://github.com/example/first" }, content);
+    expect(screen.getByRole("link", { name: "716c854" })).toHaveAttribute(
+      "href", "https://github.com/example/first/commit/716c854",
+    );
+    first.unmount();
+
+    const second = renderContent({ ...CURRENT_CONTEXT, commitRepository: "https://github.com/example/second" }, content);
+    expect(screen.getByRole("link", { name: "716c854" })).toHaveAttribute(
+      "href", "https://github.com/example/second/commit/716c854",
+    );
+    second.unmount();
+
+    renderContent(undefined, content);
+    expect(screen.queryByRole("link", { name: "716c854" })).not.toBeInTheDocument();
+  });
+
   it("marks only the current UUID mention in a paragraph with two other references as current", () => {
     renderContent(CURRENT_CONTEXT);
 

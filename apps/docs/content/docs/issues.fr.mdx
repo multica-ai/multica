@@ -139,6 +139,8 @@ Envoyer de nouveau un fichier de même nom et de même type ajoute une version a
 
 Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des instructions et des ressources partagées aux exécutions qu'il contient. Déplacer une tâche vers un autre projet ne crée pas de copie.
 
+Si le projet de la tâche ne contient qu’un dépôt GitHub, les références telles que `commit 716c854` ou `head a61a00da` dans la description et les commentaires ouvrent le commit sur GitHub. Une plage comme `87757b4..f98adf6` ouvre la comparaison. Un hash court sans contexte de commit reste en texte simple.
+
 Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
 
 Les sous-tâches directes d'une tâche sont listées sous **Sous-tâches**, sous sa description, avec une progression qui compte toutes les sous-tâches. Ouvrez-en une depuis cette liste.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { Editor } from "@tiptap/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderWithI18n } from "../test/i18n";
@@ -24,7 +24,10 @@ function adapter(): NavigationAdapter {
 // diff of the whole document against the shared one. A host re-render that
 // changes nothing must not reach it.
 describe("ContentEditor options", () => {
-  it("leaves the editor alone when the host re-renders with the same props", async () => {
+  it.each([
+    { mode: "without commit links", repository: undefined },
+    { mode: "with commit links", repository: "https://github.com/example/project" },
+  ])("leaves the editor alone on an unchanged host re-render $mode", async ({ repository }) => {
     const queryClient = new QueryClient();
     const setOptions = vi.spyOn(Editor.prototype, "setOptions");
     const onReady = vi.fn();
@@ -32,7 +35,8 @@ describe("ContentEditor options", () => {
       <NavigationProvider value={adapter()}>
         <QueryClientProvider client={queryClient}>
           <ContentEditor
-            defaultValue="Hello"
+            defaultValue="See commit 716c854"
+            commitRepository={repository}
             className={className}
             showBubbleMenu={false}
             // A fresh callback each render, as hosts pass them.
@@ -48,6 +52,12 @@ describe("ContentEditor options", () => {
     rerender(ui("a"));
     rerender(ui("a"));
     expect(setOptions).not.toHaveBeenCalled();
+    if (repository) {
+      expect(screen.getByRole("link", { name: "716c854" })).toHaveAttribute(
+        "href",
+        `${repository}/commit/716c854`,
+      );
+    }
 
     // A prop the editor does read still reaches it.
     rerender(ui("b"));

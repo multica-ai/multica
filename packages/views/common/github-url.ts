@@ -8,20 +8,32 @@
 // long, middle-truncation keeps the distinguishing tail visible (the case where
 // many repos share a long common prefix, e.g. customer-alpha vs customer-beta).
 // Non-GitHub input (enterprise hosts, malformed strings) is returned unchanged.
-export function githubShortLabel(url: string): string {
+function githubRepoSlug(url: string): string | null {
   // scp shorthand — new URL() throws on these, so match before the try block.
   const scp = url.match(/^(?:[^@/]+@)?github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
-  if (scp) return midTruncate(`${scp[1]}/${scp[2]}`);
+  if (scp) return `${scp[1]}/${scp[2]}`;
   try {
     const u = new URL(url);
     if (u.hostname === "github.com" || u.hostname === "www.github.com") {
       const [owner, repo] = u.pathname.split("/").filter(Boolean);
-      if (owner && repo) return midTruncate(`${owner}/${repo.replace(/\.git$/, "")}`);
+      if (owner && repo) return `${owner}/${repo.replace(/\.git$/, "")}`;
     }
   } catch {
     // not a parseable URL — fall through and return as-is
   }
-  return url;
+  return null;
+}
+
+export function githubShortLabel(url: string): string {
+  const slug = githubRepoSlug(url);
+  return slug ? midTruncate(slug) : url;
+}
+
+export function githubRepoWebUrl(url: string): string | null {
+  const slug = githubRepoSlug(url);
+  if (!slug || !/^[a-z\d-]+\/[a-z\d_.-]+$/i.test(slug) ||
+      slug.endsWith("/.") || slug.endsWith("/..")) return null;
+  return `https://github.com/${slug}`;
 }
 
 // Middle-truncate a string to at most maxLen characters, preserving both the
