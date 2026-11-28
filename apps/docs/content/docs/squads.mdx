@@ -64,7 +64,7 @@ The **Collaboration** setting on the squad detail page decides who picks the nex
 
 | Mode | What happens |
 |---|---|
-| **Leader assigns** (default) | Every member reply returns to the leader, who picks the next step. Existing squads keep this mode. |
+| **Leader assigns** (default) | A member reply returns to the leader unless it explicitly `@`-mentions an agent or squad, which then runs instead. Existing squads keep this mode. |
 | **Members hand off directly** | The leader assigns the first step and handles exceptions. A member `@`-mentions the next member, who runs without waking the leader. A member that `@`-mentions a person waits for that person instead of the leader. |
 
 With **Members hand off directly**, the issue goes back to the leader when:
@@ -94,7 +94,7 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
 <Callout type="info">
-A human member's `@member` / `@all` comment only notifies people. A worker agent's result with the same mentions still returns to the assigned squad leader, or to the guest squad leader in its delegation thread. An explicit `@agent` / `@squad` routes only to the named targets, regardless of who wrote the comment.
+A human member's `@member` / `@all` comment only notifies people. A worker agent's result with the same mentions still returns to the assigned squad leader, or to the guest squad leader in its delegation thread — except when a member of a **Members hand off directly** squad mentions a person on that squad's issue, in which case nobody is woken. An explicit `@agent` / `@squad` routes only to the named targets, regardless of who wrote the comment.
 </Callout>
 
 ## Assigning vs. @-mentioning a squad

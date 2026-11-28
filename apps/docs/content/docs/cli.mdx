@@ -554,8 +554,9 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
 | `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--mode` (both required), exactly one of `--agent` / `--squad` / `--squad-id` (required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
-| | `runs <id>` | View run history | |
-| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
+| | `runs <id>` | View run history | `--limit`, `--offset`, `--output` |
+| | `deliveries <id>` | List webhook deliveries, including ignored or skipped ones that created no run | `--limit` (default 20, max 100), `--offset`, `--output` |
+| | `trigger-list/trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label`, `--event-filters-file`; `trigger-update`: `--clear-event-filters` |
 | `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace; in an agent run, `list` shows only its own workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
 | | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |

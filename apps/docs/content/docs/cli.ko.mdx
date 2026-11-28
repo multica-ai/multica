@@ -537,8 +537,9 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `mcp list/add/enable/disable/remove <agent-id>` | 워크스페이스 MCP 서버를 이 에이전트에 할당 | server id는 `workspace mcp list`에서 확인. 라이브러리 항목은 여기서 추가하기 전까지 동작하지 않으며, `disable`은 할당을 유지한 채 전달만 중단합니다 |
 | `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--mode`(둘 다 필수), `--agent` / `--squad` / `--squad-id` 중 하나만(필수), `--description`, `--issue-title-template`, `--project`, `--subscriber`(반복 가능) |
 | | `trigger <id>` | 수동으로 한 번 트리거 | |
-| | `runs <id>` | 실행 기록 확인 | |
-| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 일정 및 webhook 트리거 관리 | `trigger-add`: `--kind`(`schedule` 또는 `webhook`), `--cron`, `--timezone`(기본값 UTC), `--label` |
+| | `runs <id>` | 실행 기록 확인 | `--limit`, `--offset`, `--output` |
+| | `deliveries <id>` | 실행을 만들지 않고 무시되거나 건너뛴 요청을 포함해 webhook 전달 기록 확인 | `--limit`(기본값 20, 최대 100), `--offset`, `--output` |
+| | `trigger-list/trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 일정 및 webhook 트리거 관리 | `trigger-add`: `--kind`(`schedule` 또는 `webhook`), `--cron`, `--timezone`(기본값 UTC), `--label`, `--event-filters-file`; `trigger-update`: `--clear-event-filters` |
 | `workspace` | `list/get/create/update/switch` | 워크스페이스 관리. `switch`는 현재 profile의 기본 워크스페이스 설정. 에이전트 실행에서는 `list`에 해당 워크스페이스만 | `create`: `--name`, `--slug`(모두 필수), `--issue-prefix`, `--description`, `--context` / `--context-stdin`. `update`는 slug를 제외한 같은 항목 변경 |
 | | `mcp list/add/update/remove` | 워크스페이스의 MCP 서버 라이브러리를 관리 | 쓰기는 owner/admin 전용. 여기에 추가한 서버는 어떤 에이전트에도 할당되지 않으며 `multica agent mcp add`로 할당합니다. `list`는 이름과 transport만 표시하고, 저장된 항목은 쓰기 전용이라 어떤 역할에도 반환되지 않습니다. `--server-config-file` / `--server-config-stdin`은 토큰이 셸 기록에 남지 않게 합니다 |
 | | `member list/invite <email>` | 멤버 확인 및 초대 전송 | `invite`: `--role`(member 또는 admin, 기본 member) |

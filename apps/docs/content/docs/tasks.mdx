@@ -69,6 +69,7 @@ In the execution log you can:
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
+- Clear a finished run's log. Workspace `owner`s and `admin`s can open a completed, failed, or cancelled run's transcript and choose **More → Clear run log**. Clearing permanently deletes every step, tool input and output, and the agent's final output for everyone, while keeping the run row itself (status, timing, and usage) and recording who cleared it and when. Recognized secret formats — including base64-encoded secrets — are redacted automatically before run logs are stored; **Clear run log** lets admins remove anything redaction missed.
 
 The diagram below maps every state transition in a run's lifecycle, including the retry path after failure and cancellation while queued or running. Select any state to inspect its transitions.
 
