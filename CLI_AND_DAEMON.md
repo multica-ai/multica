@@ -183,8 +183,8 @@ hint when nothing is registered, and otherwise stays out of the way.
 | macOS | launchd LaunchAgent | `~/Library/LaunchAgents/ai.multica.daemon.plist` (runs at login) |
 | Linux | systemd user unit | `~/.config/systemd/user/multica-daemon.service`; without systemd, an XDG autostart entry under `~/.config/autostart/` |
 
-Each entry runs `multica daemon start --foreground` for that profile — named
-profiles get their own entry, so several daemons on one machine never collide.
+Each entry runs `multica daemon start --foreground` for that profile. Named
+profiles get their own entries and follow the [runtime ownership rules](#profiles).
 Daemon settings are read from the profile's config (`multica config set ...`)
 at start. Shell environment variables do **not** travel into a login session:
 only `PATH` is snapshotted at registration (and refreshed while Multica owns
@@ -589,6 +589,10 @@ multica daemon start --profile staging
 # Default profile runs separately
 multica daemon start
 ```
+
+Only one profile at a time can serve runtimes for the same server URL, account,
+and daemon ID. A second start names the profile already serving those runtimes.
+Profiles with independent server or account targets can run concurrently.
 
 Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root. Daemon state means that profile's own `daemon.log`, `daemon.err.log`, `daemon.pid`, and `daemon.port` live in that directory too — see [Start](#start) for the layout, and pass `--profile <name>` to `daemon status` / `daemon logs` to act on it. The daemon normally uses the profile-derived health port. If the OS refuses that port, it binds an available loopback port and records the actual port in `daemon.port` for lifecycle commands. The record is valid only while its daemon is alive; do not edit it to configure a port.
 

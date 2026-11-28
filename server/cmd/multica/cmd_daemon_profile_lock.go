@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 const daemonShutdownLockWait = 40 * time.Second
@@ -27,7 +29,7 @@ func acquireDaemonProfileLock(profile string, handoff bool) (*os.File, error) {
 		deadline = deadline.Add(30 * time.Second)
 	}
 	for {
-		f, acquired, err := tryLockDaemonProfile(path)
+		f, acquired, err := filelock.Try(path)
 		if err != nil {
 			return nil, fmt.Errorf("lock daemon profile %q: %w", profile, err)
 		}
@@ -51,7 +53,7 @@ func waitForDaemonProfileRelease(profile string, timeout time.Duration) error {
 	nextHealthCheck := time.Time{}
 	warned := false
 	for {
-		lock, acquired, err := tryLockDaemonProfile(path)
+		lock, acquired, err := filelock.Try(path)
 		if err != nil {
 			return fmt.Errorf("check daemon profile %q lock: %w", profile, err)
 		}

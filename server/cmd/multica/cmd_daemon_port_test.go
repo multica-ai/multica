@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/filelock"
 )
 
 func TestBindDaemonHealthPortFallsBackWithoutReleasingListener(t *testing.T) {
@@ -102,7 +103,7 @@ func TestDaemonProfileLockExcludesSecondProcessHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	second, acquired, err := tryLockDaemonProfile(lock.Name())
+	second, acquired, err := filelock.Try(lock.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestDaemonProfileLockHolderProcess(t *testing.T) {
 	if path == "" {
 		return
 	}
-	lock, acquired, err := tryLockDaemonProfile(path)
+	lock, acquired, err := filelock.Try(path)
 	if err != nil || !acquired {
 		t.Fatalf("acquire holder lock: acquired=%t error=%v", acquired, err)
 	}
