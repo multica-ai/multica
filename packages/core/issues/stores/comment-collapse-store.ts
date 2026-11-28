@@ -3,57 +3,73 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-/**
- * Tracks which comments are collapsed, keyed by issue ID.
- * Only collapsed comment IDs are stored — expanded is the default state.
- */
+type CommentIdsByIssue = Record<string, string[]>;
+
+/** Explicit reader choices override the current starting default. */
 interface CommentCollapseStore {
-  collapsedByIssue: Record<string, string[]>;
-  isCollapsed: (issueId: string, commentId: string) => boolean;
-  toggle: (issueId: string, commentId: string) => void;
-  /** Replace the issue's collapsed set with `commentIds` (fold-all). */
+  collapsedByIssue: CommentIdsByIssue;
+  expandedByIssue: CommentIdsByIssue;
+  isCollapsed: (issueId: string, commentId: string, defaultCollapsed?: boolean) => boolean;
+  toggle: (issueId: string, commentId: string, defaultCollapsed?: boolean) => void;
+  setCollapsed: (issueId: string, commentId: string, collapsed: boolean) => void;
   collapseAll: (issueId: string, commentIds: readonly string[]) => void;
-  /** Clear the issue's collapsed set (unfold-all). */
-  expandAll: (issueId: string) => void;
+  expandAll: (issueId: string, commentIds: readonly string[]) => void;
+}
+
+function withoutIssue(ids: CommentIdsByIssue, issueId: string): CommentIdsByIssue {
+  if (!(issueId in ids)) return ids;
+  const { [issueId]: _, ...rest } = ids;
+  return rest;
+}
+
+function withComment(
+  ids: CommentIdsByIssue,
+  issueId: string,
+  commentId: string,
+  present: boolean,
+): CommentIdsByIssue {
+  const current = ids[issueId] ?? [];
+  if (current.includes(commentId) === present) return ids;
+  const next = present ? [...current, commentId] : current.filter((id) => id !== commentId);
+  return next.length ? { ...ids, [issueId]: next } : withoutIssue(ids, issueId);
 }
 
 export const useCommentCollapseStore = create<CommentCollapseStore>()(
   persist(
     (set, get) => ({
       collapsedByIssue: {},
-      isCollapsed: (issueId, commentId) => {
-        const ids = get().collapsedByIssue[issueId];
-        return ids ? ids.includes(commentId) : false;
+      expandedByIssue: {},
+      isCollapsed: (issueId, commentId, defaultCollapsed = false) => {
+        const state = get();
+        if (state.collapsedByIssue[issueId]?.includes(commentId)) return true;
+        if (state.expandedByIssue[issueId]?.includes(commentId)) return false;
+        return defaultCollapsed;
       },
-      toggle: (issueId, commentId) =>
+      toggle: (issueId, commentId, defaultCollapsed = false) => {
+        const state = get();
+        state.setCollapsed(issueId, commentId, !state.isCollapsed(issueId, commentId, defaultCollapsed));
+      },
+      setCollapsed: (issueId, commentId, collapsed) =>
         set((s) => {
-          const current = s.collapsedByIssue[issueId] ?? [];
-          const isCurrentlyCollapsed = current.includes(commentId);
-          if (isCurrentlyCollapsed) {
-            const next = current.filter((id) => id !== commentId);
-            if (next.length === 0) {
-              const { [issueId]: _, ...rest } = s.collapsedByIssue;
-              return { collapsedByIssue: rest };
-            }
-            return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: next } };
-          }
-          return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: [...current, commentId] } };
+          const collapsedByIssue = withComment(s.collapsedByIssue, issueId, commentId, collapsed);
+          const expandedByIssue = withComment(s.expandedByIssue, issueId, commentId, !collapsed);
+          if (collapsedByIssue === s.collapsedByIssue && expandedByIssue === s.expandedByIssue) return s;
+          return { collapsedByIssue, expandedByIssue };
         }),
       collapseAll: (issueId, commentIds) =>
-        set((s) => {
-          if (commentIds.length === 0) {
-            if (!(issueId in s.collapsedByIssue)) return s;
-            const { [issueId]: _, ...rest } = s.collapsedByIssue;
-            return { collapsedByIssue: rest };
-          }
-          return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: [...new Set(commentIds)] } };
-        }),
-      expandAll: (issueId) =>
-        set((s) => {
-          if (!(issueId in s.collapsedByIssue)) return s;
-          const { [issueId]: _, ...rest } = s.collapsedByIssue;
-          return { collapsedByIssue: rest };
-        }),
+        set((s) => ({
+          collapsedByIssue: commentIds.length
+            ? { ...s.collapsedByIssue, [issueId]: [...new Set(commentIds)] }
+            : withoutIssue(s.collapsedByIssue, issueId),
+          expandedByIssue: withoutIssue(s.expandedByIssue, issueId),
+        })),
+      expandAll: (issueId, commentIds) =>
+        set((s) => ({
+          collapsedByIssue: withoutIssue(s.collapsedByIssue, issueId),
+          expandedByIssue: commentIds.length
+            ? { ...s.expandedByIssue, [issueId]: [...new Set(commentIds)] }
+            : withoutIssue(s.expandedByIssue, issueId),
+        })),
     }),
     {
       name: "multica_comment_collapse",

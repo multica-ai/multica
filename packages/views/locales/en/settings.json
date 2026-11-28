@@ -359,6 +359,13 @@
       "default": "Default",
       "comfortable": "Comfortable"
     },
+    "comment_threads": {
+      "title": "Comment threads",
+      "description": "Threads you open or fold yourself keep that choice.",
+      "expanded": "Expanded",
+      "collapsed": "Collapsed",
+      "latest": "All but newest"
+    },
     "reduce_motion": {
       "title": "Reduce motion",
       "description": "Turn off animations and transitions. When off, your system setting still applies."

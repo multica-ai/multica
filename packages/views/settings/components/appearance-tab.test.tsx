@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -34,6 +34,8 @@ const api = vi.hoisted(() => ({
 vi.mock("@multica/core/api", () => ({ api }));
 
 import { AppearanceTab } from "./appearance-tab";
+import { useSettingsSearchIndex } from "./use-settings-search-index";
+import { searchSettings } from "./settings-search";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
@@ -89,6 +91,24 @@ describe("AppearanceTab", () => {
   });
   afterEach(() => {
     cleanup();
+  });
+
+  it("finds the comment-thread preference in settings search", () => {
+    const { result } = renderHook(() => useSettingsSearchIndex([{ value: "appearance", label: "Appearance" }]), { wrapper: Wrapper });
+    expect(searchSettings(result.current, "Comment threads")).toMatchObject([
+      { tab: "appearance", anchor: "comment-threads", title: "Comment threads" },
+    ]);
+  });
+
+  it("changes the starting state of comment threads on this device", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceTab />, { wrapper: Wrapper });
+    const threads = within(group("Comment threads"));
+    expect(threads.getByRole("button", { name: "Expanded" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(threads.getByRole("button", { name: "Collapsed" }));
+    expect(state().commentThreadDefault).toBe("collapsed");
+    await user.click(threads.getByRole("button", { name: "All but newest" }));
+    expect(state().commentThreadDefault).toBe("latest");
   });
 
   it("switches the mode on this device", async () => {

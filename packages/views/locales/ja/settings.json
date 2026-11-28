@@ -353,6 +353,13 @@
       "default": "標準",
       "comfortable": "ゆったり"
     },
+    "comment_threads": {
+      "title": "コメントスレッド",
+      "description": "手動で開閉したスレッドは、その状態を保持します。",
+      "expanded": "展開",
+      "collapsed": "折りたたむ",
+      "latest": "最新以外を折りたたむ"
+    },
     "reduce_motion": {
       "title": "視差効果を減らす",
       "description": "アニメーションとトランジションをオフにします。オフでもシステム設定は適用されます。"

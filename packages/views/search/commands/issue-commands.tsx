@@ -335,7 +335,7 @@ export function useIssueCommandGroup(
             void queryClient
               .ensureQueryData(issueTimelineOptions(single.id))
               .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(single.id);
+                useCommentCollapseStore.getState().expandAll(single.id, rootCommentIds(entries));
                 useResolvedExpandStore
                   .getState()
                   .expandAll(single.id, resolvedThreadRootIds(entries));

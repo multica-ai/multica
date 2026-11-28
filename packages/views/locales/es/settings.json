@@ -359,6 +359,13 @@
       "default": "Predeterminada",
       "comfortable": "Amplia"
     },
+    "comment_threads": {
+      "title": "Hilos de comentarios",
+      "description": "Se mantiene el estado de los hilos que abras o contraigas manualmente.",
+      "expanded": "Expandidos",
+      "collapsed": "Contraídos",
+      "latest": "Salvo el más reciente"
+    },
     "reduce_motion": {
       "title": "Reducir movimiento",
       "description": "Desactiva animaciones y transiciones. Si está desactivado, se sigue aplicando el ajuste del sistema."

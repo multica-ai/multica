@@ -359,6 +359,13 @@
       "default": "Par défaut",
       "comfortable": "Aérée"
     },
+    "comment_threads": {
+      "title": "Fils de commentaires",
+      "description": "Les fils ouverts ou repliés manuellement gardent cet état.",
+      "expanded": "Dépliés",
+      "collapsed": "Repliés",
+      "latest": "Sauf le plus récent"
+    },
     "reduce_motion": {
       "title": "Réduire les animations",
       "description": "Désactive les animations et transitions. Désactivé, le réglage du système s’applique toujours."

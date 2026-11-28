@@ -134,6 +134,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
+        anchor: "comment-threads",
+        title: t(($) => $.appearance.comment_threads.title),
+        description: t(($) => $.appearance.comment_threads.description),
+      },
+      {
+        tab: "appearance",
         anchor: "reduce-motion",
         title: t(($) => $.appearance.reduce_motion.title),
         description: t(($) => $.appearance.reduce_motion.description),

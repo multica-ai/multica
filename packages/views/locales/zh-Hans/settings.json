@@ -353,6 +353,13 @@
       "default": "标准",
       "comfortable": "宽松"
     },
+    "comment_threads": {
+      "title": "讨论展开方式",
+      "description": "手动展开或收起的讨论会保持原样。",
+      "expanded": "展开",
+      "collapsed": "收起",
+      "latest": "仅展开最新讨论"
+    },
     "reduce_motion": {
       "title": "减少动态效果",
       "description": "关闭动画和过渡效果。未开启此选项时，仍遵循系统设置。"

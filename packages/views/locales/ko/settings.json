@@ -353,6 +353,13 @@
       "default": "기본",
       "comfortable": "넓게"
     },
+    "comment_threads": {
+      "title": "댓글 스레드",
+      "description": "직접 열거나 접은 스레드는 그 상태를 유지합니다.",
+      "expanded": "펼치기",
+      "collapsed": "접기",
+      "latest": "최신 항목 외 접기"
+    },
     "reduce_motion": {
       "title": "동작 줄이기",
       "description": "애니메이션과 전환 효과를 끕니다. 꺼져 있어도 시스템 설정은 적용됩니다."

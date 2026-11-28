@@ -119,6 +119,7 @@ function StickyHeaderShell({
 
 interface CommentCardProps {
   issueId: string;
+  defaultCollapsed?: boolean;
   replyScrollParent?: HTMLElement | null;
   runs?: CommentRun[];
   runViewState?: InlineCommentRunState;
@@ -1161,6 +1162,7 @@ function AgentRunCommentImpl({ run, standalone = false, commentProps, entering =
 
 function CommentCardImpl({
   issueId,
+  defaultCollapsed = false,
   replyScrollParent,
   runs = EMPTY_COMMENT_RUNS,
   runViewState,
@@ -1207,7 +1209,7 @@ function CommentCardImpl({
     enabled: !!currentUserId,
     onOpen: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
   });
-  const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
+  const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id, defaultCollapsed));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
   // One-shot WAAPI reveal on explicit user toggles only — Virtuoso scroll
@@ -1218,8 +1220,8 @@ function CommentCardImpl({
   const userExpandedRepliesRef = useRef(false);
   const handleToggle = useCallback(() => {
     userToggledOpenRef.current = true;
-    toggleCollapse(issueId, entry.id);
-  }, [toggleCollapse, issueId, entry.id]);
+    toggleCollapse(issueId, entry.id, defaultCollapsed);
+  }, [toggleCollapse, issueId, entry.id, defaultCollapsed]);
   useLayoutEffect(() => {
     if (!userToggledOpenRef.current) return;
     userToggledOpenRef.current = false;
@@ -1241,7 +1243,7 @@ function CommentCardImpl({
   const replyBoxRef = useRef<ReplyInputHandle>(null);
   const revealReplyBox = () => {
     if (replyFolded) onResolvedExpandChange?.(entry.id, true);
-    if (!open) toggleCollapse(issueId, entry.id);
+    if (!open) toggleCollapse(issueId, entry.id, defaultCollapsed);
   };
   const focusReply = () => {
     revealReplyBox();

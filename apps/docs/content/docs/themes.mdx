@@ -26,11 +26,23 @@ The rest of the page is independent of the theme:
 |---|---|
 | **Interface text** | Font and size for menus, buttons, lists, the sidebar, and headings. |
 | **Content text** | Font, size, and line height for issue descriptions, comments, chat, and documents, plus the code font. |
-| **Layout and accessibility** | Row density in lists, Reduce motion, and Increase contrast. |
+| **Layout and accessibility** | Row density in lists, comment-thread starting state, Reduce motion, and Increase contrast. |
 
 Content text matches the interface size by default. Moving the content font-size slider sets a separate size; turn on **Match interface size** to follow the interface again. These sliders change text size, not spacing or layout.
 
 When you pick a font other than the default, or turn on Increase contrast, your choice wins over the theme's. A theme sets the colors; to change a color it doesn't offer as an option, pick another theme or [make your own](/developers/themes).
+
+## Comment threads [#comment-threads]
+
+Under **Layout and accessibility**, **Comment threads** chooses how untouched issue threads start on Web and Desktop:
+
+- **Expanded** keeps the current default.
+- **Collapsed** folds every untouched thread.
+- **All but newest** keeps the newest unresolved top-level comment thread open. A later reply in an older thread does not make that thread the newest.
+
+Opening or folding a thread yourself overrides this default and stays saved for that issue. **Fold All Comments** and **Unfold All Comments** in the command palette also override the default for the current threads. New threads follow the preference. Resolved-thread bars and standalone run blocks keep their existing behavior.
+
+Comment links and quick navigation reveal the target thread. In-page find temporarily opens threads folded only by the default. The preference is saved on this device.
 
 ## The theme store
 
