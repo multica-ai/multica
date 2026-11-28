@@ -195,7 +195,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64로 인코딩한 32바이트 token 암호화 키 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64로 인코딩한 32바이트 Bot token 암호화 키 |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat 자격 증명과 QR 상태를 암호화하는 Base64 인코딩 32바이트 키 |
-| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 스트리밍 응답에 표시할 도구 단계. `auto`(기본값: 개인 채팅은 상세, 그룹은 작업 종류만), `off`, `summary`, `detail` |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 스트리밍 응답에 표시할 도구 단계. `auto`(기본값: 개인 채팅은 상세, 그룹은 작업 종류만), `off`, `summary`, `detail`(**도구 세부 정보 제한**이 켜진 에이전트는 도구 인자를 표시하지 않음) |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
 | 테마 스토어 | `MULTICA_THEME_REGISTRY_URL` | 공식 레지스트리의 fork 등 다른 레지스트리의 `index.json`. [테마와 모양](/themes#셀프-호스팅)을 참고하세요 |

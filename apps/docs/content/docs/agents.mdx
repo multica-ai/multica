@@ -70,6 +70,9 @@ Everything other than running it is split like this:
 | See it in the agent list and pickers | The agent owner, workspace `owner`s and `admin`s, and members Access grants |
 | Edit its configuration | The agent owner and workspace `owner`s and `admin`s |
 | Change Access | Only the agent owner |
+| Change **Restrict tool details** | The agent owner and workspace `owner`s and `admin`s (human members only) |
+
+To let the team run an agent without exposing tool inputs and outputs in its run logs, turn on **Restrict tool details** under **Settings → Access → Run logs**. When enabled, the server strips tool inputs and outputs (`details_hidden: true`) for everyone except the agent owner and workspace `owner`s and `admin`s — including other members, agents or scripts using machine credentials, and plugins. Everyone else still sees which tools ran, how long they took, and the agent's thinking and replies. Only a human member with permission to manage the agent can toggle this setting; agents and machine credentials cannot.
 
 Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules. See [Create and configure an agent](/agents-create#environment-variables-and-credentials).
 

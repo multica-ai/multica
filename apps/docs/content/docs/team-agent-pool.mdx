@@ -54,6 +54,7 @@ Some rules that matter for teams:
 - A squad does not widen access: to assign or @-mention a squad, a person must be allowed to run its leader.
 - Removing a member clears the grants they had on other agents' Access lists.
 - Credentials in an agent's environment variables can be unlocked only by workspace `owner`s and `admin`s, and each read is audited. See [Environment variables and credentials](/agents-create#environment-variables-and-credentials).
+- To let the team run a shared agent without exposing command arguments or file contents in its run logs, turn on **Restrict tool details** under the agent's **Settings → Access → Run logs** so only the agent owner and workspace `owner`s and `admin`s see tool inputs and outputs. See [Permissions and Access](/agents#permissions-and-access).
 
 Private projects add a second boundary. A private project is visible only to people on its member list, and an agent run sees it only when both the person who started the run and the agent's owner are on that list. See [Private projects](/projects#private-projects).
 
