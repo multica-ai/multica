@@ -14,6 +14,12 @@ import type { NavigationAdapter } from "../../navigation";
 // Capture every queryKey passed to useQuery. queryOptions() inside the
 // dashboard options builders runs for real, so the key is the production key.
 const queryKeys = vi.hoisted(() => [] as unknown[][]);
+// The keys of queries that would actually fetch (`enabled` not false), so a
+// test can tell a view's rollup is only requested while that view is shown.
+const enabledQueryKeys = vi.hoisted(() => [] as unknown[][]);
+// Squads in the workspace plus the leaderboard's Model / Runtime fixtures.
+// Off by default so the other tests keep their single-agent arithmetic.
+const leaderboardViewsRef = vi.hoisted(() => ({ current: false }));
 const dashboardDataRef = vi.hoisted(() => ({ current: false }));
 // Swaps the per-agent fixtures for ones with enough agents to exercise the
 // top-offenders and leaderboard caps. Kept off by default so the other tests
@@ -66,6 +72,67 @@ const RESTRICTED_BUCKET_ROWS = vi.hoisted(
     }) as Record<string, unknown[]>,
 );
 
+// Two providers ship a bare `auto`: the Model view must keep them apart.
+// `rt-gone` is a deleted runtime and `__restricted_runtimes__` the server's
+// bucket for private ones; both land in one "Other runtimes" row.
+function leaderboardViewFixture(key: unknown[]): unknown[] | null {
+  if (key[0] === "workspaces" && key[2] === "squads") {
+    return [
+      {
+        id: "squad-1",
+        name: "Alpha Squad",
+        avatar_url: null,
+        leader_id: "agent-1",
+        archived_at: null,
+      },
+    ];
+  }
+  if (key[0] === "runtimes" && key[2] === "list") {
+    return [{ id: "rt-1", name: "Build box", custom_name: null, provider: "claude" }];
+  }
+  if (key[0] !== "dashboard") return null;
+  const usage = (extra: Record<string, unknown>) => ({
+    input_tokens: 1_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    ...extra,
+  });
+  switch (key[2]) {
+    case "daily":
+      return [
+        usage({ date: todayIso(), provider: "cursor", model: "auto", task_count: 1 }),
+        usage({ date: todayIso(), provider: "codex", model: "auto", task_count: 1 }),
+      ];
+    case "model-runtime":
+      return [
+        {
+          provider: "cursor",
+          model: "auto",
+          total_seconds: 600,
+          task_count: 3,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+      ];
+    case "usage-by-runtime":
+      return ["rt-1", "rt-gone", "__restricted_runtimes__"].map((runtime_id) =>
+        usage({ runtime_id, provider: "claude", model: "claude-sonnet-4-6" }),
+      );
+    case "runtime-duration":
+      return ["rt-1", "rt-gone", "__restricted_runtimes__"].map((runtime_id) => ({
+        runtime_id,
+        total_seconds: 60,
+        task_count: 1,
+        metered_task_count: 1,
+        failed_count: 0,
+        cancelled_count: 0,
+      }));
+    default:
+      return null;
+  }
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -80,8 +147,9 @@ vi.mock("@tanstack/react-query", async () => {
     // The page reads the client only to invalidate the dashboard keys from
     // the refresh button; there is no provider in these renders.
     useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-    useQuery: (opts: { queryKey: unknown[] }) => {
+    useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
       queryKeys.push(opts.queryKey);
+      if (opts.enabled !== false) enabledQueryKeys.push(opts.queryKey);
       if (opts.queryKey[0] === "workspace-features") {
         return {
           data: { features: {}, limits: { dashboardHistoryDays: historyLimitRef.current } },
@@ -115,6 +183,10 @@ vi.mock("@tanstack/react-query", async () => {
             isLoading: false,
             isSuccess: true,
           };
+        }
+        if (leaderboardViewsRef.current) {
+          const views = leaderboardViewFixture(opts.queryKey);
+          if (views) return { data: views, isLoading: false, isSuccess: true };
         }
         const kind = opts.queryKey[2];
         // Bulk fixture: 12 agents, every per-agent metric strictly descending
@@ -284,7 +356,8 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
       sel ? sel(state()) : state(),
     { getState: state },
   );
-  return { useCustomPricingStore };
+  // Consulted when a model is missing from the built-in rate table.
+  return { useCustomPricingStore, getCustomPricing: () => undefined };
 });
 
 import { DashboardPage } from "./dashboard-page";
@@ -1054,5 +1127,123 @@ describe("DashboardPage — plan history limit (MUL-9490)", () => {
     historyLimitRef.current = null;
     view.rerender(<DashboardHarness />);
     expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("90d");
+  });
+});
+
+describe("DashboardPage — leaderboard Agent / Squad / Model / Runtime control", () => {
+  const VIEW_KINDS = ["model-runtime", "usage-by-runtime", "runtime-duration"];
+
+  beforeEach(() => {
+    queryKeys.length = 0;
+    enabledQueryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    leaderboardViewsRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  afterEach(() => {
+    leaderboardViewsRef.current = false;
+  });
+
+  const groupControl = () =>
+    within(screen.getByRole("group", { name: "Group leaderboard by" }));
+  const leaderboard = () => within(screen.getByRole("list", { name: "Leaderboard" }));
+  const fetchedKinds = () =>
+    enabledQueryKeys.filter((k) => k[0] === "dashboard").map((k) => k[2] as string);
+
+  it("offers all four views, and never fetches a view's rollup while Agents is shown", () => {
+    renderDashboard();
+
+    expect(
+      groupControl()
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Agents", "Squads", "Models", "Runtimes"]);
+    expect(groupControl().getByRole("button", { name: "Agents" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(fetchedKinds().filter((k) => VIEW_KINDS.includes(k))).toEqual([]);
+    expect(enabledQueryKeys.some((k) => k[0] === "runtimes")).toBe(false);
+  });
+
+  it("renders one Model row per (provider, model) and only fetches model-runtime", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(groupControl().getByRole("button", { name: "Models" }));
+
+    const rows = leaderboard().getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(leaderboard().getAllByText("auto")).toHaveLength(2);
+    expect(leaderboard().getByText("cursor")).toBeInTheDocument();
+    expect(leaderboard().getByText("codex")).toBeInTheDocument();
+    expect(screen.getByText("2 models")).toBeInTheDocument();
+    // Only cursor/auto has run time: 3 runs over 10 minutes.
+    const cursorRow = rows.find((r) => within(r).queryByText("cursor"));
+    expect(cursorRow).toHaveTextContent("10m");
+    expect(cursorRow).toHaveTextContent("3");
+
+    const kinds = fetchedKinds();
+    expect(kinds).toContain("model-runtime");
+    expect(kinds).not.toContain("usage-by-runtime");
+    expect(kinds).not.toContain("runtime-duration");
+  });
+
+  it("names runtimes and folds deleted and private ones into Other runtimes", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(groupControl().getByRole("button", { name: "Runtimes" }));
+
+    expect(leaderboard().getAllByRole("listitem")).toHaveLength(2);
+    expect(leaderboard().getByText("Build box")).toBeInTheDocument();
+    expect(leaderboard().getAllByText("Other runtimes")).toHaveLength(1);
+    expect(screen.queryByText("rt-gone")).not.toBeInTheDocument();
+    expect(screen.queryByText("__restricted_runtimes__")).not.toBeInTheDocument();
+    expect(screen.getByText("1 runtimes")).toBeInTheDocument();
+
+    const kinds = fetchedKinds();
+    expect(kinds).toContain("usage-by-runtime");
+    expect(kinds).toContain("runtime-duration");
+    expect(kinds).not.toContain("model-runtime");
+    expect(enabledQueryKeys.some((k) => k[0] === "runtimes" && k[2] === "list")).toBe(
+      true,
+    );
+  });
+
+  it("drops Squads under a squad filter and scopes model-runtime to it", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(groupControl().getByRole("button", { name: "Models" }));
+    await user.click(screen.getByRole("button", { name: "Attribution" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Alpha Squad" }));
+
+    expect(
+      groupControl()
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Agents", "Models", "Runtimes"]);
+    expect(groupControl().getByRole("button", { name: "Models" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // The squad id is the key's last segment, after the history limit.
+    expect(
+      enabledQueryKeys.some(
+        (k) => k[0] === "dashboard" && k[2] === "model-runtime" && k[7] === "squad-1",
+      ),
+    ).toBe(true);
+    // Model and Runtime keep the generic title; only Agents shows the squad's
+    // member breakdown.
+    expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeInTheDocument();
+    await user.click(groupControl().getByRole("button", { name: "Agents" }));
+    expect(
+      screen.getByRole("heading", { name: "Alpha Squad member breakdown" }),
+    ).toBeInTheDocument();
   });
 });

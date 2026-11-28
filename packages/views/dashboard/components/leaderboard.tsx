@@ -14,7 +14,9 @@ import {
   isSyntheticAgentRow,
   isSyntheticSquadRow,
   RESTRICTED_AGENTS_ROW_ID,
+  RESTRICTED_RUNTIMES_ROW_ID,
   type AgentDashboardRow,
+  type LeaderboardEntityRow,
   type SquadDashboardRow,
 } from "../utils";
 import { Segmented } from "./dashboard-shared";
@@ -25,7 +27,7 @@ import { TruncatedTooltip } from "@multica/ui/components/common/truncated-toolti
 // width, and which column header is emphasised — keeping the three in
 // lockstep so the user always sees what the ranking actually measures.
 type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
-export type LeaderboardGroupBy = "agent" | "squad";
+export type LeaderboardGroupBy = "agent" | "squad" | "model" | "runtime";
 
 const SORT_METRIC: Record<
   LeaderboardSort,
@@ -63,8 +65,12 @@ export function Leaderboard({
   lessThanMinuteLabel,
   squadRows = [],
   squads = [],
+  modelRows = [],
+  runtimeRows = [],
+  runtimes = [],
   groupBy = "agent",
   onGroupByChange,
+  allowSquadGroup = false,
   selectedSquad = null,
 }: {
   rows: AgentDashboardRow[];
@@ -73,10 +79,16 @@ export function Leaderboard({
   lessThanMinuteLabel: string;
   squadRows?: SquadDashboardRow[];
   squads?: LeaderboardSquad[];
+  modelRows?: LeaderboardEntityRow[];
+  runtimeRows?: LeaderboardEntityRow[];
+  runtimes?: { id: string; name: string }[];
   groupBy?: LeaderboardGroupBy;
   onGroupByChange?: (next: LeaderboardGroupBy) => void;
-  /** When the page is filtered to a single Squad, the leaderboard renders that
-   *  Squad's member breakdown directly (no redundant Squad grouping toggle). */
+  /** Whether "Squads" is offered. Off when the page is filtered to a squad,
+   *  or the workspace has none; a selected squad view then shows agents. */
+  allowSquadGroup?: boolean;
+  /** When the page is filtered to a single Squad, the Agent view renders that
+   *  Squad's member breakdown. */
   selectedSquad?: LeaderboardSquad | null;
 }) {
   const { t } = useT("usage");
@@ -86,8 +98,8 @@ export function Leaderboard({
   const [expandedSquads, setExpandedSquads] = useState<Record<string, boolean>>({});
 
   const effectiveGroupBy: LeaderboardGroupBy =
-    selectedSquad || !onGroupByChange ? "agent" : groupBy;
-  const showGroupSwitch = !selectedSquad && !!onGroupByChange;
+    groupBy === "squad" && !allowSquadGroup ? "agent" : groupBy;
+  const isEntityView = effectiveGroupBy === "model" || effectiveGroupBy === "runtime";
 
   const sortOptions = useMemo(
     () => [
@@ -102,9 +114,13 @@ export function Leaderboard({
   const groupOptions = useMemo(
     () => [
       { value: "agent" as const, label: t(($) => $.leaderboard.group_agent) },
-      { value: "squad" as const, label: t(($) => $.leaderboard.group_squad) },
+      ...(allowSquadGroup
+        ? [{ value: "squad" as const, label: t(($) => $.leaderboard.group_squad) }]
+        : []),
+      { value: "model" as const, label: t(($) => $.leaderboard.group_model) },
+      { value: "runtime" as const, label: t(($) => $.leaderboard.group_runtime) },
     ],
-    [t],
+    [t, allowSquadGroup],
   );
 
   const sortedRows = useMemo(() => {
@@ -117,7 +133,18 @@ export function Leaderboard({
     return squadRows.toSorted((a, b) => metric(b) - metric(a));
   }, [squadRows, sortBy]);
 
-  const activeRows = effectiveGroupBy === "squad" ? sortedSquadRows : sortedRows;
+  const sortedEntityRows = useMemo(() => {
+    const metric = SORT_METRIC[sortBy];
+    const source = effectiveGroupBy === "model" ? modelRows : runtimeRows;
+    return source.toSorted((a, b) => metric(b) - metric(a));
+  }, [effectiveGroupBy, modelRows, runtimeRows, sortBy]);
+
+  const activeRows =
+    effectiveGroupBy === "squad"
+      ? sortedSquadRows
+      : isEntityView
+        ? sortedEntityRows
+        : sortedRows;
 
   const maxValue = useMemo(() => {
     const metric = SORT_METRIC[sortBy];
@@ -131,6 +158,14 @@ export function Leaderboard({
   const visibleSquadRows = showAll
     ? sortedSquadRows
     : sortedSquadRows.slice(0, LEADERBOARD_LIMIT);
+
+  const visibleEntityRows = showAll
+    ? sortedEntityRows
+    : sortedEntityRows.slice(0, LEADERBOARD_LIMIT);
+
+  const namedEntityCount = sortedEntityRows.filter(
+    (r) => r.key !== RESTRICTED_RUNTIMES_ROW_ID,
+  ).length;
 
   const namedAgentCount = useMemo(
     () => rows.filter((r) => !isSyntheticAgentRow(r.agentId)).length,
@@ -295,11 +330,117 @@ export function Leaderboard({
     );
   };
 
+  const headerText = {
+    agent: t(($) => $.leaderboard.header_agent),
+    squad: t(($) => $.leaderboard.header_squad),
+    model: t(($) => $.leaderboard.header_model),
+    runtime: t(($) => $.leaderboard.header_runtime),
+  }[effectiveGroupBy];
+
+  const captionText =
+    effectiveGroupBy === "squad"
+      ? t(($) => $.leaderboard.squad_caption, { count: namedSquadCount })
+      : effectiveGroupBy === "model"
+        ? t(($) => $.leaderboard.caption_models, { count: namedEntityCount })
+        : effectiveGroupBy === "runtime"
+          ? t(($) => $.leaderboard.caption_runtimes, { count: namedEntityCount })
+          : deletedAgentCount > 0
+            ? t(($) => $.leaderboard.caption_with_deleted, {
+                count: namedAgentCount,
+                deleted: deletedAgentCount,
+              })
+            : t(($) => $.leaderboard.caption, { count: namedAgentCount });
+
+  // Model and Runtime rows: same bar and token / cost / coverage cells as an
+  // agent row, with the model's provider (or nothing) as the subtitle.
+  const renderEntityRow = (row: LeaderboardEntityRow) => {
+    const isOtherRuntimes = row.key === RESTRICTED_RUNTIMES_ROW_ID;
+    const name =
+      effectiveGroupBy === "model"
+        ? row.model ?? row.key
+        : isOtherRuntimes
+          ? t(($) => $.leaderboard.other_runtimes)
+          : runtimes.find((r) => r.id === row.key)?.name ?? row.key;
+    const value = SORT_METRIC[sortBy](row);
+    const pct = maxValue > 0 ? Math.min(100, (value / maxValue) * 100) : 0;
+    const usageUnavailable = !row.hasUsageTotals;
+    const usageIncomplete = row.unreportedTaskCount > 0;
+    const tokenText = usageUnavailable
+      ? "—"
+      : `${usageIncomplete ? "≥" : ""}${formatTokens(row.tokens)}`;
+    const costText = usageUnavailable
+      ? "—"
+      : `${usageIncomplete ? "≥" : ""}$${row.cost.toFixed(2)}`;
+    const subtitle =
+      getCoverageText(
+        row.unreportedTaskCount,
+        row.hasReportedUsage && !row.hasUsageTotals,
+      ) ?? row.provider ?? null;
+
+    return (
+      <li
+        key={row.key}
+        className={`${LEADERBOARD_GRID} px-4 py-2`}
+        style={LEADERBOARD_GRID_STYLE}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {isOtherRuntimes ? (
+            <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <EyeOff className="h-3 w-3" />
+            </span>
+          ) : null}
+          <span className="min-w-0">
+            <TruncatedTooltip content={name}>
+              <span
+                className={`block truncate text-body font-medium ${isOtherRuntimes ? "italic text-muted-foreground" : ""}`}
+              >
+                {name}
+              </span>
+            </TruncatedTooltip>
+            {subtitle ? (
+              <TruncatedTooltip content={subtitle}>
+                <span className="block truncate text-caption text-muted-foreground">
+                  {subtitle}
+                </span>
+              </TruncatedTooltip>
+            ) : null}
+          </span>
+        </div>
+        <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <div
+          className={`text-right text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+        >
+          {tokenText}
+        </div>
+        <div
+          className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
+        >
+          {costText}
+        </div>
+        <div
+          className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+        >
+          {formatDuration(row.seconds, lessThanMinuteLabel)}
+        </div>
+        <div
+          className={`text-right text-caption tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+        >
+          {row.taskCount}
+        </div>
+      </li>
+    );
+  };
+
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
         <div className="flex flex-wrap items-center gap-2.5">
-          {selectedSquad ? (
+          {selectedSquad && effectiveGroupBy === "agent" ? (
             <div className="flex items-center gap-2">
               <ActorAvatarBase
                 name={selectedSquad.name}
@@ -317,7 +458,7 @@ export function Leaderboard({
           ) : (
             <h4 className="text-body font-semibold">{t(($) => $.leaderboard.title)}</h4>
           )}
-          {showGroupSwitch ? (
+          {onGroupByChange ? (
             <Segmented
               label={t(($) => $.leaderboard.group_label)}
               value={effectiveGroupBy}
@@ -337,16 +478,7 @@ export function Leaderboard({
             options={sortOptions}
           />
           <span className="text-caption text-muted-foreground">
-            {effectiveGroupBy === "squad"
-              ? t(($) => $.leaderboard.squad_caption, {
-                  count: namedSquadCount,
-                })
-              : deletedAgentCount > 0
-                ? t(($) => $.leaderboard.caption_with_deleted, {
-                    count: namedAgentCount,
-                    deleted: deletedAgentCount,
-                  })
-                : t(($) => $.leaderboard.caption, { count: namedAgentCount })}
+            {captionText}
           </span>
           {activeRows.length > LEADERBOARD_LIMIT ? (
             <button
@@ -378,9 +510,7 @@ export function Leaderboard({
               style={LEADERBOARD_GRID_STYLE}
             >
               <span>
-                {effectiveGroupBy === "squad"
-                  ? t(($) => $.leaderboard.header_squad)
-                  : t(($) => $.leaderboard.header_agent)}
+                {headerText}
               </span>
               <span />
               <span className={colClass("tokens")}>
@@ -397,13 +527,16 @@ export function Leaderboard({
               </span>
             </div>
             <ul aria-label={t(($) => $.leaderboard.title)} className="divide-y">
+              {isEntityView ? visibleEntityRows.map(renderEntityRow) : null}
               {effectiveGroupBy === "agent"
                 ? visibleAgentRows.map((row) =>
                     renderAgentRow(row, {
                       leaderId: selectedSquad?.leader_id,
                     }),
                   )
-                : visibleSquadRows.map((row) => {
+                : null}
+              {effectiveGroupBy === "squad"
+                ? visibleSquadRows.map((row) => {
                     const isDeleted = row.squadId === DELETED_SQUADS_ROW_ID;
                     const squad = squads.find((s) => s.id === row.squadId);
                     const squadName = isDeleted
@@ -537,7 +670,8 @@ export function Leaderboard({
                           : null}
                       </Fragment>
                     );
-                  })}
+                  })
+                : null}
             </ul>
           </div>
         </div>
