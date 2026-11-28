@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/thumbnail"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -24,6 +25,10 @@ const (
 	thumbnailMaxStoredBytes  = 8 << 20
 
 	thumbnailGenerateTimeout = 2 * time.Minute
+	// The checks after a thumbnail write each get their own budget, so a
+	// render that used up its timeout still confirms and cleans up.
+	thumbnailConfirmTimeout = 10 * time.Second
+	thumbnailCleanupTimeout = 30 * time.Second
 	// The bytes behind an attachment id never change, so a browser may reuse a
 	// thumbnail for as long as a signed original URL stays valid.
 	thumbnailCacheControl = "private, max-age=1800"
@@ -79,7 +84,7 @@ func (h *Handler) GetAttachmentThumbnail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	thumb, err := loadAttachmentThumbnail(r.Context(), store, att)
+	thumb, err := h.loadAttachmentThumbnail(r.Context(), store, att)
 	if err != nil {
 		if writeRequestCancellation(w, r, err) {
 			return
@@ -136,13 +141,13 @@ func (h *Handler) prewarmAttachmentThumbnail(att db.Attachment) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), thumbnailGenerateTimeout)
 		defer cancel()
-		if _, err := loadAttachmentThumbnail(ctx, store, att); err != nil && !errors.Is(err, errThumbnailUnavailable) {
+		if _, err := h.loadAttachmentThumbnail(ctx, store, att); err != nil && !errors.Is(err, errThumbnailUnavailable) {
 			slog.Warn("failed to prewarm attachment thumbnail", "id", uuidToString(att.ID), "error", err)
 		}
 	}()
 }
 
-func loadAttachmentThumbnail(ctx context.Context, store storage.Storage, att db.Attachment) (thumbnail.Thumbnail, error) {
+func (h *Handler) loadAttachmentThumbnail(ctx context.Context, store storage.Storage, att db.Attachment) (thumbnail.Thumbnail, error) {
 	objectKey := store.KeyFromURL(att.Url)
 	key, ok := thumbnail.StorageKey(objectKey)
 	if !ok {
@@ -158,7 +163,9 @@ func loadAttachmentThumbnail(ctx context.Context, store storage.Storage, att db.
 	ch := thumbnailFlight.DoChan(key, func() (any, error) {
 		genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), thumbnailGenerateTimeout)
 		defer cancel()
-		return generateAttachmentThumbnail(genCtx, store, objectKey, key)
+		return generateAttachmentThumbnail(genCtx, store, objectKey, key, func(ctx context.Context) (bool, error) {
+			return h.attachmentExists(ctx, att)
+		})
 	})
 	select {
 	case res := <-ch:
@@ -188,7 +195,28 @@ func readStoredThumbnail(ctx context.Context, store storage.Storage, key string)
 	return thumbnail.Thumbnail{}, false
 }
 
-func generateAttachmentThumbnail(ctx context.Context, store storage.Storage, objectKey, key string) (thumbnail.Thumbnail, error) {
+// attachmentExists reports whether att's row is still in the database. It
+// reads through h.Queries, the primary, so a delete that has committed is seen.
+func (h *Handler) attachmentExists(ctx context.Context, att db.Attachment) (bool, error) {
+	_, err := h.Queries.GetAttachment(ctx, db.GetAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// generateAttachmentThumbnail renders and stores the thumbnail of objectKey
+// under key. exists is checked after the write attempt: a delete of the
+// attachment may have removed the original and its thumbnail while this
+// render was running, and the write would then leave a thumbnail nothing
+// references. Deletes remove the row before the objects, so for a write that
+// has landed by the time it returns, either this check sees the row gone and
+// removes the thumbnail, or the delete's object cleanup runs after the write
+// and removes it. A write that returned an error may still have landed, so it
+// is checked the same way. The check and the removal each run once, best
+// effort under their own timeouts: a write that lands only after both
+// cleanups, or a removal that fails, still leaves the object behind.
+func generateAttachmentThumbnail(ctx context.Context, store storage.Storage, objectKey, key string, exists func(context.Context) (bool, error)) (thumbnail.Thumbnail, error) {
 	select {
 	case thumbnailSlots <- struct{}{}:
 		defer func() { <-thumbnailSlots }()
@@ -229,5 +257,30 @@ func generateAttachmentThumbnail(ctx context.Context, store storage.Storage, obj
 		// Still serve it; the next request renders it again.
 		slog.Warn("failed to store attachment thumbnail", "key", key, "error", err)
 	}
-	return thumb, nil
+	ok, err := confirmThumbnailOwner(ctx, exists)
+	if ok {
+		return thumb, nil
+	}
+	// Gone, or unknown: remove the stored copy either way. A live attachment
+	// renders it again on its next request.
+	removeThumbnail(ctx, store, key)
+	if err != nil {
+		slog.Warn("failed to confirm attachment for thumbnail", "key", key, "error", err)
+		return thumb, nil
+	}
+	return thumbnail.Thumbnail{}, errThumbnailUnavailable
+}
+
+func confirmThumbnailOwner(ctx context.Context, exists func(context.Context) (bool, error)) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), thumbnailConfirmTimeout)
+	defer cancel()
+	return exists(ctx)
+}
+
+func removeThumbnail(ctx context.Context, store storage.Storage, key string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), thumbnailCleanupTimeout)
+	defer cancel()
+	if err := store.DeleteObject(ctx, key); err != nil {
+		slog.Warn("failed to remove attachment thumbnail", "key", key, "error", err)
+	}
 }
