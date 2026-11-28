@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,14 @@ func StartHermesTaskGateway(ctx context.Context, cfg Config, home string) (func(
 }
 
 func startHermesTaskGateway(ctx context.Context, cfg Config, home string, reserved func(string) (bool, error)) (func(), error) {
+	// The gateway starts with HERMES_DISABLE_LAZY_INSTALLS=1 so it cannot
+	// initialize a cold home. First-use source profiles have no installs/ to
+	// reuse, and the ACP child that would run pm only starts after this
+	// reservation. Commit the environment first, with a longer budget than
+	// the gateway's 60s startup wait. See #11605.
+	if err := ensureHermesDependencyEnvironment(ctx, cfg, home); err != nil {
+		return nil, fmt.Errorf("start task Hermes gateway: %w", err)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	cmd := cfg.commandAt(cfg.ExecutablePath).exec(runCtx, "--profile", "default", "gateway", "run", "--quiet", "--external-supervisor")
 	hideAgentWindow(cmd)
@@ -134,6 +143,71 @@ func StopHermesTaskGateway(cfg Config, home string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("stop task Hermes gateway: %w", err)
+	}
+	return nil
+}
+
+// hermesDependencyRepairTimeout covers a cold-home `hermes pm repair`.
+// A first-use profile can spend a couple of minutes committing the managed
+// Python environment; the gateway's own 60s reservation wait is too short.
+const hermesDependencyRepairTimeout = 5 * time.Minute
+
+func ensureHermesDependencyEnvironment(ctx context.Context, cfg Config, home string) error {
+	if hermesDependencyEnvironmentCommitted(home) {
+		return nil
+	}
+	return repairHermesDependencyEnvironment(ctx, cfg, home)
+}
+
+// hermesDependencyEnvironmentCommitted reports whether home already has a
+// Hermes package-manager environment that gateway run can activate with
+// HERMES_DISABLE_LAZY_INSTALLS=1. prepareHermesInstalls links a source
+// profile's installs/ when one exists, including as a directory symlink, so
+// the root of the walk is resolved first.
+func hermesDependencyEnvironmentCommitted(home string) bool {
+	root := filepath.Join(home, "installs")
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		resolved = root
+	}
+	found := false
+	_ = filepath.WalkDir(resolved, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		switch d.Name() {
+		case "committed", "current.json", "selected.json":
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func repairHermesDependencyEnvironment(ctx context.Context, cfg Config, home string) error {
+	repairCtx, cancel := context.WithTimeout(ctx, hermesDependencyRepairTimeout)
+	defer cancel()
+	cmd := cfg.commandAt(cfg.ExecutablePath).exec(repairCtx, "--profile", "default", "pm", "repair")
+	hideAgentWindow(cmd)
+	cmd.Env = buildEnv(cfg.Env)
+	// Leave HERMES_DISABLE_LAZY_INSTALLS unset so repair can commit the
+	// environment. PYTHONIOENCODING matches the gateway child.
+	cmd.Env = append(cmd.Env, "PYTHONIOENCODING=utf-8")
+	if cfg.Logger != nil {
+		cfg.Logger.Info("hermes task home has no committed dependency environment; running pm repair before starting the Windows gateway",
+			"hermes_home", home)
+	}
+	_, err := combinedOutputOwned(cmd, cfg.Logger)
+	if err != nil {
+		return fmt.Errorf("hermes pm repair: %w", err)
 	}
 	return nil
 }
