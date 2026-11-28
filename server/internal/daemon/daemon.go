@@ -10454,7 +10454,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	var toolCount atomic.Int32
 	// lastActivityAt records (as awakeclock nanos) when the drain loop most
-	// recently received a message from the backend. The idle watchdog
+	// recently received a non-diagnostic message from the backend. The idle watchdog
 	// reads this to decide whether the agent has gone silent for too long.
 	// It is an awake-time reading, not wall time, so a host suspend is never
 	// charged to the agent as silence (GitHub #9024).
@@ -10646,8 +10646,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// gone silent — stamping before processing makes sure a
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
+				// Retry diagnostics are visible, but do not establish progress.
 				observedAt := time.Now().UTC()
-				lastActivityAt.Store(int64(awakeclock.Now()))
+				if msg.Type != agent.MessageDiagnostic {
+					lastActivityAt.Store(int64(awakeclock.Now()))
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10763,7 +10766,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					if msg.Content != "" {
 						flushFirstVisible()
 					}
-				case agent.MessageError:
+				case agent.MessageError, agent.MessageDiagnostic:
 					taskLog.Error("agent error", "content", msg.Content)
 					mu.Lock()
 					sealPendingLocked()

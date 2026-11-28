@@ -104,7 +104,7 @@ func isTaskOutputReceived(msg agent.Message) bool {
 	switch msg.Type {
 	case agent.MessageText, agent.MessageThinking:
 		return msg.Content != ""
-	case agent.MessageToolUse, agent.MessageToolResult, agent.MessageError:
+	case agent.MessageToolUse, agent.MessageToolResult, agent.MessageError, agent.MessageDiagnostic:
 		return true
 	default:
 		return false
