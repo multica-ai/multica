@@ -1226,6 +1226,65 @@ export interface DashboardSquadRunTime extends DashboardAgentRunTime {
   squad_id: string;
 }
 
+// One (provider, model) usage aggregate inside a per-member dashboard row.
+// Same token and cost-split fields as DashboardUsageByAgent, priced the same
+// way client-side.
+export interface DashboardMemberUsage {
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
+// One member's usage for the workspace dashboard's "By member" tab. "Member"
+// is the run's accountable human, so a shared agent's spend splits across the
+// people it worked for. `user_id` is "__unattributed__" for runs nobody could
+// be attributed to. `task_count` is distinct runs with usage (a run that used
+// two models counts once). A caller below admin only receives their own row.
+export interface DashboardUsageByMember {
+  user_id: string;
+  task_count: number;
+  usage: DashboardMemberUsage[];
+}
+
+// One recent run of a member. `agent_id` may be the restricted-agents bucket.
+// The issue fields are null for a run about a private project the viewer
+// cannot see; `chat_session_id` / `chat_title` are only set for the chat's
+// own creator, so everyone else (admins included) only learns it was a chat.
+export interface DashboardMemberTask {
+  task_id: string;
+  agent_id: string;
+  status: string;
+  kind: "issue" | "chat" | "other";
+  issue_id: string | null;
+  issue_identifier: string | null;
+  issue_title: string | null;
+  chat_session_id: string | null;
+  chat_title: string | null;
+  last_used_at: string;
+  usage: DashboardMemberUsage[];
+}
+
+// One project's usage for the dashboard's "By project" tab. A run's project
+// is its issue's. `project_id` is "__no_project__" for runs outside any
+// project and "__restricted_projects__" for the one bucket that holds the
+// usage of private projects the viewer cannot see; `project_title` is empty
+// for both. A caller below admin only receives the runs they are accountable
+// for.
+export interface DashboardUsageByProject {
+  project_id: string;
+  project_title: string;
+  task_count: number;
+  usage: DashboardMemberUsage[];
+}
+
 // Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab.
 // squad_id is "" for standalone (non-squad-triggered) agent runs.
 export interface DashboardFailureBySquad {

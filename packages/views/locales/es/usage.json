@@ -135,5 +135,45 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "members": {
+    "tab": "Por miembro",
+    "title": "Uso por miembro",
+    "description": "Cada ejecución se cuenta para la persona para la que se hizo: quien mencionó, asignó o programó al agente, siguiendo también los traspasos entre agentes.",
+    "caption_one": "{{count}} miembro",
+    "caption_other": "{{count}} miembros",
+    "own_only": "Solo puedes ver tu propio uso.",
+    "header_member": "Miembro",
+    "header_tokens": "Tokens",
+    "header_cost": "Coste",
+    "header_tasks": "Ejecuciones con uso",
+    "unattributed": "Sin asignar",
+    "former_member": "Antiguo miembro",
+    "no_data": "Sin uso de miembros en este periodo.",
+    "show_tasks": "Mostrar ejecuciones recientes de {{name}}",
+    "hide_tasks": "Ocultar ejecuciones recientes de {{name}}",
+    "recent_title": "Ejecuciones recientes",
+    "recent_hint": "Hasta {{limit}} ejecuciones recientes con uso en este periodo.",
+    "recent_empty": "No hay ejecuciones con uso en este periodo.",
+    "recent_error": "No se pudieron cargar las ejecuciones recientes.",
+    "chat_run": "Chat",
+    "generic_run": "Otra ejecución",
+    "other_agents": "Otros agentes",
+    "header_task": "Ejecución",
+    "header_agent": "Agente",
+    "header_time": "Último uso"
+  },
+  "projects": {
+    "tab": "Por proyecto",
+    "title": "Uso por proyecto",
+    "description": "Cada ejecución se cuenta para el proyecto de la tarea en la que trabajó. Los chats y las ejecuciones sin una tarea de proyecto aparecen en Sin proyecto.",
+    "caption_one": "{{count}} proyecto",
+    "caption_other": "{{count}} proyectos",
+    "header_project": "Proyecto",
+    "no_project": "Sin proyecto",
+    "restricted": "Proyectos que no puedes ver",
+    "no_data": "Sin uso de proyectos en este periodo.",
+    "show_tasks": "Mostrar ejecuciones recientes de {{name}}",
+    "hide_tasks": "Ocultar ejecuciones recientes de {{name}}"
   }
 }

@@ -123,6 +123,9 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   DashboardFailureBySquad,
+  DashboardUsageByMember,
+  DashboardMemberTask,
+  DashboardUsageByProject,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -375,6 +378,9 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureBySquadListSchema,
+  DashboardUsageByMemberListSchema,
+  DashboardMemberTaskListSchema,
+  DashboardUsageByProjectListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
@@ -3190,12 +3196,14 @@ export class ApiClient {
     params: DashboardRequestParams,
     schema: ZodType,
     endpoint: string,
+    extraSearch?: Record<string, string>,
   ): Promise<T[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.squad_id) search.set("squad_id", params.squad_id);
     if (params.tz) search.set("tz", params.tz);
+    for (const [key, value] of Object.entries(extraSearch ?? {})) search.set(key, value);
     const res = await this.fetchRaw(`${path}?${search}`, {
       extraHeaders: { "Content-Type": "application/json" },
     });
@@ -3284,6 +3292,56 @@ export class ApiClient {
       params,
       DashboardFailureBySquadListSchema,
       "GET /api/dashboard/failures/by-squad",
+    );
+  }
+
+  // Per-member usage: one row per accountable member. A caller below admin
+  // only gets their own row back.
+  async getDashboardUsageByMember(params: DashboardRequestParams): Promise<DashboardUsageByMember[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-member",
+      params,
+      DashboardUsageByMemberListSchema,
+      "GET /api/dashboard/usage/by-member",
+    );
+  }
+
+  // One member's most recent runs. `userId` is a user id or the
+  // "__unattributed__" bucket; asking for anyone but yourself takes an owner
+  // or admin (403 otherwise).
+  async getDashboardMemberTasks(
+    userId: string,
+    params: DashboardRequestParams,
+  ): Promise<DashboardMemberTask[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/member-tasks",
+      params,
+      DashboardMemberTaskListSchema,
+      "GET /api/dashboard/usage/member-tasks",
+      { user_id: userId },
+    );
+  }
+
+  // Per-project usage: one row per project, plus the "__no_project__" and
+  // "__restricted_projects__" buckets. A caller below admin only gets the
+  // runs they are accountable for.
+  async getDashboardUsageByProject(params: DashboardRequestParams): Promise<DashboardUsageByProject[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-project",
+      params,
+      DashboardUsageByProjectListSchema,
+      "GET /api/dashboard/usage/by-project",
+    );
+  }
+
+  // One project's most recent runs. `params.project_id` is the project, or
+  // "__no_project__" for runs outside any project.
+  async getDashboardProjectTasks(params: DashboardRequestParams): Promise<DashboardMemberTask[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/project-tasks",
+      params,
+      DashboardMemberTaskListSchema,
+      "GET /api/dashboard/usage/project-tasks",
     );
   }
 

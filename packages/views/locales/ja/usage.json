@@ -133,5 +133,43 @@
   },
   "duration": {
     "less_than_minute": "1分未満"
+  },
+  "members": {
+    "tab": "メンバー別",
+    "title": "メンバー別の使用量",
+    "description": "各実行は、その実行の依頼者（エージェントを @ メンション・割り当て・スケジュールした人）に計上されます。エージェント間の引き継ぎも最初の依頼者までたどります。",
+    "caption_other": "{{count}} 人のメンバー",
+    "own_only": "表示されるのは自分の使用量のみです。",
+    "header_member": "メンバー",
+    "header_tokens": "トークン",
+    "header_cost": "コスト",
+    "header_tasks": "使用量のある実行",
+    "unattributed": "未割り当て",
+    "former_member": "退出したメンバー",
+    "no_data": "この期間にメンバーの使用量はありません。",
+    "show_tasks": "{{name}} の最近の実行を表示",
+    "hide_tasks": "{{name}} の最近の実行を隠す",
+    "recent_title": "最近の実行",
+    "recent_hint": "この期間に使用量のある最新 {{limit}} 件までの実行です。",
+    "recent_empty": "この期間に使用量のある実行はありません。",
+    "recent_error": "最近の実行を読み込めませんでした。",
+    "chat_run": "チャット",
+    "generic_run": "その他の実行",
+    "other_agents": "その他のエージェント",
+    "header_task": "実行",
+    "header_agent": "エージェント",
+    "header_time": "最終使用"
+  },
+  "projects": {
+    "tab": "プロジェクト別",
+    "title": "プロジェクト別の使用量",
+    "description": "各実行は、対象のタスクが属するプロジェクトに計上されます。チャットやプロジェクトのないタスクの実行は「プロジェクトなし」にまとめられます。",
+    "caption_other": "{{count}} 件のプロジェクト",
+    "header_project": "プロジェクト",
+    "no_project": "プロジェクトなし",
+    "restricted": "閲覧できないプロジェクト",
+    "no_data": "この期間にプロジェクトの使用量はありません。",
+    "show_tasks": "{{name}} の最近の実行を表示",
+    "hide_tasks": "{{name}} の最近の実行を隠す"
   }
 }

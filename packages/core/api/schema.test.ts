@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiClient, ApiError } from "./client";
+import { ApiClient, ApiError, type DashboardRequestParams } from "./client";
 import { parseWithFallback } from "./schema";
 import { CreateIssueResponseSchema } from "./schemas";
 
@@ -2394,6 +2394,10 @@ describe("dashboard history limit (MUL-9490)", () => {
       client.getDashboardRunTimeDaily.bind(client),
       client.getDashboardFailuresDaily.bind(client),
       client.getDashboardFailuresByAgent.bind(client),
+      client.getDashboardUsageByMember.bind(client),
+      (params: DashboardRequestParams) => client.getDashboardMemberTasks("user-1", params),
+      client.getDashboardUsageByProject.bind(client),
+      client.getDashboardProjectTasks.bind(client),
     ];
     for (const call of calls) {
       for (const [header, want] of [
@@ -2415,5 +2419,50 @@ describe("dashboard history limit (MUL-9490)", () => {
         expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=371");
       }
     }
+  });
+
+  it("sends the member and the page filters to member-tasks", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await client.getDashboardMemberTasks("__unattributed__", {
+      days: 7,
+      project_id: "p1",
+      squad_id: "__standalone__",
+      tz: "UTC",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe("/api/dashboard/usage/member-tasks");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      days: "7",
+      project_id: "p1",
+      squad_id: "__standalone__",
+      tz: "UTC",
+      user_id: "__unattributed__",
+    });
+  });
+
+  it("sends the expanded project as project_id to project-tasks", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await client.getDashboardProjectTasks({
+      days: 7,
+      project_id: "__no_project__",
+      squad_id: "squad-1",
+      tz: "UTC",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe("/api/dashboard/usage/project-tasks");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      days: "7",
+      project_id: "__no_project__",
+      squad_id: "squad-1",
+      tz: "UTC",
+    });
   });
 });
