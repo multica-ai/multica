@@ -2,7 +2,8 @@
   "role": {
     "owner": "所有者",
     "admin": "管理员",
-    "member": "成员"
+    "member": "成员",
+    "guest": "访客"
   },
   "card": {
     "unavailable": "成员信息不可用",
@@ -19,5 +20,20 @@
     "breadcrumb_fallback": "成员",
     "not_found_title": "未找到该成员",
     "not_found_description": "该成员可能已经离开工作区。"
+  },
+  "page": {
+    "title": "成员",
+    "search": "搜索成员",
+    "manage": "在设置中管理成员",
+    "invite": "邀请成员",
+    "no_matches": "没有匹配的成员",
+    "you": "你",
+    "table": {
+      "name": "名字",
+      "role": "角色",
+      "joined": "加入时间"
+    },
+    "load_failed": "成员列表加载失败",
+    "retry": "重试"
   }
 }

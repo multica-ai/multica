@@ -22,6 +22,7 @@ describe("spaceForPath", () => {
     [ws.projectDetail("p-1"), "work"],
     [ws.agentDetail("a-1"), "team"],
     [ws.squadDetail("s-1"), "team"],
+    [ws.members(), "team"],
     [ws.memberDetail("m-1"), "team"],
     [ws.runtimeDetail("r-1"), "team"],
     [ws.skills(), "team"],

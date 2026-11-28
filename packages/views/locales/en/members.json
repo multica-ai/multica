@@ -2,7 +2,8 @@
   "role": {
     "owner": "Owner",
     "admin": "Admin",
-    "member": "Member"
+    "member": "Member",
+    "guest": "Guest"
   },
   "card": {
     "unavailable": "Member unavailable",
@@ -20,5 +21,20 @@
     "breadcrumb_fallback": "Member",
     "not_found_title": "Member not found",
     "not_found_description": "This member may have left the workspace."
+  },
+  "page": {
+    "title": "Members",
+    "search": "Search members",
+    "manage": "Manage members in Settings",
+    "invite": "Invite member",
+    "no_matches": "No matching members",
+    "you": "You",
+    "table": {
+      "name": "Name",
+      "role": "Role",
+      "joined": "Joined"
+    },
+    "load_failed": "Couldn't load members",
+    "retry": "Retry"
   }
 }

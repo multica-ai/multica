@@ -2,7 +2,8 @@
   "role": {
     "owner": "Propietario",
     "admin": "Administrador",
-    "member": "Miembro"
+    "member": "Miembro",
+    "guest": "Invitado"
   },
   "card": {
     "unavailable": "Miembro no disponible",
@@ -20,5 +21,20 @@
     "email": "Correo electrónico",
     "joined": "Se unió",
     "relation": "Relación"
+  },
+  "page": {
+    "title": "Miembros",
+    "search": "Buscar miembros",
+    "manage": "Gestionar miembros en Ajustes",
+    "invite": "Invitar miembro",
+    "no_matches": "Ningún miembro coincide",
+    "you": "Tú",
+    "table": {
+      "name": "Nombre",
+      "role": "Rol",
+      "joined": "Se unió"
+    },
+    "load_failed": "No se pudieron cargar los miembros",
+    "retry": "Reintentar"
   }
 }

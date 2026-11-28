@@ -16,6 +16,7 @@ describe("parseTabSubject", () => {
     ["/acme/autopilots", { kind: "page", page: "autopilots" }],
     ["/acme/agents", { kind: "page", page: "agents" }],
     ["/acme/squads", { kind: "page", page: "squads" }],
+    ["/acme/members", { kind: "page", page: "members" }],
     ["/acme/usage", { kind: "page", page: "usage" }],
     ["/acme/runtimes", { kind: "page", page: "runtimes" }],
     ["/acme/skills", { kind: "page", page: "skills" }],
@@ -61,7 +62,6 @@ describe("parseTabSubject", () => {
     ["/acme/chat?session=sess-1", { kind: "chat", sessionId: "sess-1" }],
     ["/acme/chat?agent=ag-1", { kind: "chat", sessionId: null }],
     // Members list route does not exist
-    ["/acme/members", { kind: "unknown" }],
     // Unknown / too short
     ["/acme/nope", { kind: "unknown" }],
     ["/acme", { kind: "unknown" }],

@@ -2,7 +2,8 @@
   "role": {
     "owner": "Propriétaire",
     "admin": "Administrateur",
-    "member": "Membre"
+    "member": "Membre",
+    "guest": "Invité"
   },
   "card": {
     "unavailable": "Membre indisponible",
@@ -20,5 +21,20 @@
     "breadcrumb_fallback": "Membre",
     "not_found_title": "Membre introuvable",
     "not_found_description": "Ce membre a peut-être quitté l'espace de travail."
+  },
+  "page": {
+    "title": "Membres",
+    "search": "Rechercher des membres",
+    "manage": "Gérer les membres dans les paramètres",
+    "invite": "Inviter un membre",
+    "no_matches": "Aucun membre ne correspond",
+    "you": "Vous",
+    "table": {
+      "name": "Nom",
+      "role": "Rôle",
+      "joined": "Arrivée"
+    },
+    "load_failed": "Impossible de charger les membres",
+    "retry": "Réessayer"
   }
 }

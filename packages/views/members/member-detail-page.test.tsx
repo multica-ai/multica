@@ -17,7 +17,7 @@ const surfaceProps = vi.hoisted(() => ({ current: null as Record<string, unknown
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
-    settings: () => "/acme/settings",
+    members: () => "/acme/members",
     agentDetail: (id: string) => `/acme/agents/${id}`,
   }),
 }));
@@ -102,7 +102,7 @@ describe("MemberDetailPage", () => {
     const header = screen.getByRole("banner");
     expect(within(header).getByRole("link", { name: "Members" })).toHaveAttribute(
       "href",
-      "/acme/settings?tab=members",
+      "/acme/members",
     );
     expect(header).toHaveTextContent("Ada Lovelace");
     expect(within(header).queryByRole("button", { name: "Search issues..." })).not.toBeInTheDocument();
