@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -991,21 +992,58 @@ var zcodeDesktopAppBundlePaths = func() []string {
 	return paths
 }
 
-// codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
-// the bundled Codex CLI. OpenAI relocated the Desktop app from Codex.app to
-// ChatGPT.app (#5205), then nested the CLI under Resources/codex-cli/bin
-// (#8941). Candidates are ordered by install location first (system
-// /Applications before user ~/Applications). Within each location the current
-// ChatGPT.app nested path is tried before the flat Resources/codex path, which
-// is tried before the legacy Codex.app path, so the newest install wins while
-// older installs still resolve.
+// codexDesktopAppBundlePaths returns candidate locations for the Codex CLI
+// that Codex Desktop (and, on macOS, ChatGPT Desktop) bundle instead of
+// installing `codex` onto PATH.
+//
+// macOS candidates are the historical app-bundle paths: OpenAI relocated the
+// Desktop app from Codex.app to ChatGPT.app (#5205), then nested the CLI under
+// Resources/codex-cli/bin (#8941). Candidates are ordered by install location
+// first (system /Applications before user ~/Applications). Within each
+// location the current ChatGPT.app nested path is tried before the flat
+// Resources/codex path, which is tried before the legacy Codex.app path, so
+// the newest install wins while older installs still resolve.
+//
+// Windows candidates come from the Codex Desktop MSIX layout (#11467): a
+// per-user copy under %LOCALAPPDATA%\OpenAI\Codex\bin\<id>\codex.exe, and
+// the packaged executable under %ProgramFiles%\WindowsApps\OpenAI.Codex_*\app\resources\codex.exe.
+// Upgrades can leave previous hash and package directories behind, so each
+// source is ordered — newest directory mtime for the per-user copy, highest
+// package version for the MSIX — rather than in whatever order the listing
+// returned. PATH and an explicit MULTICA_CODEX_PATH still win: this list is
+// only consulted for the default `codex` command after those miss.
 var codexDesktopAppBundlePaths = func() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return codexDesktopBundlePathsFor(runtime.GOOS, os.Getenv, home)
+}
+
+// codexDesktopBundlePathsFor builds the candidate list for one platform.
+//
+// Taking goos/env/home as arguments, rather than reading runtime.GOOS and
+// os.Getenv inline, is what makes the Windows layout assertable from any host.
+// The alternative leaves the Windows branch testable only on Windows, which in
+// this package has meant untested.
+func codexDesktopBundlePathsFor(goos string, env func(string) string, home string) []string {
+	switch goos {
+	case "darwin":
+		return macosCodexDesktopBundlePaths(home)
+	case "windows":
+		return windowsCodexDesktopBundlePaths(env, home)
+	default:
+		return nil
+	}
+}
+
+func macosCodexDesktopBundlePaths(home string) []string {
 	paths := []string{
 		"/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
 		"/Applications/ChatGPT.app/Contents/Resources/codex",
 		"/Applications/Codex.app/Contents/Resources/codex",
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home != "" {
 		paths = append(paths,
 			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex"),
 			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
@@ -1013,6 +1051,174 @@ var codexDesktopAppBundlePaths = func() []string {
 		)
 	}
 	return paths
+}
+
+func windowsCodexDesktopBundlePaths(env func(string) string, home string) []string {
+	localAppData := ""
+	if env != nil {
+		localAppData = env("LOCALAPPDATA")
+	}
+	if localAppData == "" && home != "" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+
+	var paths []string
+	if localAppData != "" {
+		paths = append(paths, windowsCodexUserRuntimeExes(filepath.Join(localAppData, "OpenAI", "Codex", "bin"))...)
+	}
+	for _, programFiles := range windowsProgramFilesDirs(env) {
+		paths = append(paths, windowsCodexMsixExes(filepath.Join(programFiles, "WindowsApps"))...)
+	}
+	return paths
+}
+
+func windowsProgramFilesDirs(env func(string) string) []string {
+	if env == nil {
+		return nil
+	}
+	var dirs []string
+	seen := map[string]bool{}
+	for _, key := range []string{"ProgramFiles", "PROGRAMFILES", "ProgramW6432"} {
+		dir := env(key)
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+type codexExeCandidate struct {
+	path    string
+	modTime time.Time
+	version [4]int
+	name    string
+}
+
+// windowsCodexUserRuntimeExes lists %LOCALAPPDATA%\OpenAI\Codex\bin\<id>\codex.exe
+// newest first. The directory mtime is what we sort on: Desktop writes a new
+// payload directory on upgrade and may copy the executable with a preserved
+// timestamp, so sorting the file itself would keep an abandoned hash first.
+func windowsCodexUserRuntimeExes(binRoot string) []string {
+	entries, err := os.ReadDir(binRoot)
+	if err != nil {
+		return nil
+	}
+	var found []codexExeCandidate
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		exe := filepath.Join(binRoot, entry.Name(), "codex.exe")
+		info, err := os.Stat(exe)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		modTime := info.ModTime()
+		if dirInfo, err := entry.Info(); err == nil {
+			modTime = dirInfo.ModTime()
+		}
+		found = append(found, codexExeCandidate{path: exe, modTime: modTime, name: entry.Name()})
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if !found[i].modTime.Equal(found[j].modTime) {
+			return found[i].modTime.After(found[j].modTime)
+		}
+		return found[i].name > found[j].name
+	})
+	paths := make([]string, len(found))
+	for i, c := range found {
+		paths[i] = c.path
+	}
+	return paths
+}
+
+// windowsCodexMsixExes lists packaged Codex Desktop executables under
+// WindowsApps, highest package version first. Listing that directory often
+// fails for a non-admin user; a permission error is a miss, not a crash,
+// because the per-user copy above is the path that actually works in the
+// reported install. Other publishers' packages are ignored.
+func windowsCodexMsixExes(windowsApps string) []string {
+	entries, err := os.ReadDir(windowsApps)
+	if err != nil {
+		return nil
+	}
+	var found []codexExeCandidate
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		version, ok := msixCodexPackageVersion(entry.Name())
+		if !ok {
+			continue
+		}
+		exe := filepath.Join(windowsApps, entry.Name(), "app", "resources", "codex.exe")
+		info, err := os.Stat(exe)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		found = append(found, codexExeCandidate{path: exe, version: version, name: entry.Name()})
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if c := compareVersion4(found[i].version, found[j].version); c != 0 {
+			return c > 0
+		}
+		return found[i].name > found[j].name
+	})
+	paths := make([]string, len(found))
+	for i, c := range found {
+		paths[i] = c.path
+	}
+	return paths
+}
+
+// msixCodexPackageVersion parses the version from an MSIX folder name such as
+// OpenAI.Codex_26.1120.5083.0_x64__2p2nqsd0c76g0. The resource id may be
+// empty, which shows up as a double underscore; only the version field is
+// used for ordering.
+func msixCodexPackageVersion(dirName string) ([4]int, bool) {
+	const prefix = "OpenAI.Codex_"
+	if !strings.HasPrefix(dirName, prefix) {
+		return [4]int{}, false
+	}
+	rest := dirName[len(prefix):]
+	version := rest
+	if i := strings.Index(rest, "_"); i >= 0 {
+		version = rest[:i]
+	}
+	return parseDottedVersion4(version)
+}
+
+func parseDottedVersion4(s string) ([4]int, bool) {
+	parts := strings.Split(s, ".")
+	if len(parts) == 0 || len(parts) > 4 {
+		return [4]int{}, false
+	}
+	var out [4]int
+	for i, p := range parts {
+		if p == "" {
+			return [4]int{}, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return [4]int{}, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+func compareVersion4(a, b [4]int) int {
+	for i := 0; i < 4; i++ {
+		if a[i] != b[i] {
+			if a[i] > b[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
 }
 
 // dshDesktopAppBundlePaths returns candidate locations for the DSH CLI that

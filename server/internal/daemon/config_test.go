@@ -1464,7 +1464,7 @@ func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
 // registering it would advertise a healthy runtime whose every task fails.
 func TestProbeAgentCLIsIgnoresNonExecutableCodexBundle(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the Codex Desktop app bundle fallback is macOS-only")
+		t.Skip("Unix execute-bit rejection does not apply to Windows executable detection")
 	}
 
 	pathDir := t.TempDir()
@@ -1530,7 +1530,7 @@ func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
 }
 
 func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
-	paths := codexDesktopAppBundlePaths()
+	paths := codexDesktopBundlePathsFor("darwin", envFrom(nil), "/Users/jane")
 	const (
 		nestedSuffix = "ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
 		flatSuffix   = "ChatGPT.app/Contents/Resources/codex"
