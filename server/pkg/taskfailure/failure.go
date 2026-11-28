@@ -231,7 +231,6 @@ const (
 	// until the reset time; tasks are auto-retried after the hold lifts.
 	ReasonSessionLimit Reason = "session_limit"
 
-
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
