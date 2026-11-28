@@ -393,7 +393,7 @@ Daemon behavior is configured via flags or environment variables:
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | Persistent UUID stored in `~/.multica/daemon.id` and shared across profiles |
-| Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
+| Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | `user@hostname` (hostname if the user is unknown) |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |

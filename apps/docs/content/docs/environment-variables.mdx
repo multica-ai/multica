@@ -238,7 +238,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket URL; also accepts `http(s)` |
-| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Device name shown in the runtime list |
+| `MULTICA_DAEMON_DEVICE_NAME` | `user@hostname` (hostname if the user is unknown) | Device name shown in the runtime list |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Runtime display name |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Run polling interval when no wake event arrives |
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter makes the normal default `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |

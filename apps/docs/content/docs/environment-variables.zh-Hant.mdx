@@ -234,7 +234,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | 變數 | 預設值 | 說明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket 地址，也接受 `http(s)` |
-| `MULTICA_DAEMON_DEVICE_NAME` | 主機名 | 執行時列表中的裝置名 |
+| `MULTICA_DAEMON_DEVICE_NAME` | `使用者名稱@主機名`（取不到使用者名稱時為主機名） | 執行時列表中的裝置名 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 執行時顯示名 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | 沒有喚醒事件時的執行輪詢間隔 |
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 健康 WebSocket 下 claim 安全輪詢的上限，與 `MULTICA_DAEMON_POLL_INTERVAL` 獨立配置；向下抖動後預設實際為 `2m30s`–`2m45s`，舊 Server 或結果不確定的 claim 仍使用普通輪詢間隔 |
