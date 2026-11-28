@@ -32,8 +32,7 @@
       "other_machine": "其他机器或服务器",
       "other_machine_hint": "在那台机器上运行两条命令",
       "cloud_services": "云服务",
-      "qoder_manage_hint": "已连接 · 管理连接",
-      "cloud_runtime_hint": "由 Multica 托管的云端节点，随时可用"
+      "qoder_manage_hint": "已连接 · 管理连接"
     },
     "columns": {
       "name": "名称",
@@ -279,45 +278,6 @@
     "success_description": "机器已连接，可以创建智能体。",
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
-  },
-  "cloud_runtime": {
-    "action": "云端运行时",
-    "title": "云端运行时",
-    "description": "由 Multica 托管的云端运行时，可随时运行智能体。",
-    "create_title": "新节点",
-    "nodes_title": "云端节点",
-    "refresh": "刷新",
-    "nodes_empty": "还没有云端节点",
-    "nodes_failed": "云端运行时不可用",
-    "nodes_failed_hint": "无法加载云端节点，请重试。",
-    "node_fallback_name": "云端节点",
-    "create": "创建节点",
-    "creating": "创建中...",
-    "cancel": "取消",
-    "toast_created": "云端节点已创建",
-    "toast_create_failed": "创建云端节点失败",
-    "delete": "删除节点",
-    "delete_confirm": "确定要删除此云节点吗？此操作无法撤销。",
-    "toast_deleted": "云节点已删除",
-    "toast_delete_failed": "删除云节点失败",
-    "fields": {
-      "name": "名称",
-      "instance_type": "实例规格",
-      "region": "区域",
-      "disk_size": "磁盘大小（GiB）",
-      "image_id": "镜像 ID（AMI）",
-      "subnet_id": "子网 ID",
-      "key_name": "SSH 密钥对",
-      "bootstrap_pat": "初始化访问令牌（PAT）"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "实例规格不能为空",
-      "disk_size_invalid": "磁盘大小必须是正整数"
-    }
   },
   "update": {
     "cli_version_label": "CLI 版本：",
@@ -675,10 +635,6 @@
       "remote": {
         "title": "其他机器，两条命令",
         "description": "在服务器或另一台电脑上装好 CLI，运行 multica setup 就连上了。"
-      },
-      "cloud": {
-        "title": "或者用云端节点",
-        "description": "无需本机开机，直接使用 Multica 托管的云端节点运行智能体。"
       }
     },
     "art": {

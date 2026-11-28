@@ -315,7 +315,7 @@ describe("Attachment — image dispatch", () => {
   it("renders the configured CDN URL when description markdown stores the stable API URL", () => {
     configStore.setState({ cdnDomain: "cdn.example.test" });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const att = makeRecord({
       id,
       url: "https://cdn.example.test/uploads/ws/shot.png",
@@ -402,7 +402,7 @@ describe("Attachment — image dispatch", () => {
   it("opens preview with the same resolved media URL when a reopened draft record has no download_url", async () => {
     configStore.setState({ cdnDomain: "cdn.example.test" });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const mediaUrl = "https://cdn.example.test/uploads/ws/shot.png";
     const att = makeRecord({
       id,
@@ -513,10 +513,10 @@ describe("Attachment — image dispatch", () => {
     // native <img> fetch, so the renderer must swap in a freshly signed URL
     // from authenticated attachment metadata — the reopened-draft case where
     // the persisted record deliberately strips the expired download_url.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const signed =
       "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
     const att = makeRecord({
@@ -550,10 +550,10 @@ describe("Attachment — image dispatch", () => {
     // is still recoverable from the URL itself. Token-mode clients must not
     // depend on the context resolver having a hydrated record before they can
     // fetch fresh signed metadata.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const signed =
       "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
     getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
@@ -582,9 +582,9 @@ describe("Attachment — image dispatch", () => {
     // there is nothing to swap in: the renderer must pull the bytes through
     // the authenticated client and paint them from an object URL instead of
     // keeping a src it already knows 401s.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const att = makeRecord({
       id,
       url: "https://minio:9000/multica/uploads/ws/shot.png",
@@ -628,9 +628,9 @@ describe("Attachment — image dispatch", () => {
   it("copies the durable URL, not the session-local object URL (MUL-5445)", async () => {
     // A `blob:` URL resolves only inside this renderer session, so Copy Link
     // must keep handing out the persisted attachment URL.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [
       makeRecord({
         id,
@@ -673,9 +673,9 @@ describe("Attachment — image dispatch", () => {
     // A file card only needs a link. Downloading a large archive into
     // renderer memory to draw a chip would be a bad trade, so the byte
     // fallback stays image-only.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [
       makeRecord({
         id,
@@ -712,10 +712,10 @@ describe("Attachment — image dispatch", () => {
   it("prefers the signed URL over a byte fetch when the server can presign (MUL-5445)", async () => {
     // Presign / CloudFront deployments already hand back a natively-loadable
     // URL. Pulling the bytes as well would double every image download.
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const signed =
       "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
     getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
@@ -1116,9 +1116,9 @@ describe("Attachment — absolutize site-relative URLs (MUL-3192)", () => {
 
 describe("Attachment — blob URL GC (MUL-7741)", () => {
   it("defers revoke by 5 min after last unmount", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [
       makeRecord({ id, url: "https://minio:9000/multica/uploads/ws/shot.png", markdown_url: markdownUrl, download_url: "" }),
     ];
@@ -1142,9 +1142,9 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 
   it("cancels pending GC on re-enter before expiry", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/a.png", markdown_url: markdownUrl, download_url: "" })];
     getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
     const blob = new Blob(["x"], { type: "image/png" });
@@ -1177,9 +1177,9 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 
   it("reuses cached blob URL on re-enter before GC expiry without new createObjectURL", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "99999999-aaaa-bbbb-cccc-dddddddddddd";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/r.png", markdown_url: markdownUrl, download_url: "" })];
     getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
     getAttachmentBlobMock.mockResolvedValue(new Blob(["r"], { type: "image/png" }));
@@ -1210,9 +1210,9 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 
   it("both concurrent consumers of same id get blob URL (no fallback stick)", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "cccccccc-cccc-cccc-cccc-cccccccccccc";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/c.png", markdown_url: markdownUrl, download_url: "" })];
     getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
     getAttachmentBlobMock.mockResolvedValue(new Blob(["c"], { type: "image/png" }));
@@ -1238,11 +1238,11 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 
   it("does not show previous image when gallery id changes and new blob fetch fails (A→B) via rerender", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const idA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const idB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-    const urlA = `https://multica-api.copilothub.ai/api/attachments/${idA}/download`;
-    const urlB = `https://multica-api.copilothub.ai/api/attachments/${idB}/download`;
+    const urlA = `https://api.multica.example/api/attachments/${idA}/download`;
+    const urlB = `https://api.multica.example/api/attachments/${idB}/download`;
     resolverState.attachments = [
       makeRecord({ id: idA, url: "https://minio:9000/a.png", markdown_url: urlA, download_url: "" }),
       makeRecord({ id: idB, url: "https://minio:9000/b.png", markdown_url: urlB, download_url: "" }),
@@ -1266,9 +1266,9 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 
   it("does not reuse previous account blob URL after query cache clear on account switch", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    getBaseUrlMock.mockReturnValue("https://api.multica.example");
     const id = "dddddddd-eeee-ffff-aaaa-bbbbbbbbbbbb";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.multica.example/api/attachments/${id}/download`;
     const record = makeRecord({ id, url: "https://minio:9000/d.png", markdown_url: markdownUrl, download_url: "" });
     resolverState.attachments = [record];
     getAttachmentMock.mockResolvedValue(record);

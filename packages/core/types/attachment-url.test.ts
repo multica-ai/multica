@@ -109,7 +109,7 @@ describe("contentReferencesAttachment", () => {
     id: ID,
     url: "/uploads/workspaces/ws/legacy.png",
     download_url: "https://cdn.example.com/workspaces/ws/file.png?Signature=fresh",
-    markdown_url: `https://multica-api.copilothub.ai/api/attachments/${ID}/download`,
+    markdown_url: `https://api.multica.example/api/attachments/${ID}/download`,
   };
 
   it("matches when the markdown uses the stable download path", () => {

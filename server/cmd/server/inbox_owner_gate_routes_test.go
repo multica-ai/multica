@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -101,8 +100,7 @@ func mintInboxTaskToken(t *testing.T, f *dbfx.Fixture, taskID, agentID string) s
 // Each handler under /api/inbox calls the owner gate itself, so a new route
 // that forgets it would let an agent act on its runtime owner's inbox for any
 // human. This walks the real router, so a new route is covered the moment it
-// is registered: an agent run another human triggered, and a cloud-node
-// credential claiming an owner-triggered run, must both be refused.
+// is registered: an agent run another human triggered must be refused.
 func TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger(t *testing.T) {
 	db := dbfx.New(testPool, testWorkspaceID, testUserID)
 	db.WorkspaceID = db.Workspace(t, "Inbox owner gate routes", "inbox-gate-routes-"+uuid.NewString())
@@ -120,19 +118,6 @@ func TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger(t *testing.T
 	ownerTriggered := mintInboxTaskToken(t, db, ownerTaskID, agentID)
 	otherTriggered := mintInboxTaskToken(t, db, runningTask(other), agentID)
 
-	cloudToken := "mcn_" + uuid.NewString()
-	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Token string `json:"token"`
-		}
-		if json.NewDecoder(r.Body).Decode(&request) != nil || request.Token != cloudToken {
-			http.Error(w, "unexpected verification request", http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"valid": true, "owner_id": db.UserID})
-	}))
-	t.Cleanup(fleet.Close)
-	t.Setenv("MULTICA_CLOUD_URL", fleet.URL)
 	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
 
 	call := func(method, path string, headers ...string) *httptest.ResponseRecorder {
@@ -150,8 +135,6 @@ func TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger(t *testing.T
 		headers []string
 	}{
 		{"agent run another human triggered", []string{"Authorization", "Bearer " + otherTriggered}},
-		{"cloud node claiming an owner-triggered run", []string{"Authorization", "Bearer " + cloudToken,
-			"X-Actor-Source", "task_token", "X-Task-ID", ownerTaskID, "X-Agent-ID", agentID}},
 	}
 
 	// Control: the same agent, workspace and runtime pass the gate when the

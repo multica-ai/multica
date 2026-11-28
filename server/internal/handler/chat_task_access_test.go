@@ -35,7 +35,7 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 	issueID := dbfx.Issue(t, "Chat task access", nil)
 
 	serve := func(handler func(*Handler, http.ResponseWriter, *http.Request)) http.HandlerFunc {
-		return middleware.Auth(testHandler.Queries, nil, nil, nil)(
+		return middleware.Auth(testHandler.Queries, nil, nil)(
 			middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				handler(testHandler, w, r)
 			})),

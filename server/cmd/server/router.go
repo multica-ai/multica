@@ -521,8 +521,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			storageQuota.RecordStored(ctx, workspaceID, service.StorageSourceChannel)
 		})
 	}
-	// Cloud Runtime and strict seat capacity are one managed deployment. Reuse
-	// the same base URL so Billing cannot be readable while invitation writes
+	// Billing and strict seat capacity are one managed deployment. Reuse the
+	// same base URL so Billing cannot be readable while invitation writes
 	// silently skip Cloud's authoritative seat policy.
 	h.SeatCapacity = seatCapacityExecutor(signupConfig.CloudURL)
 	capacityLocker := seatcapacity.NewWorkspaceLocker(pool)
@@ -531,8 +531,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.SeatCapacityWorker = seatcapacity.NewWorker(queries, h.SeatCapacity, capacityLocker, seatcapacity.WorkerConfig{})
 	}
 	if opts.BusinessMetrics != nil {
-		// Wire the BusinessMetrics receiver into the cloud runtime client
-		// so every outbound Fleet/Gateway request feeds the
+		// Wire the BusinessMetrics receiver into the Multica Cloud client
+		// so every outbound Billing request feeds the
 		// multica_cloudruntime_request_* histograms.
 		if client, ok := h.CloudRuntime.(*cloudruntime.Client); ok {
 			client.SetRecorder(opts.BusinessMetrics)
@@ -1561,17 +1561,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.DaemonTokenCache = daemonTokenCache
 	h.MembershipCache = auth.NewMembershipCache(rdb)
 
-	// Cloud PAT verifier: validates mcn_ tokens against Multica Cloud
-	// Fleet. Returns nil when no Cloud URL is configured — the Auth /
-	// DaemonAuth middlewares treat nil as "mcn_ not supported" and
-	// reject with 401, instead of falling through to mul_/JWT paths.
-	// Reuses MULTICA_CLOUD_URL (the same URL the cloud-runtime proxy uses) so a
-	// deployment has one authoritative multica-cloud connection.
-	cloudPATVerifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{
-		FleetBaseURL: signupConfig.CloudURL,
-		Redis:        rdb,
-	})
-
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
 	// task. Returns nil when rdb is nil — TaskService treats that
@@ -1764,7 +1753,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -1844,7 +1833,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// signed-in user's session and the installation header. Keeping it outside
 	// /v1 prevents the Public API from accepting session cookies.
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
+		r.Use(middleware.Auth(queries, patCache, cfSigner))
 		r.Route(pluginBridgePrefix, func(r chi.Router) {
 			registerPluginActionRoutes(r, h)
 			// ui / manual only. `event` is dispatched by the host off the event
@@ -1854,7 +1843,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
+		r.Use(middleware.Auth(queries, patCache, cfSigner))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
@@ -1878,7 +1867,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.With(handler.RequireHumanActor).Post("/api/me/star-prompt/claim", h.ClaimStarPromptShowing)
 		r.With(handler.RequireHumanActor).Post("/api/me/star-prompt/starred", h.MarkStarPromptStarred)
 		// Credential minting is human-only (MUL-8154): an agent task token
-		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
+		// (mat_) authenticates as its owner, so
 		// without this guard a prompt-injected agent could trade its scoped,
 		// short-lived credential for a 30-day session JWT.
 		r.With(handler.RequireHumanActor).Post("/api/cli-token", h.IssueCliToken)
@@ -2187,9 +2176,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
-		// Cloud Billing proxy. Same upstream service / port as
-		// cloud-runtime — multica-cloud's Fleet and Billing share
-		// :8080 and the same chi router. All routes here forward
+		// Cloud Billing proxy to multica-cloud. All routes here forward
 		// to /api/v1/billing/* with X-User-ID stamped from the
 		// authenticated context.
 		//
@@ -2738,22 +2725,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// behaviour, not just the route). Same handler.
 					r.Post("/archive-agents-and-delete", h.UnbindAgentsAndDeleteRuntime)
 				})
-			})
-
-			// Cloud Runtime fleet proxy. The remote service URL is configured
-			// on SaaS API nodes only; self-hosted deployments return 503.
-			r.Route("/api/cloud-runtime", func(r chi.Router) {
-				r.Get("/", h.GetCloudRuntimeService)
-				r.Get("/healthz", h.GetCloudRuntimeHealth)
-				r.Get("/readyz", h.GetCloudRuntimeReady)
-				r.Get("/nodes", h.ListCloudRuntimeNodes)
-				r.Post("/nodes", h.CreateCloudRuntimeNode)
-				r.Delete("/nodes", h.DeleteCloudRuntimeNode)
-				r.Post("/nodes/start", h.StartCloudRuntimeNode)
-				r.Post("/nodes/stop", h.StopCloudRuntimeNode)
-				r.Post("/nodes/reboot", h.RebootCloudRuntimeNode)
-				r.Post("/nodes/status", h.GetCloudRuntimeNodeStatus)
-				r.Post("/nodes/exec", h.ExecCloudRuntimeNode)
 			})
 
 			// Tasks (user-facing, with ownership check)

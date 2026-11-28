@@ -5,11 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +40,7 @@ type pluginConsentFixture struct {
 	db                  *dbfx.Fixture
 	router              http.Handler
 	h                   *handler.Handler
-	pat, task, cloud    string
+	pat, task           string
 	packageID           string
 	versionID           string
 	installationID      string
@@ -70,19 +68,6 @@ func newPluginConsentFixture(t *testing.T) *pluginConsentFixture {
 	f.Insert(t, "personal_access_token", dbfx.Cols{
 		"user_id": f.UserID, "name": "plugin consent", "token_hash": auth.HashToken(pat), "token_prefix": pat[:12],
 	})
-	cloud := "mcn_" + uuid.NewString()
-	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Token string `json:"token"`
-		}
-		if r.URL.Path != "/api/v1/pat/verify" || json.NewDecoder(r.Body).Decode(&request) != nil || request.Token != cloud {
-			http.Error(w, "invalid verification request", http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"valid": true, "owner_id": f.UserID})
-	}))
-	t.Cleanup(fleet.Close)
-	t.Setenv("MULTICA_CLOUD_URL", fleet.URL)
 	t.Setenv("MULTICA_PLUGIN_SECRET_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	t.Setenv("MULTICA_PLUGIN_SURFACE_ORIGIN", "https://plugin-content.example.test")
 	flags := featureflag.NewStaticProvider()
@@ -149,7 +134,7 @@ func newPluginConsentFixture(t *testing.T) *pluginConsentFixture {
 	if err := mw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return &pluginConsentFixture{db: f, router: router, h: h, pat: pat, task: task, cloud: cloud,
+	return &pluginConsentFixture{db: f, router: router, h: h, pat: pat, task: task,
 		packageID: published.ID, versionID: published.Versions[0].ID, installationID: util.UUIDToString(installed.ID),
 		upload: upload.String(), contentType: mw.FormDataContentType()}
 }
@@ -210,7 +195,7 @@ func TestPluginManagementRejectsMachineCredentials(t *testing.T) {
 	}
 	for _, role := range []string{"owner", "admin"} {
 		f.db.Exec(t, `UPDATE member SET role = $1 WHERE workspace_id = $2 AND user_id = $3`, role, f.db.WorkspaceID, f.db.UserID)
-		for name, token := range map[string]string{"task": f.task, "cloud": f.cloud} {
+		for name, token := range map[string]string{"task": f.task} {
 			for _, tc := range cases {
 				t.Run(role+"/"+name+"/"+tc.method+tc.path, func(t *testing.T) {
 					before := f.snapshot(t)

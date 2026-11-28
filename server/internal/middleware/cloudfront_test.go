@@ -110,7 +110,7 @@ func TestAuth_ReSignsCloudFrontCookiesOnRenewal(t *testing.T) {
 	signer := testSigner(t)
 
 	var served bool
-	handler := Auth(nil, nil, nil, signer)(
+	handler := Auth(nil, nil, signer)(
 		RefreshCloudFrontCookies(signer)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			served = true
 			w.WriteHeader(http.StatusOK)
@@ -152,7 +152,7 @@ func TestAuth_ReSignsCloudFrontCookiesOnRenewal(t *testing.T) {
 func TestAuth_ReSignsCloudFrontCookiesWithoutTheCDNMiddleware(t *testing.T) {
 	signer := testSigner(t)
 
-	handler := Auth(nil, nil, nil, signer)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(nil, nil, signer)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

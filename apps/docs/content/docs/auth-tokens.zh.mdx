@@ -85,14 +85,13 @@ curl https://api.multica.ai/api/issues \
 
 ## 其他机器凭据
 
-服务端还识别两种内部或托管场景中的凭据：
+服务端还识别一种内部场景中的凭据：
 
 | 前缀 | 用途 | 谁管理 |
 | --- | --- | --- |
-| `mcn_` | Multica Cloud Node 连接 | Multica Cloud Fleet |
 | `mdt_` | 工作区范围的守护进程认证协议 | 服务端内部流程 |
 
-普通 Cloud、自托管和 Desktop 安装都不需要手动创建它们。用户侧的 CLI 与守护进程始终使用 `mul_` PAT；不要自行构造其他前缀的令牌。
+普通 Cloud、自托管和 Desktop 安装都不需要手动创建它。用户侧的 CLI 与守护进程始终使用 `mul_` PAT；不要自行构造其他前缀的令牌。
 
 ## 接下来
 

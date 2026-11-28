@@ -85,14 +85,13 @@ These tokens are created automatically by the server; users never need to save o
 
 ## Other machine credentials
 
-The server also recognizes two credentials used in internal or managed scenarios:
+The server also recognizes one credential used in internal scenarios:
 
 | Prefix | Purpose | Managed by |
 | --- | --- | --- |
-| `mcn_` | Multica Cloud Node connections | Multica Cloud Fleet |
 | `mdt_` | Workspace-scoped daemon authentication protocol | Internal server flows |
 
-Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
+Regular Cloud, self-hosted, and Desktop installations never need to create it manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
 
 ## Next steps
 

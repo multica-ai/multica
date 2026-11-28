@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -16,9 +14,9 @@ import (
 
 // TestPrivateProjectOwnerRecoveryRejectsMachineCredentials runs the real
 // Auth -> router -> handler chain for the workspace owner's way into private
-// projects (MUL-9284). A task token (mat_) and a cloud node PAT (mcn_) both
-// authenticate as the owner, but neither may list private projects or add
-// the owner to one; the owner's own JWT and PAT keep both abilities.
+// projects (MUL-9284). A task token (mat_) authenticates as the owner, but it
+// may not list private projects or add the owner to one; the owner's own JWT
+// and PAT keep both abilities.
 func TestPrivateProjectOwnerRecoveryRejectsMachineCredentials(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -52,19 +50,6 @@ func TestPrivateProjectOwnerRecoveryRejectsMachineCredentials(t *testing.T) {
 		"user_id": f.UserID, "name": "private project recovery", "token_hash": auth.HashToken(pat), "token_prefix": pat[:12],
 	})
 
-	cloud := "mcn_" + uuid.NewString()
-	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Token string `json:"token"`
-		}
-		if r.URL.Path != "/api/v1/pat/verify" || json.NewDecoder(r.Body).Decode(&request) != nil || request.Token != cloud {
-			http.Error(w, "invalid verification request", http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"valid": true, "owner_id": f.UserID})
-	}))
-	t.Cleanup(fleet.Close)
-	t.Setenv("MULTICA_CLOUD_URL", fleet.URL)
 	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
 
 	call := func(t *testing.T, method, path, token string) *dbfx.Response {
@@ -81,7 +66,7 @@ func TestPrivateProjectOwnerRecoveryRejectsMachineCredentials(t *testing.T) {
 	}
 	listPath, joinPath := "/api/projects/private", "/api/projects/"+projectID+"/join"
 
-	for name, token := range map[string]string{"task token": task, "cloud PAT": cloud} {
+	for name, token := range map[string]string{"task token": task} {
 		t.Run(name, func(t *testing.T) {
 			call(t, http.MethodGet, listPath, token).Want(http.StatusForbidden)
 			call(t, http.MethodPost, joinPath, token).Want(http.StatusForbidden)

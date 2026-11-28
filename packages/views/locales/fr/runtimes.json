@@ -32,8 +32,7 @@
       "other_machine": "Autre machine ou serveur",
       "other_machine_hint": "Exécutez deux commandes sur cette machine",
       "cloud_services": "Services cloud",
-      "qoder_manage_hint": "Connecté · gérer la connexion",
-      "cloud_runtime_hint": "Créer un nœud cloud hébergé par Multica"
+      "qoder_manage_hint": "Connecté · gérer la connexion"
     },
     "columns": {
       "name": "Nom",
@@ -290,45 +289,6 @@
     "success_description": "Machine connectée. Vous pouvez maintenant créer un agent.",
     "view_runtime": "Voir le runtime",
     "create_agent": "Créer un agent"
-  },
-  "cloud_runtime": {
-    "action": "Cloud Runtime",
-    "title": "Cloud Runtime",
-    "description": "Créez un runtime cloud.",
-    "create_title": "Nouveau nœud",
-    "nodes_title": "Nœuds cloud",
-    "refresh": "Actualiser",
-    "nodes_empty": "Aucun nœud cloud",
-    "nodes_failed": "Cloud Runtime indisponible",
-    "nodes_failed_hint": "Impossible de charger les nœuds cloud. Réessayez.",
-    "node_fallback_name": "Nœud cloud",
-    "create": "Créer le nœud",
-    "creating": "Création...",
-    "cancel": "Annuler",
-    "toast_created": "Nœud Cloud Runtime créé",
-    "toast_create_failed": "Échec de la création du nœud Cloud Runtime",
-    "delete": "Supprimer le nœud",
-    "delete_confirm": "Voulez-vous vraiment supprimer ce nœud cloud ? Cette action est irréversible.",
-    "toast_deleted": "Nœud cloud supprimé",
-    "toast_delete_failed": "Échec de la suppression du nœud cloud",
-    "fields": {
-      "name": "Nom",
-      "instance_type": "Type d'instance",
-      "region": "Région",
-      "disk_size": "Taille du disque (Gio)",
-      "image_id": "ID d'image (AMI)",
-      "subnet_id": "ID de sous-réseau",
-      "key_name": "Paire de clés SSH",
-      "bootstrap_pat": "Jeton d'amorçage (PAT)"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "Le type d'instance est obligatoire",
-      "disk_size_invalid": "La taille du disque doit être un entier positif"
-    }
   },
   "update": {
     "cli_version_label": "Version du CLI :",
@@ -695,10 +655,6 @@
       "remote": {
         "title": "Une autre machine, deux commandes",
         "description": "Installez la CLI sur un serveur ou un autre ordinateur, puis lancez multica setup pour le connecter."
-      },
-      "cloud": {
-        "title": "Ou un nœud cloud",
-        "description": "Pas envie de gérer des machines ? Créez un nœud cloud hébergé par Multica."
       }
     },
     "art": {

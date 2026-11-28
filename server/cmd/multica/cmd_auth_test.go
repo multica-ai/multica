@@ -574,11 +574,8 @@ func TestNormalizeAPIBaseURL(t *testing.T) {
 }
 
 // TestValidateLoginTokenPrefix pins the accepted PAT prefix set for
-// `multica login --token`. The original implementation hardcoded `mul_`
-// only, which rejected legitimate Multica Cloud Node PATs (`mcn_`) at
-// the CLI even though the server's middleware would have accepted them.
-// If a future change drops `mcn_` from the list (or accidentally
-// broadens the set to anything-goes), this test fails.
+// `multica login --token`. Retired Multica Cloud Node PATs (`mcn_`) are
+// rejected by the server, so the CLI must not accept them either.
 func TestValidateLoginTokenPrefix(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -586,7 +583,7 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "mul_ PAT", token: "mul_abc123", wantErr: false},
-		{name: "mcn_ Cloud Node PAT", token: "mcn_abc123", wantErr: false},
+		{name: "retired mcn_ Cloud Node PAT", token: "mcn_abc123", wantErr: true},
 		{name: "empty token", token: "", wantErr: true},
 		{name: "no prefix", token: "abc123", wantErr: true},
 		{name: "wrong prefix mdt_", token: "mdt_abc123", wantErr: true},
@@ -615,7 +612,7 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown prefix")
 	}
-	for _, p := range []string{"mul_", "mcn_"} {
+	for _, p := range []string{"mul_"} {
 		if !strings.Contains(err.Error(), p) {
 			t.Errorf("error %q does not mention prefix %q", err.Error(), p)
 		}

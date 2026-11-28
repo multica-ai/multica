@@ -85,7 +85,7 @@ func TestDaemonTokenReadCancellation(t *testing.T) {
 			if tc.cancel {
 				lookup.cancel = cancel
 			}
-			guard := middleware.DaemonAuth(db.New(lookup), nil, nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			guard := middleware.DaemonAuth(db.New(lookup), nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("failed token lookup reached the next handler")
 			}))
 			assertRequestCancellationStatus(t, guard.ServeHTTP, req.WithContext(ctx), tc.want)

@@ -32,8 +32,7 @@ var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate and set up workspaces",
 	Long:  "Log in to Multica, then automatically discover and watch all your workspaces.",
-	// Up to one positional is accepted so `--token mul_...` / `--token mcn_...`
-	// (space form) can recover the token in runAuthLogin even though pflag
+	// Up to one positional is accepted so `--token mul_...` (space form) can recover the token in runAuthLogin even though pflag
 	// won't bind it.
 	Args: cobra.MaximumNArgs(1),
 	RunE: runLogin,
@@ -42,8 +41,7 @@ var loginCmd = &cobra.Command{
 // tokenPromptSentinel is the value pflag assigns to `--token` when the flag
 // is supplied without an explicit value. runAuthLoginToken treats it as
 // "prompt me interactively", preserving the legacy `multica login --token`
-// no-value form alongside the documented `--token mul_...` / `--token mcn_...`
-// value form.
+// no-value form alongside the documented `--token mul_...` value form.
 //
 // The sentinel must be printable: pflag renders NoOptDefVal verbatim in help
 // output ("--token string[=\"prompt\"]") and uses "\x00" internally as its
@@ -55,9 +53,9 @@ const tokenPromptSentinel = "prompt"
 func init() {
 	// No backticks in the usage string: pflag's UnquoteUsage treats the first
 	// backquoted segment as the flag's value placeholder in help output.
-	loginCmd.Flags().String("token", "", "Authenticate using a personal access token (mul_... user PAT or mcn_... Cloud Node PAT). Pass --token mul_... / --token mcn_... to supply it inline, or --token alone to be prompted interactively.")
+	loginCmd.Flags().String("token", "", "Authenticate using a personal access token (mul_...). Pass --token mul_... to supply it inline, or --token alone to be prompted interactively.")
 	// NoOptDefVal lets `--token` (no value) keep its old prompt-mode behavior
-	// while `--token mul_...` / `--token mcn_...` and the `=value` form
+	// while `--token mul_...` and the `=value` form
 	// consume the value normally.
 	loginCmd.Flags().Lookup("token").NoOptDefVal = tokenPromptSentinel
 	loginCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)

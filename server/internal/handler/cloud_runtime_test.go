@@ -41,38 +41,35 @@ func useCloudRuntimeProxy(t *testing.T, proxy cloudRuntimeProxy) {
 	t.Cleanup(func() { testHandler.CloudRuntime = prevProxy })
 }
 
-// TestCreateCloudRuntimeNodeForwardsBody is the post-MUL-2671 happy
-// path for CreateCloudRuntimeNode: the handler no longer reads, asks
-// for, or auto-generates an mul_ PAT — Cloud now mints its own
-// node-scoped mcn_ PAT during /api/v1/nodes and ships it to the EC2
-// instance via SSM. Multica-api just forwards the request body and
-// the caller's user_id; there is no PAT plumbing on this endpoint.
-func TestCreateCloudRuntimeNodeForwardsBody(t *testing.T) {
+func TestProxyCloudRuntimeForwardsBodyAndRequestID(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
 			StatusCode: http.StatusCreated,
-			Header:     http.Header{"X-Request-Id": []string{"fleet-request-id"}},
-			Body:       []byte(`{"status":"launching"}`),
+			Header:     http.Header{"X-Request-Id": []string{"cloud-request-id"}},
+			Body:       []byte(`{"status":"ok"}`),
 		},
 	}
 	useCloudRuntimeProxy(t, proxy)
 
-	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
-		"instance_type": "g5.xlarge",
+	req := newRequest(http.MethodPost, "/api/cloud-billing/checkout-sessions", map[string]any{
+		"amount": 10,
 	})
 	req.Header.Set("X-Request-ID", "api-request-id")
 	w := httptest.NewRecorder()
 
-	testHandler.CreateCloudRuntimeNode(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodPost, "/api/v1/billing/checkout-sessions", cloudRuntimeProxyOptions{
+		withUserID: true,
+		withBody:   true,
+	})
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	if !proxy.called {
-		t.Fatal("cloud runtime proxy was not called")
+		t.Fatal("cloud proxy was not called")
 	}
-	if proxy.req.Method != http.MethodPost || proxy.req.Path != "/api/v1/nodes" {
+	if proxy.req.Method != http.MethodPost || proxy.req.Path != "/api/v1/billing/checkout-sessions" {
 		t.Fatalf("proxied request = %s %s", proxy.req.Method, proxy.req.Path)
 	}
 	if proxy.req.UserID != testUserID {
@@ -81,18 +78,18 @@ func TestCreateCloudRuntimeNodeForwardsBody(t *testing.T) {
 	if proxy.req.RequestID != "api-request-id" {
 		t.Fatalf("proxied request id = %q", proxy.req.RequestID)
 	}
-	if got := w.Header().Get("X-Request-ID"); got != "fleet-request-id" {
+	if got := w.Header().Get("X-Request-ID"); got != "cloud-request-id" {
 		t.Fatalf("response request id = %q", got)
 	}
 }
 
-func TestCloudRuntimeDisabledReturnsForbidden(t *testing.T) {
+func TestProxyCloudRuntimeDisabledReturnsForbidden(t *testing.T) {
 	useCloudRuntimeProxy(t, &fakeCloudRuntimeProxy{enabled: false})
 
-	req := newRequest(http.MethodGet, "/api/cloud-runtime/nodes", nil)
+	req := newRequest(http.MethodGet, "/api/cloud-billing/balance", nil)
 	w := httptest.NewRecorder()
 
-	testHandler.ListCloudRuntimeNodes(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodGet, "/api/v1/billing/balance", cloudRuntimeProxyOptions{withUserID: true})
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
@@ -103,7 +100,7 @@ func TestCloudRuntimeDisabledReturnsForbidden(t *testing.T) {
 	}
 }
 
-func TestListCloudRuntimeNodesForwardsQuery(t *testing.T) {
+func TestProxyCloudRuntimeForwardsQuery(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
@@ -113,39 +110,36 @@ func TestListCloudRuntimeNodesForwardsQuery(t *testing.T) {
 	}
 	useCloudRuntimeProxy(t, proxy)
 
-	req := newRequest(http.MethodGet, "/api/cloud-runtime/nodes?limit=10&offset=20", nil)
+	req := newRequest(http.MethodGet, "/api/cloud-billing/transactions?limit=10&offset=20", nil)
 	w := httptest.NewRecorder()
 
-	testHandler.ListCloudRuntimeNodes(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodGet, "/api/v1/billing/transactions", cloudRuntimeProxyOptions{
+		withUserID: true,
+		withQuery:  true,
+	})
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	if !proxy.called {
-		t.Fatal("cloud runtime proxy was not called")
-	}
-	if proxy.req.Method != http.MethodGet || proxy.req.Path != "/api/v1/nodes" {
-		t.Fatalf("proxied request = %s %s", proxy.req.Method, proxy.req.Path)
 	}
 	if got := proxy.req.Query.Encode(); got != "limit=10&offset=20" {
 		t.Fatalf("proxied query = %q", got)
 	}
 }
 
-func TestCloudRuntimeNonJSONResponseIsWrapped(t *testing.T) {
+func TestProxyCloudRuntimeNonJSONResponseIsWrapped(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
 			StatusCode: http.StatusBadGateway,
-			Body:       []byte("fleet failed\n"),
+			Body:       []byte("upstream failed\n"),
 		},
 	}
 	useCloudRuntimeProxy(t, proxy)
 
-	req := newRequest(http.MethodGet, "/api/cloud-runtime/healthz", nil)
+	req := newRequest(http.MethodGet, "/api/cloud-billing/price-tiers", nil)
 	w := httptest.NewRecorder()
 
-	testHandler.GetCloudRuntimeHealth(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodGet, "/api/v1/billing/price-tiers", cloudRuntimeProxyOptions{})
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
@@ -153,12 +147,12 @@ func TestCloudRuntimeNonJSONResponseIsWrapped(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Fatalf("content type = %q", ct)
 	}
-	if got := w.Body.String(); !strings.Contains(got, `"error":"fleet failed"`) {
+	if got := w.Body.String(); !strings.Contains(got, `"error":"upstream failed"`) {
 		t.Fatalf("body = %s", got)
 	}
 }
 
-func TestCloudRuntimeEmptyResponseKeepsStatus(t *testing.T) {
+func TestProxyCloudRuntimeEmptyResponseKeepsStatus(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
@@ -168,10 +162,10 @@ func TestCloudRuntimeEmptyResponseKeepsStatus(t *testing.T) {
 	}
 	useCloudRuntimeProxy(t, proxy)
 
-	req := newRequest(http.MethodGet, "/api/cloud-runtime/healthz", nil)
+	req := newRequest(http.MethodGet, "/api/cloud-billing/price-tiers", nil)
 	w := httptest.NewRecorder()
 
-	testHandler.GetCloudRuntimeHealth(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodGet, "/api/v1/billing/price-tiers", cloudRuntimeProxyOptions{})
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
@@ -181,28 +175,31 @@ func TestCloudRuntimeEmptyResponseKeepsStatus(t *testing.T) {
 	}
 }
 
-func TestCreateCloudRuntimeNodeRejectsLargeBody(t *testing.T) {
+func TestProxyCloudRuntimeRejectsLargeBody(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
 			StatusCode: http.StatusCreated,
-			Body:       []byte(`{"status":"launching"}`),
+			Body:       []byte(`{"status":"ok"}`),
 		},
 	}
 	useCloudRuntimeProxy(t, proxy)
 
 	body := bytes.NewReader(bytes.Repeat([]byte("a"), maxCloudRuntimeRequestBodySize+1))
-	req := httptest.NewRequest(http.MethodPost, "/api/cloud-runtime/nodes", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/cloud-billing/checkout-sessions", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 
-	testHandler.CreateCloudRuntimeNode(w, req)
+	testHandler.proxyCloudRuntime(w, req, http.MethodPost, "/api/v1/billing/checkout-sessions", cloudRuntimeProxyOptions{
+		withUserID: true,
+		withBody:   true,
+	})
 
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	if proxy.called {
-		t.Fatal("cloud runtime proxy should not be called")
+		t.Fatal("cloud proxy should not be called")
 	}
 }

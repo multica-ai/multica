@@ -5,8 +5,10 @@ import (
 )
 
 // RequireHumanActor rejects machine credentials on human-only route groups.
-// Auth strips client-supplied X-Actor-Source and stamps task_token or cloud_pat;
-// that authoritative header distinguishes a machine acting for its human owner.
+// Auth strips client-supplied X-Actor-Source and stamps task_token; that
+// authoritative header distinguishes a machine acting for its human owner.
+// cloud_pat belonged to the retired Multica Cloud node PAT and stays classified
+// as a machine credential so the guard keeps failing closed.
 // resolveActor classifies workspace authorship and is not this authorization gate.
 //
 // Attach this middleware only to human-only scopes such as billing. Issue and

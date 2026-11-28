@@ -98,9 +98,10 @@ Unit tests do not replace this device validation.
 
 ## First-time setup
 
-`.env.staging` is committed (public staging URL). `.env.development.local` is gitignored — copy the template once:
+`.env.staging` and `.env.development.local` are gitignored — copy the templates once and fill in the URLs (ask the team for the current staging URLs):
 
 ```bash
+cp apps/mobile/.env.staging.example apps/mobile/.env.staging
 cp apps/mobile/.env.example apps/mobile/.env.development.local
 # then edit EXPO_PUBLIC_API_URL inside it to your Mac's LAN IP, e.g. http://192.168.1.42:8080
 ```

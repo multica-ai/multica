@@ -32,8 +32,7 @@
       "other_machine": "다른 머신 또는 서버",
       "other_machine_hint": "해당 머신에서 명령 두 개 실행",
       "cloud_services": "클라우드 서비스",
-      "qoder_manage_hint": "연결됨 · 연결 관리",
-      "cloud_runtime_hint": "Multica가 호스팅하는 클라우드 노드 생성"
+      "qoder_manage_hint": "연결됨 · 연결 관리"
     },
     "columns": {
       "name": "이름",
@@ -279,45 +278,6 @@
     "success_description": "머신이 연결되었습니다. 에이전트를 만들 수 있습니다.",
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
-  },
-  "cloud_runtime": {
-    "action": "클라우드 런타임",
-    "title": "클라우드 런타임",
-    "description": "클라우드 런타임을 만듭니다.",
-    "create_title": "새 노드",
-    "nodes_title": "클라우드 노드",
-    "refresh": "새로고침",
-    "nodes_empty": "클라우드 노드 없음",
-    "nodes_failed": "클라우드 런타임을 사용할 수 없습니다",
-    "nodes_failed_hint": "클라우드 노드를 불러올 수 없습니다. 다시 시도하세요.",
-    "node_fallback_name": "클라우드 노드",
-    "create": "노드 만들기",
-    "creating": "만드는 중...",
-    "cancel": "취소",
-    "toast_created": "클라우드 런타임 노드를 만들었습니다",
-    "toast_create_failed": "클라우드 런타임 노드를 만들지 못했습니다",
-    "delete": "노드 삭제",
-    "delete_confirm": "이 클라우드 노드를 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
-    "toast_deleted": "클라우드 노드를 삭제했습니다",
-    "toast_delete_failed": "클라우드 노드를 삭제하지 못했습니다",
-    "fields": {
-      "name": "이름",
-      "instance_type": "인스턴스 유형",
-      "region": "리전",
-      "disk_size": "디스크 크기(GiB)",
-      "image_id": "이미지 ID(AMI)",
-      "subnet_id": "Subnet ID",
-      "key_name": "SSH 키 페어",
-      "bootstrap_pat": "부트스트랩 토큰(PAT)"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "인스턴스 유형은 필수입니다",
-      "disk_size_invalid": "디스크 크기는 양의 정수여야 합니다"
-    }
   },
   "update": {
     "cli_version_label": "CLI 버전:",
@@ -675,10 +635,6 @@
       "remote": {
         "title": "다른 머신은 명령 두 개로",
         "description": "서버나 다른 컴퓨터에 CLI를 설치하고 multica setup을 실행하면 연결됩니다."
-      },
-      "cloud": {
-        "title": "클라우드 노드도 가능",
-        "description": "머신을 직접 관리하기 싫다면 Multica가 호스팅하는 클라우드 노드를 만드세요."
       }
     },
     "art": {

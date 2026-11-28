@@ -151,7 +151,7 @@ func TestDocDeletionRefusesPersonalAccessTokens(t *testing.T) {
 					token = pat
 				}
 				req.Header.Set("Authorization", "Bearer "+token)
-				serve := middleware.Auth(testHandler.Queries, nil, nil, nil)(middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(del)))
+				serve := middleware.Auth(testHandler.Queries, nil, nil)(middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(del)))
 				want := http.StatusForbidden
 				if tc.allowed {
 					want = http.StatusNoContent

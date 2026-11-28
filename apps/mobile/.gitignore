@@ -6,9 +6,8 @@ web-build/
 # macOS
 .DS_Store
 
-# Local env files only. `.env.staging` is committed — the override that
-# rescues it from the repo-root `.env*` ignore rule lives in the root
-# .gitignore (`!apps/mobile/.env.staging`).
+# Local env files only. `.env.staging` is a local copy of
+# `.env.staging.example`; the repo-root `.env*` rule keeps it untracked.
 .env*.local
 
 # Native (Expo prebuild output)
