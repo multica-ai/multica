@@ -79,9 +79,10 @@ multica env start web
 |---|---|
 | `MULTICA_PORT` | 端口段的第一个端口，例如 `41000` |
 | `MULTICA_ENVIRONMENT` | 环境名 |
+| `MULTICA_HOST` | URL 使用的主机名：`MULTICA_ENV_PUBLIC_HOST`，默认为 `localhost` |
 | `PATH` | 执行 `multica env start` 的智能体的 `PATH`，这样仓库的工具链能被找到。从侧栏启动时，沿用智能体上一次在这条任务上启动这个环境时的 `PATH`。 |
 
-它们还会继承守护进程的环境变量，但不包括 `MULTICA_*` 变量（凭据也在其中）：环境不能以这次运行的身份操作。`url` 和 `ready` 里只会替换 `$MULTICA_PORT`（或 `${MULTICA_PORT}`）。需要第二个端口时，在 shell 里计算，例如 `API_PORT=$((MULTICA_PORT + 1))`。
+它们还会继承守护进程的环境变量，但不包括 `MULTICA_*` 变量（凭据也在其中）：环境不能以这次运行的身份操作。`url` 和 `ready` 会替换 `$MULTICA_PORT` 和 `$MULTICA_HOST`（也支持 `${...}` 写法）。需要第二个端口时，在 shell 里计算，例如 `API_PORT=$((MULTICA_PORT + 1))`。
 
 ### 让 `start` 留在前台 [#foreground]
 
@@ -90,6 +91,14 @@ multica env start web
 - 让主服务留在前台。用 `&` 放到后台的辅助进程没问题，它们仍在这个进程组里。
 - 不要把工作交给进程组以外的东西，例如 `docker compose up -d`、系统服务或 `setsid`。那样环境会立刻变成**已退出**，停止时也碰不到那些工作。这类工具要在前台运行，并配一个 `stop` 命令。
 - 运行检出的代码里还没有安装依赖。在 `start` 里安装；守护进程等待就绪的十分钟包含安装时间。
+
+### 远程预览和直连 [#remote-access]
+
+如需通过局域网或 VPN 直连，请在守护进程上将 `MULTICA_ENV_PUBLIC_HOST` 设为工作区成员可访问的主机名或 IP。它会替换声明式和自动检测服务 URL 中默认的 `localhost`。启用代理或 Cloud 禁用中继时，两类服务仍保留直连链接。设置主机覆盖后，隐式就绪探针访问 `127.0.0.1`，显式 `ready` 使用配置的地址。
+
+如需中继回环地址，请在服务端将 `MULTICA_ENV_PROXY_BASE_URL` 设为独立的泛子域源，例如 `https://*.preview.example.com` 或 `https://env-*.preview.example.com`。面向多租户公网部署时，请为预览服务使用与主站不同的注册域名（独立 eTLD+1，例如 `https://*.multica-preview.com`），防止预览页设置会随主站请求发送的 Cookie。将泛域名 DNS 和 TLS 配置到 API 入口，并保留 Host 和 WebSocket Upgrade 请求头。主站（`MULTICA_APP_URL`，为空时使用 `MULTICA_PUBLIC_URL`）须将 `/api/*` 转发到 API。守护进程须支持环境隧道并能向该 API 发起 WebSocket 连接。代理须部署在单个 API 副本上（`MULTICA_BACKEND_REPLICAS=1`）。预览源无效、与平台源重叠或副本数大于 1 时，服务端记录错误并关闭代理。
+
+签发一次性启动票据前，预览链接会检查登录状态、工作区成员资格、私有项目访问权限及当前 Cloud 策略。浏览器用票据换取仅限当前预览主机的短期 Cookie。`COOKIE_DOMAIN` 可保持未设置。Cloud 可关闭中继或限制每个工作区同时活跃的环境数。中继请求体上限默认为 32 MiB，可用 `MULTICA_ENV_PROXY_MAX_BODY_BYTES` 调整。
 
 ## 示例 [#examples]
 
@@ -237,7 +246,7 @@ services:
 ## 已知限制 [#limitations]
 
 - **只支持 macOS 和 Linux。** 在 Windows 上不会识别服务，`multica env start` 会提示暂不支持。
-- **localhost 地址只能在运行它的机器上打开。** 环境运行在另一台机器上（例如构建机或同事的电脑）时，侧栏会注明；请在那台机器上打开，或者自己转发端口。
+- **localhost 地址只能在运行它的机器上打开。** 环境运行在另一台机器上（例如构建机或同事的电脑）时，侧栏会注明；请在那台机器上打开、配置[远程预览或直连](#remote-access)，或者自己转发端口。
 - **systemd 下重启守护进程。** 在 Linux 上开启了[开机自启](/daemon-runtimes#autostart)时，重启或更新守护进程会同时停止它托管的声明式环境，之后需要重新启动。
 - **一个环境只在一台机器上。** 环境运行在启动它的那次运行所在的机器上，不会随任务迁移。
 

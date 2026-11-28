@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/entitlement"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -218,6 +220,7 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	changed := false
+	var revoked []string
 	open := make(map[string]db.IssueEnvironment, len(before))
 	for _, row := range before {
 		open[row.LocalKey] = row
@@ -256,14 +259,18 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		prev, wasOpen := open[env.Key]
-		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Repo != env.Repo || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail ||
+		if wasOpen && (env.State == "stopped" || env.State == "exited" || prev.Port != params.Port || prev.Kind != env.Kind) {
+			revoked = append(revoked, uuidToString(prev.ID))
+		}
+		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Port != params.Port || prev.Repo != env.Repo || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail ||
 			prev.Excerpt != env.Excerpt || prev.Controllable != req.Controllable {
 			changed = true
 		}
 	}
-	for key := range open {
+	for key, prev := range open {
 		if !seen[key] {
 			changed = true
+			revoked = append(revoked, uuidToString(prev.ID))
 		}
 	}
 	if err := qtx.EndIssueEnvironmentsMissingFromSnapshot(r.Context(), db.EndIssueEnvironmentsMissingFromSnapshotParams{
@@ -277,6 +284,9 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to report environments")
 		return
+	}
+	for _, id := range revoked {
+		h.revokeEnvironmentSession(id)
 	}
 	// A heartbeat that only refreshes last_seen_at changes nothing a reader
 	// sees, so it stays off the realtime channel.
@@ -367,9 +377,30 @@ func (h *Handler) ListIssueEnvironments(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	var previewRuntimes map[string]db.AgentRuntime
+	if h.envProxy != nil {
+		var runtimeIDs []pgtype.UUID
+		for _, row := range rows {
+			if row.RuntimeID.Valid && row.Url != "" && environmentProxyStatus(row, now) == 0 {
+				runtimeIDs = append(runtimeIDs, row.RuntimeID)
+			}
+		}
+		if len(runtimeIDs) != 0 {
+			decision := h.environmentProxyGate(r.Context(), issue.WorkspaceID)
+			if decision.Gate.Action != entitlement.ActionEnforce || decision.Gate.Limit == nil || *decision.Gate.Limit > 0 {
+				// Leave the reported direct URLs available if the lookup fails.
+				previewRuntimes, _ = h.getAgentRuntimes(r.Context(), obsmetrics.RuntimeLookupSourceIssue, runtimeIDs)
+			}
+		}
+	}
+
 	out := make([]IssueEnvironmentResponse, 0, len(rows))
 	for _, row := range rows {
 		resp := issueEnvironmentToResponse(row, now)
+		if rt, ok := previewRuntimes[uuidToString(row.RuntimeID)]; ok && row.Url != "" &&
+			environmentProxyStatus(row, now) == 0 && environmentRuntimeSupportsTunnel(rt, row.WorkspaceID) {
+			resp.URL = h.envProxy.resolveURL(row)
+		}
 		resp.CanControl = row.Controllable && canControl(row.RuntimeID)
 		resp.PendingAction = pending[resp.ID]
 		resp.LastAction = last[resp.ID]
@@ -407,11 +438,14 @@ func startEndedAt(c db.ListIssueEnvironmentControlsRow) time.Time {
 	return c.CreatedAt.Time.Add(environmentCommandPendingWindow)
 }
 
-func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnvironmentResponse {
-	state := row.State
+func issueEnvironmentState(row db.IssueEnvironment, now time.Time) string {
 	if !row.EndedAt.Valid && row.LastSeenAt.Valid && now.Sub(row.LastSeenAt.Time) > issueEnvironmentUnreachableAfter {
-		state = "unreachable"
+		return "unreachable"
 	}
+	return row.State
+}
+
+func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnvironmentResponse {
 	resp := IssueEnvironmentResponse{
 		ID:           uuidToString(row.ID),
 		IssueID:      uuidToString(row.IssueID),
@@ -425,7 +459,7 @@ func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnv
 		Name:         row.Name,
 		Label:        row.Label,
 		URL:          row.Url,
-		State:        state,
+		State:        issueEnvironmentState(row, now),
 		Detail:       row.Detail,
 		Excerpt:      row.Excerpt,
 		StartedAt:    timestampToString(row.StartedAt),

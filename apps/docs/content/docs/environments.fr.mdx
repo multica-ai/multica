@@ -79,9 +79,10 @@ Chaque environnement reçoit dix ports libres rien qu'à lui, de `MULTICA_PORT` 
 |---|---|
 | `MULTICA_PORT` | Le premier port du bloc, par exemple `41000` |
 | `MULTICA_ENVIRONMENT` | Le nom de l'environnement |
+| `MULTICA_HOST` | Hôte des URL : `MULTICA_ENV_PUBLIC_HOST`, sinon `localhost` |
 | `PATH` | Le `PATH` de l'agent qui a lancé `multica env start`, pour que la chaîne d'outils du dépôt soit trouvée. Un démarrage depuis la barre latérale reprend le dernier utilisé par un agent pour cet environnement sur la tâche. |
 
-Ils héritent aussi de l'environnement du daemon, sauf de ses variables `MULTICA_*`, identifiants compris : un environnement ne peut pas agir au nom de l'exécution. Dans `url` et `ready`, seul `$MULTICA_PORT` (ou `${MULTICA_PORT}`) est remplacé. Pour un second port, calculez-le dans le shell, par exemple `API_PORT=$((MULTICA_PORT + 1))`.
+Ils héritent aussi de l'environnement du daemon, sauf de ses variables `MULTICA_*`, identifiants compris : un environnement ne peut pas agir au nom de l'exécution. Dans `url` et `ready`, `$MULTICA_PORT` et `$MULTICA_HOST` sont remplacés (les formes `${...}` sont aussi acceptées). Pour un second port, calculez-le dans le shell, par exemple `API_PORT=$((MULTICA_PORT + 1))`.
 
 ### Garder `start` au premier plan [#foreground]
 
@@ -90,6 +91,14 @@ Ils héritent aussi de l'environnement du daemon, sauf de ses variables `MULTICA
 - Gardez le serveur principal au premier plan. Les processus auxiliaires lancés avec `&` ne posent pas de problème : ils restent dans le groupe.
 - Ne confiez pas le travail à quelque chose hors du groupe, comme `docker compose up -d`, un service système ou `setsid`. L'environnement passerait aussitôt à **Terminé**, et l'arrêter n'atteindrait pas ce travail. Lancez ces outils au premier plan et ajoutez une commande `stop`.
 - Le checkout d'une exécution démarre sans dépendances installées. Installez-les dans `start` ; les dix minutes pendant lesquelles le daemon attend que l'environnement soit prêt incluent ce temps.
+
+### Aperçu distant et accès direct [#remote-access]
+
+Pour un accès direct sur le réseau local ou le VPN, définissez `MULTICA_ENV_PUBLIC_HOST` sur le daemon avec un nom d’hôte ou une adresse IP accessible aux membres de l’espace de travail. Cette valeur remplace le `localhost` par défaut dans les URL des serveurs déclarés et détectés. Les deux types de liens directs restent disponibles lorsque le proxy est activé ou que Cloud désactive le relais. Avec un hôte personnalisé, les sondes de disponibilité implicites utilisent `127.0.0.1`. Un paramètre `ready` explicite utilise l’adresse configurée.
+
+Pour relayer les URL de bouclage, définissez `MULTICA_ENV_PROXY_BASE_URL` sur le serveur avec une origine générique dédiée, par exemple `https://*.preview.example.com` ou `https://env-*.preview.example.com`. Pour un déploiement public mutualisé, utilisez pour le service de prévisualisation un domaine enregistré distinct de celui du site principal (son propre eTLD+1, par exemple `https://*.multica-preview.com`) afin d’empêcher les pages de prévisualisation de déposer des cookies envoyés ensuite avec les requêtes du site principal. Acheminez le DNS et TLS génériques vers l’entrée de l’API et conservez les en-têtes Host et WebSocket Upgrade. L’origine de l’application (`MULTICA_APP_URL` ou, à défaut, `MULTICA_PUBLIC_URL`) doit transférer `/api/*` à l’API. Le daemon doit prendre en charge les tunnels d’environnement et pouvoir ouvrir une connexion WebSocket vers cette API. Exécutez le proxy sur une seule réplique de l’API (`MULTICA_BACKEND_REPLICAS=1`). Une origine invalide ou qui chevauche une origine de la plateforme, ou plusieurs répliques, désactive le proxy et génère une erreur dans les journaux.
+
+À l’émission du ticket de lancement à usage unique, le service vérifie la connexion, l’appartenance à l’espace de travail, l’accès au projet privé et la politique Cloud en vigueur. Le navigateur échange le ticket contre un cookie de courte durée propre à l’hôte d’aperçu. `COOKIE_DOMAIN` peut rester indéfini. Cloud peut désactiver le relais ou limiter le nombre d’environnements actifs par espace de travail. Les corps des requêtes relayées sont limités à 32 Mio par défaut. Ce seuil se règle avec `MULTICA_ENV_PROXY_MAX_BODY_BYTES`.
 
 ## Exemples [#examples]
 
@@ -237,7 +246,7 @@ L'agent regarde comment le projet démarre, écrit le fichier avec des ports tir
 ## Limites connues [#limitations]
 
 - **macOS et Linux uniquement.** Sous Windows, les serveurs ne sont pas détectés et `multica env start` indique que les environnements ne sont pas encore pris en charge.
-- **Une URL localhost ne s'ouvre que sur l'appareil qui l'exécute.** Quand l'environnement tourne sur un autre appareil, comme un serveur de build ou l'ordinateur d'un collègue, la barre latérale l'indique ; ouvrez-le sur cet appareil, ou redirigez le port vous-même.
+- **Une URL localhost ne s'ouvre que sur l'appareil qui l'exécute.** Quand l'environnement tourne sur un autre appareil, comme un serveur de build ou l'ordinateur d'un collègue, la barre latérale l'indique ; ouvrez-le sur cet appareil, configurez [l’aperçu distant ou l’accès direct](#remote-access), ou redirigez le port vous-même.
 - **Redémarrages du daemon sous systemd.** Sous Linux avec le [démarrage à l'ouverture de session](/daemon-runtimes#autostart), redémarrer ou mettre à jour le daemon arrête aussi ses environnements déclarés. Redémarrez-les ensuite.
 - **Un appareil par environnement.** Un environnement tourne là où a tourné l'exécution qui l'a démarré ; il ne suit pas la tâche.
 

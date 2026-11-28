@@ -79,9 +79,10 @@ Each environment gets ten free ports of its own, `MULTICA_PORT` through `MULTICA
 |---|---|
 | `MULTICA_PORT` | The first port of the block, for example `41000` |
 | `MULTICA_ENVIRONMENT` | The environment's name |
+| `MULTICA_HOST` | Host used in URLs; `MULTICA_ENV_PUBLIC_HOST`, or `localhost` by default |
 | `PATH` | The `PATH` of the agent that ran `multica env start`, so the repository's toolchain resolves. A start from the sidebar reuses the last one an agent used for that environment on the issue. |
 
-They also inherit the daemon's environment, except its `MULTICA_*` variables, credentials included: an environment cannot act as the run. In `url` and `ready`, only `$MULTICA_PORT` (or `${MULTICA_PORT}`) is substituted. To use a second port, compute it in the shell, for example `API_PORT=$((MULTICA_PORT + 1))`.
+They also inherit the daemon's environment, except its `MULTICA_*` variables, credentials included: an environment cannot act as the run. In `url` and `ready`, `$MULTICA_PORT` and `$MULTICA_HOST` (including `${...}` forms) are substituted. To use a second port, compute it in the shell, for example `API_PORT=$((MULTICA_PORT + 1))`.
 
 ### Keep `start` in the foreground [#foreground]
 
@@ -90,6 +91,14 @@ They also inherit the daemon's environment, except its `MULTICA_*` variables, cr
 - Keep the main server in the foreground. Background helpers started with `&` are fine; they stay in the group.
 - Don't detach work to something outside the group, such as `docker compose up -d`, a system service, or `setsid`. The environment would end as **Exited** at once, and stopping it would not reach that work. Run such tools in the foreground and add a `stop` command.
 - A run's checkout starts without dependencies installed. Install them in `start`; the ten minutes the daemon waits for readiness include that time.
+
+### Remote preview and direct access [#remote-access]
+
+For direct LAN or VPN access, set `MULTICA_ENV_PUBLIC_HOST` on the daemon to a hostname or IP that workspace members can reach. This replaces the default `localhost` in declared and detected server URLs. Both sources keep their direct links even when the proxy is enabled or Cloud disables relay access. With a host override, implicit readiness probes use `127.0.0.1`. An explicit `ready` uses its configured address.
+
+To relay loopback URLs, set `MULTICA_ENV_PROXY_BASE_URL` on the server to a dedicated wildcard origin, for example `https://*.preview.example.com` or `https://env-*.preview.example.com`. For multi-tenant public deployments, give the preview service a registered domain separate from the main site (its own eTLD+1, for example `https://*.multica-preview.com`) so preview pages cannot set cookies that are sent with main-site requests. Route wildcard DNS and TLS to the API ingress and preserve the Host and WebSocket Upgrade headers. The app origin (`MULTICA_APP_URL`, falling back to `MULTICA_PUBLIC_URL`) must forward `/api/*` to the API. The daemon needs outbound WebSocket access to this API and a version that supports environment tunnels. Keep the proxy on a single API replica (`MULTICA_BACKEND_REPLICAS=1`). An invalid or overlapping origin or a larger replica count disables the proxy and logs an error.
+
+Preview links check sign-in, workspace membership, private-project access, and the current Cloud policy when issuing a one-time launch ticket. The browser exchanges the ticket for a short-lived cookie scoped to that preview host. `COOKIE_DOMAIN` can stay unset. Cloud can disable the relay or cap active environments per workspace. By default, relay request bodies are limited to 32 MiB. Override the size with `MULTICA_ENV_PROXY_MAX_BODY_BYTES`.
 
 ## Examples [#examples]
 
@@ -237,7 +246,7 @@ The agent reads how the project starts, writes the file with ports taken from `M
 ## Known limitations [#limitations]
 
 - **macOS and Linux only.** On Windows, servers are not detected and `multica env start` reports that environments are not supported yet.
-- **A localhost URL opens only on the machine running it.** When the environment runs on another machine, such as a build server or a teammate's computer, the sidebar says so; open it on that machine, or forward the port yourself.
+- **A localhost URL opens only on the machine running it.** When the environment runs on another machine, such as a build server or a teammate's computer, the sidebar says so; open it on that machine, configure [remote preview or direct access](#remote-access), or forward the port yourself.
 - **Daemon restarts under systemd.** On Linux with [start at login](/daemon-runtimes#autostart), restarting or updating the daemon also stops its declared environments. Start them again afterwards.
 - **One machine per environment.** An environment runs where the run that started it ran; it does not move with the issue.
 
