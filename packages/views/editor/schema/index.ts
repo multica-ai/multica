@@ -26,12 +26,14 @@ import { MentionSchema } from "./mention";
 import { BlockMathSchema, InlineMathSchema } from "./math";
 import { ImageSchema } from "./image";
 import { SlashCommandSchema } from "./slash-command";
+import { DetailsBlockSchema } from "./details";
 
 export { FileCardSchema } from "./file-card";
 export { MentionSchema, mentionText } from "./mention";
 export { BlockMathSchema, InlineMathSchema } from "./math";
 export { ImageSchema } from "./image";
 export { SlashCommandSchema } from "./slash-command";
+export { DetailsBlockSchema } from "./details";
 
 export const STARTER_KIT_OPTIONS: Partial<StarterKitOptions> = {
   // Every level Markdown can express. The Markdown parser keeps the source
@@ -98,6 +100,7 @@ export function createMarkdownSchemaExtensions(): AnyExtension[] {
     TableCell,
     BlockMathSchema,
     InlineMathSchema,
+    DetailsBlockSchema,
     HighlightExtension,
     Markdown.configure({ ...MARKDOWN_OPTIONS, marked: createMarkedInstance() }),
     FileCardSchema,
