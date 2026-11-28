@@ -127,7 +127,7 @@ multica runtime usage <runtime-id> --days 30
 
 `runtime usage` lists a runtime's tokens per date, provider, and model. `--days` defaults to 90, up to 365.
 
-Neither table includes a cost estimate; add `--output json` for the raw data the API returns.
+`issue usage` also shows `EST_COST_USD`: the same estimate as the issue's usage dialog, priced from the server's rate table. Custom rates set in the browser are not included, and models without a rate are named below the table and left out of the figure. `runtime usage` has no cost column. Add `--output json` for the raw data the API returns.
 
 ## Next steps
 

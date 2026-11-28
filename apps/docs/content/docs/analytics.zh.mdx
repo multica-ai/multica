@@ -127,7 +127,7 @@ multica runtime usage <runtime-id> --days 30
 
 `runtime usage` 按日期、工具和模型列出一个运行时的 token 用量，`--days` 默认 90，最大 365。
 
-两条命令的表格只有 token，不含费用估算；加 `--output json` 输出接口返回的原始数据。
+`issue usage` 还会输出 `EST_COST_USD`，和任务用量弹窗里的估算是同一个数，按服务端的价格表算。浏览器里设的自定义价格不算在内；没有价格的模型会在表格下面列出来，不计入这个数。`runtime usage` 没有费用列。加 `--output json` 输出接口返回的原始数据。
 
 ## 接下来
 
