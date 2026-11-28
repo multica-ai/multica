@@ -10,6 +10,7 @@ import {
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { api, ApiError } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import type { RuntimeUpdate, RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -139,6 +140,8 @@ export function UpdateSection({
 }: UpdateSectionProps) {
   const { t } = useT("runtimes");
   const isManaged = launchedBy === "desktop";
+  const configStatus = useConfigStore((state) => state.daemonConfigStatus);
+  const configuredVersion = useConfigStore((state) => state.cliLatestVersion);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   // The machine's update as the server last reported it.
   const [update, setUpdate] = useState<RuntimeUpdate | null>(null);
@@ -146,10 +149,19 @@ export function UpdateSection({
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  // Fetch latest version on mount.
   useEffect(() => {
-    fetchLatestVersion().then(setLatestVersion);
-  }, []);
+    let active = true;
+    setLatestVersion(null);
+    if (configStatus !== "ready") return;
+    if (configuredVersion !== "") {
+      setLatestVersion(typeof configuredVersion === "string" && parseReleaseVersion(configuredVersion) ? configuredVersion : null);
+      return;
+    }
+    fetchLatestVersion().then((version) => {
+      if (active) setLatestVersion(version);
+    });
+    return () => { active = false; };
+  }, [configStatus, configuredVersion]);
 
   // A reload, or another runtime of the same daemon, picks up the queue.
   // Switching machines replaces whatever the previous one showed.

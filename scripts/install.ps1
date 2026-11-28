@@ -206,6 +206,20 @@ function Assert-ComposeSupportsSelfHost {
 }
 
 function Get-LatestVersion {
+    if ($env:MULTICA_CLI_VERSION) {
+        $version = $env:MULTICA_CLI_VERSION.Trim()
+        if ($version -notmatch '^v?\d+\.\d+\.\d+$') {
+            Write-Fail "MULTICA_CLI_VERSION must name a release version."
+        }
+        return "v" + $version.TrimStart('v')
+    }
+    if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+        Write-Fail "MULTICA_CLI_VERSION is required with MULTICA_RELEASE_DOWNLOAD_BASE_URL."
+    }
+    return Get-ServerLatestVersion
+}
+
+function Get-ServerLatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
         return $release.tag_name
@@ -219,7 +233,7 @@ function Get-SelfHostRef {
         return $env:MULTICA_SELFHOST_REF
     }
 
-    $latest = Get-LatestVersion
+    $latest = Get-ServerLatestVersion
     if ($latest) {
         return $latest
     }
@@ -338,6 +352,12 @@ function Get-WindowsCliArch {
 function Get-InstalledCliVersion {
     try {
         $firstLine = multica version 2>$null | Select-Object -First 1
+        if ($env:MULTICA_CLI_VERSION) {
+            if ("$firstLine" -match '^\s*multica\s+(\S+)') {
+                return $Matches[1]
+            }
+            return $null
+        }
         if ("$firstLine" -match '\b(v?\d+(?:\.\d+)+)\b') {
             $version = $Matches[1]
             if ($version -notlike 'v*') {
@@ -354,7 +374,7 @@ function Get-InstalledCliVersion {
 # CLI Installation
 # ---------------------------------------------------------------------------
 function Install-CliBinary {
-    Write-Info "Installing Multica CLI from GitHub Releases..."
+    Write-Info "Installing Multica CLI from the configured release source..."
 
     if (-not [Environment]::Is64BitOperatingSystem) {
         Write-Fail "Multica requires a 64-bit Windows installation."
@@ -368,7 +388,12 @@ function Install-CliBinary {
     }
 
     $version = $latest.TrimStart('v')
-    $url = "https://github.com/multica-ai/multica/releases/download/$latest/multica-cli-$version-windows-$arch.zip"
+    $releaseBase = if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+        $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL.TrimEnd('/')
+    } else {
+        "https://github.com/multica-ai/multica/releases/download"
+    }
+    $url = "$releaseBase/$latest/multica-cli-$version-windows-$arch.zip"
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install"
 
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
@@ -383,7 +408,7 @@ function Install-CliBinary {
     }
 
     # Verify SHA256 checksum
-    $checksumUrl = "https://github.com/multica-ai/multica/releases/download/$latest/checksums.txt"
+    $checksumUrl = "$releaseBase/$latest/checksums.txt"
     try {
         $checksums = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -ErrorAction Stop
         $checksumContent = if ($checksums.Content -is [byte[]]) {
@@ -397,8 +422,9 @@ function Install-CliBinary {
         $legacyAsset = "multica_windows_$arch.zip"
         $expectedLine = ($checksumContent -split "`r?`n") |
             Where-Object {
-                $_ -match [regex]::Escape($releaseAsset) -or
-                $_ -match [regex]::Escape($legacyAsset)
+                $_ -match ('^\S+\s+' + [regex]::Escape($releaseAsset) + '\s*$') -or
+                (-not $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL -and
+                 $_ -match ('^\S+\s+' + [regex]::Escape($legacyAsset) + '\s*$'))
             } |
             Select-Object -First 1
         if ($expectedLine) {
@@ -409,9 +435,15 @@ function Install-CliBinary {
             }
             Write-Ok "Checksum verified"
         } else {
+            if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+                Write-Fail "Could not find mirror checksum entry for $releaseAsset."
+            }
             Write-Warn "Could not find checksum entry for $releaseAsset - skipping verification."
         }
     } catch {
+        if ($env:MULTICA_RELEASE_DOWNLOAD_BASE_URL) {
+            Write-Fail "Could not verify mirror checksums.txt: $_"
+        }
         Write-Warn "Could not download checksums.txt - skipping verification."
     }
 
@@ -435,7 +467,21 @@ function Install-CliBinary {
     Remove-Item $tmpDir -Recurse -Force
 
     Add-ToUserPath $binDir
+    Assert-CliPin (Join-Path $binDir "multica.exe")
     Write-Ok "Multica CLI installed to $binDir\multica.exe"
+}
+
+function Assert-CliPin {
+    param([string]$InstalledPath)
+    if (-not $env:MULTICA_CLI_VERSION) { return }
+    $version = Get-InstalledCliVersion
+    if (($version -replace '^v', '') -ne ($env:MULTICA_CLI_VERSION.Trim() -replace '^v', '')) {
+        $active = Get-Command multica -ErrorAction SilentlyContinue | Select-Object -First 1
+        $activePath = if ($active -and $active.Source) { $active.Source }
+            elseif ($active) { "$($active.CommandType):multica" }
+            else { "multica (not found)" }
+        Write-Fail "Pinned CLI was installed to $InstalledPath, but $activePath still reports $version. Resolve any shadowing command with Get-Command multica -All, put $(Split-Path $InstalledPath -Parent) first in PATH, and re-run the installer."
+    }
 }
 
 function Add-ToUserPath {
@@ -462,7 +508,9 @@ function Install-Cli {
         $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
 
         $isUpToDate = $currentCmp -and -not $latestCmp
-        if (-not $isUpToDate) {
+        if ($env:MULTICA_CLI_VERSION) {
+            $isUpToDate = $currentCmp -and $latestCmp -and ($currentCmp -eq $latestCmp)
+        } elseif (-not $isUpToDate) {
             try {
                 $isUpToDate = $currentCmp -and $latestCmp -and ([System.Version]$currentCmp -ge [System.Version]$latestCmp)
             } catch {

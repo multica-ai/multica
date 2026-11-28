@@ -440,6 +440,119 @@ foreach ($case in $composeCases) {
 }
 
 Remove-Item $runnerScript -Force -ErrorAction SilentlyContinue
+
+# File mirrors install only pinned, checksum-verified archives. Network and
+# persistent PATH registration are stubbed; archive extraction/copy are real.
+$mirrorRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("multica-mirror-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $mirrorRoot | Out-Null
+$mirrorRunner = Join-Path $mirrorRoot "runner.ps1"
+@'
+$ErrorActionPreference = "Stop"
+$source = Get-Content -Raw $env:MULTICA_TEST_INSTALLER
+Invoke-Expression $source.Substring(0, $source.IndexOf("# Entry point"))
+function Get-WindowsCliArch { return "amd64" }
+function Add-ToUserPath { param([string]$Dir) }
+function Invoke-RestMethod {
+    if ($env:MULTICA_TEST_SCENARIO -eq "server_ref") { return @{tag_name="v7.0.0"} }
+    throw "GitHub release API must not be called"
+}
+function Invoke-WebRequest {
+    param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [string]$ErrorAction)
+    Add-Content -Path $env:MULTICA_TEST_REQUESTS -Value $Uri
+    switch ($Uri) {
+        "https://mirror.example/releases/v0.3.2/multica-cli-0.3.2-windows-amd64.zip" {
+            Copy-Item $env:MULTICA_TEST_ARCHIVE $OutFile
+            return
+        }
+        "https://mirror.example/releases/v0.3.2/checksums.txt" {
+            if ($env:MULTICA_TEST_SCENARIO -eq "missing_manifest") { throw "manifest unavailable" }
+            return @{ Content = (Get-Content -Raw $env:MULTICA_TEST_MANIFEST) }
+        }
+        default { throw "Unexpected download URL: $Uri" }
+    }
+}
+if ($env:MULTICA_TEST_SCENARIO -eq "server_ref") {
+    Write-Host "SERVER_REF=$(Get-SelfHostRef)"
+    $env:MULTICA_CLI_VERSION = ""
+    $env:MULTICA_RELEASE_DOWNLOAD_BASE_URL = ""
+    Write-Host "DEFAULT_CLI=$(Get-LatestVersion)"
+    exit 0
+}
+function multica {
+    if ($args[0] -ne "version") { throw "Only the fake version command is allowed" }
+    $installed = Join-Path $env:USERPROFILE ".multica/bin/multica.exe"
+    $version = if ($env:MULTICA_TEST_SCENARIO -eq "shadowed") { "v0.3.1" }
+        elseif (Test-Path $installed) { "v0.3.2" }
+        elseif ($env:MULTICA_TEST_SCENARIO -eq "source_dev") { "v0.3.2-19-gabcdef" }
+        else { "v9.9.9" }
+    return "multica $version (commit: fixture)"
+}
+if ($env:MULTICA_TEST_SCENARIO -in @("existing_newer", "source_dev", "shadowed")) {
+    Install-Cli
+} else {
+    Install-CliBinary
+}
+Write-Host "ACTIVE_CLI=$(((multica version) -split '\s+')[1])"
+'@ | Set-Content -Path $mirrorRunner -Encoding UTF8
+try {
+    foreach ($scenario in @("valid", "existing_newer", "source_dev", "shadowed", "server_ref", "wrong_checksum", "missing_checksum", "wrong_filename", "missing_manifest", "missing_pin")) {
+        if ($env:MULTICA_TEST_MIRROR_CASE -and $env:MULTICA_TEST_MIRROR_CASE -ne $scenario) { continue }
+        $caseDir = Join-Path $mirrorRoot $scenario
+        $profileDir = Join-Path $caseDir "profile"
+        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+        $payload = Join-Path $caseDir "multica.exe"
+        Set-Content -Path $payload -Value "synthetic test payload, never run" -Encoding ASCII
+        $archive = Join-Path $caseDir "archive.zip"
+        Compress-Archive -Path $payload -DestinationPath $archive
+        $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+        if ($scenario -eq "wrong_checksum") { $hash = "0" * 64 }
+        $asset = if ($scenario -eq "missing_checksum") { "unrelated.zip" } else { "multica-cli-0.3.2-windows-amd64.zip" }
+        if ($scenario -eq "wrong_filename") { $asset += ".wrong" }
+        $manifest = Join-Path $caseDir "checksums.txt"
+        Set-Content -Path $manifest -Value "$hash  $asset" -Encoding ASCII
+        $requests = Join-Path $caseDir "requests.txt"
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $PowerShellPath
+        $psi.Arguments = "-NoProfile -NonInteractive -File `"$mirrorRunner`""
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.EnvironmentVariables["USERPROFILE"] = $profileDir
+        $psi.EnvironmentVariables["TEMP"] = $caseDir
+        $psi.EnvironmentVariables["TMP"] = $caseDir
+        $psi.EnvironmentVariables["TMPDIR"] = $caseDir
+        $psi.EnvironmentVariables["MULTICA_TEST_INSTALLER"] = $InstallerPath
+        $psi.EnvironmentVariables["MULTICA_TEST_SCENARIO"] = $scenario
+        $psi.EnvironmentVariables["MULTICA_TEST_ARCHIVE"] = $archive
+        $psi.EnvironmentVariables["MULTICA_TEST_MANIFEST"] = $manifest
+        $psi.EnvironmentVariables["MULTICA_TEST_REQUESTS"] = $requests
+        $psi.EnvironmentVariables["MULTICA_RELEASE_DOWNLOAD_BASE_URL"] = "https://mirror.example/releases/"
+        $psi.EnvironmentVariables["MULTICA_CLI_VERSION"] = $(if ($scenario -eq "missing_pin") { "" } else { "0.3.2" })
+        $process = [System.Diagnostics.Process]::Start($psi)
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $installed = Join-Path $profileDir ".multica/bin/multica.exe"
+        if ($scenario -eq "server_ref") {
+            if ($process.ExitCode -ne 0 -or ($stdout -notmatch "SERVER_REF=v7.0.0" -or $stdout -notmatch "DEFAULT_CLI=v7.0.0")) { Fail-Test "CLI pin changed the server ref: $stdout $stderr" }
+            continue
+        }
+        if ($scenario -in @("valid", "existing_newer", "source_dev")) {
+            if ($process.ExitCode -ne 0 -or -not (Test-Path $installed)) { Fail-Test "mirror install failed: $stdout $stderr" }
+            if ((Get-FileHash $installed).Hash -ne (Get-FileHash $payload).Hash) { Fail-Test "mirror installed wrong payload" }
+            if ($stdout -notmatch '(?m)^ACTIVE_CLI=v0\.3\.2\r?$') { Fail-Test "active CLI did not reach pin: $stdout" }
+            if (@(Get-Content $requests).Count -ne 2) { Fail-Test "expected exactly archive + checksum requests" }
+        } elseif ($scenario -eq "shadowed") {
+            if ($process.ExitCode -eq 0) { Fail-Test "shadowed CLI was reported as upgraded: $stdout $stderr" }
+        } else {
+            if ($process.ExitCode -eq 0 -or (Test-Path $installed)) { Fail-Test "unsafe mirror $scenario install succeeded: $stdout $stderr" }
+            if ($scenario -eq "missing_pin" -and (Test-Path $requests)) { Fail-Test "missing pin attempted a download" }
+        }
+    }
+} finally {
+    Remove-Item $mirrorRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "install.ps1 tests passed" -ForegroundColor Green
 # The expected-failure cases leave the last child's exit code in $LASTEXITCODE,
 # which `powershell -command` would report as the script's own result.

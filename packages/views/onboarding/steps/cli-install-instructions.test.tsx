@@ -49,7 +49,7 @@ describe("CliInstallInstructions", () => {
   it("does not offer a setup command before connection settings resolve", () => {
     renderInstructions();
     expect(screen.queryByText("multica setup")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.queryAllByRole("button", { name: "Copy" })).toHaveLength(0);
     expect(screen.getByRole("status")).toHaveTextContent(
       "Loading connection settings",
     );
@@ -63,7 +63,7 @@ describe("CliInstallInstructions", () => {
       "Couldn't load connection settings",
     );
     expect(screen.queryByText("multica setup")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.queryAllByRole("button", { name: "Copy" })).toHaveLength(0);
     act(() => configStore.getState().setDaemonConfig({
       daemonSetupTarget: "self_host",
       daemonServerUrl: "https://api.example.com",

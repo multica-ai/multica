@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { configStore } from "@multica/core/config";
 import { CliSection } from "./cli-section";
 
 vi.mock("../../i18n", () => ({
@@ -30,6 +31,7 @@ describe("CliSection", () => {
   // The switch itself is covered in @multica/views; this checks the landing
   // dictionary is wired into it and the daemon block stays shared.
   it("wires the platform switch into the install block", async () => {
+    configStore.getState().setDaemonConfig({ daemonSetupTarget: "cloud" });
     const user = userEvent.setup();
     render(<CliSection />);
 

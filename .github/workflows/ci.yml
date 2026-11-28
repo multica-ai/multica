@@ -751,6 +751,11 @@ jobs:
           check-latest: true
           cache-dependency-path: server/go.sum
 
+      - name: Test Windows CLI file-mirror update
+        working-directory: server
+        # Replaces only a copied test executable using a local HTTP fixture.
+        run: go test ./internal/cli -run '^(TestUpdateFromFileMirrorWithoutReleaseAPI|TestFetchLatestReleaseFileMirror.*)$' -count=1 -timeout=5m
+
       - name: Test Windows WeCom media streaming and plaintext cleanup
         working-directory: server
         # These tests need no database. Windows must prove private file access,

@@ -1,7 +1,9 @@
+import { ApiClient } from "@multica/core/api/client";
+import { configStore } from "@multica/core/config";
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api, ApiError } from "@multica/core/api";
 import type { RuntimeUpdate } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -38,9 +40,15 @@ function renderSection(props: {
   );
 }
 
+beforeEach(() => {
+  configStore.setState({ daemonConfigStatus: "ready", cliLatestVersion: "" });
+});
+
 afterEach(() => {
+  configStore.setState({ daemonConfigStatus: "ready", cliLatestVersion: "" });
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("UpdateSection read-only status", () => {
@@ -174,6 +182,61 @@ describe("UpdateSection non-release versions", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Local build")).not.toBeInTheDocument();
   });
+});
+
+describe("UpdateSection deployment release pin", () => {
+  it("uses the deployment version without a GitHub request, including while config loads", async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error("GitHub is unreachable"));
+    vi.stubGlobal("fetch", fetch);
+    configStore.setState({ daemonConfigStatus: "loading", cliLatestVersion: "" });
+    renderSection({ runtimeId: "runtime-1" });
+    expect(fetch).not.toHaveBeenCalled();
+    act(() => configStore.setState({
+      daemonConfigStatus: "ready",
+      cliLatestVersion: "v9.8.7",
+    }));
+    expect(await screen.findByText("v9.8.7")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to GitHub for an invalid configured version", async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error("GitHub is unreachable"));
+    vi.stubGlobal("fetch", fetch);
+    configStore.setState({ daemonConfigStatus: "ready", cliLatestVersion: "not-a-release" });
+    renderSection({ runtimeId: "runtime-1" });
+    expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+it("keeps the deployment pin when a late GitHub response arrives", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1_000_000_000_000);
+  let resolveFetch!: (value: unknown) => void;
+  const fetch = vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; }));
+  vi.stubGlobal("fetch", fetch);
+  renderSection({ runtimeId: "runtime-1" });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  act(() => configStore.setState({ cliLatestVersion: "v9.8.7" }));
+  expect(await screen.findByText("v9.8.7")).toBeInTheDocument();
+  await act(async () => resolveFetch({
+    ok: true,
+    json: async () => ({ tag_name: "v0.5.0" }),
+  }));
+  expect(screen.getByText("v9.8.7")).toBeInTheDocument();
+  expect(screen.queryByText("v0.5.0")).not.toBeInTheDocument();
+});
+
+it("does not contact GitHub when the API supplies a malformed non-string pin", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2_000_000_000_000);
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({cli_latest_version: []})));
+  vi.stubGlobal("fetch",fetch);
+  const cfg = await new ApiClient("https://api.example.test").getConfig();
+  configStore.getState().setCliReleaseConfig({latestVersion:cfg.cli_latest_version});
+  fetch.mockReset().mockRejectedValue(new Error("Public GitHub lookup is forbidden"));
+  renderSection({runtimeId: "runtime-1"});
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button",{name:"Update"})).not.toBeInTheDocument();
 });
 
 describe("UpdateSection queued updates", () => {

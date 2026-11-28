@@ -712,6 +712,36 @@ func TestGetConfigReportsTheThemeStore(t *testing.T) {
 	}
 }
 
+func TestGetConfigPublishesCLIReleaseConfiguration(t *testing.T) {
+	want := map[string]string{
+		"cli_install_command_unix":    "curl -fsSL https://mirror.example/install.sh | bash",
+		"cli_install_command_windows": "irm https://mirror.example/install.ps1 | iex",
+		"cli_latest_version":          "v1.2.3",
+	}
+	for key, value := range want {
+		env := map[string]string{"cli_install_command_unix": "MULTICA_CLI_INSTALL_COMMAND_UNIX", "cli_install_command_windows": "MULTICA_CLI_INSTALL_COMMAND_WINDOWS", "cli_latest_version": "MULTICA_CLI_LATEST_VERSION"}[key]
+		t.Setenv(env, value)
+	}
+	var config map[string]any
+	testutil.Call(t, testHandler.GetConfig, httptest.NewRequest(http.MethodGet, "/api/config", nil)).Want(http.StatusOK).JSON(&config)
+	for key, value := range want {
+		if config[key] != value {
+			t.Errorf("%s=%v, want %q", key, config[key], value)
+		}
+	}
+	for _, env := range []string{"MULTICA_CLI_INSTALL_COMMAND_UNIX", "MULTICA_CLI_INSTALL_COMMAND_WINDOWS", "MULTICA_CLI_LATEST_VERSION"} {
+		t.Setenv(env, "")
+	}
+	// Decode into a fresh map: JSON unmarshal preserves absent keys otherwise.
+	config = map[string]any{}
+	testutil.Call(t, testHandler.GetConfig, httptest.NewRequest(http.MethodGet, "/api/config", nil)).Want(http.StatusOK).JSON(&config)
+	for key := range want {
+		if _, exists := config[key]; exists {
+			t.Errorf("unset optional config %s was published", key)
+		}
+	}
+}
+
 func TestGetConfigDashboardHistory365dFlagCanBeTurnedOff(t *testing.T) {
 	h := &Handler{}
 	withFeatureFlag(t, h, featureflags.DashboardHistory365d, false)

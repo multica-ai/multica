@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -49,5 +50,49 @@ func TestFetchLatestReleaseUsesConfiguredAPI(t *testing.T) {
 	}
 	if got.TagName != "v9.8.7" {
 		t.Fatalf("release tag = %q, want v9.8.7", got.TagName)
+	}
+}
+
+func TestFetchLatestReleaseFileMirrorRequiresPinWithoutNetwork(t *testing.T) {
+	for _, version := range []string{"", "dev", "../latest", "v1.2.3-42-gabc"} {
+		t.Run(version, func(t *testing.T) {
+			var requests atomic.Int32
+			mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected network lookup", 500)
+			}))
+			defer mirror.Close()
+			t.Setenv(releaseDownloadBaseURLEnv, mirror.URL)
+			t.Setenv(releaseAPIBaseURLEnv, mirror.URL)
+			t.Setenv("MULTICA_CLI_VERSION", version)
+			if release, err := FetchLatestRelease(); err == nil {
+				t.Fatalf("release=%+v, want a missing/invalid pin error", release)
+			}
+			if requests.Load() != 0 {
+				t.Fatalf("made %d network requests for invalid mirror pin", requests.Load())
+			}
+		})
+	}
+}
+
+func TestFetchLatestReleaseFileMirrorUsesPinWithoutAPI(t *testing.T) {
+	var requests atomic.Int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected release API", 500)
+	}))
+	defer mirror.Close()
+	t.Setenv(releaseDownloadBaseURLEnv, mirror.URL)
+	t.Setenv(releaseAPIBaseURLEnv, mirror.URL)
+	t.Setenv("MULTICA_CLI_VERSION", "1.2.3")
+	got, err := FetchLatestRelease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TagName != "v1.2.3" {
+		t.Fatalf("tag=%q, want v1.2.3", got.TagName)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("made %d network requests instead of using pin", requests.Load())
 	}
 }
