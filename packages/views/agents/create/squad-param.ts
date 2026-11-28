@@ -13,11 +13,12 @@
  */
 export function createPathWithParams(
   path: string,
-  params: { squad?: string | null; runtime?: string | null },
+  params: { squad?: string | null; runtime?: string | null; strategy?: string | null },
 ): string {
   const query = new URLSearchParams();
   if (params.squad) query.set("squad", params.squad);
   if (params.runtime) query.set("runtime", params.runtime);
+  if (params.strategy) query.set("strategy", params.strategy);
   const suffix = query.toString();
   return suffix ? `${path}?${suffix}` : path;
 }

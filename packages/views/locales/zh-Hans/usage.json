@@ -12,7 +12,9 @@
     "attribution_label": "归属",
     "all_attribution": "全部归属",
     "standalone_only": "仅独立智能体",
-    "squads_group": "Squad"
+    "squads_group": "Squad",
+    "caller_label": "调用人",
+    "all_callers": "全部"
   },
   "history_limit": {
     "note": "当前套餐可以查看最近 {{days}} 天。升级后可以查看更早的数据，数据一直保留。",

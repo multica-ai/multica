@@ -144,5 +144,13 @@
     "unknown": "Este servidor no ha confirmado sus ajustes de conexión. Pide a tu administrador que actualice el servidor.",
     "incomplete": "Los ajustes de conexión están incompletos. Pide a tu administrador que configure las URL públicas de este servidor."
   },
-  "more_actions": "Más acciones"
+  "more_actions": "Más acciones",
+  "agents": {
+    "recent": {
+      "load_failed": "No se pudieron cargar los agentes usados recientemente.",
+      "retry": "Reintentar",
+      "sync_failed": "Se seleccionó el agente, pero no se pudo sincronizar la lista de recientes entre dispositivos."
+    }
+  },
+  "recently_used": "Usados recientemente"
 }

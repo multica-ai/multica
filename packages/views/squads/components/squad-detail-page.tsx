@@ -82,6 +82,10 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import {
+  SmartRuntimeAgentBadge,
+  SmartRuntimeAgentBadgeById,
+} from "../../agents/components/agent-runtime-hover";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -664,6 +668,9 @@ function SquadMembersSection({
                 />
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <span className="truncate font-medium">{name}</span>
+                  {m.member_type === "agent" && (
+                    <SmartRuntimeAgentBadgeById agentId={m.member_id} />
+                  )}
                   {leader && (
                     <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm border px-1 text-caption text-muted-foreground">
                       <Crown className="size-3" />
@@ -951,6 +958,7 @@ function SquadProperties({
     <>
       <ActorAvatar actorType="agent" actorId={squad.leader_id} size="xs" />
       <span className="truncate">{leaderName}</span>
+      <SmartRuntimeAgentBadgeById agentId={squad.leader_id} />
     </>
   );
 
@@ -981,6 +989,7 @@ function SquadProperties({
                   <DropdownMenuRadioItem key={m.member_id} value={m.member_id}>
                     <ActorAvatar actorType="agent" actorId={m.member_id} size="xs" />
                     <span className="truncate">{getEntityName("agent", m.member_id)}</span>
+                    <SmartRuntimeAgentBadgeById agentId={m.member_id} />
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -1143,6 +1152,7 @@ function AddMemberDialog({
                         >
                           <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                           <span>{a.name}</span>
+                          <SmartRuntimeAgentBadge shareRuntime={a.share_runtime} />
                         </PickerItem>
                       ))}
                     </PickerSection>

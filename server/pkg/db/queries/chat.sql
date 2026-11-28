@@ -1158,6 +1158,8 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     fire_at, channel_context_revision, id, context
 )
 SELECT
@@ -1172,6 +1174,13 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),

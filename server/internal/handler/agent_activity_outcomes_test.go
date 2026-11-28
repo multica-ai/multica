@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -80,4 +81,78 @@ func TestAgentActivityOutcomes(t *testing.T) {
 		"started_at": testutil.Raw("now()"),
 	})
 	t.Run("window_and_active_runs", func(t *testing.T) { readCounts(t, 10, 1, 1, 8) })
+}
+
+// The caller-filtered activity series must come from the server-side roll-up,
+// not from whatever task pages the client has loaded: a member whose runs fall
+// outside the first page still sees their complete 30-day counts.
+func TestWorkspaceAgentActivity30dOriginatorFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	if testPool == nil {
+		t.Skip("database pool not available")
+	}
+
+	var runtimeID, agentID string
+	dbfx.QueryRow(t, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID)
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+
+	var issueID string
+	dbfx.QueryRow(t, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'activity originator filter test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	const callerA = "5b1f6e1a-0000-4000-8000-0000000000c3"
+	const callerB = "5b1f6e1a-0000-4000-8000-0000000000d4"
+	mkTask := func(caller string) {
+		dbfx.Task(t, agentID, testutil.Cols{
+			"issue_id":             issueID,
+			"runtime_id":           runtimeID,
+			"status":               "completed",
+			"originator_user_id":   caller,
+			"accountable_user_id":  caller,
+			"started_at":           testutil.Raw("now() - interval '5 minutes'"),
+			"completed_at":         testutil.Raw("now()"),
+			"created_at":           testutil.Raw("now()"),
+		})
+	}
+	mkTask(callerA)
+	mkTask(callerA)
+	mkTask(callerB)
+
+	readCounts := func(originator string) int {
+		path := "/api/agent-activity-30d"
+		if originator != "" {
+			path += "?originator_user_id=" + originator
+		}
+		req := withChatTestWorkspaceCtx(t, newRequest(http.MethodGet, path, nil))
+		var rows []struct {
+			AgentID   string `json:"agent_id"`
+			TaskCount int    `json:"task_count"`
+		}
+		testutil.Call(t, testHandler.GetWorkspaceAgentActivity30d, req).Want(http.StatusOK).JSON(&rows)
+		total := 0
+		for _, row := range rows {
+			if row.AgentID == agentID {
+				total += row.TaskCount
+			}
+		}
+		return total
+	}
+
+	if got := readCounts(callerA); got != 2 {
+		t.Errorf("caller A task_count = %d, want 2", got)
+	}
+	if got := readCounts(callerB); got != 1 {
+		t.Errorf("caller B task_count = %d, want 1", got)
+	}
+	if got := readCounts(""); got != 3 {
+		t.Errorf("unfiltered task_count = %d, want 3", got)
+	}
 }

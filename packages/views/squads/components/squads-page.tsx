@@ -71,6 +71,7 @@ import {
   type CollectionColumn,
   type CollectionSort,
 } from "../../layout/collection-list";
+import { SmartRuntimeAgentBadge } from "../../agents/components/agent-runtime-hover";
 import { useLocale, useT } from "../../i18n";
 
 // Cells
@@ -115,6 +116,7 @@ function LeaderCell({
     <>
       <ActorAvatar actorType="agent" actorId={leaderId} size="sm" />
       <span className="min-w-0 truncate">{leader?.name ?? leaderId.slice(0, 8)}</span>
+      <SmartRuntimeAgentBadge shareRuntime={leader?.share_runtime} />
     </>
   );
 }

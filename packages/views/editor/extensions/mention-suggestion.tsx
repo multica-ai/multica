@@ -46,6 +46,9 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ArchivedProjectTag } from "../../projects/components/project-archive";
 import { useT } from "../../i18n";
+import type { AgentRuntime, IssuePriority, MemberRole } from "@multica/core/types";
+import type { MentionCli } from "./mention-cli-brand";
+import { createRuntimeMentionSuggestion } from "./runtime-mention-suggestion";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
   Tooltip,
@@ -82,7 +85,27 @@ export interface MentionItem {
   label: string;
   type: "member" | "agent" | "squad" | "issue" | "project" | "doc" | "all";
   /** Optional grouping hint for injected context items. */
-  group?: "current" | "recent" | "search";
+  group?:
+    "current" | "recent" | "search" | "issue_runtime" | "requester_runtime";
+  /** Runtime-aware agent section. Distinguishes duplicate rows for the same agent. */
+  agentRuntimeGroup?: "issue" | "requester";
+  /** The current-task run this row continues; sticky routing pins to it. */
+  sourceTaskId?: string;
+  /** Runtime display data for smart runtime agent rows. */
+  runtime?: AgentRuntime | null;
+  runtimeId?: string;
+  shareRuntime?: boolean;
+  runtimeOwner?: MemberWithUser | null;
+  /**
+   * Owner display name resolved once at item-build time. Runtime
+   * rows set it even when the run's machine is absent from the viewer's own
+   * runtime list, where the runtime-object path in the renderer cannot
+   * produce a name.
+   */
+  ownerLabel?: string;
+  runtimeModelLabel?: string;
+  /** Optional label persisted into the mention node after selecting a row. */
+  insertLabel?: string;
   /** Secondary text shown beside the label (e.g. issue title) */
   description?: string;
   /** Issue status for StatusIcon rendering */
@@ -101,7 +124,33 @@ export interface MentionItem {
   /** Archived projects stay mentionable; search ranks them last. */
   projectArchived?: boolean;
   /** Present when the target should remain discoverable but cannot be selected. */
-  disabledReason?: "agent_runtime_required";
+  disabledReason?: "agent_runtime_required" | "agent_disabled";
+  /**
+   * verdict: archived agents stay visible in the agents bucket but
+   * cannot be mentioned. Drives the disabled presence shape (hollow dot +
+   * slash, dimmed row, "Archived" tag) regardless of what presence data says.
+   */
+  agentArchived?: boolean;
+  // --- plan A+C fields ------------------------------------------------
+  /** Resolved CLI brand identity for agent rows (plan A corner badge + tag). */
+  cli?: MentionCli;
+  /** Raw runtime provider slug backing `cli` ("claude", "codex", "kimi", …). */
+  cliProvider?: string | null;
+  /** Runtime host display name ("Laptop") for the agent sub-line. */
+  runtimeHost?: string;
+  /** Workspace role of a member row, for the side role tag. */
+  memberRole?: MemberRole;
+  /**
+   * The single side tag a member row renders, resolved at item-build time by
+   * the priority: initiator > owner > admin > none. Plain
+   * members render no tag; a missing issue context simply drops the
+   * initiator tier instead of guessing it.
+   */
+  memberTag?: "trigger" | "owner" | "admin" | null;
+  /** Squad size (member count) for the squad sub-line. */
+  squadSize?: number | null;
+  /** Issue priority for the tabular issue template. */
+  issuePriority?: IssuePriority;
 }
 
 interface MentionListProps {
@@ -835,6 +884,8 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 }
 
 interface MentionSuggestionOptions {
+  runtimeMentionIssueId?: string;
+  onSelect?: (item: MentionItem) => void;
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
   /** Leave guests out of the member list, where the mention leads somewhere they cannot open. */
@@ -850,6 +901,13 @@ export function createMentionSuggestion(
   SuggestionOptions<MentionItem>,
   "editor"
 > {
+  if (options.runtimeMentionIssueId) {
+    return createRuntimeMentionSuggestion(qc, {
+      ...options,
+      runtimeMentionIssueId: options.runtimeMentionIssueId,
+    });
+  }
+
   // The explicit key is passed into Tiptap Suggestion and reused by the
   // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
   const pluginKey = new PluginKey("mentionSuggestion");

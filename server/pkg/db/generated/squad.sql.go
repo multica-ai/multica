@@ -445,8 +445,10 @@ SELECT
 FROM squad_member sm
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id
+LEFT JOIN agent_user_runtime_config urc
+       ON urc.agent_id = a.id AND urc.user_id = $2::uuid
 LEFT JOIN agent_runtime ar
-       ON ar.id = a.runtime_id
+       ON ar.id = COALESCE(a.runtime_id, urc.runtime_id)
 LEFT JOIN agent_task_queue atq
        ON sm.member_type = 'agent'
       AND atq.agent_id = sm.member_id
@@ -456,6 +458,11 @@ LEFT JOIN issue i
 WHERE sm.squad_id = $1
 ORDER BY sm.created_at ASC, atq.dispatched_at DESC NULLS LAST
 `
+
+type ListSquadMemberStatusRowsParams struct {
+	SquadID      pgtype.UUID `json:"squad_id"`
+	ViewerUserID pgtype.UUID `json:"viewer_user_id"`
+}
 
 type ListSquadMemberStatusRowsRow struct {
 	SquadMemberID     pgtype.UUID        `json:"squad_member_id"`
@@ -480,8 +487,8 @@ type ListSquadMemberStatusRowsRow struct {
 // waiting_local_directory stays in the row set so its issue remains visible,
 // but the handler only treats dispatched/running rows as working because the
 // squad status vocabulary has no queued bucket.
-func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberStatusRowsRow, error) {
-	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, squadID)
+func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, arg ListSquadMemberStatusRowsParams) ([]ListSquadMemberStatusRowsRow, error) {
+	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, arg.SquadID, arg.ViewerUserID)
 	if err != nil {
 		return nil, err
 	}

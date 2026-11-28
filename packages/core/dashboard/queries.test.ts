@@ -45,8 +45,8 @@ describe("dashboard range placeholders", () => {
     "keeps the previous %s result when only the day range changes",
     (buildOptions) => {
       const previous = [{ sentinel: "30d" }];
-      const previousOptions = buildOptions("ws-1", 30, null, "UTC", null);
-      const nextOptions = buildOptions("ws-1", 7, null, "UTC", null);
+      const previousOptions = buildOptions("ws-1", 30, null, null, "UTC", null);
+      const nextOptions = buildOptions("ws-1", 7, null, null, "UTC", null);
 
       expect(
         resolvePlaceholder(nextOptions, previous, previousOptions.queryKey),
@@ -60,6 +60,7 @@ describe("dashboard range placeholders", () => {
       "ws-1",
       7,
       "project-1",
+      null,
       "Asia/Shanghai",
       null,
     );
@@ -68,13 +69,14 @@ describe("dashboard range placeholders", () => {
         "ws-2",
         30,
         "project-1",
+        null,
         "Asia/Shanghai",
         null,
       ),
-      dashboardUsageDailyOptions("ws-1", 30, "project-2", "Asia/Shanghai", null),
-      dashboardUsageDailyOptions("ws-1", 30, "project-1", "UTC", null),
+      dashboardUsageDailyOptions("ws-1", 30, "project-2", null, "Asia/Shanghai", null),
+      dashboardUsageDailyOptions("ws-1", 30, "project-1", null, "UTC", null),
       // A tightened plan limit: the 90-day result is outside the new plan.
-      dashboardUsageDailyOptions("ws-1", 30, "project-1", "Asia/Shanghai", 30),
+      dashboardUsageDailyOptions("ws-1", 30, "project-1", null, "Asia/Shanghai", 30),
     ];
 
     for (const previousOptions of previousScopes) {
@@ -85,7 +87,7 @@ describe("dashboard range placeholders", () => {
   });
 
   it("keeps the initial loading state honest when there is no previous query", () => {
-    const options = dashboardUsageDailyOptions("ws-1", 30, null, "UTC", null);
+    const options = dashboardUsageDailyOptions("ws-1", 30, null, null, "UTC", null);
 
     expect(resolvePlaceholder(options, undefined, undefined)).toBeUndefined();
   });
@@ -93,10 +95,10 @@ describe("dashboard range placeholders", () => {
 
 describe("dashboard history limit in queries", () => {
   it.each(optionBuilders)("waits for the limit and keys %s on it", (buildOptions) => {
-    expect(buildOptions("ws-1", 30, null, "UTC", undefined).enabled).toBe(false);
-    expect(buildOptions("ws-1", 30, null, "UTC", null).enabled).toBe(true);
-    expect(buildOptions("ws-1", 30, null, "UTC", 30).queryKey).not.toEqual(
-      buildOptions("ws-1", 30, null, "UTC", 90).queryKey,
+    expect(buildOptions("ws-1", 30, null, null, "UTC", undefined).enabled).toBe(false);
+    expect(buildOptions("ws-1", 30, null, null, "UTC", null).enabled).toBe(true);
+    expect(buildOptions("ws-1", 30, null, null, "UTC", 30).queryKey).not.toEqual(
+      buildOptions("ws-1", 30, null, null, "UTC", 90).queryKey,
     );
   });
 });

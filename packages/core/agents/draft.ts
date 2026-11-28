@@ -1,4 +1,5 @@
 import { qoderAgentId } from "./qoder-runtime-config";
+import { catalogRuntimeForCli } from "./runtime-cli";
 import { isRuntimeUsableForUser } from "../runtimes/access";
 import type {
   Agent,
@@ -189,13 +190,13 @@ export function buildDuplicateDraft(
     canAddInvocationMembers?: boolean;
   },
 ): AgentDraft {
-  const keepsRuntime =
-    !!source.runtime_id &&
-    options.runtimes.some(
-      (runtime) =>
-        runtime.id === source.runtime_id &&
-        isRuntimeUsableForUser(runtime, options.currentUserId),
-    );
+  const recommendedCli = source.cli || source.runtime_config_summary?.recommended.cli || "";
+  const sourceRuntimeId = source.share_runtime === false
+    ? catalogRuntimeForCli(options.runtimes, recommendedCli, options.currentUserId)?.id
+    : options.runtimes.find((runtime) =>
+        runtime.id === source.runtime_id && isRuntimeUsableForUser(runtime, options.currentUserId),
+      )?.id;
+  const keepsRuntime = !!sourceRuntimeId;
   return {
     ...EMPTY_AGENT_DRAFT,
     name: `${source.name}${options.nameSuffix}`,
@@ -203,9 +204,7 @@ export function buildDuplicateDraft(
     instructions: source.instructions ?? "",
     conversationStarters: (source.conversation_starters ?? []).map((item) => ({ ...item })),
     avatarUrl: source.avatar_url ?? null,
-    runtimeId: keepsRuntime
-      ? (source.runtime_id as string)
-      : options.fallbackRuntimeId,
+    runtimeId: sourceRuntimeId ?? options.fallbackRuntimeId,
     qoderAgentId: keepsRuntime ? qoderAgentId(source.runtime_config) : "",
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
@@ -224,13 +223,14 @@ export function buildDuplicateDraft(
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
   runtimeId: string;
+  runtimeCli?: string;
   /** Provider of `runtimeId`; drafts outlive runtime switches, so fields the target runtime cannot run are dropped here. */
   runtimeProvider?: string;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {
-  const { runtimeId, runtimeProvider, template, duplicateSource } = options;
+  const { runtimeId, runtimeCli, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
   // hides them once Qoder is chosen.
@@ -258,7 +258,8 @@ export function buildCreateAgentRequest(options: {
         }
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
-    runtime_id: runtimeId,
+    runtime_id: runtimeCli ? "" : runtimeId,
+    ...(runtimeCli ? { cli: runtimeCli.trim().toLowerCase() } : {}),
     ...(draft.qoderAgentId ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } } : {}),
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,

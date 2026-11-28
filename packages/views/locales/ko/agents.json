@@ -192,7 +192,9 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "cancel": "취소"
+    "cancel": "취소",
+    "prop_recommended_runtime": "권장 CLI",
+    "section_execution_hint": "런타임, 모델, 추론 수준, 속도, 동시 실행 한도를 선택하세요."
   },
   "overview": {
     "attention_title": "확인이 필요한 실행",
@@ -254,7 +256,11 @@
     "service_tier_standard_description": "기본 속도 및 표준 사용량",
     "service_tier_tooltip": "속도 · {{value}}",
     "service_tier_clear": "런타임 기본값",
-    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
+    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다",
+    "cli_empty": "사용 가능한 CLI 없음",
+    "cli_none": "CLI 없음",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · 선택 안 함"
   },
   "model_dropdown": {
     "label": "모델",
@@ -264,7 +270,8 @@
     "managed_by_runtime_title": "이 런타임에서 모델 선택을 관리합니다.",
     "managed_by_runtime_hint": "런타임 호스트에서 모델을 설정하세요. 예: Hermes는 자체 설정 파일에서 읽습니다.",
     "discovery_failed": "검색 실패",
-    "clear_full": "선택 지우기(제공자 기본값 사용)"
+    "clear_full": "선택 지우기(제공자 기본값 사용)",
+    "recommended_label": "권장 모델"
   },
   "tabs": {
     "work": "작업",
@@ -338,6 +345,14 @@
       "remove_aria": "아바타 제거",
       "select_image_toast": "이미지 파일을 선택하세요.",
       "upload_failed_toast": "아바타 업로드 실패"
+    },
+    "recommended_runtime_label": "권장 CLI",
+    "share_runtime": {
+      "fixed_desc": "모든 사용자가 연결된 런타임 설정으로 이 에이전트를 실행합니다.",
+      "fixed_title": "고정 런타임",
+      "label": "런타임 정책",
+      "smart_desc": "호출한 사용자는 자신의 런타임을 사용합니다. 설정한 모델은 해당 런타임에서 사용할 수 있어야 합니다.",
+      "smart_title": "스마트 런타임"
     }
   },
   "conversation_starters": {
@@ -646,7 +661,14 @@
       "cancel_failed_toast": "실행을 취소하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "caller_filter_label": "호출자",
+      "caller_filter_all": "전체",
+      "caller_filter_search": "멤버 검색",
+      "caller_filter_members": "멤버",
+      "caller_filter_clear_aria": "호출자 필터 지우기",
+      "summary_load_failed": "이 호출자의 30일 요약을 불러오지 못했습니다.",
+      "retry": "재시도"
     },
     "connected_apps": {
       "loading": "앱을 불러오는 중…",
@@ -1068,7 +1090,8 @@
       "member_fix": "관리자에게 해결을 요청하세요",
       "footer_selected": "선택됨:",
       "cancel": "취소",
-      "next": "다음"
+      "next": "다음",
+      "continue_smart": "머신이 없나요? 스마트 런타임 사용"
     }
   },
   "intro": {
@@ -1094,6 +1117,36 @@
       "comment": "수정했습니다. 375px 이하에서 요금 카드가 한 열로 바뀝니다. PR을 열었고 테스트도 통과했습니다.",
       "step_read": "{{file}} 읽기"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "확인",
+    "confirming_notice": "저장 중…",
+    "current_concurrency": "동시 실행 수",
+    "current_model": "모델",
+    "current_runtime": "런타임",
+    "current_section": "내 현재 설정",
+    "current_speed": "속도",
+    "current_strategy": "설정 방식",
+    "current_thinking": "추론",
+    "load_failed": "현재 설정을 불러오지 못했습니다.",
+    "loading": "현재 설정을 불러오는 중…",
+    "not_editable": "먼저 런타임을 추가하세요.",
+    "notice_required": "이 에이전트는 권장 또는 기본 설정으로 내 런타임을 사용했습니다. 필요한 경우 여기서 개인 설정을 확인하고 저장할 수 있습니다.",
+    "notice_seen_failed_toast": "알림을 확인하지 못했습니다",
+    "resolution": {
+      "model_unavailable": "런타임에서 모델을 사용할 수 없음",
+      "no_user_runtime": "먼저 런타임을 추가하세요",
+      "runtime_offline": "런타임 오프라인",
+      "runtime_unavailable": "런타임을 사용할 수 없음"
+    },
+    "save_failed_toast": "현재 설정을 저장하지 못했습니다",
+    "saved_toast": "현재 설정을 저장했습니다",
+    "strategy_custom": "사용자 지정",
+    "strategy_recommended": "권장",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
+  },
+  "runtime_policy": {
+    "smart": "스마트"
   },
   "apps_section": {
     "title": "앱",

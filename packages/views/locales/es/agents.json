@@ -201,7 +201,9 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "prop_recommended_runtime": "CLI recomendada",
+    "section_execution_hint": "Elige el entorno de ejecución, el modelo, el nivel de razonamiento, la velocidad y el límite de ejecuciones simultáneas."
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",
@@ -243,7 +245,11 @@
     "service_tier_standard_description": "Velocidad estándar y uso estándar",
     "service_tier_tooltip": "Velocidad · {{value}}",
     "service_tier_clear": "Predeterminado del runtime",
-    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida"
+    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida",
+    "cli_empty": "No hay CLI disponibles",
+    "cli_none": "Sin CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · ninguna seleccionada"
   },
   "model_dropdown": {
     "label": "Modelo",
@@ -253,7 +259,8 @@
     "managed_by_runtime_title": "La selección de modelo la gestiona este runtime.",
     "managed_by_runtime_hint": "Configura el modelo en el host del runtime (p. ej., Hermes lo lee de su propio archivo de configuración).",
     "discovery_failed": "falló el descubrimiento",
-    "clear_full": "Limpiar selección (usar el predeterminado del proveedor)"
+    "clear_full": "Limpiar selección (usar el predeterminado del proveedor)",
+    "recommended_label": "Modelo recomendado"
   },
   "tabs": {
     "work": "Trabajo",
@@ -420,7 +427,8 @@
       "member_fix": "Pide a un administrador que lo arregle",
       "footer_selected": "Seleccionado:",
       "cancel": "Cancelar",
-      "next": "Siguiente"
+      "next": "Siguiente",
+      "continue_smart": "¿Sin máquina? Usa el runtime inteligente"
     }
   },
   "create_dialog": {
@@ -473,6 +481,14 @@
       "remove_aria": "Quitar avatar",
       "select_image_toast": "Selecciona un archivo de imagen.",
       "upload_failed_toast": "Error al subir el avatar"
+    },
+    "recommended_runtime_label": "CLI recomendada",
+    "share_runtime": {
+      "fixed_desc": "Todos ejecutan este agente con la configuración del entorno asignado.",
+      "fixed_title": "Entorno fijo",
+      "label": "Estrategia de ejecución",
+      "smart_desc": "Cada persona usa su propio entorno de ejecución. El modelo configurado debe estar disponible en ese entorno.",
+      "smart_title": "Entorno inteligente"
     }
   },
   "conversation_starters": {
@@ -786,7 +802,14 @@
       "cancel_failed_toast": "No se ha podido cancelar la ejecución",
       "started_prefix": "Iniciada {{when}}",
       "dispatched_prefix": "Enviada {{when}}",
-      "queued_prefix": "En cola {{when}}"
+      "queued_prefix": "En cola {{when}}",
+      "caller_filter_label": "Caller",
+      "caller_filter_all": "Anyone",
+      "caller_filter_search": "Search members",
+      "caller_filter_members": "Members",
+      "caller_filter_clear_aria": "Clear caller filter",
+      "summary_load_failed": "No se pudo cargar el resumen de 30 días de este autor de llamada.",
+      "retry": "Reintentar"
     },
     "connected_apps": {
       "loading": "Cargando aplicaciones…",
@@ -1125,6 +1148,36 @@
       "comment": "Corregido: las tarjetas de precios se apilan en una columna por debajo de 375 px. El PR está abierto y los tests pasan.",
       "step_read": "Leer {{file}}"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "Entendido",
+    "confirming_notice": "Guardando…",
+    "current_concurrency": "Ejecuciones simultáneas",
+    "current_model": "Modelo",
+    "current_runtime": "Entorno de ejecución",
+    "current_section": "Mi configuración actual",
+    "current_speed": "Velocidad",
+    "current_strategy": "Estrategia de configuración",
+    "current_thinking": "Razonamiento",
+    "load_failed": "No se pudo cargar la configuración actual.",
+    "loading": "Cargando la configuración actual…",
+    "not_editable": "Añade primero un entorno de ejecución.",
+    "notice_required": "El agente usó tu entorno con la configuración recomendada o predeterminada. Puedes revisar y guardar aquí tu propia configuración.",
+    "notice_seen_failed_toast": "No se pudo confirmar el aviso",
+    "resolution": {
+      "model_unavailable": "Modelo no disponible en el entorno",
+      "no_user_runtime": "Añade primero un entorno de ejecución",
+      "runtime_offline": "Entorno desconectado",
+      "runtime_unavailable": "Entorno no disponible"
+    },
+    "save_failed_toast": "No se pudo guardar la configuración actual",
+    "saved_toast": "Configuración actual guardada",
+    "strategy_custom": "Personalizada",
+    "strategy_recommended": "Recomendada",
+    "template_model_reset_toast": "Model {{model}} is no longer in this runtime's catalog. Cleared to follow the runtime default."
+  },
+  "runtime_policy": {
+    "smart": "Inteligente"
   },
   "apps_section": {
     "title": "Apps",

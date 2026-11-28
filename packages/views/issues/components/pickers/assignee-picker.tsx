@@ -5,7 +5,7 @@ import { Lock, UserMinus } from "@multica/ui/icons";
 import type { Agent, IssueAssigneeType, MemberRole, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { isAgentRuntimeBound, useRecentAgents } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -23,6 +23,9 @@ import {
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { SmartRuntimeAgentBadge } from "../../../agents/components/agent-runtime-hover";
+import { useRecentAgentRecordError } from "../../../common/use-recent-agent-record-error";
+import { RecentAgentLoadError } from "../../../common/recent-agent-load-error";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -73,12 +76,12 @@ interface AssigneePickerProps {
 }
 
 /**
- * Mounting the real picker subscribes to members/agents/squads
- * queries — multiplied per board card / list row that cost froze tab
- * switches. Uncontrolled callers that bring their own trigger content get a
- * deferred lookalike trigger instead; the picker mounts on first interaction.
- * The default trigger needs `getActorName` (a members/agents subscription
- * itself), so trigger-less callers stay eager.
+ * Mounting the real picker subscribes to members/agents/squads and
+ * recent-agents queries — multiplied per board card / list row that cost froze
+ * tab switches. Uncontrolled callers that bring their own trigger content get
+ * a deferred lookalike trigger instead; the picker mounts on first
+ * interaction. The default trigger needs `getActorName` (a members/agents
+ * subscription itself), so trigger-less callers stay eager.
  */
 export function AssigneePicker(props: AssigneePickerProps) {
   const hasDeferredTriggerContent =
@@ -123,7 +126,7 @@ function AssigneePickerImpl({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
-  const choices = useAssigneeChoices(filter);
+  const choices = useAssigneeChoices(filter, { open });
   const { getActorName } = useActorName();
 
   const triggerLabel =
@@ -228,7 +231,7 @@ export function useRecordAssigneePick() {
   };
 }
 
-function useAssigneeChoices(filter: string) {
+function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -236,6 +239,7 @@ function useAssigneeChoices(filter: string) {
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const picks = useAssigneePicksStore(selectAssigneePicks(user?.id, wsId));
   const ranked = useMemo(() => rankAssigneePicks(picks), [picks]);
+  const onRecentAgentRecordError = useRecentAgentRecordError();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -263,13 +267,31 @@ function useAssigneeChoices(filter: string) {
   const assignableSquads = squads.filter(
     (s) => !s.archived_at && assignableAgentIds.has(s.leader_id),
   );
+  const {
+    recentAgents,
+    recentIds,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = useRecentAgents({
+    agents: assignableAgents,
+    userId: user?.id,
+    wsId,
+    enabled: (options?.open ?? true),
+    onRecordError: onRecentAgentRecordError,
+  });
 
   const query = filter.trim().toLowerCase();
   const filteredMembers = members
     .filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
+  const filteredRecentAgents = recentAgents.filter(
+    (agent) =>
+      agent.name.toLowerCase().includes(query) || matchesPinyin(agent.name, query),
+  );
   const filteredAgents = assignableAgents
     .filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query))
+    .filter((agent) => !recentIds.has(agent.id))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = assignableSquads
     .filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query))
@@ -297,10 +319,16 @@ function useAssigneeChoices(filter: string) {
   }
 
   return {
+    userId: user?.id ?? null,
+    memberRole,
     recent,
     filteredMembers,
+    filteredRecentAgents,
     filteredAgents,
     filteredSquads,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
   };
 }
 
@@ -327,7 +355,19 @@ function AssigneeOptions({
   onPick: (updates: Partial<UpdateIssueRequest>) => void;
 }) {
   const { t } = useT("issues");
-  const { recent, filteredMembers, filteredAgents, filteredSquads } = choices;
+  const { t: tCommon } = useT("common");
+  const {
+    userId,
+    memberRole,
+    recent,
+    filteredMembers,
+    filteredRecentAgents,
+    filteredAgents,
+    filteredSquads,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = choices;
   const recordPick = useRecordAssigneePick();
 
   const isSelected = (type: string, id: string) =>
@@ -353,19 +393,45 @@ function AssigneeOptions({
     </PickerItem>
   );
 
-  const renderAgent = (a: Agent) => (
-    <PickerItem
-      key={a.id}
-      selected={isSelected("agent", a.id)}
-      onClick={() => pickActor("agent", a.id)}
-    >
-      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-      <span className="truncate">{a.name}</span>
-      {a.visibility === "private" && (
-        <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
-      )}
-    </PickerItem>
-  );
+  const renderAgent = (agent: Agent) => {
+    const decision = canAssignAgentToIssue(agent, {
+      userId,
+      role:
+        memberRole === "owner" ||
+        memberRole === "admin" ||
+        memberRole === "member"
+          ? memberRole
+          : null,
+    });
+    const runtimeBound = isAgentRuntimeBound(agent);
+    const allowed = decision.allowed && runtimeBound;
+    return (
+      <PickerItem
+        key={agent.id}
+        selected={isSelected("agent", agent.id)}
+        disabled={!allowed}
+        tooltip={
+          !decision.allowed
+            ? decision.message
+            : !runtimeBound
+              ? t(($) => $.pickers.assignee.agent_runtime_required)
+              : undefined
+        }
+        onClick={() => {
+          if (!allowed) return;
+          recordRecentAgent(agent.id);
+          pickActor("agent", agent.id);
+        }}
+      >
+        <ActorAvatar actorType="agent" actorId={agent.id} size="sm" showStatusDot />
+        <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{agent.name}</span>
+        <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+        {agent.visibility === "private" && (
+          <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+        )}
+      </PickerItem>
+    );
+  };
 
   const renderSquad = (s: Squad) => (
     <PickerItem
@@ -380,6 +446,9 @@ function AssigneeOptions({
 
   return (
     <>
+      {isRecentAgentsError && (
+        <RecentAgentLoadError onRetry={refetchRecentAgents} />
+      )}
       {/* Unassigned — always the first row, search active or not. Every
           picker in the app puts the empty value there, so "clear this field"
           never moves. */}
@@ -406,6 +475,12 @@ function AssigneeOptions({
         </PickerSection>
       )}
 
+      {filteredRecentAgents.length > 0 && (
+        <PickerSection label={tCommon(($) => $.recently_used)}>
+          {filteredRecentAgents.map(renderAgent)}
+        </PickerSection>
+      )}
+
       {filteredMembers.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.members_group)}>
           {filteredMembers.map(renderMember)}
@@ -427,6 +502,7 @@ function AssigneeOptions({
       )}
 
       {filteredMembers.length === 0 &&
+        filteredRecentAgents.length === 0 &&
         filteredAgents.length === 0 &&
         filteredSquads.length === 0 &&
         filter && <PickerEmpty />}

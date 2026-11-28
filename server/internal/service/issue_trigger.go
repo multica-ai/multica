@@ -170,7 +170,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil || agent.ArchivedAt.Valid {
 			return declineRun(dispatch.ReasonTargetUnavailable)
 		}
-		if !agent.RuntimeID.Valid {
+		if !AgentHasRuntimeBinding(agent) {
 			return declineRun(dispatch.ReasonAgentRuntimeRequired)
 		}
 		if !canAccess(agent) {

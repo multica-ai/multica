@@ -14,6 +14,7 @@ import { renderWithI18n } from "../../test/i18n";
 const mockCreateAutopilot = vi.hoisted(() => vi.fn());
 const mockCreateTrigger = vi.hoisted(() => vi.fn());
 
+vi.mock("@multica/core/auth", () => ({ useAuthStore: () => undefined }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ name: "Acme" }) }));
 

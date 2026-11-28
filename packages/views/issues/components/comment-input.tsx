@@ -1,5 +1,6 @@
 "use client";
 
+import { useCommentRuntimeOriginator } from "./comment-runtime-originator";
 import { useRef, useState, useEffect, useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { Info } from "@multica/ui/icons";
@@ -44,7 +45,13 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    steerTaskIds?: string[],
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<string | boolean>;
   /** Called after the server accepts the comment and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   onEditAnnotation?: (id: string) => boolean;
@@ -71,6 +78,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   // Subscribe to the persisted draft so text written into it from outside
   // this composer shows up even while it is mounted.
   const draftKey = `new:${issueId}` as const;
+  const runtimeOriginator = useCommentRuntimeOriginator(draftKey);
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
   );
@@ -218,12 +226,14 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
         steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        ...runtimeOriginator.requestArgs(content),
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
       });
     },
     onAccepted: () => {
+      runtimeOriginator.clear();
       // Success may only consume the entry it submitted (MUL-5181 P0): edits
       // made while the request was in flight — or by a reopened composer after
       // this one unmounted — survive both in the store and in the editor.
@@ -304,6 +314,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           onReady={lazy.onReady}
           placeholder={placeholder}
           onUpdate={(md) => {
+            runtimeOriginator.prune(md);
             setContent(md);
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
@@ -317,6 +328,8 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           onUploadingChange={uploadGate.onUploadingChange}
           debounceMs={100}
           currentIssueId={issueId}
+          enableRuntimeAgentMentions
+          onMentionSelect={runtimeOriginator.select}
           attachments={pendingAttachments}
           enableSlashCommands={!guest}
           slashCommandMode="command"

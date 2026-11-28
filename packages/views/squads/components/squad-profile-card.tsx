@@ -12,6 +12,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SmartRuntimeAgentBadgeById } from "../../agents/components/agent-runtime-hover";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -168,6 +169,9 @@ function MembersList({
                 className="shrink-0"
               />
               <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+              {m.member_type === "agent" && (
+                <SmartRuntimeAgentBadgeById agentId={m.member_id} />
+              )}
               {isLeader && (
                 <span className="max-w-[4rem] shrink-0 truncate rounded-md bg-amber-100 px-1 py-0.5 text-micro font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                   {t(($) => $.members_tab.leader_chip)}

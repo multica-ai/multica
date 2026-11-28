@@ -1,5 +1,6 @@
 "use client";
 
+import { agentEffectiveRuntimeId, type EffectiveRuntimeAgent } from "@multica/core/agents";
 import { useQuery } from "@tanstack/react-query";
 import {
   runtimeListOptions,
@@ -19,11 +20,12 @@ import {
  */
 export function useChatProjectContextSupport(
   wsId: string,
-  agent: { runtime_id?: string | null } | null | undefined,
+  agent: (Omit<EffectiveRuntimeAgent, "runtime_id"> & { runtime_id?: string | null }) | null | undefined,
 ): boolean | null {
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
-  if (!agent?.runtime_id) return null;
-  const runtime = runtimes.find((r) => r.id === agent.runtime_id);
+  const runtimeId = agent ? agentEffectiveRuntimeId({ ...agent, runtime_id: agent.runtime_id ?? "" }) : null;
+  if (!runtimeId) return null;
+  const runtime = runtimes.find((r) => r.id === runtimeId);
   if (!runtime) return null;
   return chatProjectContextSupported(readRuntimeCliVersion(runtime.metadata));
 }

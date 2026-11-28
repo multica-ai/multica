@@ -12,7 +12,9 @@
     "attribution_label": "帰属",
     "all_attribution": "すべての帰属",
     "standalone_only": "単独エージェントのみ",
-    "squads_group": "Squad"
+    "squads_group": "Squad",
+    "caller_label": "呼び出し元",
+    "all_callers": "すべて"
   },
   "history_limit": {
     "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",

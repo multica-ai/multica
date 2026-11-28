@@ -141,6 +141,7 @@ function Stepper({
       triggerNodes,
       indicators,
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the focus helpers are stable closures over coordinator state already listed here
     [
       currentStep,
       handleSetActiveStep,
@@ -246,13 +247,16 @@ function StepperTrigger({
     if (btnRef.current) {
       registerTrigger(btnRef.current)
     }
+    // Runs once per mount: re-registering on trigger changes is handled by
+    // the Stepper coordinator, not by individual triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [btnRef.current])
 
   // Find our index among triggers for navigation
   const myIdx = useMemo(
     () =>
       triggerNodes.findIndex((n: HTMLButtonElement) => n === btnRef.current),
-    [triggerNodes, btnRef.current]
+    [triggerNodes]
   )
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {

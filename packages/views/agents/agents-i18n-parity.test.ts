@@ -149,7 +149,6 @@ describe("access-scope i18n parity across all 4 locales", () => {
     for (const [name, loc] of Object.entries(LOCALES)) {
       for (const key of ALL_NEW_KEYS) {
         const parts = key.split(".");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let node: any = loc as any;
         for (const p of parts) {
           node = node?.[p];
@@ -165,7 +164,6 @@ describe("access-scope i18n parity across all 4 locales", () => {
     for (const [name, loc] of Object.entries(LOCALES)) {
       for (const key of ["row_actions.set_access_applies_to_other", "row_actions.set_access_skipped", "row_actions.set_access_bulk_partial"]) {
         const parts = key.split(".");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let node: any = loc as any;
         for (const p of parts) {
           node = node?.[p];

@@ -81,7 +81,7 @@ import {
   dimsForDays,
   type TimeRange,
 } from "./dashboard-shared";
-import { ProjectFilter, SquadFilter, TimeRangeFilter } from "./dashboard-filters";
+import { CallerFilter, ProjectFilter, SquadFilter, TimeRangeFilter, ALL_CALLERS } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard, type LeaderboardGroupBy } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
@@ -92,6 +92,7 @@ import {
   planForRange,
 } from "../history-range";
 import { dashboardTimeRanges } from "./dashboard-shared";
+import { useAuthStore } from "@multica/core/auth";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -272,6 +273,32 @@ export function DashboardPage() {
     return squads.find((s) => s.id === squadFilterParam) ?? null;
   }, [squadFilterParam, squads]);
 
+  // Caller filter. Defaults to the signed-in member — a dashboard answers
+  // "what did I and my agents run" first — with an explicit anyone option
+  // (`ALL_CALLERS`) that drops the server-side originator filter.
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const [callerOverride, setCallerOverride] = useState<string | "all">();
+  const originatorUserId =
+    callerOverride === undefined
+      ? currentUserId
+      : callerOverride === "all"
+        ? null
+        : callerOverride;
+  const callerValue = originatorUserId ?? ALL_CALLERS;
+
+  // The weekly charts paint `ceil(days / 7)` trailing calendar weeks anchored
+  // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
+  // sits `weekCount * 7 - 1` days back, so a vanilla `days=30` request would
+  // silently truncate the leftmost bucket. Over-fetch the per-date queries to
+  // cover the full first week.
+  //
+  // Unconditionally, not only when a chart is weekly: the dimension is now a
+  // card-level control, so the page cannot know which grain is on screen — and
+  // fetching for the wider of the two means flipping a card between Daily and
+  // Weekly never refetches. Daily aggregations trim back to exactly `days`
+  // client-side via `dailyCutoffIso` below, so the extra rows change nothing
+  // they show. The per-agent rollups stay at `days` so KPI/leaderboard labels
+  // (e.g. "Tasks · 30D") keep their advertised window.
   const weekCount = Math.max(1, Math.ceil(days / 7));
   const chartFetchDays = weekCount * 7;
 
@@ -280,6 +307,7 @@ export function DashboardPage() {
       wsId,
       chartFetchDays,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -290,6 +318,7 @@ export function DashboardPage() {
       wsId,
       days,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -314,6 +343,7 @@ export function DashboardPage() {
       wsId,
       days,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -338,6 +368,7 @@ export function DashboardPage() {
       wsId,
       chartFetchDays,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -348,6 +379,7 @@ export function DashboardPage() {
       wsId,
       chartFetchDays,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -358,6 +390,7 @@ export function DashboardPage() {
       wsId,
       days,
       projectId,
+      originatorUserId,
       viewTZ,
       historyLimit,
       squadFilterParam,
@@ -682,6 +715,12 @@ export function DashboardPage() {
             planForDays={(range) => planForRange(range, planLimits)}
             onViewPlans={billingEnabled ? viewPlans : null}
             ranges={ranges}
+          />
+          <CallerFilter
+            callerValue={callerValue}
+            onCallerChange={(value) =>
+              setCallerOverride(value === ALL_CALLERS ? "all" : value)
+            }
           />
           <ProjectFilter
             projects={projects}

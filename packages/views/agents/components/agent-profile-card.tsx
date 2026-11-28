@@ -22,6 +22,7 @@ import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { VisibilityBadge } from "./visibility-badge";
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 import { useT } from "../../i18n";
 
 interface AgentProfileCardProps {
@@ -59,7 +60,18 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
-  const runtime = runtimes.find((r) => r.id === agent.runtime_id) ?? null;
+  // Smart agents leave the template's runtime_id empty; the agent list
+  // payload carries the viewer's effective runtime configuration, so the
+  // card resolves the runtime and model the agent would actually use for
+  // this member instead of reading "Unknown runtime".
+  const isSmart = agent.share_runtime === false;
+  const current = agent.runtime_config_summary?.current ?? null;
+  const runtime = runtimes.find(
+    (r) => r.id === (isSmart ? current?.runtime_id ?? "" : agent.runtime_id),
+  ) ?? null;
+  const displayModel = isSmart && current?.model ? current.model : agent.model;
+  const displayThinkingLevel =
+    isSmart && current?.thinking_level ? current.thinking_level : agent.thinking_level;
   const isArchived = !!agent.archived_at;
   const initials = agent.name
     .split(" ")
@@ -91,6 +103,10 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-body font-semibold">{agent.name}</p>
+            <SmartRuntimeAgentBadge
+              shareRuntime={agent.share_runtime}
+              archived={isArchived}
+            />
             {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
@@ -125,7 +141,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           agent running?" without opening the detail page. */}
       <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
-        <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
+        <ModelRow model={displayModel} thinkingLevel={displayThinkingLevel} />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}

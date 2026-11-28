@@ -34,6 +34,8 @@ Switching models or editing instructions does not create a new agent, and past i
 
 One runtime can host multiple agents, and one agent can complete many runs over time. When the runtime is offline, the agent's identity and history remain, but new runs wait until the runtime comes back.
 
+A fixed agent runs on its bound runtime. A smart agent runs on a runtime owned by the member who triggered it, so members can share the definition and keep their execution settings separate.
+
 ## Ways an agent participates
 
 - **Own an issue** — set the agent as the assignee; it starts once the run is enqueued.

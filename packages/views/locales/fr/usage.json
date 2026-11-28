@@ -12,7 +12,9 @@
     "attribution_label": "Attribution",
     "all_attribution": "Toute attribution",
     "standalone_only": "Agents autonomes uniquement",
-    "squads_group": "Squads"
+    "squads_group": "Squads",
+    "caller_label": "Caller",
+    "all_callers": "Anyone"
   },
   "history_limit": {
     "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",

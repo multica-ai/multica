@@ -57,6 +57,18 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 /**
+ * CLI slugs offered when a member has no runtime registered yet: a smart
+ * agent's recommendation is a provider name, not a machine, so the picker can
+ * still offer the common harnesses from an empty runtime list.
+ */
+export const RECOMMENDED_CLI_OPTIONS = [
+  "claude",
+  "codex",
+  "cursor",
+  "opencode",
+] as const;
+
+/**
  * Map a provider slug to its display name, matching the daemon's
  * providerDisplayName: an explicit override when listed, otherwise the slug
  * with its first letter capitalized.

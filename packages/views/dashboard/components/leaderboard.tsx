@@ -20,6 +20,7 @@ import {
 import { Segmented } from "./dashboard-shared";
 import "./leaderboard.css";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { SmartRuntimeAgentBadgeById } from "../../agents/components/agent-runtime-hover";
 
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
@@ -244,6 +245,7 @@ export function Leaderboard({
                   >
                     {agent?.name ?? row.agentId}
                   </span>
+                  <SmartRuntimeAgentBadgeById agentId={row.agentId} />
                   {isLeader ? (
                     <span className="shrink-0 rounded-md bg-amber-100 px-1 py-0.5 text-micro font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                       {tSquads(($) => $.members_tab.leader_chip)}

@@ -15,6 +15,7 @@ The page has two tabs, **Usage** and **Errors**, which share the filters at the 
 - **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours.
 - **Project**: **All projects** by default. With a project selected, only runs on that project's issues count; runs that belong to no issue, such as chat runs, drop out.
 - **Attribution** (shown once the workspace has squads): **All attribution** by default. Choose **Standalone agents only** to inspect runs not triggered through any squad, or pick a specific squad to scope every chart, KPI, and list on both tabs to that squad — including its leader's runs, delegated member runs, and runs on squad-created sub-issues.
+- **Caller**: you (the signed-in member) by default. With a member selected, only runs that member triggered count; **Anyone** drops the filter and spans every caller.
 
 Days are cut in your time zone: the one set under **Settings → Preferences → Time zone**, or the browser's if you have not set one. The header shows that time zone and when the data was last updated. The server rolls the figures up every 5 minutes and an open page refreshes on the same interval, so a run that just finished can take a few minutes to appear; the refresh button pulls the latest figures immediately.
 

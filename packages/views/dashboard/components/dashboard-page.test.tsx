@@ -365,7 +365,7 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
   function tzSegments(): unknown[] {
     return queryKeys
       .filter((k) => k[0] === "dashboard")
-      .map((k) => k[5]);
+      .map((k) => k[6]);
   }
 
   it("uses the stored timezone in every dashboard query key", () => {
@@ -1002,7 +1002,7 @@ describe("DashboardPage — plan history limit (MUL-9490)", () => {
     expect(menu).toHaveTextContent("Your plan covers the last 30 days.");
     expect(within(menu).getByRole("button", { name: "View plans" })).toBeInTheDocument();
     // Every query is keyed on the limit it is made under.
-    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[6] === 30)).toBe(true);
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[7] === 30)).toBe(true);
   });
 
   it("labels plans from the configured limits, not a fixed table", async () => {

@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import {useQuery} from "@tanstack/react-query";
-import {runtimeModelsOptions} from "@multica/core/runtimes";
-import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
+import { useQuery } from "@tanstack/react-query";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   agentDescriptionLength,
@@ -34,6 +37,7 @@ import { ThinkingSettingField } from "../components/inspector/thinking-prop-row"
 import { ModelDropdown } from "../components/model-dropdown";
 import { QoderAgentSelect } from "../components/qoder-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
+import { RuntimeStrategySection } from "../components/runtime-strategy-section";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
 
@@ -42,6 +46,36 @@ const PERMISSION_SCOPES: AgentPermissionScope[] = [
   "workspace",
   "members",
 ];
+
+export type AgentConfigurationPanelProps = {
+  draft: AgentDraft;
+  onChange: (draft: AgentDraft) => void;
+  /** Value cleanup without user interaction, such as an unsupported model. */
+  onAutomaticChange?: (draft: AgentDraft) => void;
+  runtimes: RuntimeDevice[];
+  runtimesLoading: boolean;
+  members: MemberWithUser[];
+  currentUserId: string | null;
+  nameError: string | null;
+  onNameChange: (name: string) => void;
+  compact?: boolean;
+  shareRuntime?: boolean;
+  onShareRuntimeChange?: (next: boolean) => void;
+  /** Builder sessions rebind the server-side carrier instead of only editing
+   *  the draft. Absent for the plain create flows, where the draft is the only
+   *  state that exists. */
+  onRuntimeSelect?: (runtimeId: string) => void;
+  /** A builder reply is in flight, so the server would refuse the rebind. */
+  runtimeSwitchPending?: boolean;
+  /** A rebind request is in flight. */
+  runtimeSwitchInFlight?: boolean;
+  /** Replaces the runtime picker when the runtime was chosen in an earlier
+   *  step and changing it means going back there. */
+  runtimeSummary?: ReactNode;
+  /** Receives a bare recommended CLI when the member has no local runtime to
+   *  host model discovery; absent means the caller cannot accept one. */
+  onRecommendedCliSelect?: (cli: string) => void;
+};
 
 export function AgentConfigurationPanel({
   draft,
@@ -57,31 +91,11 @@ export function AgentConfigurationPanel({
   onRuntimeSelect,
   runtimeSwitchPending = false,
   runtimeSwitchInFlight = false,
+  shareRuntime = false,
+  onShareRuntimeChange,
   runtimeSummary,
-}: {
-  draft: AgentDraft;
-  onChange: (draft: AgentDraft) => void;
-  /** Value cleanup without user interaction, such as an unsupported model. */
-  onAutomaticChange?: (draft: AgentDraft) => void;
-  runtimes: RuntimeDevice[];
-  runtimesLoading: boolean;
-  members: MemberWithUser[];
-  currentUserId: string | null;
-  nameError: string | null;
-  onNameChange: (name: string) => void;
-  compact?: boolean;
-  /** Builder sessions rebind the server-side carrier instead of only editing
-   *  the draft. Absent for the plain create flows, where the draft is the only
-   *  state that exists. */
-  onRuntimeSelect?: (runtimeId: string) => void;
-  /** A builder reply is in flight, so the server would refuse the rebind. */
-  runtimeSwitchPending?: boolean;
-  /** A rebind request is in flight. */
-  runtimeSwitchInFlight?: boolean;
-  /** Replaces the runtime picker when the runtime was chosen in an earlier
-   *  step and changing it means going back there. */
-  runtimeSummary?: ReactNode;
-}) {
+  onRecommendedCliSelect,
+}: AgentConfigurationPanelProps) {
   const { t } = useT("agents");
   const conversationStartersSupported = useConfigStore(
     (state) => state.agentConversationStartersSupported,
@@ -102,6 +116,10 @@ export function AgentConfigurationPanel({
     hasExistingConfig: false,
   });
   const canAddMembers = invocationMembers.canAdd;
+  const runtimeStrategyEnabled = !!onShareRuntimeChange;
+  // Smart runtime binds a recommendation, not the runtime the agent will use,
+  // so the labels have to say so — otherwise the picker reads as a hard choice.
+  const showRecommendedLabels = runtimeStrategyEnabled && !shareRuntime;
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
@@ -119,9 +137,7 @@ export function AgentConfigurationPanel({
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.identity)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.identity)}>
         <SettingsCard>
           <DraftFieldRow
             compact={compact}
@@ -189,9 +205,7 @@ export function AgentConfigurationPanel({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.behavior)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.behavior)}>
         <SettingsCard>
           <DraftFieldRow
             compact
@@ -232,21 +246,36 @@ export function AgentConfigurationPanel({
         description={t(($) => $.creation_studio.sections.execution_hint)}
       >
         <SettingsCard>
+          {runtimeStrategyEnabled && onShareRuntimeChange ? (
+            <div className="px-4 py-4">
+              <RuntimeStrategySection
+                shareRuntime={shareRuntime}
+                onShareRuntimeChange={onShareRuntimeChange}
+              />
+            </div>
+          ) : null}
           <div
             className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}
           >
             <div className="min-w-0">
               {runtimeSummary ?? (
-              <RuntimePicker
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                members={members}
-                currentUserId={currentUserId}
-                selectedRuntimeId={draft.runtimeId}
-                onSelect={handleRuntimeSelect}
-                disabled={runtimeLocked}
-                autoSelect={!onRuntimeSelect}
-              />
+                <RuntimePicker
+                  runtimes={runtimes}
+                  runtimesLoading={runtimesLoading}
+                  members={members}
+                  currentUserId={currentUserId}
+                  selectedRuntimeId={draft.runtimeId}
+                  onSelect={handleRuntimeSelect}
+                  disabled={runtimeLocked}
+                  cliOnly={showRecommendedLabels}
+                  onSelectCli={onRecommendedCliSelect}
+                  label={
+                    showRecommendedLabels
+                      ? t(($) => $.create_dialog.recommended_runtime_label)
+                      : undefined
+                  }
+                  autoSelect={!onRuntimeSelect}
+                />
               )}
               {/* A silently greyed-out picker is the worst version of this: the
                   user reaches for it exactly when the current runtime has gone
@@ -277,6 +306,11 @@ export function AgentConfigurationPanel({
                 // A successful switch clears the model, so an edit made while the
                 // rebind is in flight would be silently discarded.
                 disabled={!selectedRuntime || runtimeSwitchInFlight}
+                label={
+                  showRecommendedLabels
+                    ? t(($) => $.model_dropdown.recommended_label)
+                    : undefined
+                }
               />
             )}
           </div>
@@ -294,9 +328,7 @@ export function AgentConfigurationPanel({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.access)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.access)}>
         <SettingsCard>
           <div
             className="space-y-1 p-2"
@@ -475,14 +507,40 @@ export function AgentExecutionOverrides({
 }) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
-  const modelsQuery = useQuery(runtimeModelsOptions(runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "") ? runtime?.id ?? null : null));
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(
+      runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "")
+        ? (runtime?.id ?? null)
+        : null,
+    ),
+  );
   useEffect(() => {
-    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? "")) return;
-    if (draft.thinkingLevel || !draft.model || !modelsQuery.isSuccess || !modelsQuery.data?.supported) return;
-    const entry = findModelCapabilityEntry(modelsQuery.data.models, draft.model, runtime?.provider ?? "");
-    const level = entry?.thinking?.default_level ?? entry?.thinking?.supported_levels[0]?.value;
+    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? ""))
+      return;
+    if (
+      draft.thinkingLevel ||
+      !draft.model ||
+      !modelsQuery.isSuccess ||
+      !modelsQuery.data?.supported
+    )
+      return;
+    const entry = findModelCapabilityEntry(
+      modelsQuery.data.models,
+      draft.model,
+      runtime?.provider ?? "",
+    );
+    const level =
+      entry?.thinking?.default_level ??
+      entry?.thinking?.supported_levels[0]?.value;
     if (level) onChange({ ...draft, thinkingLevel: level });
-  }, [disabled, draft, modelsQuery.data, modelsQuery.isSuccess, onChange, runtime?.provider]);
+  }, [
+    disabled,
+    draft,
+    modelsQuery.data,
+    modelsQuery.isSuccess,
+    onChange,
+    runtime?.provider,
+  ]);
 
   return (
     <>
