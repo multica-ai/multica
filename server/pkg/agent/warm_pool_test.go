@@ -387,7 +387,7 @@ while IFS= read -r line; do
       printf '{"type":"assistant","message":{"id":"msg-%s","role":"assistant","model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"plan-%s"},{"type":"text","text":"hello %s:%s:%s"}]}}\n' "$turn" "$turn" "$tok" "$tid" "$static_tok"
       cum_in=$((turn * 50))
       cum_out=$((turn * 15))
-      printf '{"type":"result","subtype":"success","session_id":"claude-warm-1","result":"hello %s:%s:%s","is_error":false,"modelUsage":{"claude-opus-5-5":{"inputTokens":%d,"outputTokens":%d}}}\n' "$tok" "$tid" "$static_tok" "$cum_in" "$cum_out"
+      printf '{"type":"result","subtype":"success","session_id":"claude-warm-1","result":"hello %s:%s:%s","is_error":false,"modelUsage":{"` + testOpusProfileARN + `":{"inputTokens":%d,"outputTokens":%d}}}\n' "$tok" "$tid" "$static_tok" "$cum_in" "$cum_out"
       ;;
   esac
 done
@@ -435,7 +435,7 @@ done
 	}
 
 	// Turn 1: cold spawn + stream_event deltas + zero duplication against assistant snapshot.
-	r1, msgs1 := runTurn("task-c1", "mat_c1", "", "claude-opus-5-5")
+	r1, msgs1 := runTurn("task-c1", "mat_c1", "", testOpusProfileARN)
 	if r1.Status != "completed" || r1.SessionID != "claude-warm-1" {
 		t.Fatalf("Turn 1 result = %+v", r1)
 	}
@@ -461,15 +461,16 @@ done
 		t.Fatalf("pool.Len() after Turn 1 = %d, want 1", pool.Len())
 	}
 
-	// Turn 2: warm hit on SAME PID, fresh token, cumulative modelUsage delta subtracted!
-	r2, msgs2 := runTurn("task-c2", "mat_c2", "claude-warm-1", "claude-opus-5-5")
+	// The warm turn subtracts cumulative usage under the raw profile ARN
+	// before attributing this turn's delta to the model on the assistant event.
+	r2, msgs2 := runTurn("task-c2", "mat_c2", "claude-warm-1", testOpusProfileARN)
 	if r2.Status != "completed" || r2.SessionID != "claude-warm-1" {
 		t.Fatalf("Turn 2 result = %+v", r2)
 	}
 	if r2.Output != "hello mat_c2:task-c2:EMPTY" {
 		t.Fatalf("Turn 2 output = %q", r2.Output)
 	}
-	if u := r2.Usage["claude-opus-5-5"]; u.InputTokens != 50 || u.OutputTokens != 15 {
+	if u := r2.Usage["claude-opus-5-5"]; len(r2.Usage) != 1 || u.InputTokens != 50 || u.OutputTokens != 15 {
 		t.Fatalf("Turn 2 usage = %+v, want delta input=50 output=15", u)
 	}
 	var streamedText2 strings.Builder

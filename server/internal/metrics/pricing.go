@@ -3,6 +3,8 @@ package metrics
 import (
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/modelid"
 )
 
 // CostUSDTicksPerUSD is the scale of provider-reported costs: xAI reports
@@ -379,32 +381,8 @@ func matchModelAlias(model string) (ModelPrice, bool) {
 	return ModelPrice{}, false
 }
 
-// Bedrock Anthropic ids may follow routing prefixes such as `custom:bedrock/`.
-// Accept the same routing segments as the frontend's stripProvider, and only
-// normalize Claude ids under the recognized Bedrock vendor/region prefixes.
-var bedrockAnthropicIDRe = regexp.MustCompile(`^(?:[a-z][a-z0-9_-]*[/:])*(?:(?:us|eu|apac|global)\.)?anthropic\.(claude-)`)
-
-// Preserve a single context tag for the existing matcher while removing the
-// Bedrock version (`...-v1:0[1m]`). Multiple tags remain unrecognized.
-var bedrockVersionSuffixRe = regexp.MustCompile(`-v\d+:\d+(\[[^\]]+\])?$`)
-
-// normalizeBedrockID rewrites a Bedrock-served Anthropic id into the bare
-// catalog id the price rows are keyed by, so `us.anthropic.claude-sonnet-5`
-// prices as `claude-sonnet-5` — the same SKU. It is a no-op for every other id,
-// including non-Anthropic Bedrock models (`us.amazon.nova-*`), which stay
-// unmapped rather than inheriting a Claude rate. Keep in step with
-// `stripBedrock` in packages/views/runtimes/utils.ts: the dashboard and this
-// metric must agree on what is priced.
-func normalizeBedrockID(model string) string {
-	if !bedrockAnthropicIDRe.MatchString(model) {
-		return model
-	}
-	model = bedrockAnthropicIDRe.ReplaceAllString(model, "${1}")
-	return bedrockVersionSuffixRe.ReplaceAllString(model, "${1}")
-}
-
 func PriceForModelAlias(model string) (ModelPrice, bool) {
-	model = normalizeBedrockID(strings.ToLower(strings.TrimSpace(model)))
+	model = modelid.NormalizeBedrock(strings.ToLower(strings.TrimSpace(model)))
 	if price, ok := matchModelAlias(model); ok {
 		return price, true
 	}
