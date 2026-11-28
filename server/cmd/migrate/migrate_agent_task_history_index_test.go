@@ -66,6 +66,11 @@ func TestAgentTaskHistoryIndexMigrationAndPagePlans(t *testing.T) {
 			"@before_created_at", before,
 			"@before_id", "'ffffffff-ffff-ffff-ffff-ffffffffffff'",
 			"@page_limit", "201",
+			// The optional status filter is absent for this plan check, so
+			// substitute its sqlc.narg directive with NULL:
+			// (NULL::text IS NULL OR status = NULL::text) is constant-true and
+			// PostgreSQL removes it, leaving the unfiltered plan on this index.
+			"sqlc.narg('status')", "NULL",
 		).Replace(history)
 		plan := explainAnalyze(t, ctx, pool, query)
 		if !strings.Contains(plan, indexName) || strings.Contains(plan, "Sort") {

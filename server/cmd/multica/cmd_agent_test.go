@@ -38,6 +38,7 @@ func newAgentTasksTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().Int("limit", 200, "")
 	cmd.Flags().String("before", "", "")
+	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("profile", "", "")
 	return cmd
 }
@@ -70,6 +71,36 @@ func TestRunAgentTasksRequestsUsageForJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `"input_tokens": 12`) {
 		t.Fatalf("JSON output missing usage: %s", out)
+	}
+}
+
+func TestRunAgentTasksStatusFilter(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents/agent-123/tasks" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("status") != "running" {
+			t.Errorf("status = %q, want running", r.URL.Query().Get("status"))
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "task-1", "status": "running"}})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newAgentTasksTestCmd()
+	if err := cmd.Flags().Set("status", "running"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatalf("runAgentTasks: %v", err)
+	}
+	if !strings.Contains(out, "task-1") {
+		t.Fatalf("output = %s", out)
 	}
 }
 

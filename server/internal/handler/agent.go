@@ -3102,6 +3102,18 @@ const HeaderAgentTasksNextCursor = "X-Agent-Tasks-Next-Cursor"
 const defaultAgentTasksLimit = 200
 const maxAgentTasksLimit = 200
 
+// validAgentTaskStatus reports whether s is a status the agent_task_queue can
+// hold. Kept next to the handler (not shared with the query) so an unknown
+// value is rejected here instead of matching nothing in the optional predicate.
+func validAgentTaskStatus(s string) bool {
+	switch s {
+	case "queued", "dispatched", "running", "waiting_local_directory",
+		"deferred", "completed", "failed", "cancelled":
+		return true
+	}
+	return false
+}
+
 func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
@@ -3127,6 +3139,17 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional run-state filter. The accepted set matches the statuses written
+	// to agent_task_queue; an unknown value is a client error, not an empty page.
+	statusFilter := pgtype.Text{}
+	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
+		if !validAgentTaskStatus(raw) {
+			writeError(w, http.StatusBadRequest, "status must be one of queued, dispatched, running, waiting_local_directory, deferred, completed, failed, cancelled")
+			return
+		}
+		statusFilter = pgtype.Text{String: raw, Valid: true}
+	}
+
 	limit := defaultAgentTasksLimit
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -3148,7 +3171,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), db.ListAgentTasksParams{
-		AgentID: agent.ID, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		AgentID: agent.ID, Status: statusFilter, BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
 		PageLimit: int32(limit + 1),
 	})
 	if err != nil {

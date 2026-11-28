@@ -222,6 +222,7 @@ func init() {
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
 	agentTasksCmd.Flags().Int("limit", 200, "Maximum runs per page (1-200)")
 	agentTasksCmd.Flags().String("before", "", "Cursor from the previous page")
+	agentTasksCmd.Flags().String("status", "", "Filter runs by status (queued, dispatched, running, waiting_local_directory, deferred, completed, failed, cancelled)")
 
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
@@ -915,6 +916,9 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 	before, _ := cmd.Flags().GetString("before")
 	if before != "" {
 		params.Set("before", before)
+	}
+	if status, _ := cmd.Flags().GetString("status"); status != "" {
+		params.Set("status", status)
 	}
 	if output == "json" {
 		params.Set("include_usage", "true")

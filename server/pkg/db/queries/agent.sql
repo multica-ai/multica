@@ -361,6 +361,9 @@ RETURNING *;
 -- name: ListAgentTasks :many
 SELECT * FROM agent_task_queue
 WHERE agent_id = @agent_id
+  -- Optional status filter; a NULL status matches every run so callers that
+  -- do not filter keep the current behaviour.
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
   -- Apply visibility before LIMIT so hidden fallbacks cannot end a page early.
   -- Keep this predicate in sync with handler.visibleTaskHistory.
   AND NOT (escalation_for_task_id IS NOT NULL AND started_at IS NULL
