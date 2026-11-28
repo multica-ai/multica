@@ -52,20 +52,25 @@ function renderDropdown(props: Partial<ComponentProps<typeof ModelDropdown>> = {
     defaultOptions: { queries: { retry: false } },
   });
   const onChange = vi.fn();
-  const view = render(
+  const control = (value: string) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <ModelDropdown
           runtimeId="rt-codex"
           runtimeOnline
-          value=""
           onChange={onChange}
           {...props}
+          value={value}
         />
       </QueryClientProvider>
-    </I18nProvider>,
+    </I18nProvider>
   );
-  return { ...view, onChange };
+  const view = render(control(props.value ?? ""));
+  return {
+    ...view,
+    onChange,
+    rerenderValue: (value: string) => view.rerender(control(value)),
+  };
 }
 
 function openDropdown(container: HTMLElement) {
@@ -115,6 +120,40 @@ describe("ModelDropdown", () => {
     fireEvent.click(screen.getByText("GPT-5.6 Terra"));
     expect(onChange).toHaveBeenCalledWith("gpt-5.6-terra");
     expect(onAutomaticChange).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { id: "gpt-5.6-terra", label: "gpt-6.2-sol" },
+    { id: "gpt-5.6-sol", label: "gpt-6.2-astra" },
+  ])("keeps $label as the selected title and submits its runtime ID", async ({ id, label }) => {
+    discovery = async () => ({
+      models: [{ id, label, provider: "openai" }],
+      supported: true,
+    });
+    const { container, onChange, rerenderValue } = renderDropdown();
+    openDropdown(container);
+
+    fireEvent.click(await screen.findByText(label));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(id);
+
+    rerenderValue(id);
+    const trigger = container.querySelector('[data-trigger="popover"]');
+    await waitFor(() =>
+      expect(trigger?.querySelector("span.truncate")?.textContent).toBe(label),
+    );
+    expect(trigger?.getAttribute("title")).toContain(id);
+  });
+
+  it("shows the saved ID when the catalog has no matching label", async () => {
+    discovery = async () => ({ models: [], supported: true });
+    const { container } = renderDropdown({ value: "saved-model" });
+
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-trigger="popover"] span.truncate')?.textContent,
+      ).toBe("saved-model"),
+    );
   });
 
   it("routes unsupported model cleanup separately from user selections", async () => {
