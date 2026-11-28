@@ -81,6 +81,10 @@ type InboundMessage struct {
 	// HasSelectedContext is set when enrichment renders an explicitly selected
 	// quote or forward; automatic recent context does not set it.
 	HasSelectedContext bool
+
+	// InstallationID is the installation whose connection received the
+	// message. The connector sets it before enrichment.
+	InstallationID pgtype.UUID
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier
