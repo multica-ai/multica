@@ -118,6 +118,8 @@ describe("ModelPicker (inspector)", () => {
   it("shows the saved ID when the catalog has no matching label", async () => {
     discovery = async () => ({ models: [], supported: true });
     const { container } = renderPicker("saved-model");
+    openPicker(container);
+    await screen.findByText(enAgents.pickers.model_empty);
 
     await waitFor(() =>
       expect(container.querySelector("button")?.textContent).toBe("saved-model"),

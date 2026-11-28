@@ -148,6 +148,8 @@ describe("ModelDropdown", () => {
   it("shows the saved ID when the catalog has no matching label", async () => {
     discovery = async () => ({ models: [], supported: true });
     const { container } = renderDropdown({ value: "saved-model" });
+    openDropdown(container);
+    await screen.findByText(enAgents.pickers.model_empty_with_dot);
 
     await waitFor(() =>
       expect(
