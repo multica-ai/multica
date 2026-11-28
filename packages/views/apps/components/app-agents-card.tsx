@@ -115,11 +115,9 @@ function AgentAppRow({
   // into the overview); the row stays disabled until the save lands so two
   // saves of the same agent's list cannot race.
   const save = (scope: AppAccountScope | null) => {
-    update.mutate(agentAppsWith(overview, agent.id, slug, scope), {
-      onError: (e: unknown) => {
-        refreshFeaturesOnLockedError(qc, wsId, e);
-        toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.app_page.save_failed)));
-      },
+    void update.mutateAsync(agentAppsWith(overview, agent.id, slug, scope)).catch((e: unknown) => {
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.app_page.save_failed)));
     });
   };
 

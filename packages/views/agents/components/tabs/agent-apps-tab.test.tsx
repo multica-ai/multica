@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
 import { toast } from "sonner";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { workspaceFeatureKeys } from "@multica/core/billing";
 import type { Agent, AgentApp, AppsOverview } from "@multica/core/types";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -22,7 +23,7 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
 }));
 vi.mock("@multica/core/auth", () => {
   const state = { user: { id: "me" } };
-  return { useAuthStore: (selector: (s: typeof state) => unknown) => selector(state) };
+  return { useAuthStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), { getState: () => state }) };
 });
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -38,6 +39,7 @@ const apps: AgentApp[] = [
   { agent_id: "a1", toolkit_slug: "gmail", account_scope: "personal", level: "read" },
 ];
 let overview: AppsOverview;
+const clients: QueryClient[] = [];
 
 beforeEach(() => {
   vi.mocked(api.listAgentApps).mockResolvedValue({ apps });
@@ -64,21 +66,41 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  for (const client of clients.splice(0)) client.clear();
   vi.clearAllMocks();
 });
 
 function renderApps() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  clients.push(queryClient);
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider locale="en" resources={{ en: { common: enCommon, agents: enAgents, settings: enSettings, billing: enBilling } }}>
         <AgentAppsTab agent={{ id: "a1", permission_mode: "private" } as Agent} />
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("AgentAppsTab", () => {
+  it.each([
+    { error: new Error("Could not save app access"), message: "Could not save app access", locked: false },
+    { error: new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "team_app_accounts" }), message: enBilling.paid_feature.locked_error, locked: true },
+  ])("reports a pending save failure after leaving the tab (feature locked: $locked)", async ({ error, message, locked }) => {
+    let reject!: (error: Error) => void;
+    vi.mocked(api.updateAgentApps).mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    const view = renderApps();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("switch", { name: "Enable Gmail" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(view.queryClient.isMutating()).toBe(1);
+    await act(async () => reject(error));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(message);
+    if (locked) expect(view.queryClient.getQueryState(workspaceFeatureKeys.all("ws-1"))?.isInvalidated).toBe(true);
+  });
+
   it("lists connected apps and saved grants with icons, excluding unconnected catalog entries", async () => {
     overview.personal = [{ id: "expired-calendar", toolkit_slug: "googlecalendar", status: "expired", connected_at: "", last_used_at: null }];
     renderApps();
