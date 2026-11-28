@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -504,6 +505,32 @@ func watchPRInChat(t *testing.T, pool *pgxpool.Pool, pr db.GithubPullRequest, re
 	})
 }
 
+// watchNamedPRFromIssue registers an issue checks wakeup that names target by
+// repository and number on an issue that links only linked.
+func watchNamedPRFromIssue(t *testing.T, pool *pgxpool.Pool, target, linked db.GithubPullRequest) {
+	t.Helper()
+	ctx := context.Background()
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO issue (workspace_id,title,creator_type,creator_id)
+		VALUES ($1,'watch','member',gen_random_uuid()) RETURNING id`, target.WorkspaceID).Scan(&issueID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_wakeup WHERE issue_id=$1`, issueID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE issue_id=$1`, issueID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, issueID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)`, issueID, linked.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,enabled,condition)
+		VALUES(gen_random_uuid(),$1,$2,'go','event','once',true,
+		jsonb_build_object('type','pull_request','event','checks_finished','repo',$3::text,'number',$4::int))`,
+		target.WorkspaceID, issueID, strings.ToUpper(target.RepoOwner+"/"+target.RepoName), target.PrNumber); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChecksWatchedGitHubPRQueriesAndRotation(t *testing.T) {
 	pool := testDBPool(t)
 	q := db.New(pool)
@@ -544,6 +571,10 @@ func TestChecksWatchedGitHubPRQueriesAndRotation(t *testing.T) {
 	watchPR(t, pool, conflictsOnly, "conflicts", true)
 	closedWatched := seed(9, "closed", "h9", "h9", stale)
 	watchPR(t, pool, closedWatched, "checks_finished", true)
+	// A rule naming one PR watches that PR, not the ones its issue links.
+	namedTarget := seed(10, "open", "h10", "h10", stale)
+	linkedToNamedRule := seed(11, "open", "h11", "h11", stale)
+	watchNamedPRFromIssue(t, pool, namedTarget, linkedToNamedRule)
 
 	rows, err := q.ListStaleChecksWatchedGitHubPRs(ctx, db.ListStaleChecksWatchedGitHubPRsParams{
 		OlderThan: tsFromTime(now.Add(-2 * time.Minute)),
@@ -558,7 +589,7 @@ func TestChecksWatchedGitHubPRQueriesAndRotation(t *testing.T) {
 			got[r.PrNumber] = true
 		}
 	}
-	want := map[int32]bool{1: true, 2: true, 4: true, 5: true}
+	want := map[int32]bool{1: true, 2: true, 4: true, 5: true, 10: true}
 	if len(got) != len(want) {
 		t.Fatalf("checks-watched sweep = %v, want %v", got, want)
 	}
@@ -573,7 +604,7 @@ func TestChecksWatchedGitHubPRQueriesAndRotation(t *testing.T) {
 	m := NewManager(enabledClient(t), q, pool, nil)
 	m.sweepMaxRows = 1
 	seen := map[int32]bool{}
-	for sweep := 0; sweep < 50 && !(seen[1] && seen[2] && seen[4] && seen[5]); sweep++ {
+	for sweep := 0; sweep < 50 && !(seen[1] && seen[2] && seen[4] && seen[5] && seen[10]); sweep++ {
 		m.sweepChecksWatched(ctx)
 		for len(m.queue) > 0 {
 			addr := <-m.queue

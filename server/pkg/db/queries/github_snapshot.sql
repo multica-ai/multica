@@ -138,7 +138,8 @@ LIMIT sqlc.arg('max_rows');
 -- webhook/chase refreshes may have been dropped during a rate limit or deploy.
 -- Sweeping watched PRs on a shorter TTL keeps --until-pr checks responsive
 -- without relying on a manual page visit. Rotates an address cursor like the
--- other sweeps.
+-- other sweeps. An issue rule that names one PR (repo + number) watches that
+-- PR instead of the issue's linked ones.
 WITH watched_issue_prs AS (
     SELECT ipr.pull_request_id AS pr_id
     FROM issue_wakeup AS w
@@ -146,6 +147,21 @@ WITH watched_issue_prs AS (
     WHERE w.enabled
       AND w.condition->>'type' = 'pull_request'
       AND w.condition->>'event' = 'checks_finished'
+      AND COALESCE(w.condition->>'repo', '') = ''
+    UNION ALL
+    SELECT pr.id AS pr_id
+    FROM issue_wakeup AS w
+    JOIN github_pull_request AS pr
+      ON pr.workspace_id = w.workspace_id
+     AND lower(pr.repo_owner) = lower(split_part(w.condition->>'repo', '/', 1))
+     AND lower(pr.repo_name) = lower(split_part(w.condition->>'repo', '/', 2))
+     AND pr.pr_number = CASE
+         WHEN COALESCE(w.condition->>'number', '') ~ '^[0-9]{1,9}$' THEN (w.condition->>'number')::INTEGER
+     END
+    WHERE w.enabled
+      AND w.condition->>'type' = 'pull_request'
+      AND w.condition->>'event' = 'checks_finished'
+      AND COALESCE(w.condition->>'repo', '') <> ''
 ),
 watched_chat_prs AS (
     SELECT pr.id AS pr_id

@@ -247,7 +247,7 @@ func chatWakeupConditionFromFlags(ctx context.Context, cmd *cobra.Command, clien
 		return nil, fmt.Errorf("--stage requires --until-children-done")
 	}
 	if v, _ := cmd.Flags().GetString("until-pr"); v != "" {
-		c, err := parseChatWakeupPR(v)
+		c, err := parseWakeupPRTarget(v)
 		if err != nil {
 			return nil, err
 		}
@@ -280,8 +280,9 @@ func chatWakeupConditionFromFlags(ctx context.Context, cmd *cobra.Command, clien
 	}
 }
 
-// parseChatWakeupPR reads owner/repo#N[:merged|closed|checks].
-func parseChatWakeupPR(v string) (map[string]any, error) {
+// parseWakeupPRTarget reads owner/repo#N[:merged|closed|checks], the one-PR
+// form chat and issue wakeups share.
+func parseWakeupPRTarget(v string) (map[string]any, error) {
 	ref, event, _ := strings.Cut(v, ":")
 	repo, num, ok := strings.Cut(ref, "#")
 	n, err := strconv.Atoi(num)

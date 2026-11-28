@@ -193,13 +193,6 @@ func (s *ChatWakeupService) normalizeChatCondition(ctx context.Context, tx pgx.T
 		}
 		out = ChatWakeupCondition{Type: c.Type, IssueID: util.UUIDToString(id), Identifier: identifier, Stage: c.Stage}
 	case "pull_request":
-		owner, name, ok := strings.Cut(strings.TrimSpace(c.Repo), "/")
-		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-			return nil, badChatCondition("repo must be owner/name")
-		}
-		if c.Number <= 0 {
-			return nil, badChatCondition("number must be a pull request number")
-		}
 		switch c.Event {
 		case "merged", "closed":
 		case "checks_finished":
@@ -209,15 +202,15 @@ func (s *ChatWakeupService) normalizeChatCondition(ctx context.Context, tx pgx.T
 		default:
 			return nil, badChatCondition("event must be merged, closed or checks_finished")
 		}
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM github_pull_request WHERE workspace_id=$1 AND lower(repo_owner)=lower($2) AND lower(repo_name)=lower($3) AND pr_number=$4)`,
-			workspaceID, owner, name, c.Number).Scan(&exists); err != nil {
+		repo, err := normalizePRTarget(ctx, tx, workspaceID, c.Repo, c.Number)
+		var bad prTargetInputError
+		if errors.As(err, &bad) {
+			return nil, badChatCondition(bad.msg)
+		}
+		if err != nil {
 			return nil, err
 		}
-		if !exists {
-			return nil, badChatCondition(fmt.Sprintf("this workspace has no pull request %s/%s#%d; it must be on a repository connected through the GitHub integration", owner, name, c.Number))
-		}
-		out = ChatWakeupCondition{Type: c.Type, Repo: owner + "/" + name, Number: c.Number, Event: c.Event}
+		out = ChatWakeupCondition{Type: c.Type, Repo: repo, Number: c.Number, Event: c.Event}
 	case "run":
 		id, err := util.ParseUUID(c.TaskID)
 		if err != nil {
@@ -316,32 +309,11 @@ func (s *ChatWakeupService) evaluateChatCondition(ctx context.Context, tx pgx.Tx
 		observed["issue"] = c.Identifier
 		return met, fingerprint, observed, nil
 	case "pull_request":
-		owner, name, _ := strings.Cut(c.Repo, "/")
-		var state, head, snapshotHead, checks, url, title string
-		err := tx.QueryRow(ctx, `SELECT state, head_sha, snapshot_head_sha, COALESCE(checks_rollup_state,''), html_url, title
-			FROM github_pull_request
-			WHERE workspace_id=$1 AND lower(repo_owner)=lower($2) AND lower(repo_name)=lower($3) AND pr_number=$4
-			ORDER BY updated_at DESC LIMIT 1`, w.WorkspaceID, owner, name, c.Number).Scan(&state, &head, &snapshotHead, &checks, &url, &title)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, "", nil, errChatConditionPending{"The pull request is no longer mirrored in this workspace; check the GitHub integration"}
+		met, fingerprint, observed, err := evaluatePRTarget(ctx, tx, w.WorkspaceID, c.Repo, c.Number, c.Event)
+		if errors.Is(err, errPRTargetMissing) || errors.Is(err, errPRTargetSnapshotPending) {
+			return false, "", observed, errChatConditionPending{err.Error()}
 		}
-		if err != nil {
-			return false, "", nil, err
-		}
-		observed := map[string]any{"pull_request": fmt.Sprintf("%s#%d", c.Repo, c.Number), "title": title, "url": url, "state": state}
-		switch c.Event {
-		case "merged":
-			return state == "merged", "pr:" + state, observed, nil
-		case "closed":
-			return state == "merged" || state == "closed", "pr:" + state, observed, nil
-		case "checks_finished":
-			if snapshotHead == "" || snapshotHead != head {
-				return false, "", observed, errChatConditionPending{"Waiting for a check snapshot of the pull request's current head"}
-			}
-			observed["head_sha"], observed["checks"] = head, strings.ToLower(checks)
-			finished := slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks)
-			return finished, "checks:" + head + ":" + checks, observed, nil
-		}
+		return met, fingerprint, observed, err
 	case "run":
 		var status string
 		var issueID pgtype.UUID

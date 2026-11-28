@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -179,6 +180,9 @@ func TestIssueWakeupCLIConditionsAndManagement(t *testing.T) {
 		{[]string{"--until-pr", "checks", "--mode", "continuous", "--max-fires", "5"}, `{"event":"checks_finished","type":"pull_request"}`},
 		{[]string{"--until-pr", "conflicts", "--mode", "continuous", "--max-fires", "5"}, `{"event":"conflicts","type":"pull_request"}`},
 		{[]string{"--until-assignee", "agent:a1"}, `{"assignee_id":"a1","assignee_type":"agent","field":"assignee","type":"issue_field"}`},
+		{[]string{"--until-pr", "acme/web#12"}, `{"event":"merged","number":12,"repo":"acme/web","type":"pull_request"}`},
+		{[]string{"--until-pr", "acme/web#12:closed"}, `{"event":"closed","number":12,"repo":"acme/web","type":"pull_request"}`},
+		{[]string{"--until-pr", "acme/web#12:checks"}, `{"event":"checks_finished","number":12,"repo":"acme/web","type":"pull_request"}`},
 	} {
 		calls = nil
 		if err := run(append([]string{"create", issue, "--instruction", "go"}, tc.args...)...); err != nil {
@@ -188,7 +192,7 @@ func TestIssueWakeupCLIConditionsAndManagement(t *testing.T) {
 		if string(got) != tc.want {
 			t.Errorf("%v: condition %s, want %s", tc.args, got, tc.want)
 		}
-		if tc.args[0] == "--until-pr" && calls[len(calls)-1].body["max_fires"] != float64(5) {
+		if slices.Contains(tc.args, "--max-fires") && calls[len(calls)-1].body["max_fires"] != float64(5) {
 			t.Errorf("max_fires not sent: %+v", calls[len(calls)-1].body)
 		}
 	}
@@ -196,6 +200,10 @@ func TestIssueWakeupCLIConditionsAndManagement(t *testing.T) {
 		{"--until-status", "done", "--until-label", "l1"},
 		{"--stage", "2"},
 		{"--until-pr", "reviews"},
+		{"--until-pr", "closed"},
+		{"--until-pr", "acme/web#12:conflicts"},
+		{"--until-pr", "acme/web#x"},
+		{"--until-pr", "web#12"},
 		{"--until-assignee", "a1"},
 	} {
 		if err := run(append([]string{"create", issue, "--instruction", "go"}, bad...)...); err == nil {

@@ -240,7 +240,7 @@ func (h *Handler) CreateIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
-	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.ID, result.Condition)
+	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.WorkspaceID, issue.ID, result.Condition)
 	status := http.StatusCreated
 	if existingID.Valid {
 		status = http.StatusOK
@@ -309,14 +309,15 @@ func (h *Handler) EnableIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
-	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.ID, result.Condition)
+	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.WorkspaceID, issue.ID, result.Condition)
 	writeJSON(w, 200, result)
 }
 
 // maybeRefreshPRsForIssueWakeup kicks off a non-blocking snapshot refresh for
-// open/draft GitHub PRs linked to issue when a checks/conflicts wakeup is
-// created or re-enabled and the PR's snapshot is missing or stale.
-func (h *Handler) maybeRefreshPRsForIssueWakeup(ctx context.Context, issueID pgtype.UUID, rawCondition []byte) {
+// open/draft GitHub PRs linked to issue, or the one PR the rule names, when a
+// checks/conflicts wakeup is created or re-enabled and the PR's snapshot is
+// missing or stale.
+func (h *Handler) maybeRefreshPRsForIssueWakeup(ctx context.Context, workspaceID, issueID pgtype.UUID, rawCondition []byte) {
 	if !h.PRRefresh.Enabled() || len(rawCondition) == 0 {
 		return
 	}
@@ -325,6 +326,10 @@ func (h *Handler) maybeRefreshPRsForIssueWakeup(ctx context.Context, issueID pgt
 		return
 	}
 	if cond.Event != "checks_finished" && cond.Event != "conflicts" {
+		return
+	}
+	if cond.Repo != "" {
+		h.maybeRefreshNamedPR(ctx, workspaceID, cond.Repo, cond.Number)
 		return
 	}
 	rows, err := h.Queries.ListPullRequestsByIssue(ctx, issueID)
