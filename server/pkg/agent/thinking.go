@@ -409,9 +409,8 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		}
 		label := m.DisplayName
 		if label == "" {
-			label = m.Slug
+			label = normalizeCodexModelLabel(m.Slug, m.Slug)
 		}
-		label = normalizeCodexModelLabel(m.Slug, label)
 		models = append(models, Model{
 			ID:           m.Slug,
 			Label:        label,
