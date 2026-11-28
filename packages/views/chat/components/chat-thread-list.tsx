@@ -726,7 +726,7 @@ export function ChatThreadList({
               >
                 {project.icon ?? "📁"} {project.title} <span className="font-normal">({sessions.length})</span>
               </button>
-              {onNewProjectChat && <button type="button" aria-label={t(($) => $.window.new_chat_tooltip)} onClick={() => onNewProjectChat(project.id)} className="rounded px-2 py-1 text-caption text-muted-foreground hover:bg-accent/50"><Plus className="size-3.5" /></button>}
+              {onNewProjectChat && <button type="button" aria-label={t(($) => $.window.new_chat_tooltip)} onClick={() => onNewProjectChat(project.id)} className="rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-accent/50"><Plus className="size-3.5" /></button>}
             </div>
             {!collapsed && <SessionHistoryList sessions={sessions} renderRow={renderRow} animateExit />}
           </section>
