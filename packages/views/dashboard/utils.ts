@@ -8,6 +8,8 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   DashboardFailureBySquad,
+  DashboardMemberUsage,
+  DashboardUsageByMember,
 } from "@multica/core/types";
 import {
   FAILURE_CLASSES,
@@ -1027,4 +1029,57 @@ export function sortSquadFailures(
   return rows.toSorted(
     (a, b) => sample(a) - sample(b) || b.rate - a.rate || b.failed - a.failed,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Per-member usage (the "By member" tab).
+// ---------------------------------------------------------------------------
+
+/** Server sentinel for runs with no accountable member. Never a real user id. */
+export const UNATTRIBUTED_MEMBER_ID = "__unattributed__";
+
+export interface MemberDashboardRow {
+  userId: string;
+  tokens: number;
+  cost: number;
+  /** Distinct runs with usage in the window, counted server-side. */
+  taskCount: number;
+}
+
+/** Tokens and estimated cost of a list of (provider, model) usage rows. */
+export function summarizeMemberUsage(usage: DashboardMemberUsage[]): {
+  tokens: number;
+  cost: number;
+} {
+  let tokens = 0;
+  let cost = 0;
+  for (const u of usage) {
+    tokens += u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+    cost += estimateCost(u);
+  }
+  return { tokens, cost };
+}
+
+/**
+ * One row per member, priced like the per-agent leaderboard. Sorted by cost,
+ * then tokens; the unattributed bucket always sorts last. The run count is the
+ * server's, never a sum over usage rows, which would count a run that used two
+ * models twice.
+ */
+export function aggregateMemberUsage(rows: DashboardUsageByMember[]): MemberDashboardRow[] {
+  const byUser = new Map<string, MemberDashboardRow>();
+  for (const r of rows) {
+    const { tokens, cost } = summarizeMemberUsage(r.usage);
+    const entry = byUser.get(r.user_id) ?? { userId: r.user_id, tokens: 0, cost: 0, taskCount: 0 };
+    entry.tokens += tokens;
+    entry.cost += cost;
+    entry.taskCount += r.task_count;
+    byUser.set(r.user_id, entry);
+  }
+  return Array.from(byUser.values()).toSorted((a, b) => {
+    const aUnattributed = a.userId === UNATTRIBUTED_MEMBER_ID;
+    const bUnattributed = b.userId === UNATTRIBUTED_MEMBER_ID;
+    if (aUnattributed !== bUnattributed) return aUnattributed ? 1 : -1;
+    return b.cost - a.cost || b.tokens - a.tokens;
+  });
 }

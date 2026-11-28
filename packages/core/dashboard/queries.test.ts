@@ -4,9 +4,12 @@ import {
   dashboardAgentRunTimeOptions,
   dashboardFailuresByAgentOptions,
   dashboardFailuresDailyOptions,
+  dashboardMemberTasksOptions,
   dashboardRunTimeDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardUsageByMemberOptions,
   dashboardUsageDailyOptions,
+  dashboardKeys,
 } from "./queries";
 
 type QueryOptionsWithPlaceholder = {
@@ -38,6 +41,7 @@ const optionBuilders = [
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  dashboardUsageByMemberOptions,
 ] as const;
 
 describe("dashboard range placeholders", () => {
@@ -98,5 +102,28 @@ describe("dashboard history limit in queries", () => {
     expect(buildOptions("ws-1", 30, null, "UTC", 30).queryKey).not.toEqual(
       buildOptions("ws-1", 30, null, "UTC", 90).queryKey,
     );
+  });
+});
+
+describe("member tasks query", () => {
+  const build = (userId: string | null, days = 30) =>
+    dashboardMemberTasksOptions("ws-1", days, "project-1", "UTC", null, "squad-1", userId);
+
+  it("waits for a member and keys on them", () => {
+    expect(build(null).enabled).toBe(false);
+    expect(build("user-1").enabled).toBe(true);
+    expect(
+      dashboardMemberTasksOptions("ws-1", 30, null, "UTC", undefined, null, "user-1").enabled,
+    ).toBe(false);
+    expect(build("user-1").queryKey).toEqual(
+      dashboardKeys.memberTasks("ws-1", 30, "project-1", "UTC", null, "squad-1", "user-1"),
+    );
+  });
+
+  it("never shows one member's runs as a placeholder under another's", () => {
+    const previous = [{ sentinel: "alice" }];
+    expect(resolvePlaceholder(build("bob", 7), previous, build("alice").queryKey)).toBeUndefined();
+    // The same member across a range change keeps the previous runs in place.
+    expect(resolvePlaceholder(build("alice", 7), previous, build("alice").queryKey)).toBe(previous);
   });
 });

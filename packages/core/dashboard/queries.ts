@@ -25,7 +25,9 @@ type DashboardKeyPart =
   | "runtime-daily"
   | "failures-daily"
   | "failures-by-agent"
-  | "failures-by-squad";
+  | "failures-by-squad"
+  | "by-member"
+  | "member-tasks";
 
 const dashboardKey = (
   wsId: string,
@@ -114,6 +116,30 @@ export const dashboardKeys = {
     historyLimit?: DashboardHistoryLimitParam,
     squadId: string | null = null,
   ) => dashboardKey(wsId, "failures-by-squad", days, projectId, tz, historyLimit, squadId),
+  byMember: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "by-member", days, projectId, tz, historyLimit, squadId),
+  // The member is part of the scope, so one member's runs are never shown as
+  // a placeholder under another's name.
+  memberTasks: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit: DashboardHistoryLimitParam,
+    squadId: string | null,
+    userId: string,
+  ) =>
+    [
+      ...dashboardKey(wsId, "member-tasks", days, projectId, tz, historyLimit, squadId),
+      "user",
+      userId,
+    ] as const,
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -162,8 +188,13 @@ function dashboardOptions<T>(
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
   squadId: string | null = null,
+  keySuffix: readonly string[] = [],
+  ready = true,
 ) {
-  const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit, squadId);
+  const queryKey = [
+    ...dashboardKey(wsId, part, days, projectId, tz, historyLimit, squadId),
+    ...keySuffix,
+  ];
   return queryOptions({
     queryKey,
     queryFn: async ({ client }: { client: QueryClient }) => {
@@ -188,7 +219,7 @@ function dashboardOptions<T>(
       }
       return rows;
     },
-    enabled: !!wsId && historyLimit !== undefined,
+    enabled: !!wsId && historyLimit !== undefined && ready,
     // The app default retries once; a tightened limit is not transient, and
     // the page re-queries under the stricter key on its own.
     retry: (failureCount: number, error: Error) =>
@@ -379,5 +410,49 @@ export function dashboardFailuresBySquadOptions(
     tz,
     historyLimit,
     squadId,
+  );
+}
+
+export function dashboardUsageByMemberOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "by-member",
+    (params) => api.getDashboardUsageByMember(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+  );
+}
+
+// Fetched only when a member row is expanded, hence the userId gate.
+export function dashboardMemberTasksOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null,
+  userId: string | null,
+) {
+  return dashboardOptions(
+    "member-tasks",
+    (params) => api.getDashboardMemberTasks(userId ?? "", params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
+    ["user", userId ?? ""],
+    !!userId,
   );
 }

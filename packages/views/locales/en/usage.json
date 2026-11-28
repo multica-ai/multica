@@ -135,5 +135,32 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "members": {
+    "tab": "By member",
+    "title": "Usage by member",
+    "description": "Each run counts for the person it was done for: whoever mentioned, assigned or scheduled the agent, followed through hand-offs between agents.",
+    "caption_one": "{{count}} member",
+    "caption_other": "{{count}} members",
+    "own_only": "You can only see your own usage.",
+    "header_member": "Member",
+    "header_tokens": "Tokens",
+    "header_cost": "Cost",
+    "header_tasks": "Runs with usage",
+    "unattributed": "Unattributed",
+    "former_member": "Former member",
+    "no_data": "No member usage in this window.",
+    "show_tasks": "Show recent runs for {{name}}",
+    "hide_tasks": "Hide recent runs for {{name}}",
+    "recent_title": "Recent runs",
+    "recent_hint": "Up to {{limit}} most recent runs with usage in this window.",
+    "recent_empty": "No runs with usage in this window.",
+    "recent_error": "Couldn't load recent runs.",
+    "chat_run": "Chat",
+    "generic_run": "Other run",
+    "other_agents": "Other agents",
+    "header_task": "Run",
+    "header_agent": "Agent",
+    "header_time": "Last used"
   }
 }

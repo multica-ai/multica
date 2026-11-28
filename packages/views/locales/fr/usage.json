@@ -135,5 +135,32 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "members": {
+    "tab": "Par membre",
+    "title": "Consommation par membre",
+    "description": "Chaque exécution est comptée pour la personne pour qui elle a été faite : celle qui a mentionné, assigné ou planifié l'agent, y compris à travers les relais entre agents.",
+    "caption_one": "{{count}} membre",
+    "caption_other": "{{count}} membres",
+    "own_only": "Vous ne voyez que votre propre consommation.",
+    "header_member": "Membre",
+    "header_tokens": "Tokens",
+    "header_cost": "Coût",
+    "header_tasks": "Exécutions avec consommation",
+    "unattributed": "Non attribué",
+    "former_member": "Ancien membre",
+    "no_data": "Aucune consommation de membre sur cette fenêtre.",
+    "show_tasks": "Afficher les exécutions récentes de {{name}}",
+    "hide_tasks": "Masquer les exécutions récentes de {{name}}",
+    "recent_title": "Exécutions récentes",
+    "recent_hint": "Jusqu'à {{limit}} exécutions récentes avec consommation sur cette fenêtre.",
+    "recent_empty": "Aucune exécution avec consommation sur cette fenêtre.",
+    "recent_error": "Impossible de charger les exécutions récentes.",
+    "chat_run": "Chat",
+    "generic_run": "Autre exécution",
+    "other_agents": "Autres agents",
+    "header_task": "Exécution",
+    "header_agent": "Agent",
+    "header_time": "Dernière utilisation"
   }
 }

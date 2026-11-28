@@ -722,6 +722,34 @@ describe("DashboardPage — the two questions are separate tabs", () => {
     expect(screen.getByRole("list", { name: "Leaderboard" })).toBeInTheDocument();
   });
 
+  it("fetches per-member usage only once the By member tab is open", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    expect(queryKeys.some((k) => k[2] === "by-member")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "By member" }));
+    expect(replaceSpy).toHaveBeenLastCalledWith("/acme/usage?tab=members");
+    expect(screen.getByRole("tab", { name: "By member" })).toHaveAttribute("aria-selected", "true");
+    // Same range, project, tz, history limit and squad scope as the other tabs.
+    expect(queryKeys.find((k) => k[2] === "by-member")).toEqual([
+      "dashboard",
+      "ws-1",
+      "by-member",
+      30,
+      null,
+      "UTC",
+      null,
+    ]);
+    expect(screen.getByText("No member usage in this window.")).toBeInTheDocument();
+  });
+
+  it("opens straight onto By member when the URL asks for it", () => {
+    renderDashboard("tab=members");
+
+    expect(screen.getByRole("tab", { name: "By member" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("list", { name: "Leaderboard" })).not.toBeInTheDocument();
+  });
+
   it("caps the offender list and expands it on demand", async () => {
     manyAgentsRef.current = true;
     const user = userEvent.setup();

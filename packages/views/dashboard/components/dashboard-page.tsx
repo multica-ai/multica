@@ -85,6 +85,7 @@ import { ProjectFilter, SquadFilter, TimeRangeFilter } from "./dashboard-filters
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard, type LeaderboardGroupBy } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
+import { MembersTab } from "./members-tab";
 import {
   earliestReadableDay,
   effectiveRange,
@@ -110,7 +111,7 @@ const EMPTY_FAILURE_BY_SQUAD: import("@multica/core/types").DashboardFailureBySq
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
 
-type DashboardTab = "usage" | "errors";
+type DashboardTab = "usage" | "errors" | "members";
 const TAB_QUERY_KEY = "tab";
 const DEFAULT_TAB: DashboardTab = "usage";
 
@@ -164,7 +165,8 @@ function useDataFreshness(
  * with rather than by which rollup feeds them: Usage answers "what did this
  * cost", Errors answers "what broke". They used to share one scrolling page,
  * where the failure breakdown sat below a leaderboard that could itself run to
- * thirty rows, and the only way to chart failures was to hide spend.
+ * thirty rows, and the only way to chart failures was to hide spend. A third
+ * tab, By member, splits the same spend by the person each run was done for.
  *
  * Scope is expressed by where a control lives: the header carries the tabs and
  * the two page-scoped filters (time range, project), every card carries its
@@ -237,7 +239,8 @@ export function DashboardPage() {
   // flipping tabs does not stack up history entries. An unknown ?tab= value
   // falls back to Usage rather than rendering nothing.
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
-  const tab: DashboardTab = tabFromUrl === "errors" ? "errors" : DEFAULT_TAB;
+  const tab: DashboardTab =
+    tabFromUrl === "errors" || tabFromUrl === "members" ? tabFromUrl : DEFAULT_TAB;
   const handleTabChange = (next: string) => {
     const params = new URLSearchParams(navigation.searchParams);
     if (next === DEFAULT_TAB) params.delete(TAB_QUERY_KEY);
@@ -662,6 +665,12 @@ export function DashboardPage() {
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
+            <TabsTrigger
+              value="members"
+              className="h-full rounded-none px-2.5"
+            >
+              {t(($) => $.members.tab)}
+            </TabsTrigger>
           </TabsList>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -842,6 +851,21 @@ export function DashboardPage() {
                 locales={locales}
               />
             )}
+          </TabsContent>
+
+          {/* Fetched only while open: the per-member rollup reads raw usage
+              rather than the hourly rollup, so it is not prefetched with the
+              other tabs. */}
+          <TabsContent value="members">
+            <MembersTab
+              wsId={wsId}
+              days={days}
+              projectId={projectId}
+              viewTZ={viewTZ}
+              historyLimit={historyLimit}
+              squadId={squadFilterParam}
+              agents={agents}
+            />
           </TabsContent>
         </div>
       </div>
