@@ -115,6 +115,8 @@
     "quick_actions_aria": "Предложенные вопросы",
     "quick_actions_regenerate": "Обновить предложения",
     "quick_actions_regenerate_failed": "Не удалось обновить предложения. Попробуйте ещё раз.",
+    "quick_actions_edit": "Изменить перед отправкой",
+    "quick_actions_edit_aria": "Изменить перед отправкой: {{label}}",
     "tools_few": "{{count}} инструмента",
     "tools_many": "{{count}} инструментов",
     "process_steps_few": "{{count}} шага",

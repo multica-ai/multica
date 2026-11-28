@@ -103,7 +103,9 @@
     "quick_actions_heading": "後續提問",
     "quick_actions_aria": "後續提問建議",
     "quick_actions_regenerate": "重新生成建議",
-    "quick_actions_regenerate_failed": "無法重新生成建議，請重試。"
+    "quick_actions_regenerate_failed": "無法重新生成建議，請重試。",
+    "quick_actions_edit": "編輯後傳送",
+    "quick_actions_edit_aria": "編輯後傳送：{{label}}"
   },
   "session_history": {
     "untitled": "無標題",

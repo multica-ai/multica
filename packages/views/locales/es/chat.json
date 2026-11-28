@@ -108,7 +108,9 @@
     "quick_actions_heading": "Preguntas de seguimiento",
     "quick_actions_aria": "Seguimientos sugeridos",
     "quick_actions_regenerate": "Regenerar sugerencias",
-    "quick_actions_regenerate_failed": "No se han podido actualizar las sugerencias. Inténtalo de nuevo."
+    "quick_actions_regenerate_failed": "No se han podido actualizar las sugerencias. Inténtalo de nuevo.",
+    "quick_actions_edit": "Editar antes de enviar",
+    "quick_actions_edit_aria": "Editar antes de enviar: {{label}}"
   },
   "session_history": {
     "untitled": "Sin título",

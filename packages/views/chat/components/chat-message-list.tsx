@@ -19,11 +19,19 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@multica/ui/components/ui/context-menu";
+import {
   ChevronRight,
   Brain,
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
+  Copy,
+  PencilLine,
   RotateCw,
 } from "@multica/ui/icons";
 import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
@@ -103,6 +111,8 @@ interface ChatMessageListProps {
   transformContent?: (content: string) => string;
   /** Send the full hidden prompt behind an assistant follow-up chip. */
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  /** Put a follow-up chip's full prompt into the composer instead of sending it. */
+  onEditQuickAction?: (action: ChatQuickAction) => void;
   quickActionsDisabled?: boolean;
   /**
    * Regenerate the follow-up suggestions for the session's latest assistant
@@ -218,6 +228,7 @@ export function ChatMessageList({
   onLoadOlderMessages,
   transformContent,
   onQuickAction,
+  onEditQuickAction,
   quickActionsDisabled = false,
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
@@ -465,6 +476,7 @@ export function ChatMessageList({
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
               transformContent={transformContent}
               onQuickAction={onQuickAction}
+              onEditQuickAction={onEditQuickAction}
               quickActionsDisabled={quickActionsDisabled}
               onRegenerateQuickActions={onRegenerateQuickActions}
               latestAssistantMessageId={latestAssistantMessageId}
@@ -548,6 +560,7 @@ const MessageBubble = memo(function MessageBubble({
   isPending,
   transformContent,
   onQuickAction,
+  onEditQuickAction,
   quickActionsDisabled,
   onRegenerateQuickActions,
   latestAssistantMessageId,
@@ -561,6 +574,7 @@ const MessageBubble = memo(function MessageBubble({
   isPending: boolean;
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  onEditQuickAction?: (action: ChatQuickAction) => void;
   quickActionsDisabled: boolean;
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   latestAssistantMessageId: string | null;
@@ -634,6 +648,7 @@ const MessageBubble = memo(function MessageBubble({
         isPending={isPending}
         transformContent={transformContent}
         onQuickAction={onQuickAction}
+        onEditQuickAction={onEditQuickAction}
         quickActionsDisabled={quickActionsDisabled}
         onRegenerateQuickActions={onRegenerateQuickActions}
         canRegenerateQuickActions={message.id === latestAssistantMessageId}
@@ -669,6 +684,7 @@ function AssistantMessage({
   isPending,
   transformContent,
   onQuickAction,
+  onEditQuickAction,
   quickActionsDisabled,
   onRegenerateQuickActions,
   canRegenerateQuickActions = false,
@@ -681,6 +697,7 @@ function AssistantMessage({
   isPending: boolean;
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  onEditQuickAction?: (action: ChatQuickAction) => void;
   quickActionsDisabled: boolean;
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   canRegenerateQuickActions?: boolean;
@@ -790,6 +807,7 @@ function AssistantMessage({
               actions={message.quick_actions ?? []}
               disabled={quickActionsDisabled || isPending}
               onSelect={onQuickAction}
+              onEdit={onEditQuickAction}
               onRegenerate={
                 onRegenerateQuickActions && canRegenerateQuickActions
                   ? () => onRegenerateQuickActions(message)
@@ -826,12 +844,15 @@ function QuickActions({
   actions,
   disabled,
   onSelect,
+  onEdit,
   onRegenerate,
   pending = false,
 }: {
   actions: ChatQuickAction[];
   disabled: boolean;
   onSelect: (action: ChatQuickAction) => void | Promise<unknown>;
+  /** Absent where there is no composer to edit in. */
+  onEdit?: (action: ChatQuickAction) => void;
   /** Present only on the session's latest turn — re-runs the suggestion pass. */
   onRegenerate?: () => void | Promise<unknown>;
   /**
@@ -879,7 +900,16 @@ function QuickActions({
     }
   };
 
+  const handleCopy = async (action: ChatQuickAction) => {
+    if (await copyText(action.prompt)) {
+      toast.success(t(($) => $.message_list.copied_toast));
+    } else {
+      toast.error(t(($) => $.message_list.copy_failed_toast));
+    }
+  };
+
   const regenerateLabel = t(($) => $.message_list.quick_actions_regenerate);
+  const editLabel = t(($) => $.message_list.quick_actions_edit);
 
   return (
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
@@ -889,29 +919,70 @@ function QuickActions({
       >
         <QuickActionsHeading />
         {actions.slice(0, 3).map((action, index) => (
-          // The whole pill previews its hidden prompt on hover: clicking
-          // sends a message the user has never seen, in their name — the
-          // tooltip flips that from commit-then-learn to learn-then-commit.
-          <Tooltip key={`${action.label}-${index}`}>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant={action.primary ? "brandSubtle" : "outline"}
-                  size="sm"
-                  className="max-w-full px-3"
-                  disabled={blocked}
-                  onClick={() => void handleSelect(action)}
-                />
-              }
-            >
-              <span className="truncate">{action.label}</span>
-              {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap break-words">
-              {action.prompt}
-            </TooltipContent>
-          </Tooltip>
+          // Edit and copy act on the hidden prompt, not the label, so the
+          // user starts from exactly what a click would have sent. The menu
+          // hangs off a wrapper because a disabled button gets no contextmenu.
+          <ContextMenu key={`${action.label}-${index}`}>
+            <ContextMenuTrigger className="flex min-w-0 max-w-full items-center gap-0.5">
+              {/* The whole pill previews its hidden prompt on hover: clicking
+                  sends a message the user has never seen, in their name — the
+                  tooltip flips that from commit-then-learn to learn-then-commit. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant={action.primary ? "brandSubtle" : "outline"}
+                      size="sm"
+                      className="min-w-0 max-w-full px-3"
+                      disabled={blocked}
+                      onClick={() => void handleSelect(action)}
+                    />
+                  }
+                >
+                  <span className="truncate">{action.label}</span>
+                  {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap break-words">
+                  {action.prompt}
+                </TooltipContent>
+              </Tooltip>
+              {onEdit ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="shrink-0 text-faint-foreground hover:text-foreground"
+                        disabled={blocked}
+                        aria-label={t(($) => $.message_list.quick_actions_edit_aria, {
+                          label: action.label,
+                        })}
+                        onClick={() => onEdit(action)}
+                      />
+                    }
+                  >
+                    <PencilLine aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{editLabel}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              {onEdit ? (
+                <ContextMenuItem disabled={blocked} onClick={() => onEdit(action)}>
+                  <PencilLine aria-hidden="true" />
+                  {editLabel}
+                </ContextMenuItem>
+              ) : null}
+              <ContextMenuItem onClick={() => void handleCopy(action)}>
+                <Copy aria-hidden="true" />
+                {t(($) => $.message_list.copy_action)}
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
         {onRegenerate ? (
           <Tooltip>

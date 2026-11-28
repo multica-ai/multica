@@ -108,7 +108,9 @@
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
-    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again.",
+    "quick_actions_edit": "Edit before sending",
+    "quick_actions_edit_aria": "Edit before sending: {{label}}"
   },
   "session_history": {
     "untitled": "Untitled",

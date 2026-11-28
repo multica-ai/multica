@@ -103,6 +103,14 @@ interface ChatInputProps {
   } | null;
   /** Consumes the request even when the composer cannot send right now. */
   onConversationStarterApplied?: () => void;
+  /** Text to put into the draft for editing, never sent. An empty draft takes
+   * it as is; an existing draft keeps its content and gets it appended. */
+  draftInsertRequest?: {
+    id: number;
+    content: string;
+  } | null;
+  /** Consumes the request even when the composer cannot take it right now. */
+  onDraftInsertApplied?: () => void;
   /**
    * Fired when — and only when — the restore's content/attachments were written
    * into the draft. A restore the composer cannot apply yet (the user has work
@@ -186,6 +194,8 @@ export function ChatInput({
   restoreDraftRequest,
   conversationStarterRequest,
   onConversationStarterApplied,
+  draftInsertRequest,
+  onDraftInsertApplied,
   onRestoreDraftApplied,
   uploadEnabled: uploadAllowed,
   onStop,
@@ -275,6 +285,7 @@ export function ChatInput({
   const hasNothingToSend = isEmpty && !inputDraft.trim() && annotations.length === 0;
   const appliedRestoreIdRef = useRef<string | null>(null);
   const appliedConversationStarterIdRef = useRef<number | null>(null);
+  const appliedDraftInsertIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
   // Leaving the page drops what was attached to it, so coming back later
@@ -692,6 +703,39 @@ export function ChatInput({
     submitting,
     t,
   ]);
+
+  // Same once-per-click consumption as a starter, but nothing is sent. Text
+  // already in the draft stays, including an upload still in flight: its
+  // placeholder never reaches the markdown, so replacing the document would
+  // drop it. Appending through the editor keeps it and commits via onUpdate.
+  useLayoutEffect(() => {
+    if (!draftInsertRequest) return;
+    if (appliedDraftInsertIdRef.current === draftInsertRequest.id) return;
+    appliedDraftInsertIdRef.current = draftInsertRequest.id;
+    onDraftInsertApplied?.();
+    if (disabled || noAgent || editorDraftKeyRef.current !== draftKey) return;
+
+    const editor = editorRef.current;
+    if (!editor) return;
+    const pending = editor.flushPendingUpdate();
+    if (pending != null) commitDraft(draftKey, pending);
+    const draft = useChatStore.getState();
+    const hasDraft =
+      !!editor.getMarkdown().trim() ||
+      !!(draft.inputDrafts[draftKey] ?? "").trim() ||
+      (draft.inputDraftAttachments[draftKey]?.length ?? 0) > 0 ||
+      editor.hasActiveUploads();
+    const { content } = draftInsertRequest;
+    if (!content.trim()) return;
+    if (hasDraft) {
+      if (!editor.insertMarkdownAtEnd(content)) return;
+    } else {
+      commitDraft(draftKey, content);
+      editor.adoptContent(content);
+    }
+    setIsEmpty(false);
+    editor.focus("end");
+  }, [commitDraft, disabled, draftInsertRequest, draftKey, noAgent, onDraftInsertApplied]);
 
   const placeholder = agentAccessRevoked
     ? t(($) => $.input.placeholder_access_revoked)

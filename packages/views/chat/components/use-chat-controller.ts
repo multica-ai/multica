@@ -287,6 +287,17 @@ export function useChatController(opts?: { isActive?: boolean }) {
     () => setConversationStarterRequest(null),
     [],
   );
+  // A follow-up suggestion the user wants to reword before sending. ChatInput
+  // puts it into the draft and focuses the caret after it.
+  const [draftInsertRequest, setDraftInsertRequest] = useState<{
+    id: number;
+    content: string;
+  } | null>(null);
+  const nextDraftInsertRequestIdRef = useRef(0);
+  const insertIntoDraft = useCallback((content: string) => {
+    setDraftInsertRequest({ id: ++nextDraftInsertRequestIdRef.current, content });
+  }, []);
+  const handleDraftInsertApplied = useCallback(() => setDraftInsertRequest(null), []);
 
   const currentSession = activeSessionId
     ? sessions.find((s) => s.id === activeSessionId)
@@ -907,6 +918,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
     conversationStarterRequest,
     handleConversationStarterApplied,
     sendConversationStarter,
+    draftInsertRequest,
+    handleDraftInsertApplied,
+    insertIntoDraft,
     // actions
     handleSend,
     handleStop,

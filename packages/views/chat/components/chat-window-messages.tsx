@@ -21,6 +21,7 @@ export function ChatWindowMessages({
   pendingTaskLoading,
   availability,
   onQuickAction,
+  onEditQuickAction,
   quickActionsDisabled,
   quickActionsPendingMessageId,
   onReady,
@@ -32,6 +33,7 @@ export function ChatWindowMessages({
   pendingTaskLoading: boolean;
   availability: AgentAvailability | undefined;
   onQuickAction: (action: ChatQuickAction) => void | Promise<unknown>;
+  onEditQuickAction?: (action: ChatQuickAction) => void;
   quickActionsDisabled: boolean;
   quickActionsPendingMessageId: string | null;
   /** This area has something to show — the window can fade in around it. */
@@ -95,6 +97,7 @@ export function ChatWindowMessages({
           isFetchingOlderMessages={isFetchingNextPage}
           onLoadOlderMessages={() => void fetchNextPage()}
           onQuickAction={onQuickAction}
+          onEditQuickAction={onEditQuickAction}
           quickActionsDisabled={quickActionsDisabled}
           onRegenerateQuickActions={(message) => sessionId
             ? regenerateQuickActions.mutateAsync({ sessionId, messageId: message.id })

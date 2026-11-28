@@ -378,6 +378,7 @@ export function ChatWindow() {
             pendingTaskLoading={c.pendingTaskLoading}
             availability={c.availability}
             onQuickAction={(action) => c.handleSend(action.prompt)}
+            onEditQuickAction={(action) => c.insertIntoDraft(action.prompt)}
             quickActionsDisabled={
               !!pendingTaskId ||
               c.isSessionArchived ||
@@ -440,6 +441,8 @@ export function ChatWindow() {
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}
+        draftInsertRequest={c.draftInsertRequest}
+        onDraftInsertApplied={c.handleDraftInsertApplied}
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
         uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
         onStop={c.handleStop}
