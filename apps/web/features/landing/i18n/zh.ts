@@ -13,7 +13,7 @@ export function createZhDict(): LandingDict {
       {
         question: "Multica 支持哪些编码智能体？",
         answer:
-          "Multica 开箱即用支持 31 款 AI 编程工具：Amp、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Factory Droid、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode。守护进程会自动检测本机已安装的 CLI 并为每款注册一个运行时。因为源码公开，你也可以自己添加后端。自托管部署还可以使用 Qoder PAT 和 Qoder Cloud Agents 中已有的智能体，将 Qoder Cloud Agents 配置为执行任务的托管远程运行时。",
+          "Multica 开箱即用支持 32 款 AI 编程工具：Amp、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Factory Droid、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、San、Trae CLI、ZeroClaw、ZCode。守护进程会自动检测本机已安装的 CLI 并为每款注册一个运行时。因为源码公开，你也可以自己添加后端。自托管部署还可以使用 Qoder PAT 和 Qoder Cloud Agents 中已有的智能体，将 Qoder Cloud Agents 配置为执行任务的托管远程运行时。",
       },
       {
         question: "需要自托管吗，还是有云版本？",

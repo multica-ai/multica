@@ -164,7 +164,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "No new agent to learn.",
       title: "Bring the ones you already use.",
-      all: "All 31 agents",
+      all: "All 32 agents",
     },
     updates: {
       eyebrow: "Changelog",

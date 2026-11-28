@@ -162,7 +162,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "新しいエージェントを覚える必要はありません。",
       title: "いま使っているものを、そのまま。",
-      all: "全 31 種のエージェント",
+      all: "全 32 種のエージェント",
     },
     updates: {
       eyebrow: "変更履歴",

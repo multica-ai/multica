@@ -149,6 +149,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "devin",
   "zeroclaw",
   "zcode",
+  "san",
 ] as const;
 
 export type RuntimeProtocolFamily =

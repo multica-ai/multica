@@ -1,12 +1,12 @@
 ---
 title: 支持的 AI 编程工具
-description: Multica 支持的 31 款 AI 编程工具，包括 Claude Code、Codex、Cursor 和 Copilot，以及检测、模型、MCP、会话、插话和 Skill 的差异。
+description: Multica 支持的 32 款 AI 编程工具，包括 Claude Code、Codex、Cursor 和 Copilot，以及检测、模型、MCP、会话、插话和 Skill 的差异。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica 支持 31 款 AI 编程工具。它不替代你在用的工具：运行时调用电脑上已经安装并登录的工具，再把执行进度和结果写回任务。已经在用其中一款的，通常直接沿用就行。还没定的话，看四件事：
+Multica 支持 32 款 AI 编程工具。它不替代你在用的工具：运行时调用电脑上已经安装并登录的工具，再把执行进度和结果写回任务。已经在用其中一款的，通常直接沿用就行。还没定的话，看四件事：
 
 - 电脑上是否已经安装；
 - 账号可以使用哪些模型；
@@ -39,6 +39,7 @@ Multica 支持 31 款 AI 编程工具。它不替代你在用的工具：运行�
 | Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| San | `san` | ✓ | ✓ | — | — |
 | Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
@@ -116,7 +117,7 @@ Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存�
 
 使用 Kiro CLI 时，创建和设置智能体页面中的**思考**选项来自所选模型支持的 effort 档位，选择会应用到新建和恢复的会话。不选择时沿用 Kiro 自身的 effort 设置。模型或 CLI 版本未返回 effort 选项时，不显示该选择器。
 
-QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
+QwenPaw、MiniMax Code、ZeroClaw 和 San 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
 
 Antigravity 会把 `agy models` 中的推理变体显示为独立模型。在模型选择器中选用完整的变体名称，包括后缀。Multica 不为 Antigravity 提供单独的**思考**设置。如果在自定义参数中传入 `--effort`，Antigravity 会检查它能否与所选模型同时使用。
 

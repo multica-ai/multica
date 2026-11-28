@@ -24,7 +24,7 @@ Conductor、Claude Squad 和 Orca 帮助一名开发者并行运行多个编程�
 | 工作单位 | 共享看板上的任务 | 一个工作区（worktree 和分支） | 一个会话（tmux 和 worktree） | 一个 worktree | 一个带依赖关系的 bead（任务） |
 | 并行工作如何避免冲突 | 每次运行有自己的目录和仓库检出；智能体也可以使用本地目录的隔离 worktree | 每个工作区一个 git worktree | 每个会话一个 git worktree | 每个任务一个 git worktree | 不负责运行；任务以原子方式认领 |
 | 智能体在哪里运行 | 你连接的任何电脑；同事可以共用运行时 | 你的 Mac；也有云端工作区 | 你的终端 | 你的电脑、SSH 主机、远程 Orca Server 或云端虚拟机 | 你的智能体在哪里就在哪里 |
-| 工具 | [31 种 AI 编程工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等终端智能体 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能调用它 CLI 的智能体 |
+| 工具 | [32 种 AI 编程工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等终端智能体 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能调用它 CLI 的智能体 |
 | 团队共用 | 支持：共享任务、智能体、运行时、Skills、角色，以及按智能体的 Access | — | — | bot 接收来自 Slack、Linear 或 GitHub 的请求，用所有者的智能体运行 | 通过 Dolt remote 同步 |
 | 应用内审查 diff | 不支持；审查在 pull request 上进行，运行日志留在任务上 | 支持 | 支持 | 支持 | — |
 | 重复性和触发式工作 | [自动化](/autopilots)按计划或 webhook 运行 | — | — | bot 的计划和触发器（pull request、检查失败、webhook），以及定时自动化 | — |

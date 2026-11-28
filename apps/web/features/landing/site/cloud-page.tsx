@@ -207,7 +207,7 @@ function Services() {
               available={service.available}
             />
           ))}
-          <ServiceRow icon={<Laptop className="size-5" aria-hidden />} name="Your own machines" detail="31 coding agents, through the daemon" available />
+          <ServiceRow icon={<Laptop className="size-5" aria-hidden />} name="Your own machines" detail="32 coding agents, through the daemon" available />
         </ul>
       </Container>
     </Section>

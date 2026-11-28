@@ -24,7 +24,7 @@ Conductor、Claude Squad、Orca は、1 人の開発者が複数のコーディ�
 | 作業の単位 | 共有ボード上のタスク | ワークスペース（worktree とブランチ） | セッション（tmux と worktree） | worktree | 依存関係を持つ bead（タスク） |
 | 並行作業の衝突回避 | 実行ごとにリポジトリのチェックアウトを含む専用ディレクトリを持つ。ローカルディレクトリの分離された worktree も使える | ワークスペースごとに git worktree | セッションごとに git worktree | タスクごとに git worktree | 実行は担わない。タスクはアトミックに確保される |
 | エージェントが動く場所 | 接続した任意のコンピューター。チームメイトとランタイムを共有できる | あなたの Mac。クラウドワークスペースもある | あなたのターミナル | あなたのマシン、SSH ホスト、リモートの Orca サーバー、クラウド VM | エージェントが動く場所ならどこでも |
-| ツール | [31 種類の AI コーディングツール](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp などのターミナルエージェント | 自分の Claude Code、Codex、Grok、Antigravity などの CLI | その CLI を呼び出せる任意のエージェント |
+| ツール | [32 種類の AI コーディングツール](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp などのターミナルエージェント | 自分の Claude Code、Codex、Grok、Antigravity などの CLI | その CLI を呼び出せる任意のエージェント |
 | チームでの共有 | 可能：タスク、エージェント、ランタイム、スキル、ロール、エージェントごとの Access を共有 | — | — | ボットが Slack、Linear、GitHub からの依頼を受け、所有者のエージェントで実行 | Dolt のリモートで同期 |
 | アプリ内での差分レビュー | なし。レビューは pull request で行い、実行ログはタスクに残る | あり | あり | あり | — |
 | 定期的な作業とトリガー | [オートパイロット](/autopilots)がスケジュールや webhook で実行 | — | — | ボットのスケジュールとトリガー（pull request、チェックの失敗、webhook）、スケジュール実行のオートメーション | — |

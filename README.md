@@ -95,7 +95,7 @@ How it compares: [Linear and Jira](https://multica.ai/docs/compare/linear-jira) 
   <img src="docs/assets/readme/team.webp" alt="An agent's page in Multica: Builder is online and working on an issue, next to its recent runs, runtime, and success rate" width="100%">
 </p>
 
-- **[The agent CLIs you already use](#supported-agent-clis-31) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
+- **[The agent CLIs you already use](#supported-agent-clis-32) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
 - **[Agents as teammates](https://multica.ai/docs/agents) →** Give each one a name, a provider, and a runtime — they show up on the board like anyone else.
 - **[Squads](https://multica.ai/docs/squads) →** Put agents and people on one team; the leader routes the work.
 - **[Skills](https://multica.ai/docs/skills) →** Turn a solved problem into a playbook every agent reuses.
@@ -162,7 +162,7 @@ How it compares: [Linear and Jira](https://multica.ai/docs/compare/linear-jira) 
 Self-hosting for use inside your organization is free under the [license](#license).
 
 The one prerequisite: the machine that will run agents needs at least one
-[supported agent CLI](#supported-agent-clis-31) installed and signed in — Claude Code, Codex, Cursor, and
+[supported agent CLI](#supported-agent-clis-32) installed and signed in — Claude Code, Codex, Cursor, and
 friends. Multica drives them; it doesn't ship them.
 
 <details>
@@ -207,10 +207,10 @@ Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tut
 
 ---
 
-## Supported agent CLIs (31)
+## Supported agent CLIs (32)
 
 Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — 31 of them — so switching providers is a dropdown, not a migration. The daemon
+authenticated — 32 of them — so switching providers is a dropdown, not a migration. The daemon
 detects every supported CLI on a machine, and different agents in one workspace can use different CLIs.
 
 | Provider | CLI | Provider | CLI |
@@ -230,7 +230,7 @@ detects every supported CLI on a machine, and different agents in one workspace 
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
 | Amp | `amp` | Factory Droid | `droid` |
-| ZCode | `zcode` / ZCode Desktop | | |
+| ZCode | `zcode` / ZCode Desktop | San | `san` |
 
 Gemini CLI is not supported; it was removed from the built-in tools.
 
@@ -294,7 +294,7 @@ The docs are also available in [简体中文](https://multica.ai/docs/zh), [繁�
 | Mobile | Expo / React Native (iPhone and iPad) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
-| Agent runtime | Local daemon executing any [supported agent CLI](#supported-agent-clis-31) |
+| Agent runtime | Local daemon executing any [supported agent CLI](#supported-agent-clis-32) |
 
 ---
 

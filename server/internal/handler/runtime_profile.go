@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -181,6 +182,10 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateRuntimeProfileCommandName(req.CommandName); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if family == "san" && len(req.FixedArgs) > 0 {
+		writeError(w, http.StatusBadRequest, "fixed_args: San does not support fixed arguments")
 		return
 	}
 	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
@@ -403,6 +408,11 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "a runtime profile with this display_name already exists")
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "runtime_profile_san_fixed_args_check" {
+			writeError(w, http.StatusBadRequest, "fixed_args: San does not support fixed arguments")
 			return
 		}
 		slog.Error("UpdateRuntimeProfile failed", "error", err, "profile_id", uuidToString(profileUUID))

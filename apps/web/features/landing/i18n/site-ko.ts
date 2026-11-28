@@ -161,7 +161,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
     agents: {
       lead: "새로운 에이전트를 배울 필요는 없습니다.",
       title: "이미 쓰고 있는 그대로.",
-      all: "에이전트 31종 전체",
+      all: "에이전트 32종 전체",
     },
     updates: {
       eyebrow: "변경 로그",

@@ -196,7 +196,7 @@ Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装�
 
 ## 支持的智能体 CLI
 
-Multica 不自带模型。它驱动的是你本来就装好、登录好的那些智能体 CLI——一共支持 31 种——所以换提供方
+Multica 不自带模型。它驱动的是你本来就装好、登录好的那些智能体 CLI——一共支持 32 种——所以换提供方
 就是切个下拉框，谈不上迁移。守护进程会检测一台机器上所有受支持的 CLI，同一个工作区里不同的智能体可以用不同的 CLI。
 
 | Provider | CLI | Provider | CLI |
@@ -216,7 +216,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 华为云 CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
 | Amp | `amp` | Factory Droid | `droid` |
-| ZCode | `zcode` / ZCode Desktop | | |
+| ZCode | `zcode` / ZCode Desktop | San | `san` |
 
 不支持 Gemini CLI，它已从内置工具中移除。
 

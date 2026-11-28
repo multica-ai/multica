@@ -1,12 +1,12 @@
 ---
 title: AI コーディングツール比較
-description: Multica が対応する 31 種類の AI コーディングツール（Claude Code、Codex、Cursor、Copilot など）と、検出、モデル、MCP、セッション、割り込み、スキルの違いを比較します。
+description: Multica が対応する 32 種類の AI コーディングツール（Claude Code、Codex、Cursor、Copilot など）と、検出、モデル、MCP、セッション、割り込み、スキルの違いを比較します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica は 31 種類の AI コーディングツールに対応しています。普段使っているツールの代わりになるものではありません。ランタイムがコンピューターにインストール済みでログイン済みのツールを呼び出し、実行の進捗と結果をタスクに書き戻します。すでにいずれかのツールを使っているなら、通常はそのまま使い続けられます。まだ決めていない場合は、次の 4 点を確認してください。
+Multica は 32 種類の AI コーディングツールに対応しています。普段使っているツールの代わりになるものではありません。ランタイムがコンピューターにインストール済みでログイン済みのツールを呼び出し、実行の進捗と結果をタスクに書き戻します。すでにいずれかのツールを使っているなら、通常はそのまま使い続けられます。まだ決めていない場合は、次の 4 点を確認してください。
 
 - コンピューターにすでにインストールされているか
 - アカウントでどのモデルを利用できるか
@@ -39,6 +39,7 @@ Multica は 31 種類の AI コーディングツールに対応しています�
 | Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| San | `san` | ✓ | ✓ | — | — |
 | Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
@@ -114,7 +115,7 @@ Devin は `WINDSURF_API_KEY` があれば使用し、なければ `devin auth lo
 
 モデルを選択しない場合、Multica はそのツールのデフォルト設定を使用します。一覧が空の場合は、ランタイムがオンラインでツールにログイン済みであることを確認してから、モデル一覧を更新してください。
 
-QwenPaw、MiniMax Code、ZeroClaw は例外です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは各ツール側の設定で選んでください。これらのツールでモデル一覧が空なのは正常で、ランタイムがオフラインという意味ではありません。
+QwenPaw、MiniMax Code、ZeroClaw、San は例外です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは各ツール側の設定で選んでください。これらのツールでモデル一覧が空なのは正常で、ランタイムがオフラインという意味ではありません。
 
 Antigravity の推論バリアントが `agy models` にある場合、それぞれが別のモデルとして表示されます。モデル選択欄で、接尾辞を含む正確なバリアントを選んでください。Multica には Antigravity 専用の 推論設定はありません。カスタム引数で `--effort` を渡す場合、選択したモデルと併用できるかどうかは Antigravity が判定します。
 

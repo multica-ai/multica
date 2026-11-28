@@ -490,6 +490,30 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestSanRuntimeProfileRejectsFixedArgs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for _, args := range [][]string{{"--dangerously-skip-permissions"}, {"run"}} {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("POST", "/", map[string]any{
+			"display_name": "San Wrapper", "runtime_type": "san",
+			"command_name": "san-wrapper", "fixed_args": args,
+		}), "id", testWorkspaceID)
+		testHandler.CreateRuntimeProfile(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not support fixed arguments") {
+			t.Fatalf("create with %v: status %d: %s", args, w.Code, w.Body.String())
+		}
+	}
+	id := insertRuntimeProfileFixture(t, context.Background(), "San Wrapper", "san", "san-wrapper")
+	w := httptest.NewRecorder()
+	req := withURLParams(newRequest("PATCH", "/", map[string]any{"fixed_args": []string{"run"}}), "id", testWorkspaceID, "profileId", id)
+	testHandler.UpdateRuntimeProfile(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not support fixed arguments") {
+		t.Fatalf("update status %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateRuntimeProfile_RejectsIdentityChange(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

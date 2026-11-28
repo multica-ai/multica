@@ -24,7 +24,7 @@ Conductor、Claude Squad 和 Orca 幫助一名開發者並行執行多個程式�
 | 工作單位 | 共享看板上的任務 | 一個工作區（worktree 和分支） | 一個工作階段（tmux 和 worktree） | 一個 worktree | 一個帶相依關係的 bead（任務） |
 | 並行工作如何避免衝突 | 每次執行有自己的目錄和倉庫檢出；AI 代理也可以使用本機目錄的隔離 worktree | 每個工作區一個 git worktree | 每個工作階段一個 git worktree | 每個任務一個 git worktree | 不負責執行；任務以原子方式認領 |
 | AI 代理在哪裡執行 | 你連線的任何電腦；同事可以共用執行時 | 你的 Mac；也有雲端工作區 | 你的終端機 | 你的電腦、SSH 主機、遠端 Orca Server 或雲端虛擬機 | 你的 AI 代理在哪裡就在哪裡 |
-| 工具 | [31 種 AI 程式設計工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等終端機 AI 代理 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能呼叫它 CLI 的 AI 代理 |
+| 工具 | [32 種 AI 程式設計工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等終端機 AI 代理 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能呼叫它 CLI 的 AI 代理 |
 | 團隊共用 | 支援：共享任務、AI 代理、執行時、Skills、角色，以及按 AI 代理的 Access | — | — | bot 接收來自 Slack、Linear 或 GitHub 的請求，用所有者的 AI 代理執行 | 透過 Dolt remote 同步 |
 | 應用內審查 diff | 不支援；審查在 pull request 上進行，執行日誌留在任務上 | 支援 | 支援 | 支援 | — |
 | 重複性和觸發式工作 | [自動化](/autopilots)按排程或 webhook 執行 | — | — | bot 的排程和觸發器（pull request、檢查失敗、webhook），以及定時自動化 | — |
