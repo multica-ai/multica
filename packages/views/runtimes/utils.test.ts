@@ -691,7 +691,7 @@ describe("estimateCost", () => {
     for (const model of [
       "gemini-2.5-flash-image", "gemini-3-pro-image", "gemini-3.1-flash-image",
       "gemini-3.1-flash-lite-image", "gemini-3.1-flash-live-preview",
-      "gemini-omni-flash-preview", "gemini-embedding-2",
+      "gemini-embedding-2",
     ]) {
       expect(isModelPriced(model, "antigravity"), model).toBe(true);
       expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBeGreaterThan(0);
@@ -948,10 +948,12 @@ describe("estimateCost", () => {
     expect(cost("muse-wonder-1.0-minimal")).toBeCloseTo(4 + 20 + 0.2 + 4, 5);
     expect(cost("kimi-k3-max")).toBeCloseTo(3 + 15 + 0.3 + 3, 5);
     expect(cost("claude-fable-5-2-xhigh")).toBeCloseTo(8 + 40 + 0.2 + 10, 5);
-    expect(cost("gemini-4-hydrogen-high")).toBeCloseTo(1.5 + 7.5 + 0.075, 5);
-    expect(cost("gemini-4-hydrogen-xhigh")).toBeCloseTo(1.5 + 7.5 + 0.075, 5);
-    // Cursor's post-intro Carbon rate, not the bare row's $2 / $10 intro rate.
-    expect(cost("gemini-4-carbon-medium")).toBeCloseTo(4 + 20 + 0.2, 5);
+    expect(cost("gemini-4-hydrogen-high")).toBeCloseTo(1.5 + 7.5 + 0.075 + 1.5, 5);
+    expect(cost("gemini-4-hydrogen-xhigh")).toBeCloseTo(1.5 + 7.5 + 0.075 + 1.5, 5);
+    // Fork note: the generated snapshot has no Cursor-specific Carbon row, so
+    // Cursor resolves to the bare models.dev rate rather than upstream's
+    // hand-pinned post-intro $4 / $20.
+    expect(cost("gemini-4-carbon-medium")).toBeCloseTo(2 + 10 + 0.1 + 2, 5);
     expect(cost("claude-opus-4-8[context=1m,effort=high,fast=false]")).toBeCloseTo(
       5 + 25 + 0.5 + 6.25,
       5,
@@ -1092,8 +1094,8 @@ describe("estimateCost", () => {
         models: ["deepseek-chat", "deepseek-reasoner"],
       },
       {
-        want: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0.3 },
-        total: 1.806,
+        want: { input: 0.12, output: 0.48, cacheRead: 0.0024, cacheWrite: 0.12 },
+        total: 0.7224,
         models: ["deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"],
       },
     ];

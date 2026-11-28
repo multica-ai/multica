@@ -90,6 +90,9 @@ async function loadModelsDev() {
     { key: "cursor/composer-1.5",   input: 3.5,  output: 17.5, cache_read: 0.35,  cache_write: 0 },
     { key: "cursor/composer-1",     input: 1.25, output: 10,   cache_read: 0.125, cache_write: 0 },
     { key: "cursor",                input: 3,    output: 15,   cache_read: 0.5,   cache_write: 0 },
+    // Antigravity serves GPT-OSS 120B at Vertex AI's rate; models.dev has no
+    // antigravity provider, so seed the provider-qualified row upstream pins.
+    { key: "antigravity/gpt-oss-120b", input: 0.09, output: 0.36, cache_read: 0.09, cache_write: 0.09 },
     // OpenAI Codex CLI default; models.dev currently prices this lower than
     // the published $1.25 / $10 tier the dashboard tests are pinned to.
     { key: "gpt-5-codex",           input: 1.25, output: 10,   cache_read: 0.125, cache_write: 1.25 },
