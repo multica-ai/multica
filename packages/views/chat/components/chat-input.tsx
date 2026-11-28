@@ -914,7 +914,7 @@ export function ChatInput({
                     <img
                       src={previewUrl}
                       alt={upload.filename}
-                      className="size-9 shrink-0 rounded object-cover"
+                      className="size-9 shrink-0 rounded-md object-cover"
                     />
                   ) : upload.status === "uploading" ? (
                     <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-muted-foreground" />
@@ -939,7 +939,7 @@ export function ChatInput({
                   <button
                     type="button"
                     aria-label={t(($) => $.input.remove_attachment, { filename: upload.filename })}
-                    className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => removeUpload(upload.clientUploadId)}
                   >
