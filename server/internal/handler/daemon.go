@@ -5111,7 +5111,9 @@ type TaskCompleteRequest struct {
 // JSONB; neither tolerates a NUL.
 func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.PRURL = util.SanitizeTextForPostgres(req.PRURL)
-	req.Output = util.SanitizeTextForPostgres(req.Output)
+	// The result is stored and returned in run history, and becomes the
+	// fallback comment or chat reply, so filter secrets here once.
+	req.Output = redact.Text(util.SanitizeTextForPostgres(req.Output))
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
@@ -6208,7 +6210,7 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	// into TEXT columns, and this endpoint fails LOUD on write errors, so an
 	// unsanitized NUL here turns a cancelled task's only pointer to its work
 	// into an endless 500 retry loop (GH #7098).
-	req.ErrorMessage = util.SanitizeTextForPostgres(req.ErrorMessage)
+	req.ErrorMessage = redact.Text(util.SanitizeTextForPostgres(req.ErrorMessage))
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)

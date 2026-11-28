@@ -5391,6 +5391,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// is normalised too, and before the retry pre-compute below so the upgraded
 	// reason is what decides retry eligibility.
 	failureReason = taskfailure.NormalizeDaemonReason(failureReason, errMsg).String()
+	// Classification above reads the raw diagnostic. Every copy from here on
+	// (task row, retry child, chat error, logs, events) is filtered.
+	errMsg = redact.Text(errMsg)
 
 	// Pre-compute the auto-retry so the retry child can be created inside the
 	// SAME transaction as the fail (MUL-4351). Doing it atomically closes the

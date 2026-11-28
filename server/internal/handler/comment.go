@@ -23,6 +23,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 type CommentResponse struct {
@@ -1736,6 +1737,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	// Agent-written comments get the same secret filter as run transcripts:
+	// an agent can paste its own task token into a comment it posts directly.
+	if authorType == "agent" {
+		req.Content = redact.Text(req.Content)
+	}
 	if h.refuseGuestMention(w, r, uuidToString(issue.WorkspaceID), userID, authorType, req.Content) {
 		return
 	}
@@ -3529,6 +3535,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
 	req.Content = sanitizeNullBytes(req.Content)
+	// Filter only the new text an agent writes. ContentBase stays as sent so the
+	// three-way merge still compares against what is stored.
+	if actorType == "agent" {
+		req.Content = redact.Text(req.Content)
+	}
 	if req.ContentBase != nil {
 		sanitized := sanitizeNullBytes(*req.ContentBase)
 		req.ContentBase = &sanitized
