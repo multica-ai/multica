@@ -20,9 +20,11 @@ import (
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
-// The leaderboard's Runtime view adds two more, fetched only while it is
-// selected: usage/by-runtime (per-(runtime, model) token rows) and
-// runtime-duration (per-runtime run time + task counts). Both fold the
+// The leaderboard's Model and Runtime views add three more, each fetched only
+// while its view is selected: model-runtime (per-(provider, model) run time +
+// task counts; the Model view's tokens come from usage/daily),
+// usage/by-runtime (per-(runtime, model) token rows) and runtime-duration
+// (per-runtime run time + task counts). The two runtime reads fold the
 // runtimes the caller may not read; see dashboardRestrictedRuntimes.
 //
 // All of them accept ?days=N (defaults to 30, at most 371 so a 365-day weekly
@@ -963,6 +965,68 @@ func foldRestrictedRuntimeDuration(
 			return dst
 		},
 	)
+}
+
+// DashboardModelRunTimeResponse is one (provider, model) row of terminal-task
+// run time and counts, the Time / Runs half of the leaderboard's Model view.
+// A task that used several models counts in full on each of them, so the
+// rows can add up to more than the Run time KPI; within one row a task counts
+// once.
+type DashboardModelRunTimeResponse struct {
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
+}
+
+// GetDashboardModelRunTime returns per-(provider, model) terminal-task run
+// time and counts over the exact N-day window. The response names neither an
+// agent nor a runtime, so there is nothing to fold: like usage/daily it is a
+// workspace total.
+func (h *Handler) GetDashboardModelRunTime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	// Exact N-day cutoff: the rows carry no date (MUL-5551).
+	window := h.dashboardCutoff(w, r, workspaceID, h.resolveViewingTZ(r), 1)
+
+	rows, err := h.Queries.ListDashboardModelRunTime(r.Context(), db.ListDashboardModelRunTimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       window.since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model run time")
+		return
+	}
+	resp := make([]DashboardModelRunTimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardModelRunTimeResponse{
+			Provider:       row.Provider,
+			Model:          row.Model,
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run

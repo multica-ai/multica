@@ -2699,6 +2699,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/failures/by-squad", h.GetDashboardFailuresBySquad)
 				r.Get("/usage/by-runtime", h.GetDashboardUsageByRuntime)
 				r.Get("/runtime-duration", h.GetDashboardRuntimeDuration)
+				r.Get("/model-runtime", h.GetDashboardModelRunTime)
 			})
 
 			// Runtimes

@@ -224,6 +224,7 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, countRows("task_count"), false},
 		{"/api/dashboard/usage/by-runtime", testHandler.GetDashboardUsageByRuntime, countTokens, false},
 		{"/api/dashboard/runtime-duration", testHandler.GetDashboardRuntimeDuration, countRows("task_count"), false},
+		{"/api/dashboard/model-runtime", testHandler.GetDashboardModelRunTime, countRows("task_count"), false},
 	}
 
 	// Each plan's limit with the request its weekly chart sends. Fixtures sit
@@ -247,7 +248,7 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 				testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1`, runtimeID)
 			})
 			for _, at := range []time.Time{inside, outside} {
-				dbfx.Task(t, agentID, testutil.Cols{
+				taskID := dbfx.Task(t, agentID, testutil.Cols{
 					"issue_id":       issueID,
 					"runtime_id":     runtimeID,
 					"status":         "failed",
@@ -255,6 +256,10 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 					"started_at":     at.Add(-10 * time.Minute),
 					"completed_at":   at,
 					"created_at":     at.Add(-10 * time.Minute),
+				})
+				dbfx.Insert(t, "task_usage", testutil.Cols{
+					"task_id": taskID, "provider": "history-limit", "model": "history-limit-model",
+					"input_tokens": 100, "created_at": at, "updated_at": at,
 				})
 				dbfx.Exec(t, `
 					INSERT INTO task_usage_hourly (
