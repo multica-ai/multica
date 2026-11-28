@@ -110,6 +110,9 @@ if [ -n "$default_flags" ]; then
   echo "$default_flags"
   exit 1
 fi
+repo_lookup_env="$tmp_dir/.env.repo-lookup"
+sed 's/^# FF_WORKSPACE_REPOS_ON_DEMAND=true$/FF_WORKSPACE_REPOS_ON_DEMAND=true/' "$tmp_env" >"$repo_lookup_env"
+require_env "$(backend_flags "$repo_lookup_env")" 'FF_WORKSPACE_REPOS_ON_DEMAND=true'
 kill_switch_env="$tmp_dir/.env.kill-switch"
 sed 's/^# FF_LOCAL_SEARCH_INDEX=off$/FF_LOCAL_SEARCH_INDEX=off/' "$tmp_env" >"$kill_switch_env"
 require_env "$(backend_flags "$kill_switch_env")" 'FF_LOCAL_SEARCH_INDEX=off'

@@ -1799,6 +1799,52 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 }
 
 // The blocks are per-run, so they must be absent when their preconditions are.
+func TestWorkspaceRepoCandidatesInRunPrompt(t *testing.T) {
+	const matchedURL = "https://git.example.test/platform/sms-platform.git"
+	repos := []RepoData{
+		{URL: "https://git.example.test/platform/sms-idn.git", Description: "\u5370\u5c3c\u7ad9\u77ed\u4fe1\u53d1\u9001\u548c\u4f9b\u5e94\u5546\u56de\u6267"},
+		{URL: matchedURL, Description: "\u8d1f\u8d23\u9a6c\u6765\u7ad9\u77ed\u4fe1\u53d1\u9001\u548c\u4f9b\u5e94\u5546\u56de\u6267"},
+		{URL: "https://git.example.test/platform/payments.git", Description: "Payment processing"},
+	}
+	question := "\u6211\u60f3\u6392\u67e5\u9a6c\u6765\u7ad9\u7684\u77ed\u4fe1\u4f9b\u5e94\u5546\u56de\u6267\uff0c\u5e94\u8be5\u53bb\u54ea\u4e2a\u4ed3\u5e93\uff1f"
+	chat := Task{ChatSessionID: "chat", ChatMessage: question, Repos: repos}
+	if prompt := BuildPrompt(chat, "codex"); strings.Contains(prompt, matchedURL) {
+		t.Fatal("disabled lookup included candidates in the turn")
+	}
+	chat.WorkspaceReposOnDemand = true
+	prompt := BuildPrompt(chat, "codex")
+	malaysia, indonesia := strings.Index(prompt, matchedURL), strings.Index(prompt, repos[0].URL)
+	if malaysia < 0 || indonesia < malaysia || strings.Contains(prompt, repos[2].URL) {
+		t.Fatalf("want Malaysia match before Indonesia and no unrelated repo in %q", prompt)
+	}
+	chat.ChatMessage = "How do I invite a teammate?"
+	if prompt := BuildPrompt(chat, "codex"); strings.Contains(prompt, "[Workspace repository candidates]") {
+		t.Fatalf("ordinary chat got repository candidates: %q", prompt)
+	}
+	comment := Task{IssueID: "issue", TriggerCommentID: "comment", TriggerCommentContent: question, Repos: repos, WorkspaceReposOnDemand: true}
+	if prompt := BuildPrompt(comment, "codex"); !strings.Contains(prompt, matchedURL) {
+		t.Fatalf("missing repository candidate for an issue comment: %q", prompt)
+	}
+	autopilot := Task{AutopilotRunID: "run", AutopilotDescription: "Check sms-platform before launch", Repos: repos, WorkspaceReposOnDemand: true}
+	if prompt := BuildPrompt(autopilot, "codex"); !strings.Contains(prompt, matchedURL) {
+		t.Fatalf("missing repository candidate for a run-only autopilot: %q", prompt)
+	}
+}
+
+func TestWorkspaceRepoCandidatesHaveBoundedOutput(t *testing.T) {
+	task := Task{ChatMessage: "Look up notifications", WorkspaceReposOnDemand: true}
+	for i := 0; i < 120; i++ {
+		task.Repos = append(task.Repos, RepoData{
+			URL:         fmt.Sprintf("https://git.example.test/service-%03d.git", i),
+			Description: "Notifications " + strings.Repeat("long description ", 80),
+		})
+	}
+	got := buildWorkspaceRepoCandidates(task)
+	if strings.Count(got, `"https://git.example.test/`) != workspaceRepoCandidateLimit || strings.Contains(got, "service-003.git") || len(got) > 1000 {
+		t.Fatalf("lookup output is not bounded or does not respect registration order: %q", got)
+	}
+}
+
 func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()
 

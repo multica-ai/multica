@@ -76,6 +76,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	b.WriteString(buildProjectWorkflowBlock(task))
 	b.WriteString(buildParentIssueBlock(task))
+	b.WriteString(buildWorkspaceRepoCandidates(task))
 	return b.String()
 }
 

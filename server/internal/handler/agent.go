@@ -483,6 +483,9 @@ type AgentTaskResponse struct {
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// WorkspaceReposOnDemand changes the runtime brief; Repos still drives checkout.
+	WorkspaceReposOnDemand bool `json:"workspace_repos_on_demand,omitempty"`
+
 	// ModelOverride snapshots the agent's persistent OpenClaw model override at
 	// claim time. Later config edits affect subsequent claims, not this payload.
 	// Mirrors internal/daemon/types.go with the same JSON name; empty for other

@@ -214,6 +214,7 @@ Some features are switched with `FF_<FLAG_KEY>` variables: `true`, `false` (or `
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FF_DOCS_V1` | off | Workspace Docs. |
+| `FF_WORKSPACE_REPOS_ON_DEMAND` | off | Look up workspace repository metadata on demand instead of putting the catalog in every run. Requires an updated server and daemon. |
 | `FF_LOCAL_SEARCH_INDEX` | on | Web and Desktop keep a local search index per workspace. Set `off` to make clients search through the server again. |
 | `FF_DASHBOARD_HISTORY_365D` | on | The 365-day range on the Analytics page. Set `off` if year-long dashboard queries are too slow for your database. |
 

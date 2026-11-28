@@ -115,6 +115,7 @@ type Task struct {
 	ModelOverride                 string                 `json:"model_override,omitempty"` // claim-time snapshot of the agent's persistent OpenClaw model override
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                         []RepoData             `json:"repos,omitempty"`
+	WorkspaceReposOnDemand        bool                   `json:"workspace_repos_on_demand,omitempty"`        // Render lookup instructions for workspace repos while retaining the checkout catalog.
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
 	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
 	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief

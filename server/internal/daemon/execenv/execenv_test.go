@@ -701,6 +701,53 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 // the rendering side: given a TaskContextForEnv where Repos was already
 // narrowed by the server to project repos only, the meta skill renders just
 // those.
+func TestWorkspaceReposOnDemandKeepsRuntimeBriefSizeFixed(t *testing.T) {
+	repos := make([]RepoContextForEnv, 120)
+	for i := range repos {
+		repos[i] = RepoContextForEnv{
+			URL:         fmt.Sprintf("https://git.example.test/platform/service-%03d.git", i+1),
+			Description: fmt.Sprintf("Service %03d. Owns a production microservice. Repository guide covers business responsibilities, downstream dependencies, deployment region, on-call ownership, and API usage.", i+1),
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{name: "chat", ctx: TaskContextForEnv{ChatSessionID: "chat-1"}},
+		{name: "issue", ctx: TaskContextForEnv{IssueID: "issue-1"}},
+		{name: "run-only autopilot", ctx: TaskContextForEnv{AutopilotRunID: "autopilot-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, provider := range []string{"codex", "claude", "traecli"} {
+				t.Run(provider, func(t *testing.T) {
+					ctx := tc.ctx
+					ctx.Repos = repos
+					legacy := buildMetaSkillContent(provider, ctx)
+					if !strings.Contains(legacy, repos[119].URL) || !strings.Contains(legacy, repos[0].Description) {
+						t.Fatal("default brief did not include the configured repositories")
+					}
+					ctx.WorkspaceReposOnDemand = true
+					brief, err := InjectRuntimeConfig(t.TempDir(), provider, ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(brief, repos[0].URL) || strings.Contains(brief, repos[119].Description) ||
+						!strings.Contains(brief, "repo list --query") || !strings.Contains(brief, "repo list --output json") ||
+						!strings.Contains(brief, "KEPT an existing checkout") {
+						t.Fatal("on-demand brief is missing checkout or lookup guidance, or includes catalog entries")
+					}
+					ctx.Repos = repos[:1]
+					if one := buildMetaSkillContent(provider, ctx); one != brief {
+						t.Fatalf("brief changed with catalog size: one = %d bytes, many = %d bytes", len(one), len(brief))
+					}
+					t.Logf("120 repositories: %d bytes before, %d after", len(legacy), len(brief))
+				})
+			}
+		})
+	}
+}
+
 func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

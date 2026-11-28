@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,8 @@ var (
 
 func init() {
 	repoListCmd.Flags().String("output", "table", "Output format: table or json")
+	repoListCmd.Flags().String("query", "", "Filter URLs and descriptions by a case-insensitive substring")
+	repoListCmd.Flags().Int("limit", 0, "Maximum number of matching repositories to return")
 
 	repoAddCmd.Flags().StringArray("url", nil, "Repository URL to add (may be repeated)")
 	repoAddCmd.Flags().String("description", "", "Optional description; only valid when adding one URL")
@@ -165,6 +168,11 @@ func repoCommandClient(cmd *cobra.Command) (*cli.APIClient, string, error) {
 }
 
 func runRepoList(cmd *cobra.Command, _ []string) error {
+	limit, _ := cmd.Flags().GetInt("limit")
+	if cmd.Flags().Changed("limit") && limit <= 0 {
+		return fmt.Errorf("--limit must be a positive integer")
+	}
+
 	client, workspaceID, err := repoCommandClient(cmd)
 	if err != nil {
 		return err
@@ -176,6 +184,18 @@ func runRepoList(cmd *cobra.Command, _ []string) error {
 	ws, err := fetchRepoWorkspace(ctx, client, workspaceID)
 	if err != nil {
 		return err
+	}
+
+	query, _ := cmd.Flags().GetString("query")
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query != "" {
+		ws.Repos = slices.DeleteFunc(ws.Repos, func(repo workspaceRepo) bool {
+			return !strings.Contains(strings.ToLower(repo.URL), query) &&
+				!strings.Contains(strings.ToLower(repo.Description), query)
+		})
+	}
+	if limit > 0 && len(ws.Repos) > limit {
+		ws.Repos = ws.Repos[:limit]
 	}
 
 	output, _ := cmd.Flags().GetString("output")

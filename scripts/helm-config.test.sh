@@ -130,10 +130,12 @@ flags_config="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/configmap.yaml \
     --set backend.config.featureFlags.docs_v1=true \
+    --set backend.config.featureFlags.workspace_repos_on_demand=true \
     --set backend.config.featureFlags.local_search_index=false \
     --set-string 'backend.config.featureFlags.checkout\.algo-v2=25%'
 )"
 require_rendered_value "$flags_config" 'FF_DOCS_V1: "true"'
+require_rendered_value "$flags_config" 'FF_WORKSPACE_REPOS_ON_DEMAND: "true"'
 require_rendered_value "$flags_config" 'FF_LOCAL_SEARCH_INDEX: "false"'
 require_rendered_value "$flags_config" 'FF_CHECKOUT_ALGO_V2: "25%"'
 # `helm upgrade --reuse-values` from a chart without featureFlags.

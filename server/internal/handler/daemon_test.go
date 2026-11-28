@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2285,6 +2286,7 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 		t.Skip("database not available")
 	}
 
+	withFeatureFlag(t, testHandler, featureflags.WorkspaceReposOnDemand, true)
 	setHandlerTestWorkspaceRepos(t, []map[string]string{
 		{"url": "https://github.com/example/workspace-fallback", "description": "ws"},
 	})
@@ -2314,12 +2316,16 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	var resp struct {
 		Task *struct {
-			Repos []RepoData `json:"repos"`
+			WorkspaceReposOnDemand bool       `json:"workspace_repos_on_demand"`
+			Repos                  []RepoData `json:"repos"`
 		} `json:"task"`
 	}
 	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
+	}
+	if !resp.Task.WorkspaceReposOnDemand {
+		t.Fatal("expected on-demand lookup for the workspace catalog")
 	}
 	if len(resp.Task.Repos) != 1 || !strings.HasSuffix(resp.Task.Repos[0].URL, "workspace-fallback") {
 		t.Fatalf("expected workspace fallback repo, got %+v", resp.Task.Repos)

@@ -35,6 +35,9 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// WorkspaceReposOnDemand lets agents discover the workspace repository
+	// catalog through the CLI. It is a deployment-wide switch, off by default.
+	WorkspaceReposOnDemand = "workspace_repos_on_demand"
 	// DocsV1 gates workspace Docs (MUL-8370) while it is still being tested:
 	// the /api/docs and /api/doc-folders APIs, the Web/Desktop entry points,
 	// and the doc lines in the agent brief. Off by default so a release can
@@ -102,6 +105,10 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
+func WorkspaceReposOnDemandEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkspaceReposOnDemand, false)
 }
 
 func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {

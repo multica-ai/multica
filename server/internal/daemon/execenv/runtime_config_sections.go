@@ -469,9 +469,18 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
-	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	repos := ctx.Repos
+	if ctx.WorkspaceReposOnDemand {
+		b.WriteString("Look up a workspace repository only when you need code and do not already know its URL. ")
+		b.WriteString("Run `multica repo list --query \"<service name or keyword>\" --limit 10 --output json` to match registered URLs and descriptions. ")
+		b.WriteString("Try a shorter keyword or service alias if the search is inconclusive. Use `multica repo list --output json` to inspect the full catalog only if needed. ")
+		b.WriteString("Confirm ambiguous matches before using `multica repo checkout <url>`.\n")
+		repos = nil
+	} else {
+		b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
+	}
 	pinned := false
-	for _, repo := range ctx.Repos {
+	for _, repo := range repos {
 		line := "- " + repo.URL
 		if repo.Description != "" {
 			line += " — " + repo.Description
