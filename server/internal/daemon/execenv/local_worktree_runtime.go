@@ -15,6 +15,10 @@ func (w *LocalWorktree) ProtectRuntimeConfig(provider string) error {
 	if w == nil || w.RuntimeConfigSkipWorktree != "" {
 		return nil
 	}
+	if runtimeBriefInRuleFiles(provider) {
+		// The brief lives in untracked rule files, not the user's AGENTS.md.
+		return nil
+	}
 	path := runtimeConfigPath(w.WorkDir, provider)
 	if path == "" {
 		return nil

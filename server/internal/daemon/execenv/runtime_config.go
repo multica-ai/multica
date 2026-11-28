@@ -178,12 +178,20 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For DSH:         writes {workDir}/AGENTS.md  (DSH reads AGENTS.md and .dsh/skills/ natively)
 // For Kiro:        writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Qoder/Qoder CN: writes {workDir}/AGENTS.md  (skills discovered from .qoder/skills/; user-level roots are unaffected)
-// For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
+// For Antigravity: writes {workDir}/.agents/rules/multica-runtime-NN.md  (agy caps each rule file at 24,000 bytes, so the brief is split; see runtime_config_rules.go. Skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
 // For Traecli:     writes {workDir}/AGENTS.md  (traecli reads .trae/rules/ not AGENTS.md, so the brief is delivered inline via providerNeedsInlineSystemPrompt; the file is written for parity/visibility only)
 // For Grok:        writes {workDir}/AGENTS.md  (Grok Build CLI reads AGENTS.md natively from the workdir)
 // For Qwen:        writes {workDir}/QWEN.md (Qwen Code's native context file; it also reads AGENTS.md, but QWEN.md avoids cross-runtime ambiguity)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
+	if runtimeBriefInRuleFiles(provider) {
+		// Drop the previous run's parts and any brief block an older daemon
+		// appended to AGENTS.md before writing the current parts.
+		if err := CleanupRuntimeConfig(workDir, provider); err != nil {
+			return content, err
+		}
+		return content, writeAntigravityRuleFiles(workDir, content)
+	}
 	path := runtimeConfigPath(workDir, provider)
 	if path == "" {
 		// Unknown provider — skip config injection, prompt-only mode.
@@ -472,6 +480,12 @@ func locateMarkerBlock(content string) (start, end int, found bool) {
 // Missing files, unknown providers, and files without a marker block are
 // no-ops — Cleanup is safe to call defensively.
 func CleanupRuntimeConfig(workDir, provider string) error {
+	if runtimeBriefInRuleFiles(provider) {
+		if err := cleanupAntigravityRuleFiles(workDir); err != nil {
+			return err
+		}
+		// Fall through: AGENTS.md may still carry a block from an older daemon.
+	}
 	path := runtimeConfigPath(workDir, provider)
 	if path == "" {
 		return nil

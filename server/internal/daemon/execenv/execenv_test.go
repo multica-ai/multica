@@ -1330,7 +1330,7 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 		{"claude", "CLAUDE.md"},
 		{"codex", "AGENTS.md"},
 		{"codebuddy", "CODEBUDDY.md"},
-		{"antigravity", "AGENTS.md"},
+		{"antigravity", ""}, // split rule files
 		{"opencode", "AGENTS.md"},
 		{"codearts", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
@@ -1344,11 +1344,16 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 			if _, err := InjectRuntimeConfig(dir, tc.name, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
-			data, err := os.ReadFile(filepath.Join(dir, tc.file))
-			if err != nil {
-				t.Fatalf("read %s: %v", tc.file, err)
+			var s string
+			if tc.file == "" {
+				s = readAntigravityRuleFiles(t, dir)
+			} else {
+				data, err := os.ReadFile(filepath.Join(dir, tc.file))
+				if err != nil {
+					t.Fatalf("read %s: %v", tc.file, err)
+				}
+				s = string(data)
 			}
-			s := string(data)
 			providerPins := []string{
 				"no background-completion wakeup",
 				"whatever a tool response promises",
@@ -2146,6 +2151,8 @@ func TestInjectRuntimeConfigQoderCN(t *testing.T) {
 // TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
 // advertises native skill discovery (rather than the .agent_context fallback)
 // — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
+// Antigravity caps each rule file at 24,000 bytes, so the brief goes to split
+// always-on rule files instead of AGENTS.md (GitHub #11480).
 func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2155,29 +2162,54 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
+	brief, err := InjectRuntimeConfig(dir, "antigravity", ctx)
+	if err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("antigravity must not get an AGENTS.md brief, stat err = %v", err)
 	}
 
-	s := string(content)
+	s := readAntigravityRuleFiles(t, dir)
+	if strings.TrimRight(s, "\n") != strings.TrimRight(brief, "\n") {
+		t.Fatalf("rule files do not carry the brief verbatim:\n%s", s)
+	}
 	if !strings.Contains(s, "Multica Agent Runtime") {
-		t.Error("AGENTS.md missing meta skill header")
+		t.Error("rule files missing meta skill header")
 	}
 	// Listed by on-disk slug rather than the display name (MUL-5529).
 	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
+		t.Error("rule files missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
+		t.Error("Antigravity brief should advertise native skill discovery")
 	}
 	if strings.Contains(s, ".agent_context/skills/") {
-		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
+		t.Error("Antigravity brief must not reference the .agent_context/skills/ fallback")
 	}
+}
+
+// readAntigravityRuleFiles returns the bodies of the daemon's rule files in
+// order, without their headers.
+func readAntigravityRuleFiles(t *testing.T, workDir string) string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(antigravityRulesDir(workDir), antigravityRuleFilePrefix+"*.md"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no antigravity rule files in %s (err %v)", workDir, err)
+	}
+	var b strings.Builder
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, ok := strings.CutPrefix(string(data), antigravityRuleFileHeader)
+		if !ok {
+			t.Fatalf("%s lacks the rule file header:\n%s", path, data)
+		}
+		b.WriteString(body)
+	}
+	return b.String()
 }
 
 // TestInjectRuntimeConfigDim verifies that the runtime brief is delivered to

@@ -31,6 +31,16 @@ func RuntimeConfigRelPath(workDir, provider string) string {
 	return filepath.Base(path)
 }
 
+// RuntimeBriefRelPath returns where the runtime brief itself is written,
+// workdir-relative: the runtime config file, or the split rule files for
+// providers that use them.
+func RuntimeBriefRelPath(workDir, provider string) string {
+	if runtimeBriefInRuleFiles(provider) {
+		return ".agents/rules/" + antigravityRuleFilePrefix + "*.md"
+	}
+	return RuntimeConfigRelPath(workDir, provider)
+}
+
 // ExistingRuntimeConfigContent returns the part of the provider's runtime
 // config file that Multica does not manage: what the repository (or the user)
 // already had in CLAUDE.md / AGENTS.md before the brief was appended. Empty
