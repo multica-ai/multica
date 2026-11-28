@@ -322,9 +322,16 @@ type daemonProfileMismatchError struct {
 	// that is not a string. It claimed an identity we cannot read, so it must
 	// not be credited as ours — see daemonIdentityMismatch.
 	Unreadable bool
+	// OtherUser marks a daemon run by another OS user on this machine.
+	OtherUser bool
 }
 
 func (e *daemonProfileMismatchError) Error() string {
+	if e.OtherUser {
+		return fmt.Sprintf(
+			"port %d is serving another OS user's daemon, not yours\n"+
+				"Refusing to act on it as %s.", e.Port, describeProfile(e.Want))
+	}
 	if e.Unreadable {
 		return fmt.Sprintf(
 			"port %d is serving a daemon that reported an unreadable profile identity\n"+
@@ -341,6 +348,9 @@ func (e *daemonProfileMismatchError) Error() string {
 // statusNote is the one-line explanation `daemon status` prints under its
 // verdict, where the command has not failed and there is no error to render.
 func (e *daemonProfileMismatchError) statusNote() string {
+	if e.OtherUser {
+		return fmt.Sprintf("Note: port %d is serving another OS user's daemon.", e.Port)
+	}
 	if e.Unreadable {
 		return fmt.Sprintf("Note: port %d is serving a daemon whose profile identity could not be read.", e.Port)
 	}
@@ -350,6 +360,9 @@ func (e *daemonProfileMismatchError) statusNote() string {
 
 // statusJSON is the additive `port_conflict` object for --output json.
 func (e *daemonProfileMismatchError) statusJSON() map[string]any {
+	if e.OtherUser {
+		return map[string]any{"port": e.Port, "other_user": true}
+	}
 	if e.Unreadable {
 		return map[string]any{"port": e.Port, "unreadable_identity": true}
 	}
@@ -380,6 +393,9 @@ func describeProfile(profile string) string {
 // field is present it is enforced strictly — including the empty string, which
 // is the default profile identifying itself, not a missing answer.
 func daemonIdentityMismatch(health map[string]any, profile string, port int) error {
+	if pid, ok := health["pid"].(float64); ok && processOwnedByOtherUser(int(pid)) {
+		return &daemonProfileMismatchError{Want: profile, Port: port, OtherUser: true}
+	}
 	raw, ok := health["profile"]
 	if !ok {
 		return nil
