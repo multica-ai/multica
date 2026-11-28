@@ -2,10 +2,7 @@
 
 package daemon
 
-import (
-	"path/filepath"
-	"strings"
-)
+import "path/filepath"
 
 func canonicalPath(path string) (string, error) {
 	return filepath.EvalSymlinks(path)
@@ -36,18 +33,6 @@ func discoveredExecutablePath(path string) string {
 		return abs
 	}
 	return filepath.Join(realDir, filepath.Base(abs))
-}
-
-func isNameDispatchingAgentShim(path string) bool {
-	base := strings.ToLower(filepath.Base(path))
-	// "vp" is intentionally admitted despite being a short, generic token:
-	// it is Vite Plus's shared dispatcher and, like Volta, selects the managed
-	// package from argv[0]. Keep this exact-match list limited to dispatchers
-	// confirmed to require the invoked entrypoint name. Do not strip executable
-	// extensions: these managers use wrappers or trampolines rather than
-	// name-dispatching symlinks, and that is a Windows shape this file never
-	// compiles for.
-	return base == "volta-shim" || base == "vp" || base == "mise"
 }
 
 var executablePathForLaunch = executablePathForLaunchDefault

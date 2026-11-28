@@ -7002,17 +7002,8 @@ func providerDisplayName(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 
-// providerNeedsInlineSystemPrompt reports whether the runtime brief must ride
-// along in the turn itself (agent.ExecOptions.SystemPrompt) because the CLI
-// will not pick up the per-task context file execenv writes into the workdir.
-// This is the ONLY place that decides it, and it is the reason every other
-// backend sees an empty SystemPrompt.
-//
-// Adding a provider here is a real fix only when that CLI genuinely ignores its
-// context file — traecli was added because it reads .trae/rules/ and not
-// AGENTS.md, so its agents were silently missing the workflow section and left
-// issues stuck in `todo` with no comment and no error. Adding one that DOES
-// read the file just duplicates the brief on every turn.
+// providerNeedsInlineSystemPrompt reports which providers need the runtime
+// brief in the turn unless file delivery has been established.
 //
 // Confirmed to load their context file, so deliberately absent here. MUL-5392
 // probed each one over its real launch path with a canary in the context file
@@ -9339,6 +9330,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
 			profileFixedArgs, rawCustomArgs, d.logger)
 	}
+	// In-place tasks share AGENTS.md with chats that bypass the directory lock.
+	// For isolated tasks, probe the concrete target so a retargeted install
+	// alias cannot make us apply a cached version to a different executable.
+	var traeFileDelivery bool
+	if provider == "traecli" && !env.LocalDirectory && agent.TraeLoadsProjectInstructions(resolvedVersion) {
+		target, version := probeTraeLaunchVersion(ctx, entry.Path, profileFixedArgs)
+		if agent.TraeLoadsProjectInstructions(version) {
+			entry.Path, resolvedVersion = target, version
+			traeFileDelivery = true
+		}
+	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
 	// families go through New. This is the single production boundary — the
@@ -9529,7 +9531,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// as always included, and a real kiro-cli 2.13.0 ACP smoke confirms it.
 	// Prepending the full runtime brief into the ACP user prompt duplicates that
 	// context and bloats every turn.
-	if providerNeedsInlineSystemPrompt(provider) {
+	if traeFileDelivery {
+		prompt, execOpts.SystemPrompt = traeRuntimeBriefPrompt(prompt, runtimeBrief, runtimeBriefWritten)
+	} else if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
@@ -9714,6 +9718,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		freshPrompt, freshSkills := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
+		if traeFileDelivery {
+			freshPrompt, execOpts.SystemPrompt = traeRuntimeBriefPrompt(freshPrompt, freshBrief, runtimeBriefWritten)
+		}
 		execOpts.SkillInvocation = freshSkills
 		execOpts.WarmPoolBriefHash = agent.HashWarmBrief(runtimeBrief)
 
@@ -9721,7 +9728,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		receiptInput.RuntimeBrief = freshBrief
 		receiptInput.InlineBrief = execOpts.SystemPrompt != ""
 		if receiptInput.InlineBrief {
-			// A failed file rewrite leaves the prior inline payload in use.
 			receiptInput.RuntimeBrief = execOpts.SystemPrompt
 		}
 		receiptInput.BriefWritten = runtimeBriefWritten

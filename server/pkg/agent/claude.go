@@ -2033,7 +2033,11 @@ func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (st
 	hideAgentWindow(cmd)
 	cmd.WaitDelay = probeWaitDelay
 	data, err := outputOwned(cmd, runtimeCmd.logger)
-	version, recognised := extractVersionLine(string(data))
+	output := string(data)
+	version, recognised := extractVersionLine(output)
+	if recognised {
+		version = traeVersionWithPublicEdition(version, output)
+	}
 	if err != nil {
 		// recognised, not `version != ""`. The two differ exactly where it
 		// matters: extractVersionLine falls back to the trimmed raw output when
