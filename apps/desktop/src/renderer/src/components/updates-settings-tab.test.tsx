@@ -32,6 +32,7 @@ const translations = {
       check_unavailable: "Unable to check right now. Try later.",
       check_network: "Check your connection and try again.",
       check_failed: "Unable to check. Please retry.",
+      check_not_configured: "Updates are not configured for this build.",
       download_failed: "Download failed. You can keep using this version.",
       download_ready: "v{{version}} is ready to install.",
       retry: "Retry",
@@ -105,6 +106,13 @@ describe("UpdatesSettingsTab", () => {
     expect(screen.queryByText(/private HTTP/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Up to date")).toBeInTheDocument();
+  });
+
+  it("explains when the build has no update feed", async () => {
+    mocks.checkForUpdates.mockResolvedValueOnce({ ok: false, reason: "not-configured", error: "Updates are not configured for this build." });
+    render(<UpdatesSettingsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Updates are not configured for this build.");
   });
 
   it("recovers when the check IPC itself rejects", async () => {

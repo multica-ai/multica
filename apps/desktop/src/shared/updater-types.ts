@@ -2,7 +2,13 @@ export interface UpdaterPreferences {
   automaticUpdates: boolean;
 }
 
-export type UpdaterFailureReason = "unavailable" | "network" | "unknown";
+// "not-configured": the build was packaged for a self-hosted server without an
+// update feed (MULTICA_DESKTOP_SERVER_URL without MULTICA_DESKTOP_UPDATE_URL).
+export type UpdaterFailureReason =
+  | "unavailable"
+  | "network"
+  | "unknown"
+  | "not-configured";
 
 export type UpdaterDownloadState =
   | { status: "idle" }

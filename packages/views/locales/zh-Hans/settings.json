@@ -1583,6 +1583,7 @@
       "check_unavailable": "暂时无法检查更新，请稍后重试。",
       "check_network": "无法连接更新服务，请检查网络后重试。",
       "check_failed": "检查更新失败，请重试。",
+      "check_not_configured": "此版本未配置更新。如需新版本，请联系管理员。",
       "download_failed": "更新下载失败，可以继续使用当前版本并重试。",
       "download_ready": "v{{version}} 已可安装。",
       "retry": "重试",

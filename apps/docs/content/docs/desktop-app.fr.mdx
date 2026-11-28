@@ -189,6 +189,21 @@ Deux façons courantes d'écrire le fichier sous Windows produisent un fichier q
 
 La commande PowerShell de l'onglet Windows ci-dessus évite ces deux problèmes.
 
+### Packager Desktop pour votre serveur [#build-for-your-server]
+
+Pour éviter à vos utilisateurs d'écrire `desktop.json`, packagez Desktop avec l'adresse de votre serveur intégrée. Lors du packaging depuis une copie du dépôt Multica, définissez `MULTICA_DESKTOP_SERVER_URL` sur l'adresse que les utilisateurs ouvrent dans le navigateur :
+
+```bash
+cd apps/desktop
+MULTICA_DESKTOP_SERVER_URL=https://multica.example.com pnpm package -- --linux --x64
+```
+
+Remplacez `--linux --x64` par la plateforme et l'architecture voulues (`--mac`, `--win`, `--arm64`). Les programmes d'installation sont écrits dans `apps/desktop/dist/`. Le packaging compile aussi le CLI intégré : Go doit donc être installé.
+
+Desktop utilise cette adresse à la fois comme `apiUrl` et `appUrl` et en dérive `wsUrl`, et le daemon intégré s'y connecte aussi. Elle doit donc servir l'application web et router `/ws`, `/api/daemon/ws` et `/health` vers le backend, comme le fait l'exemple « Origine unique » du [démarrage rapide en auto-hébergement](/self-host-quickstart#remote-access). Avec la configuration à deux domaines, continuez plutôt à écrire `desktop.json` avec l'adresse de l'API, ou ajoutez ces routes au domaine de l'application. Un `desktop.json` sur la machine de l'utilisateur reste prioritaire. Une adresse invalide fait échouer le build.
+
+Un build avec une adresse de serveur ne se met jamais à jour vers une version officielle, car les versions officielles se connectent à Multica Cloud. Pour distribuer vous-même les mises à jour, définissez aussi `MULTICA_DESKTOP_UPDATE_URL`, par exemple `https://multica.example.com/desktop/`, et publiez à cette adresse les programmes d'installation de chaque version avec les fichiers `latest*.yml` de `dist/`. Sans elle, les mises à jour automatiques sont désactivées et une vérification manuelle indique que les mises à jour ne sont pas configurées pour ce build ; les utilisateurs mettent à jour en installant le nouveau paquet par-dessus l'ancien.
+
 ## Windows Defender signale Multica comme un virus
 
 Sécurité Windows signale une menace telle que `Trojan:Script/Wacatac.B!ml` et met en quarantaine un fichier de l'installation de Desktop. L'élément concerné est normalement le CLI intégré, et non l'exécutable de l'application :

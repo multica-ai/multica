@@ -1595,6 +1595,7 @@
       "check_unavailable": "No se pueden buscar actualizaciones ahora. Inténtalo más tarde.",
       "check_network": "No se puede conectar con el servicio de actualizaciones. Revisa tu conexión e inténtalo de nuevo.",
       "check_failed": "No se pudieron buscar actualizaciones. Inténtalo de nuevo.",
+      "check_not_configured": "Las actualizaciones no están configuradas para esta compilación. Pide una versión más reciente a tu administrador.",
       "download_failed": "La descarga falló. Puedes seguir usando la versión actual e intentarlo de nuevo.",
       "download_ready": "v{{version}} está lista para instalar.",
       "retry": "Reintentar",

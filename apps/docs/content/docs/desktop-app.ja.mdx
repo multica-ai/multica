@@ -189,6 +189,21 @@ Windows でよく使う 2 つの書き方では、Desktop が読めないファ�
 
 上の Windows タブにある PowerShell のコマンドなら、この 2 つをどちらも避けられます。
 
+### 自分のサーバー向けに Desktop をパッケージする [#build-for-your-server]
+
+ユーザーに `desktop.json` を書いてもらう代わりに、サーバーのアドレスを組み込んだ Desktop をパッケージできます。Multica リポジトリのチェックアウトからパッケージするときに、`MULTICA_DESKTOP_SERVER_URL` にユーザーがブラウザで開くアドレスを設定します:
+
+```bash
+cd apps/desktop
+MULTICA_DESKTOP_SERVER_URL=https://multica.example.com pnpm package -- --linux --x64
+```
+
+`--linux --x64` は必要なプラットフォームとアーキテクチャ（`--mac`、`--win`、`--arm64`）に置き換えてください。インストーラーは `apps/desktop/dist/` に出力されます。パッケージ時に同梱の CLI もコンパイルするため、Go が必要です。
+
+Desktop はこのアドレスを `apiUrl` と `appUrl` の両方に使い、そこから `wsUrl` を導出します。内蔵デーモンもこのアドレスに接続します。そのため、このアドレスで Web アプリを提供し、`/ws`、`/api/daemon/ws`、`/health` をバックエンドにルーティングする必要があります。[セルフホストクイックスタート](/self-host-quickstart#remote-access)の単一オリジンの例がこの構成です。2 つのドメイン構成の場合は、引き続き `desktop.json` に API のアドレスを書くか、アプリのドメインにこれらのルートを追加してください。ユーザーのマシンにある `desktop.json` は引き続き優先されます。無効なアドレスを指定するとビルドが失敗します。
+
+サーバーのアドレスを組み込んだビルドは、公式リリースには更新されません。公式リリースは Multica Cloud に接続するためです。更新を自分で配布するには、`MULTICA_DESKTOP_UPDATE_URL`（例: `https://multica.example.com/desktop/`）も設定し、リリースごとのインストーラーを `dist/` の `latest*.yml` ファイルと一緒にそのアドレスで公開します。設定しない場合、自動更新はオフになり、手動確認ではこのビルドにアップデートが設定されていないと表示されます。ユーザーは新しいパッケージを上書きインストールして更新します。
+
 ## Windows Defender が Multica をウイルスとして検出する
 
 Windows セキュリティが `Trojan:Script/Wacatac.B!ml` のような脅威を報告し、Desktop のインストール先にあるファイルを隔離します。対象になるのは通常、アプリ本体の実行ファイルではなく同梱の CLI です。

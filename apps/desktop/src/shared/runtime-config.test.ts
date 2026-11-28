@@ -4,6 +4,7 @@ import {
   deriveWsUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
+  runtimeConfigFromServerUrl,
 } from "./runtime-config";
 
 describe("runtime config", () => {
@@ -138,5 +139,42 @@ describe("runtime config", () => {
       wsUrl: "wss://api.test.multica.ai/ws",
       appUrl: "https://staging.multica.ai",
     });
+  });
+});
+
+describe("runtimeConfigFromServerUrl", () => {
+  it("uses one server URL for api and app and derives the websocket URL", () => {
+    expect(runtimeConfigFromServerUrl("  https://multica.example.com/  ")).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://multica.example.com",
+      wsUrl: "wss://multica.example.com/ws",
+      appUrl: "https://multica.example.com",
+    });
+  });
+
+  it("keeps ports and path prefixes and drops query and hash", () => {
+    expect(
+      runtimeConfigFromServerUrl("http://build-01.example.com:8080/multica/?x=1#top"),
+    ).toEqual({
+      schemaVersion: 1,
+      apiUrl: "http://build-01.example.com:8080/multica",
+      wsUrl: "ws://build-01.example.com:8080/multica/ws",
+      appUrl: "http://build-01.example.com:8080/multica",
+    });
+  });
+
+  it("does not apply the api. host convention to a single server URL", () => {
+    expect(runtimeConfigFromServerUrl("https://api.multica.example.com").appUrl).toBe(
+      "https://api.multica.example.com",
+    );
+  });
+
+  it("rejects invalid URLs and non-http schemes, naming the env var", () => {
+    expect(() => runtimeConfigFromServerUrl("multica.example.com")).toThrow(
+      "MULTICA_DESKTOP_SERVER_URL must be a valid URL",
+    );
+    expect(() => runtimeConfigFromServerUrl("wss://multica.example.com")).toThrow(
+      "MULTICA_DESKTOP_SERVER_URL must use http or https",
+    );
   });
 });

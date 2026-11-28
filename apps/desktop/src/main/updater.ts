@@ -14,6 +14,7 @@ import {
 import type { DaemonInstallPrep } from "./update-install-gate";
 import { classifyUpdaterError } from "./updater-errors";
 import { type DialogLocale, resolveDialogLocale } from "./dialog-locale";
+import type { UpdateFeed } from "./build-config";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -75,6 +76,12 @@ export interface UpdaterDaemonGate {
 export interface SetupAutoUpdaterOptions {
   daemonGate?: UpdaterDaemonGate;
   platform?: NodeJS.Platform;
+  /**
+   * Where updates come from (see build-config.ts). Defaults to the feed in
+   * app-update.yml. A generic feed keeps the architecture channels above, so
+   * it must serve the same latest-*.yml names that package.mjs produces.
+   */
+  feed?: UpdateFeed;
 }
 
 const BUSY_INSTALL_COPY: Record<
@@ -237,6 +244,11 @@ export function setupAutoUpdater(
     return pending;
   }
   const platform = options.platform ?? process.platform;
+  const feed = options.feed ?? { kind: "default" };
+  if (feed.kind === "generic") {
+    autoUpdater.setFeedURL({ provider: "generic", url: feed.url });
+  }
+  const updatesDisabled = feed.kind === "disabled";
   // Only Windows locks a running executable against replacement; macOS and
   // Linux keep their existing update path untouched.
   const daemonGate = platform === "win32" ? (options.daemonGate ?? null) : null;
@@ -256,7 +268,7 @@ export function setupAutoUpdater(
   const runAutomaticCheck = (errorMessage: string): void => {
     void preferencesReady
       .then(() => {
-        if (!automaticUpdatesEnabled) return;
+        if (updatesDisabled || !automaticUpdatesEnabled) return;
         return checkForUpdatesOnce();
       })
       .catch((err) => {
@@ -267,6 +279,7 @@ export function setupAutoUpdater(
   // Arm the startup + periodic background checks. Idempotent: an already-armed
   // timer is left in place so re-enabling never stacks duplicate schedules.
   const scheduleBackgroundChecks = (): void => {
+    if (updatesDisabled) return;
     if (startupTimer === null && !startupCheckElapsed) {
       // Initial check shortly after startup so we don't block boot.
       startupTimer = setTimeout(() => {
@@ -441,6 +454,13 @@ export function setupAutoUpdater(
   );
 
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
+    if (updatesDisabled) {
+      return {
+        ok: false,
+        error: "Updates are not configured for this build.",
+        reason: "not-configured",
+      };
+    }
     try {
       const result = (await checkForUpdatesOnce()) as
         | { updateInfo: { version: string }; isUpdateAvailable?: boolean }

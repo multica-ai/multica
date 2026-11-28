@@ -189,6 +189,21 @@ Two common ways of writing the file on Windows produce one Desktop can't read:
 
 The PowerShell command in the Windows tab above avoids both.
 
+### Build Desktop for your server [#build-for-your-server]
+
+To spare your users from writing `desktop.json`, package Desktop with your server's address built in. When packaging from a checkout of the Multica repository, set `MULTICA_DESKTOP_SERVER_URL` to the address users open in the browser:
+
+```bash
+cd apps/desktop
+MULTICA_DESKTOP_SERVER_URL=https://multica.example.com pnpm package -- --linux --x64
+```
+
+Replace `--linux --x64` with the platform and architecture you need (`--mac`, `--win`, `--arm64`). Installers are written to `apps/desktop/dist/`. Packaging also compiles the bundled CLI, so Go must be installed.
+
+Desktop uses that address as both `apiUrl` and `appUrl` and derives `wsUrl` from it, and the bundled daemon connects to it too. The address must therefore serve the web app and route `/ws`, `/api/daemon/ws` and `/health` to the backend, as the single-origin example in the [self-host quickstart](/self-host-quickstart#remote-access) does. With the two-domain setup, keep using `desktop.json` with the API address instead, or add those routes to the app domain. A `desktop.json` on the user's machine still takes precedence. An invalid address fails the build.
+
+A build with a server address never updates to an official release, because official releases connect to Multica Cloud. To ship updates yourself, also set `MULTICA_DESKTOP_UPDATE_URL`, for example `https://multica.example.com/desktop/`, and publish each release's installers together with the `latest*.yml` files from `dist/` at that address. Without it, automatic updates are off and a manual check reports that updates are not configured for this build; users update by installing the new package over the old one.
+
 ## Windows Defender flags Multica as a virus
 
 Windows Security reports a threat such as `Trojan:Script/Wacatac.B!ml` and quarantines a file inside the Desktop installation. The affected item is normally the bundled CLI, not the app executable:

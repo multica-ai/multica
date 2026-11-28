@@ -50,6 +50,23 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
   };
 }
 
+// A self-hosted server serves the web app and the API from one origin (the
+// reverse proxy routes /api, /ws, ... to the backend), so one URL is the whole
+// config. Used for the server URL baked in at package time
+// (MULTICA_DESKTOP_SERVER_URL).
+export function runtimeConfigFromServerUrl(
+  serverUrl: string,
+  field = "MULTICA_DESKTOP_SERVER_URL",
+): RuntimeConfig {
+  const url = normalizeHttpUrl(serverUrl, field);
+  return {
+    schemaVersion: 1,
+    apiUrl: url,
+    wsUrl: deriveWsUrl(url),
+    appUrl: url,
+  };
+}
+
 export function parseRuntimeConfig(raw: string): RuntimeConfig {
   let parsed: unknown;
   try {

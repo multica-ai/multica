@@ -5,6 +5,7 @@ import {
   DEFAULT_RUNTIME_CONFIG,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
+  runtimeConfigFromServerUrl,
   type RuntimeConfig,
   type RuntimeConfigEnv,
   type RuntimeConfigResult,
@@ -14,6 +15,12 @@ export async function loadRuntimeConfig(options: {
   isDev: boolean;
   env: RuntimeConfigEnv;
   configPath?: string;
+  /**
+   * Server baked in at package time (MULTICA_DESKTOP_SERVER_URL). Replaces
+   * the Multica Cloud default when desktop.json is absent; desktop.json
+   * still wins. Ignored in dev.
+   */
+  defaultServerUrl?: string;
 }): Promise<RuntimeConfigResult> {
   if (options.isDev) {
     try {
@@ -29,7 +36,7 @@ export async function loadRuntimeConfig(options: {
     return { ok: true, config: parseRuntimeConfig(raw) };
   } catch (err) {
     if (isMissingFileError(err)) {
-      return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+      return defaultRuntimeConfig(options.defaultServerUrl);
     }
     return {
       ok: false,
@@ -37,6 +44,15 @@ export async function loadRuntimeConfig(options: {
         message: `Invalid ${configPath}: ${errorMessage(err)}`,
       },
     };
+  }
+}
+
+function defaultRuntimeConfig(serverUrl: string | undefined): RuntimeConfigResult {
+  if (!serverUrl) return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+  try {
+    return { ok: true, config: runtimeConfigFromServerUrl(serverUrl) };
+  } catch (err) {
+    return { ok: false, error: { message: errorMessage(err) } };
   }
 }
 
